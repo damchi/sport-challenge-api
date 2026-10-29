@@ -249,8 +249,15 @@ sportchallenge-api/
 │   │   ├── auth/                    interface TokenVerifier (JWKS), middlewares Authenticate et CurrentUser
 │   │   ├── storage/                 interface de stockage + implémentation Cloud Storage (URL signées)
 │   │   ├── clock/                   interface Clock : horloge réelle, horloge décalable (staging, tests)
-│   │   ├── logger/                  logs structurés JSON
 │   │   └── apperr/                  erreurs métier avec code stable (traduit côté client)
+│   │
+│   ├── api/
+│   │   ├── api.gen.go               généré par oapi-codegen depuis api/openapi.yaml (make generate) : routes Gin,
+│   │   │                            types de requête et de réponse, interface StrictServerInterface ; jamais modifié à la main
+│   │   └── apitest/                 helper de test : valide une réponse réelle contre le contrat (kin-openapi)
+│   │
+│   ├── health/
+│   │   └── handler.go               GET /healthz (implémente l'interface générée)
 │   │
 │   ├── user/
 │   │   ├── model.go                 entité User
@@ -319,7 +326,8 @@ sportchallenge-api/
 │
 ├── migrations/                      000001_init.up.sql / .down.sql, 000002_… (golang-migrate, appliqué par la CI)
 ├── api/
-│   └── openapi.yaml                 spécification de l'API (source du client TypeScript)
+│   ├── openapi.yaml                 spécification de l'API : source du code serveur généré et du client TypeScript
+│   └── oapi-codegen.yaml            configuration de la génération du code serveur (internal/api)
 ├── deploy/
 │   ├── Dockerfile                   build multi-stage, image minimale
 │   ├── docker-compose.yml           local : API, worker, PostgreSQL, émulateur de stockage
@@ -367,7 +375,7 @@ flowchart TD
 | `badge` | `GET /me/badges`, `GET /challenges/{id}/badges`, `POST /challenges/{id}/badges` (créateur), `PATCH` et `DELETE /challenges/{id}/badges/{badgeId}` (créateur, tant que personne ne l'a gagné) |
 | uploads | `POST /uploads/avatar` (URL signée) |
 | `integration` (V2) | `GET /integrations`, `POST /integrations/{provider}/connect`, `DELETE /integrations/{provider}`, `POST /webhooks/{provider}` (public) |
-| santé | `GET /healthz` |
+| `health` | `GET /healthz` (à la racine, hors `/api/v1`) |
 
 **Tâches du worker**
 

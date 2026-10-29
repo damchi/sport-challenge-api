@@ -41,7 +41,7 @@ Structure **cible** : chaque dossier est créé par le premier ticket qui y met 
 ```
 cmd/api, cmd/worker
 internal/
-  platform/   config, db, httpx, auth, storage, clock, logger, apperr
+  platform/   config, db, httpx, auth, storage, clock, apperr
   user, challenge, invitation, sport, activity, scoring,
   leaderboard, closure, badge, integration (V2+), notification (V3)
 migrations/   api/openapi.yaml   deploy/   .github/workflows/
