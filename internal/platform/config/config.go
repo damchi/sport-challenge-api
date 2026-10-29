@@ -26,13 +26,15 @@ type Config struct {
 }
 
 // Load reads the configuration through getenv (os.Getenv in production).
-// Every missing or invalid variable is reported in a single error. Values are
-// never included in the error, so a misplaced secret cannot leak through it.
+// Surrounding spaces are ignored. Every missing or invalid variable is
+// reported in a single error. Values are never included in the error, so a
+// misplaced secret cannot leak through it.
 func Load(getenv func(string) string) (Config, error) {
+	get := func(key string) string { return strings.TrimSpace(getenv(key)) }
 	var cfg Config
 	var problems []string
 
-	switch env := Environment(getenv("ENV")); env {
+	switch env := Environment(get("ENV")); env {
 	case "":
 		problems = append(problems, "ENV is required")
 	case EnvLocal, EnvStaging, EnvProduction:
@@ -41,7 +43,7 @@ func Load(getenv func(string) string) (Config, error) {
 		problems = append(problems, "ENV must be one of local, staging, production")
 	}
 
-	if raw := getenv("PORT"); raw == "" {
+	if raw := get("PORT"); raw == "" {
 		problems = append(problems, "PORT is required")
 	} else if port, err := strconv.Atoi(raw); err != nil || port < 1 || port > 65535 {
 		problems = append(problems, "PORT must be an integer between 1 and 65535")
@@ -49,7 +51,7 @@ func Load(getenv func(string) string) (Config, error) {
 		cfg.Port = port
 	}
 
-	if raw := getenv("LOG_LEVEL"); raw == "" {
+	if raw := get("LOG_LEVEL"); raw == "" {
 		problems = append(problems, "LOG_LEVEL is required")
 	} else if level, ok := logLevels[strings.ToLower(raw)]; !ok {
 		problems = append(problems, "LOG_LEVEL must be one of debug, info, warn, error")

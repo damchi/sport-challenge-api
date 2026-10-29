@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestNewLoggerIsCloudLoggingCompatible(t *testing.T) {
@@ -45,5 +47,26 @@ func TestNewLoggerFiltersBelowLevel(t *testing.T) {
 	newLogger(&out, slog.LevelWarn).Info("hidden")
 	if out.Len() != 0 {
 		t.Fatalf("info written at warn level: %q", out.String())
+	}
+}
+
+func TestLogRoutesAtDebugLevel(t *testing.T) {
+	routes := gin.RoutesInfo{{Method: "GET", Path: "/healthz"}}
+
+	var out bytes.Buffer
+	logRoutes(newLogger(&out, slog.LevelDebug), routes)
+	var line map[string]any
+	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
+		t.Fatalf("not JSON: %q", out.String())
+	}
+	got, _ := line["routes"].([]any)
+	if line["message"] != "routes registered" || len(got) != 1 || got[0] != "GET /healthz" {
+		t.Fatalf("line = %v, want the GET /healthz route", line)
+	}
+
+	out.Reset()
+	logRoutes(newLogger(&out, slog.LevelInfo), routes)
+	if out.Len() != 0 {
+		t.Fatalf("routes logged at info level: %q", out.String())
 	}
 }

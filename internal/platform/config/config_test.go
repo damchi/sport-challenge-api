@@ -28,6 +28,16 @@ func TestLoad(t *testing.T) {
 			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug},
 		},
 		{
+			name: "surrounding spaces are ignored",
+			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   "},
+			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo},
+		},
+		{
+			name:    "blank values count as missing",
+			vars:    map[string]string{"ENV": " ", "PORT": "\t", "LOG_LEVEL": " "},
+			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required"},
+		},
+		{
 			name:    "all missing are reported together",
 			vars:    map[string]string{},
 			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required"},

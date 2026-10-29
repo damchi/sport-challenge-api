@@ -52,6 +52,7 @@ func run() error {
 	api.RegisterHandlersWithOptions(router, strict, api.GinServerOptions{
 		ErrorHandler: httpx.InvalidParamHandler,
 	})
+	logRoutes(logger, router.Routes())
 
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
@@ -85,6 +86,16 @@ func run() error {
 	}
 	logger.Info("server stopped")
 	return nil
+}
+
+// logRoutes lists the registered routes at debug level, as Gin's debug mode
+// would, without leaving the JSON log format.
+func logRoutes(logger *slog.Logger, routes gin.RoutesInfo) {
+	list := make([]string, 0, len(routes))
+	for _, r := range routes {
+		list = append(list, r.Method+" "+r.Path)
+	}
+	logger.Debug("routes registered", slog.Any("routes", list))
 }
 
 // newLogger writes JSON lines that Cloud Logging understands: "severity"
