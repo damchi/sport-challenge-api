@@ -48,6 +48,7 @@ Correspondance avec les anciens statuts :
   - [ ] Tests ajoutés, dont les cas « interdit » et les cas limites de temps quand ils s'appliquent
   - [ ] Erreurs avec code stable ; aucune donnée personnelle dans les logs
   - [ ] Migration : paire `.up.sql` / `.down.sql`, `up → down → up` vérifié
+  - [ ] **Route ajoutée ou modifiée** : `api/openapi.yaml` mis à jour **avant** le code, `make generate` et `make openapi-lint` sans différence ni erreur, réponses validées par le test de contrat
   - [ ] **Aucun code inutilisé** : chaque fonction, type, variable de configuration ou package ajouté est utilisé par ce ticket
   - [ ] Agents de revue lancés et points bloquants corrigés
   - [ ] README mis à jour **seulement** si l'utilisateur a validé un changement de règle
@@ -101,9 +102,9 @@ Tickets déplacés ou réduits : 012 (seulement CORS), 022 (limitation de débit
 
 ## Périmètre de la V1 : aller le plus vite possible
 
-Le frontend démarre en **web uniquement** (le mobile viendra en V2) et la V1 repose sur la saisie manuelle. Le backlog complet compte **67 tickets et 215 points** (E0 : 7 · E1 : 5 · E2 : 31 · E3 : 3 · E4 : 42 · E5 : 21 · E6 : 27 · E7 : 17 · E8 : 31 · E9 : 31).
+Le frontend démarre en **web uniquement** (le mobile viendra en V2) et la V1 repose sur la saisie manuelle. Le backlog complet compte **67 tickets et 217 points** (E0 : 7 · E1 : 7 · E2 : 31 · E3 : 3 · E4 : 42 · E5 : 21 · E6 : 27 · E7 : 17 · E8 : 31 · E9 : 31).
 
-**Décision D10 ✅** : les badges et l'upload d'avatar sont **reportés à une V1.1** pour sortir la V1 plus vite. La V1 compte donc **187 points** (215 − 28). Au lancement, les avatars sont des **initiales par défaut**.
+**Décision D10 ✅** : les badges et l'upload d'avatar sont **reportés à une V1.1** pour sortir la V1 plus vite. La V1 compte donc **189 points** (217 − 28). Au lancement, les avatars sont des **initiales par défaut**.
 
 | Reporté en V1.1 | Tickets | Points | Effet |
 |---|---|---|---|
@@ -166,7 +167,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 ### SC-API-002 · Makefile, lint et formatage
 `E0` · Task · Phase 0 · Estimation 2 · Dépend de : 001, 003
 
-**Description** : les commandes dont on a besoin **tout de suite**. Les autres cibles seront ajoutées par les tickets qui en ont l'usage (`test-integration` au 019, `worker` au 055, `generate` et `openapi-lint` quand `api/openapi.yaml` existera).
+**Description** : les commandes dont on a besoin **tout de suite**. Les autres cibles seront ajoutées par les tickets qui en ont l'usage (`test-integration` au 019, `worker` au 055, `generate`, `openapi-lint` et `doc` au ticket 006, qui crée `api/openapi.yaml`).
 
 **Critères d'acceptation**
 - [ ] Cibles : `help` (par défaut), `run`, `build`, `tools`, `fmt`, `lint`, `test`, `check`, `migrate-new`, `migrate-up`, `migrate-down`, `migrate-version`, `docker-up`, `docker-down`.
@@ -218,22 +219,27 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 # E1 — Serveur minimal
 
-### SC-API-006 · Serveur API minimal : `GET /healthz`
-`E1` · Story · Phase 1 · Estimation 3 · Dépend de : 002
+### SC-API-006 · Contrat OpenAPI et serveur minimal : `GET /healthz`
+`E1` · Story · Phase 1 · Estimation 5 · Dépend de : 002
 
-**Description** : un serveur qui démarre, journalise et s'arrête proprement, rien de plus. La configuration, les middlewares et les erreurs grossiront avec les tickets qui en ont besoin.
+**Description** : un serveur qui démarre, journalise et s'arrête proprement, rien de plus, **et le contrat OpenAPI qui le pilote** (décision : spec-first, doc toujours à jour). La configuration, les middlewares et les erreurs grossiront avec les tickets qui en ont besoin.
 
 **Critères d'acceptation**
 - [ ] `internal/platform/config` : structure `Config` avec seulement `ENV` (`local`, `staging`, `production`), `PORT` et `LOG_LEVEL`, lue depuis l'environnement ; **toutes** les variables manquantes ou invalides sont listées dans une seule erreur ; aucune valeur secrète dans les logs ni les erreurs.
 - [ ] `log/slog` en JSON sur la sortie standard, compatible Cloud Logging (`severity`, `message`, `time`), installé comme logger par défaut dans `cmd/api/main.go`. Pas de package `logger` : on l'ajoutera si un besoin réel apparaît.
 - [ ] Routeur Gin avec trois middlewares : `Recovery` (plantage = 500 `internal_error` générique, trace dans les logs), `RequestID` (reprend un `X-Request-ID` valide, sinon en génère un, le renvoie) et `Logger` (une ligne par requête : méthode, **modèle de route**, statut, durée, `request_id` ; jamais le jeton ni le corps).
-- [ ] `GET /healthz` répond toujours 200.
+- [ ] `GET /healthz` répond toujours 200 (corps `{"status":"ok"}`), **décrit d'abord dans le contrat** puis implémenté.
+- [ ] `api/openapi.yaml` (OpenAPI 3.0.3, `info`, chemins complets : `/healthz` et `/readyz` à la racine, les routes métier sous `/api/v1`) ; le fichier est **la source** : on le modifie avant le code, jamais l'inverse.
+- [ ] Génération avec `oapi-codegen` (version épinglée via `make tools`) : `api/oapi-codegen.yaml`, serveur Gin en mode strict, code généré **versionné** dans `internal/api/api.gen.go` (jamais modifié à la main) ; `GET /healthz` implémente l'interface générée.
+- [ ] `make generate` régénère le code ; `make openapi-lint` valide le YAML ; `make doc` ouvre Swagger UI sur http://localhost:8082 (Docker, `api/` monté en lecture seule).
+- [ ] Test de contrat : un helper de test valide la réponse réelle d'un handler contre `openapi.yaml` (`kin-openapi`) ; il est utilisé par le test de `/healthz` et le sera par chaque route.
+- [ ] CI (`ci.yml`) : étapes `make openapi-lint` et `make generate` suivi de `git diff --exit-code` (échoue si le contrat et le code généré divergent).
 - [ ] Arrêt propre à la réception de `SIGTERM` (compatible Cloud Run).
 - [ ] `make run` démarre l'API ; `.env.example` complété avec `ENV`, `PORT`, `LOG_LEVEL`.
 
-**Tests** : config (valide, manquant, invalide), `httptest` pour `/healthz`, un plantage, un identifiant valide et invalide, la ligne de log.
+**Tests** : config (valide, manquant, invalide), `httptest` pour `/healthz` (avec la validation de contrat), un plantage, un identifiant valide et invalide, la ligne de log.
 **Revue** : `go-reviewer`, `security-reviewer`.
-**Commit** : `feat(api): add minimal server with health endpoint and base middlewares`
+**Commit** : `feat(api): add OpenAPI contract and minimal server with health endpoint`
 **Statut** : À faire
 
 ### SC-API-007 · Connexion à la base et `GET /readyz`
@@ -241,7 +247,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] `internal/platform/db` : pool `pgx` créé à partir de `DATABASE_URL` (ajoutée à `Config` et vérifiée au démarrage), avec fonction de ping et fermeture propre à l'arrêt.
-- [ ] `GET /readyz` répond 200 si la base répond, 503 sinon.
+- [ ] `GET /readyz` répond 200 si la base répond, 503 sinon ; la route est ajoutée **d'abord** à `api/openapi.yaml`, puis `make generate`.
 - [ ] Aucun GORM, aucun helper de transaction ni base de test pour l'instant : ils seront ajoutés par les tickets 019 et 029 qui s'en servent.
 
 **Tests** : `readyz` avec une base disponible et indisponible.

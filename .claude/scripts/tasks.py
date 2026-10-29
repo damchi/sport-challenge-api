@@ -14,6 +14,9 @@ Commandes
         Marque le ticket « en cours » (étiquette, assigné à toi, statut du Project).
   tick  TICKET
         Coche les critères d'acceptation du ticket (à lancer quand ils sont tous remplis).
+  sync  TICKET [--force]
+        Remet à jour le titre, le corps et les étiquettes d'une issue depuis TASKS.md (après une modification
+        du ticket dans ce fichier). Refuse si des cases sont déjà cochées ou si l'issue est fermée, sauf --force.
 
 TICKET s'écrit `12`, `#12`, `SC-API-006` ou `006`.
 """
@@ -328,6 +331,32 @@ def cmd_tick(args):
     print(f"#{issue['number']} {issue['tid']} : {m.group(2).count('- [ ]')} critère(s) coché(s).")
 
 
+def cmd_sync(args):
+    issues = load_issues()
+    issue = resolve(issues, args.ticket)
+    if issue["state"] != "OPEN" and not args.force:
+        sys.exit(f"{issue['tid']} est fermé : utilise --force pour le mettre à jour quand même.")
+    if "- [x]" in (issue["body"] or "") and not args.force:
+        sys.exit(f"{issue['tid']} a des critères déjà cochés : --force les remplacerait par des cases vides.")
+    tickets = {t.id: t for t in parse_tasks(TASKS)}
+    t = tickets.get(issue["tid"])
+    if t is None:
+        sys.exit(f"{issue['tid']} n'existe plus dans TASKS.md.")
+    numbers = {tid: i["number"] for tid, i in issues.items()}
+    current = issue["label_names"]
+    wanted = set(t.labels)
+    stale = {l for l in current if l.split(":")[0] in ("points", "type", "phase") and l not in wanted}
+    for label in wanted - current:
+        gh("label", "create", label, "--color", "ededed", "--force")
+    cmd = ["issue", "edit", str(issue["number"]), "--title", t.title, "--body-file", "-"]
+    for label in sorted(wanted - current):
+        cmd += ["--add-label", label]
+    for label in sorted(stale):
+        cmd += ["--remove-label", label]
+    gh(*cmd, stdin=render(t, numbers))
+    print(f"#{issue['number']} {t.id} mis à jour depuis TASKS.md.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -339,8 +368,11 @@ def main():
     sub.add_parser("next")
     for name in ("start", "tick"):
         sub.add_parser(name).add_argument("ticket")
+    sy = sub.add_parser("sync")
+    sy.add_argument("ticket")
+    sy.add_argument("--force", action="store_true")
     args = parser.parse_args()
-    {"import": cmd_import, "next": cmd_next, "start": cmd_start, "tick": cmd_tick}[args.cmd](args)
+    {"import": cmd_import, "next": cmd_next, "start": cmd_start, "tick": cmd_tick, "sync": cmd_sync}[args.cmd](args)
 
 
 if __name__ == "__main__":
