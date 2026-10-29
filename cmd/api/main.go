@@ -18,11 +18,15 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/health"
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
+	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
 )
 
 // shutdownTimeout stays under the 10 seconds Cloud Run waits after SIGTERM.
 const shutdownTimeout = 8 * time.Second
+
+// startupPingTimeout bounds the database check done at startup.
+const startupPingTimeout = 5 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -40,11 +44,22 @@ func run() error {
 	logger := newLogger(os.Stdout, cfg.LogLevel)
 	slog.SetDefault(logger)
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	// Deferred first, run last: the pool closes after the HTTP server stops.
+	defer pool.Close()
+	pingDatabase(ctx, logger, pool.Ping)
+
 	gin.SetMode(gin.ReleaseMode)
 	router := httpx.NewRouter(logger)
 	// The generated defaults send err.Error() to the client: every error
 	// handler is replaced by one that answers in the API error format.
-	strict := api.NewStrictHandlerWithOptions(health.Handler{}, nil, api.StrictGinServerOptions{
+	strict := api.NewStrictHandlerWithOptions(health.NewHandler(pool, logger), nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler,
 		HandlerErrorFunc:         httpx.InternalErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.InternalErrorHandler(logger),
@@ -62,9 +77,6 @@ func run() error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
-	defer stop()
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -86,6 +98,18 @@ func run() error {
 	}
 	logger.Info("server stopped")
 	return nil
+}
+
+// pingDatabase only warns when the database does not answer at startup: the
+// API still starts and /readyz reports 503 until the database is back.
+func pingDatabase(ctx context.Context, logger *slog.Logger, ping func(context.Context) error) {
+	ctx, cancel := context.WithTimeout(ctx, startupPingTimeout)
+	defer cancel()
+	if err := ping(ctx); err != nil {
+		logger.Warn("database unavailable at startup", slog.String("error", err.Error()))
+		return
+	}
+	logger.Info("database connected")
 }
 
 // logRoutes lists the registered routes at debug level, as Gin's debug mode

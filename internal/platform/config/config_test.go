@@ -19,28 +19,28 @@ func TestLoad(t *testing.T) {
 	}{
 		{
 			name: "valid",
-			vars: map[string]string{"ENV": "staging", "PORT": "8080", "LOG_LEVEL": "warn"},
-			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn},
+			vars: map[string]string{"ENV": "staging", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x"},
+			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x"},
 		},
 		{
 			name: "log level is case insensitive",
-			vars: map[string]string{"ENV": "local", "PORT": "1", "LOG_LEVEL": "DEBUG"},
-			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug},
+			vars: map[string]string{"ENV": "local", "PORT": "1", "LOG_LEVEL": "DEBUG", "DATABASE_URL": "postgres://localhost/x"},
+			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x"},
 		},
 		{
 			name: "surrounding spaces are ignored",
-			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   "},
-			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo},
+			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   ", "DATABASE_URL": " postgres://localhost/x "},
+			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x"},
 		},
 		{
 			name:    "blank values count as missing",
-			vars:    map[string]string{"ENV": " ", "PORT": "\t", "LOG_LEVEL": " "},
-			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required"},
+			vars:    map[string]string{"ENV": " ", "PORT": "\t", "LOG_LEVEL": " ", "DATABASE_URL": " "},
+			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required"},
 		},
 		{
 			name:    "all missing are reported together",
 			vars:    map[string]string{},
-			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required"},
+			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required"},
 		},
 		{
 			name: "all invalid are reported together",
@@ -53,7 +53,7 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name:    "port out of range",
-			vars:    map[string]string{"ENV": "production", "PORT": "70000", "LOG_LEVEL": "info"},
+			vars:    map[string]string{"ENV": "production", "PORT": "70000", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x"},
 			wantErr: []string{"PORT must be an integer between 1 and 65535"},
 		},
 	}
@@ -83,7 +83,7 @@ func TestLoad(t *testing.T) {
 
 func TestLoadNeverEchoesValues(t *testing.T) {
 	const secret = "s3cr3t-value"
-	_, err := Load(envFrom(map[string]string{"ENV": secret, "PORT": secret, "LOG_LEVEL": secret}))
+	_, err := Load(envFrom(map[string]string{"ENV": secret, "PORT": secret, "LOG_LEVEL": secret, "DATABASE_URL": "postgres://u:" + secret + "@db/x"}))
 	if err == nil {
 		t.Fatal("Load() error = nil, want an error")
 	}
