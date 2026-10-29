@@ -33,5 +33,5 @@ go.work.sum
 CLAUDE.local.md
 
 # Editor/IDE
-# .idea/
+.idea/
 # .vscode/
