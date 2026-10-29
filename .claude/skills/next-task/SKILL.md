@@ -22,6 +22,11 @@ Les tickets sont des **issues GitHub** (importées depuis `TASKS.md`). Le statut
 
 - Relis les sections du `README.md` citées par le ticket et les règles de `CLAUDE.md`.
 - Si un critère s'appuie sur un 🟡 ou un ❓ non tranché, ou si le ticket contredit le README : **demande avant d'écrire**.
+- **Branche** (une par ticket, créée automatiquement) :
+  1. `git status` : si l'arbre de travail n'est pas propre, **arrête-toi** et demande quoi faire (le travail non committé n'est jamais écrasé).
+  2. Si l'utilisateur est déjà sur une branche de ce ticket (`sc-api-0xx-…`), reprends-la.
+  3. Sinon : `git switch main`, `git pull --ff-only`, puis `git switch -c <identifiant en minuscules>-<résumé court du titre>` (ex. `sc-api-002-makefile-lint`) : minuscules, tirets, 40 caractères au plus pour le résumé.
+  4. Ne pars jamais d'une autre branche de ticket non fusionnée sans l'accord de l'utilisateur.
 - Marque le ticket en cours : `python3 .claude/scripts/tasks.py start <numéro>` (étiquette `en-cours`, assigné à l'utilisateur, statut « In Progress » du Project).
 - Annonce un court plan.
 
@@ -44,7 +49,7 @@ Les tickets sont des **issues GitHub** (importées depuis `TASKS.md`). Le statut
 - Si **tous** les critères d'acceptation sont remplis : `python3 .claude/scripts/tasks.py tick <numéro>` coche les cases dans l'issue. S'il en reste un non rempli, ne lance pas `tick` : dis lequel et pourquoi.
 - Ne ferme pas l'issue et ne change pas son statut : elle se ferme toute seule à la fusion de la pull request qui contient `Closes #<numéro>`.
 - Présente : la liste des fichiers modifiés, un résumé du diff, le résultat des vérifications, les points ouverts éventuels, et le **message de commit** du ticket (adapté si besoin), terminé par `Closes #<numéro>` puis `Refs: SC-API-0xx` en pied.
-- **N'exécute ni `git commit`, ni `git push`, ni `gh pr create`.** Attends l'accord explicite de l'utilisateur. Tu peux utiliser `git add`, `git status` et `git diff`. Propose le titre et la description de la pull request (avec `Closes #<numéro>`) pour qu'il l'ouvre ou te le demande.
+- **N'exécute ni `git commit`, ni `git push`, ni `gh pr create` (seule la création de branche du §2 est automatique).** Attends l'accord explicite de l'utilisateur. Tu peux utiliser `git add`, `git status` et `git diff`. Propose le titre et la description de la pull request (avec `Closes #<numéro>`) pour qu'il l'ouvre ou te le demande.
 - Termine en indiquant que le ticket suivant sera disponible une fois cette pull request fusionnée (ses dépendances seront alors fermées), et ses éventuelles décisions en attente. L'utilisateur peut aussi demander explicitement un autre ticket.
 
 ## Rappels

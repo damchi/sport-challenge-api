@@ -17,6 +17,8 @@
       "Bash(git diff:*)",
       "Bash(git log:*)",
       "Bash(git add:*)",
+      "Bash(git switch:*)",
+      "Bash(git pull --ff-only)",
       "Bash(python3 .claude/scripts/tasks.py next)",
       "Bash(python3 .claude/scripts/tasks.py start:*)",
       "Bash(python3 .claude/scripts/tasks.py tick:*)",
