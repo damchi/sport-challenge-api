@@ -1,0 +1,42 @@
+openapi: 3.0.3
+info:
+  title: Sport Challenge API
+  version: 0.1.0
+  description: |
+    Backend of the Sport Challenge app. This file is the source of truth:
+    change it first, then run `make generate`.
+
+    Health endpoints live at the root; business routes live under `/api/v1`.
+  license:
+    name: Proprietary
+    url: https://github.com/damchi/sport-challenge-api
+servers:
+  - url: /
+security: []
+tags:
+  - name: health
+    description: Liveness and readiness probes.
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness probe
+      description: Always returns 200 while the process is able to serve requests.
+      tags: [health]
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok]

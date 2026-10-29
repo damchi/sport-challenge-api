@@ -39,6 +39,16 @@ jobs:
           make fmt
           git diff --exit-code
 
+      - name: OpenAPI lint
+        run: make openapi-lint
+
+      # Fails when api/openapi.yaml and the generated code disagree.
+      - name: Generated code is up to date
+        run: |
+          make generate
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
       - name: Lint
         run: make lint
 

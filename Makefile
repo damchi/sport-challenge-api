@@ -11,14 +11,25 @@ TOOLS_BIN      := $(CURDIR)/bin
 MIGRATE_VERSION       := v4.20.1
 GOLANGCI_LINT_VERSION := v2.15.0
 GOFUMPT_VERSION       := v0.12.0
+OAPI_CODEGEN_VERSION  := v2.8.1
+
+REDOCLY_IMAGE    := redocly/cli:2.72.1@sha256:d39a229ebd8250fea62f44c377ddb04797e8a155140eda49db17f1caaa9334ff
+SWAGGER_UI_IMAGE := swaggerapi/swagger-ui:v5.34.0@sha256:58c1fbf5f5cf6d2ae857e4d1296cb02192fa5de472c1cd76f58b2be99523e1d0
+DOC_PORT         := 8082
 
 MIGRATE       := $(TOOLS_BIN)/migrate
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOFUMPT       := $(TOOLS_BIN)/gofumpt
+OAPI_CODEGEN  := $(TOOLS_BIN)/oapi-codegen
 
-MIGRATE_STAMP       := $(TOOLS_BIN)/.migrate-$(MIGRATE_VERSION)
-GOLANGCI_LINT_STAMP := $(TOOLS_BIN)/.golangci-lint-$(GOLANGCI_LINT_VERSION)
-GOFUMPT_STAMP       := $(TOOLS_BIN)/.gofumpt-$(GOFUMPT_VERSION)
+# Tools are built with the Go version of go.mod: bumping it rebuilds them
+# (golangci-lint refuses to lint code newer than the Go that built it).
+GO_VERSION := $(shell awk '/^go /{print $$2}' go.mod)
+
+MIGRATE_STAMP       := $(TOOLS_BIN)/.migrate-$(MIGRATE_VERSION)-go$(GO_VERSION)
+GOLANGCI_LINT_STAMP := $(TOOLS_BIN)/.golangci-lint-$(GOLANGCI_LINT_VERSION)-go$(GO_VERSION)
+GOFUMPT_STAMP       := $(TOOLS_BIN)/.gofumpt-$(GOFUMPT_VERSION)-go$(GO_VERSION)
+OAPI_CODEGEN_STAMP  := $(TOOLS_BIN)/.oapi-codegen-$(OAPI_CODEGEN_VERSION)-go$(GO_VERSION)
 
 # Lint and test are skipped only while the repository has no Go file at all.
 GO_FILES := $(shell find . -name '*.go' -not -path './bin/*' -print -quit)
@@ -28,7 +39,7 @@ LOCAL_DB_HOSTS := localhost 127.0.0.1 postgres
 
 .DEFAULT_GOAL := help
 
-.PHONY: help run build tools fmt lint test check \
+.PHONY: help run build tools fmt lint test check generate openapi-lint doc \
 	migrate-new migrate-up migrate-down migrate-version \
 	docker-up docker-down guard-local-db
 
@@ -41,9 +52,9 @@ run: ## Run the API locally
 build: ## Build the binaries into bin/
 	go build -o $(TOOLS_BIN)/ ./cmd/...
 
-tools: $(MIGRATE_STAMP) $(GOLANGCI_LINT_STAMP) $(GOFUMPT_STAMP) ## Install pinned dev tools into bin/
+tools: $(MIGRATE_STAMP) $(GOLANGCI_LINT_STAMP) $(GOFUMPT_STAMP) $(OAPI_CODEGEN_STAMP) ## Install pinned dev tools into bin/
 
-# Stamp files carry the version: changing a pinned version reinstalls the tool.
+# Stamp files carry the tool and Go versions: changing either reinstalls the tool.
 $(MIGRATE_STAMP):
 	GOBIN=$(TOOLS_BIN) go install -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@$(MIGRATE_VERSION)
 	@touch $@
@@ -54,6 +65,10 @@ $(GOLANGCI_LINT_STAMP):
 
 $(GOFUMPT_STAMP):
 	GOBIN=$(TOOLS_BIN) go install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
+	@touch $@
+
+$(OAPI_CODEGEN_STAMP):
+	GOBIN=$(TOOLS_BIN) go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
 	@touch $@
 
 fmt: $(GOFUMPT_STAMP) ## Format the code (gofumpt, a stricter gofmt)
@@ -74,6 +89,16 @@ else
 endif
 
 check: fmt lint test ## Run fmt, lint and test
+
+generate: $(OAPI_CODEGEN_STAMP) ## Regenerate internal/api from api/openapi.yaml
+	$(OAPI_CODEGEN) -config api/oapi-codegen.yaml api/openapi.yaml
+
+openapi-lint: ## Validate api/openapi.yaml (Redocly, in Docker)
+	docker run --rm -v $(CURDIR)/api:/spec:ro -w /spec $(REDOCLY_IMAGE) lint openapi.yaml
+
+doc: ## Serve Swagger UI for api/openapi.yaml on http://localhost:8082
+	@echo "Swagger UI: http://localhost:$(DOC_PORT) (Ctrl+C to stop)"
+	docker run --rm -p 127.0.0.1:$(DOC_PORT):8080 -e SWAGGER_JSON=/spec/openapi.yaml -v $(CURDIR)/api:/spec:ro $(SWAGGER_UI_IMAGE)
 
 migrate-new: $(MIGRATE_STAMP) ## Create a migration pair: make migrate-new NAME=x
 	@test -n "$(NAME)" || { echo "Usage: make migrate-new NAME=<name>"; exit 1; }

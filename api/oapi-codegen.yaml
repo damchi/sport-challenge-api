@@ -1,0 +1,7 @@
+# Code generation for the API contract. Run `make generate`; never edit the output by hand.
+package: api
+output: internal/api/api.gen.go
+generate:
+  gin-server: true
+  strict-server: true
+  models: true
