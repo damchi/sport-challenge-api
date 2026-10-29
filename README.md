@@ -249,7 +249,6 @@ sportchallenge-api/
 │   │   ├── auth/                    interface TokenVerifier (JWKS), middlewares Authenticate et CurrentUser
 │   │   ├── storage/                 interface de stockage + implémentation Cloud Storage (URL signées)
 │   │   ├── clock/                   interface Clock : horloge réelle, horloge décalable (staging, tests)
-│   │   ├── logger/                  logs structurés JSON
 │   │   └── apperr/                  erreurs métier avec code stable (traduit côté client)
 │   │
 │   ├── api/
