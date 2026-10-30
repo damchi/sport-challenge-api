@@ -54,3 +54,59 @@ jobs:
 
       - name: Test
         run: make test
+
+  migrations:
+    name: migrations up, down, up
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sport
+          POSTGRES_PASSWORD: sport
+          POSTGRES_DB: sport_challenge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sport -d sport_challenge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway CI database, same credentials as the local compose (not secrets).
+      DATABASE_URL: postgres://sport:sport@localhost:5432/sport_challenge?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin
+          key: tools-${{ runner.os }}-${{ hashFiles('go.mod', 'Makefile') }}
+
+      - name: Up
+        run: make migrate-up
+
+      # Rolls back every migration, one at a time, then proves the down files
+      # left nothing behind (only golang-migrate's own table may remain).
+      - name: Down to empty
+        run: |
+          for _ in migrations/*.up.sql; do
+            make migrate-down
+          done
+          tables=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'")
+          functions=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'")
+          echo "tables=$tables functions=$functions"
+          test "$tables" = 0 && test "$functions" = 0
+
+      - name: Up again
+        run: |
+          make migrate-up
+          make migrate-version
