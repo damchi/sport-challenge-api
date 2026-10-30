@@ -23,6 +23,8 @@ type Config struct {
 	Env      Environment
 	Port     int
 	LogLevel slog.Level
+	// DatabaseURL contains the database password: never log it.
+	DatabaseURL string
 }
 
 // Load reads the configuration through getenv (os.Getenv in production).
@@ -57,6 +59,10 @@ func Load(getenv func(string) string) (Config, error) {
 		problems = append(problems, "LOG_LEVEL must be one of debug, info, warn, error")
 	} else {
 		cfg.LogLevel = level
+	}
+
+	if cfg.DatabaseURL = get("DATABASE_URL"); cfg.DatabaseURL == "" {
+		problems = append(problems, "DATABASE_URL is required")
 	}
 
 	if len(problems) > 0 {

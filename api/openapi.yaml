@@ -30,6 +30,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Readiness probe
+      description: Returns 200 when the database answers, 503 otherwise.
+      tags: [health]
+      responses:
+        "200":
+          description: The API can serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+              example:
+                status: ok
+        "503":
+          description: A dependency (the database) does not answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+              example:
+                status: unavailable
 components:
   schemas:
     Health:
@@ -40,3 +63,11 @@ components:
         status:
           type: string
           enum: [ok]
+    Readiness:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]

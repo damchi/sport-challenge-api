@@ -1,5 +1,6 @@
 # Redocly lint exceptions, one entry per justified case.
 openapi.yaml:
-  # A liveness probe never answers 4xx.
+  # Health probes never answer 4xx.
   operation-4xx-response:
     - '#/paths/~1healthz/get/responses'
+    - '#/paths/~1readyz/get/responses'

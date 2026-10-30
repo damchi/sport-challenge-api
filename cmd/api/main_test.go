@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -68,5 +70,36 @@ func TestLogRoutesAtDebugLevel(t *testing.T) {
 	logRoutes(newLogger(&out, slog.LevelInfo), routes)
 	if out.Len() != 0 {
 		t.Fatalf("routes logged at info level: %q", out.String())
+	}
+}
+
+func TestPingDatabase(t *testing.T) {
+	tests := []struct {
+		name         string
+		pingErr      error
+		wantSeverity string
+		wantMessage  string
+	}{
+		{name: "available", wantSeverity: "INFO", wantMessage: "database connected"},
+		{name: "unavailable", pingErr: errors.New("connection refused"), wantSeverity: "WARNING", wantMessage: "database unavailable at startup"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			pingDatabase(t.Context(), newLogger(&out, slog.LevelDebug), func(ctx context.Context) error {
+				if _, ok := ctx.Deadline(); !ok {
+					t.Error("ping context has no deadline")
+				}
+				return tt.pingErr
+			})
+
+			var line map[string]any
+			if err := json.Unmarshal(out.Bytes(), &line); err != nil {
+				t.Fatalf("not JSON: %q", out.String())
+			}
+			if line["severity"] != tt.wantSeverity || line["message"] != tt.wantMessage {
+				t.Fatalf("line = %v, want %s %q", line, tt.wantSeverity, tt.wantMessage)
+			}
+		})
 	}
 }
