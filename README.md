@@ -149,11 +149,12 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 
 ### 3.2 Authentification
 
-- ✅ Service tiers pour les comptes et la connexion (OIDC) : Google, Apple, lien magique ou e-mail.
-- ✅ **Auth0**, avec un tenant par environnement (développement, staging, production). ❓ À vérifier à la création du premier tenant : région **Canada** disponible avec le forfait voulu, et lien magique inclus dans ce forfait. Plan B si le Canada n'est pas disponible : Google Identity Platform (gratuit jusqu'à 50 000 utilisateurs actifs par mois), en documentant l'évaluation de transfert hors Québec car on n'y choisit pas la région des données.
+- ✅ Service tiers pour les comptes et la connexion (OIDC). V1 : e-mail sans mot de passe par **code à usage unique**, seule méthode de connexion. Connexions sociales (Google, Apple) reportées à plus tard.
+- ✅ **Auth0**, avec un tenant par environnement (développement, staging, production), en région **Canada** (vérifiée disponible avec le forfait choisi). Procédure : `docs/auth0-setup.md`.
+- ✅ Connexion par e-mail : **code à usage unique** (passwordless, mode code), et non lien magique : le New Universal Login d'Auth0 ne propose pas le lien magique.
 - Le backend reste indépendant du fournisseur (interface `TokenVerifier`, identifiant d'utilisateur local, validation JWT par JWKS) : un changement ultérieur ne toucherait pas les modules métier.
-- ❓ Vérifier la région du tenant (Canada) avant de le créer, car elle ne se change pas ensuite.
-- Sign in with Apple obligatoire sur iOS si une autre connexion sociale est proposée.
+- La région du tenant ne se change pas après sa création.
+- Quand des connexions sociales seront ajoutées : Sign in with Apple obligatoire sur iOS si une autre connexion sociale est proposée.
 - Le backend valide le JWT et garde son propre `user_id` lié à l'identifiant du fournisseur.
 
 ### 3.3 Stockage d'images
@@ -546,7 +547,7 @@ Le détail ticket par ticket (67 tickets, critères d'acceptation, commits propo
 |---|---|---|
 | 0 | Fondations minimales et CI | `go.mod` ; `Makefile` limité au nécessaire, avec garde-fou : les migrations ne s'appliquent que sur la base locale ; `docker-compose` (PostgreSQL) ; lint ; CI GitHub Actions ; relecture des pull requests par Claude |
 | 1 | Serveur minimal | `config` réduite aux variables utilisées, `slog`, middlewares `Recovery`, `RequestID`, `Logger`, `GET /healthz` et `/readyz`. Le reste du socle (**`apperr`**, §5.8, `clock` injectable, transactions, pagination, `CORS`) arrive avec la première fonctionnalité qui l'utilise |
-| 2 | Utilisateur et **Auth0** | Middlewares `Authenticate`, `CORS`, `CurrentUser` (la limitation de débit par IP et par utilisateur vient en phase 9, avant l'exposition publique) ; interface `TokenVerifier` ; **access token** de l'API (pas l'ID token) ; tenant Auth0 par environnement (région Canada et lien magique à vérifier) ; création de l'utilisateur au premier login, idempotente ; connexion **obligatoire** partout sauf `/healthz` |
+| 2 | Utilisateur et **Auth0** | Middlewares `Authenticate`, `CORS`, `CurrentUser` (la limitation de débit par IP et par utilisateur vient en phase 9, avant l'exposition publique) ; interface `TokenVerifier` ; **access token** de l'API (pas l'ID token) ; tenant Auth0 par environnement (région Canada, code à usage unique par e-mail) ; création de l'utilisateur au premier login, idempotente ; connexion **obligatoire** partout sauf `/healthz` |
 | 3 | Catalogue de sports | Données de référence idempotentes ; coefficients copiés dans le challenge à sa création |
 | 4 | Challenges et catégories | **`policy.go`** (matrice des droits §5.7) ; **aucune autorisation dans un middleware** ; 3 catégories figées ; inscription jusqu'à la fin de la semaine 1 ; plusieurs créateurs ; titre et description seuls modifiables ; test « interdit » pour chaque règle |
 | 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine terminée verrouillée** ; modification et suppression seulement dans la semaine en cours ; route de détail des activités des participants (visible des seuls participants du challenge) |
@@ -574,7 +575,6 @@ Garmin et Coros (demandes de partenariat à lancer tôt, les délais sont longs)
 ## 8. Questions ouvertes
 
 - ❓ (V2) Synchronisations tardives (Garmin, Coros) : sans délai de grâce, une activité reçue après la fin de sa semaine ne compte pas. À revisiter à l'arrivée des synchronisations.
-- ❓ À la création du tenant Auth0 : région Canada et lien magique disponibles avec le forfait voulu (plan B : Google Identity Platform).
 - ❓ Agrégateur ou connexions directes pour les synchronisations (à trancher avant la V2).
 - ✅ Package d'erreurs maison (Faunadex) : examiné, non repris. `platform/apperr` suit le contrat du §5.8 ; ses messages FR/EN pourront alimenter les fichiers de traduction du frontend. Le `translator` (`go-i18n`, fichiers `.toml`) pourra servir plus tard aux textes émis par le serveur (courriels, notifications).
 - ❓ Confirmer les points marqués 🟡.

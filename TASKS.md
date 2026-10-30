@@ -265,10 +265,10 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Description** : tâche manuelle, à faire avec l'utilisateur. Elle peut se faire en parallèle de la phase 1.
 
 **Critères d'acceptation**
-- [ ] Un tenant par environnement (développement, staging, production), en région **Canada**. Si le Canada n'est pas disponible avec le forfait voulu, ou si le lien magique n'est pas inclus : **s'arrêter et demander** (plan B : Google Identity Platform).
+- [ ] Un tenant par environnement (développement, staging, production), en région **Canada**. Si le Canada n'est pas disponible avec le forfait voulu : **s'arrêter et demander** (plan B : Google Identity Platform).
 - [ ] Une **API** Auth0 par environnement ; son identifiant est l'audience (`AUTH0_AUDIENCE`).
 - [ ] Applications : une SPA (web) et une application native (mobile), avec URL de rappel, de déconnexion et origines autorisées.
-- [ ] Connexions activées : Google, Apple, lien magique par e-mail.
+- [ ] Connexion activée : code à usage unique par e-mail, seule méthode en V1 (le New Universal Login ne propose pas le lien magique ; connexions sociales Google et Apple reportées).
 - [ ] Durée de vie courte de l'access token et rotation des refresh tokens.
 - [ ] Une application **machine à machine** par environnement, limitée à la permission de supprimer des utilisateurs (`delete:users`), pour l'API de gestion (ticket 039) ; ses identifiants vont dans Secret Manager.
 - [ ] Aucun secret dans le dépôt ; les valeurs sont notées pour Secret Manager.
