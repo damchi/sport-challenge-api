@@ -51,7 +51,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// Deferred first, run last: the pool closes after the HTTP server stops.
+	// The pool closes when run returns, after srv.Shutdown below has drained
+	// the requests. Keep Shutdown in the body of run, not in a defer.
 	defer pool.Close()
 	pingDatabase(ctx, logger, pool.Ping)
 
