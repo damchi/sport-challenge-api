@@ -1,6 +1,6 @@
 # Configuration d'Auth0
 
-Procédure manuelle, à refaire à l'identique pour chaque environnement. Elle crée ce dont l'API a besoin pour valider les jetons (ticket SC-API-016) et supprimer un compte chez Auth0 (ticket SC-API-039).
+Procédure manuelle, à refaire à l'identique pour chaque environnement. Elle crée ce dont l'API a besoin pour valider les jetons (ticket SC-API-017) et supprimer un compte chez Auth0 (ticket SC-API-039).
 
 **Aucun secret dans le dépôt.** Les valeurs non secrètes (domaine, audience, identifiant de la SPA) vont dans la configuration ; le seul secret (client de l'API de gestion) va dans Secret Manager.
 
@@ -112,7 +112,7 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
 - **Brute-force Protection** : activé.
 - Vérifier que ces limites couvrent l'envoi des courriels passwordless (pour empêcher d'inonder une adresse de liens de connexion).
 
-## Points d'attention pour l'API (ticket SC-API-016)
+## Points d'attention pour l'API (ticket SC-API-017)
 
 - **Jetons machine à machine** : refuser un access token dont `gty` vaut `client-credentials` ou dont `sub` se termine par `@clients`, en défense en profondeur de l'étape 2.5.
 - **Domaine personnalisé** : si un *Custom Domain* est ajouté plus tard, l'émetteur des jetons change (`https://<custom-domain>/`) : `AUTH0_DOMAIN` doit alors être ce domaine.
@@ -129,7 +129,7 @@ Par environnement, une fois la procédure terminée :
 | Client ID de l'application machine à machine | à traiter comme secret | Secret Manager : `auth0-mgmt-client-id` |
 | Client Secret de l'application machine à machine | **oui** | Secret Manager : `auth0-mgmt-client-secret` |
 
-`AUTH0_DOMAIN` et `AUTH0_AUDIENCE` seront ajoutées à la configuration de l'API et à `.env.example` par le ticket SC-API-016.
+`AUTH0_DOMAIN` et `AUTH0_AUDIENCE` seront ajoutées à la configuration de l'API et à `.env.example` par le ticket SC-API-017.
 
 ## Vérification
 
