@@ -19,28 +19,28 @@ func TestLoad(t *testing.T) {
 	}{
 		{
 			name: "valid",
-			vars: map[string]string{"ENV": "staging", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x"},
-			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x"},
+			vars: map[string]string{"ENV": "staging", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test"},
+			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test"},
 		},
 		{
 			name: "log level is case insensitive",
-			vars: map[string]string{"ENV": "local", "PORT": "1", "LOG_LEVEL": "DEBUG", "DATABASE_URL": "postgres://localhost/x"},
-			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x"},
+			vars: map[string]string{"ENV": "local", "PORT": "1", "LOG_LEVEL": "DEBUG", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test"},
+			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test"},
 		},
 		{
 			name: "surrounding spaces are ignored",
-			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   ", "DATABASE_URL": " postgres://localhost/x "},
-			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x"},
+			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   ", "DATABASE_URL": " postgres://localhost/x ", "AUTH0_DOMAIN": " tenant.ca.auth0.com ", "AUTH0_AUDIENCE": " https://api.test "},
+			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test"},
 		},
 		{
 			name:    "blank values count as missing",
-			vars:    map[string]string{"ENV": " ", "PORT": "\t", "LOG_LEVEL": " ", "DATABASE_URL": " "},
-			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required"},
+			vars:    map[string]string{"ENV": " ", "PORT": "\t", "LOG_LEVEL": " ", "DATABASE_URL": " ", "AUTH0_DOMAIN": " ", "AUTH0_AUDIENCE": " "},
+			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required", "AUTH0_DOMAIN is required", "AUTH0_AUDIENCE is required"},
 		},
 		{
 			name:    "all missing are reported together",
 			vars:    map[string]string{},
-			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required"},
+			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required", "AUTH0_DOMAIN is required", "AUTH0_AUDIENCE is required"},
 		},
 		{
 			name: "all invalid are reported together",
@@ -52,8 +52,48 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name: "auth0 domain with a scheme",
+			vars: map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "https://tenant.ca.auth0.com/", "AUTH0_AUDIENCE": "https://api.test",
+			},
+			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
+		},
+		{
+			name: "auth0 domain with userinfo",
+			vars: map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "x@evil.com", "AUTH0_AUDIENCE": "https://api.test",
+			},
+			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
+		},
+		{
+			name: "auth0 domain with a query",
+			vars: map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "tenant.ca.auth0.com?x=1", "AUTH0_AUDIENCE": "https://api.test",
+			},
+			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
+		},
+		{
+			name: "auth0 domain without a dot",
+			vars: map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "localhost", "AUTH0_AUDIENCE": "https://api.test",
+			},
+			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
+		},
+		{
+			name: "auth0 domain with a space",
+			vars: map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "tenant .ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test",
+			},
+			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
+		},
+		{
 			name:    "port out of range",
-			vars:    map[string]string{"ENV": "production", "PORT": "70000", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x"},
+			vars:    map[string]string{"ENV": "production", "PORT": "70000", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test"},
 			wantErr: []string{"PORT must be an integer between 1 and 65535"},
 		},
 	}
