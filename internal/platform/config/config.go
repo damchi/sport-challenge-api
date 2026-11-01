@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -25,6 +26,10 @@ type Config struct {
 	LogLevel slog.Level
 	// DatabaseURL contains the database password: never log it.
 	DatabaseURL string
+	// Auth0Domain is the tenant host name, without scheme or path
+	// (sport-challenge-dev.ca.auth0.com); Auth0Audience is the API identifier.
+	Auth0Domain   string
+	Auth0Audience string
 }
 
 // Load reads the configuration through getenv (os.Getenv in production).
@@ -65,11 +70,26 @@ func Load(getenv func(string) string) (Config, error) {
 		problems = append(problems, "DATABASE_URL is required")
 	}
 
+	// Lowercase: the expected issuer must match the "iss" Auth0 writes.
+	if cfg.Auth0Domain = strings.ToLower(get("AUTH0_DOMAIN")); cfg.Auth0Domain == "" {
+		problems = append(problems, "AUTH0_DOMAIN is required")
+	} else if !hostName.MatchString(cfg.Auth0Domain) {
+		problems = append(problems, "AUTH0_DOMAIN must be a host name (letters, digits, hyphens and dots), without scheme, port or path")
+	}
+
+	if cfg.Auth0Audience = get("AUTH0_AUDIENCE"); cfg.Auth0Audience == "" {
+		problems = append(problems, "AUTH0_AUDIENCE is required")
+	}
+
 	if len(problems) > 0 {
 		return Config{}, errors.New("invalid configuration: " + strings.Join(problems, "; "))
 	}
 	return cfg, nil
 }
+
+// hostName accepts a DNS host name such as sport-challenge-dev.ca.auth0.com.
+// It rejects anything that would change the JWKS URL built from it (@, ?, #...).
+var hostName = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 
 var logLevels = map[string]slog.Level{
 	"debug": slog.LevelDebug,

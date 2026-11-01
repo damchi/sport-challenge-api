@@ -303,11 +303,12 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Vérifie : signature (RS256 uniquement ; `none` et HMAC refusés), émetteur (`https://{AUTH0_DOMAIN}/`), audience (`AUTH0_AUDIENCE`), expiration et début de validité avec 60 s de tolérance.
 - [ ] Le jeton vérifié est l'**access token** de l'API, pas l'ID token.
 - [ ] Les claims exposés se limitent à `sub`, expiration et scopes.
+- [ ] Les jetons machine à machine sont refusés (`gty` = `client-credentials` ou `sub` terminé par `@clients`), voir `docs/auth0-setup.md`.
 
 - [ ] `AUTH0_DOMAIN` et `AUTH0_AUDIENCE` ajoutées à `Config`, vérifiées au démarrage et listées dans `.env.example`.
 
 **Notes techniques** : bibliothèques proposées : `golang-jwt/jwt/v5` et `MicahParks/keyfunc` ; justifier l'ajout à l'utilisateur avant d'installer.
-**Tests** : clés RSA générées dans le test et faux serveur JWKS (`httptest`) : jeton valide, expiré, mauvaise audience, mauvais émetteur, mauvaise signature, algorithme `none`, clé inconnue puis rotation.
+**Tests** : clés RSA générées dans le test et faux serveur JWKS (`httptest`) : jeton valide, expiré, mauvaise audience, mauvais émetteur, mauvaise signature, algorithme `none`, jeton machine à machine, clé inconnue puis rotation.
 **Revue** : `go-reviewer`, `security-reviewer`.
 **Commit** : `feat(auth): add JWT verifier with cached JWKS for Auth0`
 **Statut** : À faire
