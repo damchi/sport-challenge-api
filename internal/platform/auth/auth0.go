@@ -45,12 +45,18 @@ type Auth0Verifier struct {
 // and the API audience. ctx ends the background JWKS refresh. The JWKS is
 // fetched in the background: an unreachable tenant does not fail startup.
 func NewAuth0Verifier(ctx context.Context, domain, audience string) (*Auth0Verifier, error) {
-	return newVerifier(ctx, verifierOptions{
+	return newVerifier(ctx, tenantOptions(domain, audience))
+}
+
+// tenantOptions builds the JWKS URL and the issuer Auth0 uses for domain. The
+// issuer ends with a slash: Auth0 puts it in every token's "iss".
+func tenantOptions(domain, audience string) verifierOptions {
+	return verifierOptions{
 		jwksURL:                "https://" + domain + "/.well-known/jwks.json",
 		issuer:                 "https://" + domain + "/",
 		audience:               audience,
 		unknownKeyRefreshEvery: unknownKeyRefreshEvery,
-	})
+	}
 }
 
 type verifierOptions struct {

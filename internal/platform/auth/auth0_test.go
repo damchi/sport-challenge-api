@@ -245,7 +245,20 @@ func TestVerifyLimitsRefreshesOnUnknownKeys(t *testing.T) {
 	}
 }
 
-func TestNewAuth0VerifierUsesTheTenantURLs(t *testing.T) {
+func TestTenantOptions(t *testing.T) {
+	got := tenantOptions("sport-challenge-dev.ca.auth0.com", "https://api.dev.sport-challenge")
+	want := verifierOptions{
+		jwksURL:                "https://sport-challenge-dev.ca.auth0.com/.well-known/jwks.json",
+		issuer:                 "https://sport-challenge-dev.ca.auth0.com/",
+		audience:               "https://api.dev.sport-challenge",
+		unknownKeyRefreshEvery: unknownKeyRefreshEvery,
+	}
+	if got != want {
+		t.Fatalf("tenantOptions() = %+v, want %+v", got, want)
+	}
+}
+
+func TestNewAuth0VerifierDoesNotFailOnUnreachableTenant(t *testing.T) {
 	// The JWKS is fetched in the background: creation must not fail or block
 	// even though this domain is unreachable from the test.
 	v, err := NewAuth0Verifier(t.Context(), "tenant.invalid", testAudience)

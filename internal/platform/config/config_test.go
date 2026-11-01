@@ -92,6 +92,17 @@ func TestLoad(t *testing.T) {
 			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
 		},
 		{
+			name: "auth0 domain is lowercased",
+			vars: map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "Tenant.CA.Auth0.com", "AUTH0_AUDIENCE": "https://api.test",
+			},
+			want: Config{
+				Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x",
+				Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test",
+			},
+		},
+		{
 			name:    "port out of range",
 			vars:    map[string]string{"ENV": "production", "PORT": "70000", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test"},
 			wantErr: []string{"PORT must be an integer between 1 and 65535"},

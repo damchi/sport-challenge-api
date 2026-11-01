@@ -70,7 +70,8 @@ func Load(getenv func(string) string) (Config, error) {
 		problems = append(problems, "DATABASE_URL is required")
 	}
 
-	if cfg.Auth0Domain = get("AUTH0_DOMAIN"); cfg.Auth0Domain == "" {
+	// Lowercase: the expected issuer must match the "iss" Auth0 writes.
+	if cfg.Auth0Domain = strings.ToLower(get("AUTH0_DOMAIN")); cfg.Auth0Domain == "" {
 		problems = append(problems, "AUTH0_DOMAIN is required")
 	} else if !hostName.MatchString(cfg.Auth0Domain) {
 		problems = append(problems, "AUTH0_DOMAIN must be a host name (letters, digits, hyphens and dots), without scheme, port or path")
