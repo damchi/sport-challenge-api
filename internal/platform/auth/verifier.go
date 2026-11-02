@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-// Errors returned by Verify, wrapping the underlying cause.
+// Errors returned by Verify, wrapping the underlying cause. Any other error
+// (cancelled request, JWKS timeout) says nothing about the token.
 var (
 	// ErrTokenExpired means the token was valid but is past its expiration.
 	ErrTokenExpired = errors.New("token expired")

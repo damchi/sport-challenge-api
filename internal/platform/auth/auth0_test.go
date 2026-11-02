@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
@@ -178,6 +179,19 @@ func TestVerify(t *testing.T) {
 				t.Fatalf("Verify() error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestVerifyCancelledContextIsNotAnInvalidToken(t *testing.T) {
+	key := newSigningKey(t, "key-1")
+	v := newTestVerifier(t, newJWKSServer(t), time.Minute)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	// Unknown key: the refresh runs with the cancelled context.
+	_, err := v.Verify(ctx, sign(t, key, validClaims()))
+	if errors.Is(err, ErrInvalidToken) || errors.Is(err, ErrTokenExpired) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("Verify() error = %v, want context.Canceled, not an invalid token", err)
 	}
 }
 

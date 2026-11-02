@@ -115,6 +115,10 @@ func (v *Auth0Verifier) Verify(ctx context.Context, rawToken string) (Claims, er
 	var c tokenClaims
 	_, err := v.parser.ParseWithClaims(rawToken, &c, v.keys.KeyfuncCtx(ctx))
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// The request ended or the JWKS did not answer in time: says nothing
+		// about the token, so it is neither invalid nor expired.
+		return Claims{}, fmt.Errorf("verify token: %w", err)
 	case errors.Is(err, jwt.ErrTokenExpired):
 		return Claims{}, fmt.Errorf("%w: %w", ErrTokenExpired, err)
 	case err != nil:

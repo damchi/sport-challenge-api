@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 )
 
 func TestMain(m *testing.M) {
@@ -29,13 +33,15 @@ func newTestRouter(t *testing.T) (*gin.Engine, *bytes.Buffer) {
 	r.GET("/abort", func(*gin.Context) { panic(http.ErrAbortHandler) })
 	r.GET("/fail-late", func(c *gin.Context) {
 		c.String(http.StatusOK, "partial")
-		InternalErrorHandler(slog.New(slog.NewJSONHandler(&logs, nil)))(c, errors.New("encode failed"))
+		ErrorHandler(slog.New(slog.NewJSONHandler(&logs, nil)))(c, errors.New("encode failed"))
 	})
 	r.GET("/fail", func(c *gin.Context) {
-		InternalErrorHandler(slog.New(slog.NewJSONHandler(&logs, nil)))(c, errors.New("db is down"))
+		ErrorHandler(slog.New(slog.NewJSONHandler(&logs, nil)))(c, errors.New("db is down"))
 	})
 	return r, &logs
 }
+
+func discard() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard, nil)) }
 
 func serve(r http.Handler, req *http.Request) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
@@ -166,7 +172,7 @@ func TestRecoveryAbortHandlerIsNotAnError(t *testing.T) {
 	}
 }
 
-func TestInternalErrorHandlerKeepsAStartedResponse(t *testing.T) {
+func TestErrorHandlerKeepsAStartedResponse(t *testing.T) {
 	r, logs := newTestRouter(t)
 	rec := serve(r, httptest.NewRequest(http.MethodGet, "/fail-late", nil))
 
@@ -178,7 +184,7 @@ func TestInternalErrorHandlerKeepsAStartedResponse(t *testing.T) {
 	}
 }
 
-func TestInternalErrorHandlerHidesTheCause(t *testing.T) {
+func TestUnknownErrorHidesTheCause(t *testing.T) {
 	r, logs := newTestRouter(t)
 	rec := serve(r, httptest.NewRequest(http.MethodGet, "/fail", nil))
 
@@ -205,7 +211,7 @@ func TestUnknownRouteAnswersNotFound(t *testing.T) {
 func TestInvalidParamHandler(t *testing.T) {
 	r := gin.New()
 	r.GET("/", func(c *gin.Context) {
-		InvalidParamHandler(c, errors.New("invalid value someone@example.com for id"), http.StatusBadRequest)
+		InvalidParamHandler(discard())(c, errors.New("invalid value someone@example.com for id"), http.StatusBadRequest)
 	})
 	rec := serve(r, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -219,7 +225,7 @@ func TestInvalidParamHandler(t *testing.T) {
 
 func TestBadRequestHandler(t *testing.T) {
 	r := gin.New()
-	r.GET("/", func(c *gin.Context) { BadRequestHandler(c, errors.New("json: cannot unmarshal")) })
+	r.GET("/", func(c *gin.Context) { BadRequestHandler(discard())(c, errors.New("json: cannot unmarshal")) })
 	rec := serve(r, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	if rec.Code != http.StatusBadRequest || decodeError(t, rec).Code != "validation_failed" {
@@ -227,5 +233,72 @@ func TestBadRequestHandler(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "unmarshal") {
 		t.Fatalf("response leaks the decoding error: %s", rec.Body)
+	}
+}
+
+func TestRespondErrorWithAnApplicationError(t *testing.T) {
+	var logs bytes.Buffer
+	r := NewRouter(slog.New(slog.NewJSONHandler(&logs, nil)))
+	r.GET("/", func(c *gin.Context) {
+		e := apperr.New(apperr.CodeTokenExpired, errors.New("exp 2026-11-01 is in the past"))
+		e.Params = map[string]string{"retry": "refresh"}
+		RespondError(c, slog.New(slog.NewJSONHandler(&logs, nil)), fmt.Errorf("authenticate: %w", e))
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(RequestIDHeader, "req-42")
+	rec := serve(r, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	var got map[string]map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	body := got["error"]
+	if body["code"] != "token_expired" || body["message"] != "Access token expired" || body["request_id"] != "req-42" {
+		t.Fatalf("error = %v", body)
+	}
+	if params, _ := body["params"].(map[string]any); params["retry"] != "refresh" {
+		t.Fatalf("params = %v, want retry=refresh", body["params"])
+	}
+	if strings.Contains(rec.Body.String(), "2026-11-01") {
+		t.Fatalf("response leaks the cause: %s", rec.Body)
+	}
+	if strings.Contains(logs.String(), "request failed") {
+		t.Fatalf("a known application error is logged as a failure: %s", logs.String())
+	}
+}
+
+func TestRespondErrorOmitsEmptyParams(t *testing.T) {
+	r, _ := newTestRouter(t)
+	rec := serve(r, httptest.NewRequest(http.MethodGet, "/nope", nil))
+	if strings.Contains(rec.Body.String(), "params") {
+		t.Fatalf("body = %s, want no params field", rec.Body)
+	}
+}
+
+func TestRespondErrorLogsServerErrorsOnly(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantLog bool
+	}{
+		{name: "internal application error", err: apperr.New(apperr.CodeInternal, errors.New("db: connection reset")), wantLog: true},
+		{name: "unknown error", err: errors.New("db: connection reset"), wantLog: true},
+		{name: "client error", err: apperr.New(apperr.CodeValidationFailed, errors.New("db: connection reset"))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			r := gin.New()
+			r.GET("/", func(c *gin.Context) { RespondError(c, logger, tt.err) })
+			serve(r, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			if got := strings.Contains(logs.String(), "connection reset"); got != tt.wantLog {
+				t.Fatalf("cause logged = %v, want %v: %s", got, tt.wantLog, logs.String())
+			}
+		})
 	}
 }
