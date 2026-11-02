@@ -71,7 +71,7 @@ func call(t *testing.T, verifierErr error, authorization string) result {
 	r.ServeHTTP(rec, req)
 
 	res := result{status: rec.Code, wwwAuth: rec.Header().Get("WWW-Authenticate"), subject: subject, logs: logs.String(), received: verifier.received}
-	if rec.Code >= 400 {
+	if rec.Code >= 400 && rec.Body.Len() > 0 {
 		var body struct {
 			Error struct {
 				Code string `json:"code"`
@@ -164,6 +164,9 @@ func TestAuthenticateStopsWhenTheClientIsGone(t *testing.T) {
 	got := call(t, fmt.Errorf("verify token: %w", context.Canceled), "Bearer other.token.value")
 	if got.subject != "" || strings.Contains(got.logs, "unavailable") {
 		t.Fatalf("got %+v, want the request aborted without an error log", got)
+	}
+	if got.status != statusClientClosedRequest || !strings.Contains(got.logs, `"status":499`) {
+		t.Fatalf("status = %d, logs = %s: want 499 in the response and the request log", got.status, got.logs)
 	}
 }
 

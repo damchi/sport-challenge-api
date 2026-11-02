@@ -12,6 +12,10 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
 )
 
+// statusClientClosedRequest is nginx's convention for a client that left
+// before the response.
+const statusClientClosedRequest = 499
+
 // maxTokenLength bounds the token parsed: Auth0 access tokens are far smaller.
 const maxTokenLength = 8 << 10
 
@@ -50,8 +54,9 @@ func Authenticate(verifier TokenVerifier, logger *slog.Logger) gin.HandlerFunc {
 		switch {
 		case err == nil:
 		case errors.Is(err, context.Canceled):
-			// The client is gone: nobody reads the response.
-			c.Abort()
+			// The client is gone: nobody reads the response. 499 (client
+			// closed request) keeps the request log from showing a success.
+			c.AbortWithStatus(statusClientClosedRequest)
 			return
 		case !errors.Is(err, ErrInvalidToken) && !errors.Is(err, ErrTokenExpired):
 			logger.ErrorContext(c.Request.Context(), "access token verification unavailable",
