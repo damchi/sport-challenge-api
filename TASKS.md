@@ -358,8 +358,11 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Compte anonymisé : 401 `account_deleted`.
 - [ ] Groupes : publiques (`/healthz`, `/readyz`) ; protégées (tout `/api/v1`) avec `Authenticate` puis `CurrentUser`.
 - [ ] La connexion est obligatoire partout, y compris pour lire les challenges publics.
+- [ ] **Protégé par défaut** : `api/openapi.yaml` déclare le schéma `bearerAuth` (http, bearer, JWT) exigé au niveau global ; seules `/healthz` et `/readyz` le surchargent avec `security: []`. Une nouvelle route est donc protégée sans rien ajouter.
+- [ ] Dans `cmd/api`, `Authenticate` puis `CurrentUser` s'appliquent à toute route hors d'une **liste explicite** de routes publiques ; ne pas s'appuyer sur la présence de `BearerAuthScopes` dans le contexte (ce serait ouvert si le schéma était oublié). Les requêtes `OPTIONS` (CORS, ticket 012) passent avant `Authenticate`.
+- [ ] `NewAuth0Verifier` est créé dans `cmd/api` avec le contexte de l'application.
 
-**Tests** : `httptest` avec faux vérificateur (sans jeton, jeton valide, compte supprimé).
+**Tests** : `httptest` avec faux vérificateur (sans jeton, jeton valide, compte supprimé) ; **test de garde** qui parcourt `router.Routes()` et vérifie que chaque route hors de la liste publique répond 401 `unauthenticated` sans jeton.
 **Revue** : `go-reviewer`, `security-reviewer`.
 **Commit** : `feat(httpx): add current user middleware and protected route group`
 **Statut** : À faire

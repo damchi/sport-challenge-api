@@ -56,6 +56,8 @@ func Authenticate(verifier TokenVerifier, logger *slog.Logger) gin.HandlerFunc {
 		case errors.Is(err, context.Canceled):
 			// The client is gone: nobody reads the response. 499 (client
 			// closed request) keeps the request log from showing a success.
+			// Deliberate exception to httpx.RespondError: no client receives
+			// this response, so there is no error body to format.
 			c.AbortWithStatus(statusClientClosedRequest)
 			return
 		case !errors.Is(err, ErrInvalidToken) && !errors.Is(err, ErrTokenExpired):
