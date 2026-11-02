@@ -3,6 +3,8 @@
 export
 
 DATABASE_URL ?= postgres://sport:sport@localhost:5432/sport_challenge?sslmode=disable
+# Maintenance database where integration tests create and drop their own databases.
+TEST_DATABASE_URL ?= postgres://sport:sport@localhost:5432/postgres?sslmode=disable
 
 COMPOSE_FILE   := deploy/docker-compose.yml
 MIGRATIONS_DIR := migrations
@@ -39,7 +41,7 @@ LOCAL_DB_HOSTS := localhost 127.0.0.1 postgres
 
 .DEFAULT_GOAL := help
 
-.PHONY: help run build tools fmt lint test check generate openapi-lint doc \
+.PHONY: help run build tools fmt lint test test-integration check generate openapi-lint doc \
 	migrate-new migrate-up migrate-down migrate-version \
 	docker-up docker-down guard-local-db
 
@@ -87,6 +89,9 @@ ifeq ($(GO_FILES),)
 else
 	go test ./...
 endif
+
+test-integration: ## Run integration tests against PostgreSQL (make docker-up first)
+	go test -tags integration -count=1 ./...
 
 check: fmt lint test ## Run fmt, lint and test
 

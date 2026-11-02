@@ -16,6 +16,7 @@ const (
 	CodeUnauthenticated  Code = "unauthenticated"
 	CodeInvalidToken     Code = "invalid_token"
 	CodeTokenExpired     Code = "token_expired"
+	CodeAccountDeleted   Code = "account_deleted"
 	CodeNotFound         Code = "not_found"
 	CodeValidationFailed Code = "validation_failed"
 	CodeInternal         Code = "internal_error"
@@ -35,6 +36,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnauthorized, "Invalid access token"}, true
 	case CodeTokenExpired:
 		return definition{http.StatusUnauthorized, "Access token expired"}, true
+	case CodeAccountDeleted:
+		return definition{http.StatusUnauthorized, "Account deleted"}, true
 	case CodeNotFound:
 		return definition{http.StatusNotFound, "Resource not found"}, true
 	case CodeValidationFailed:
