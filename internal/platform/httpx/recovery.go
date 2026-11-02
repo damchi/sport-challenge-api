@@ -7,6 +7,8 @@ import (
 	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 )
 
 // RecoveryMiddleware turns a panic into a generic 500 internal_error and logs
@@ -33,7 +35,7 @@ func RecoveryMiddleware(logger *slog.Logger) gin.HandlerFunc {
 				c.Abort()
 				return
 			}
-			WriteError(c, http.StatusInternalServerError, "internal_error", "Internal server error")
+			RespondError(c, logger, apperr.New(apperr.CodeInternal, nil))
 		}()
 		c.Next()
 	}

@@ -61,12 +61,12 @@ func run() error {
 	// The generated defaults send err.Error() to the client: every error
 	// handler is replaced by one that answers in the API error format.
 	strict := api.NewStrictHandlerWithOptions(health.NewHandler(pool, logger), nil, api.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  httpx.BadRequestHandler,
-		HandlerErrorFunc:         httpx.InternalErrorHandler(logger),
-		ResponseErrorHandlerFunc: httpx.InternalErrorHandler(logger),
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		HandlerErrorFunc:         httpx.ErrorHandler(logger),
+		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
 	})
 	api.RegisterHandlersWithOptions(router, strict, api.GinServerOptions{
-		ErrorHandler: httpx.InvalidParamHandler,
+		ErrorHandler: httpx.InvalidParamHandler(logger),
 	})
 	logRoutes(logger, router.Routes())
 

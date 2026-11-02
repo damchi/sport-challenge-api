@@ -4,3 +4,6 @@ openapi.yaml:
   operation-4xx-response:
     - '#/paths/~1healthz/get/responses'
     - '#/paths/~1readyz/get/responses'
+  # Shared 401 response, referenced by the first protected route (SC-API-021).
+  no-unused-components:
+    - '#/components/responses/Unauthorized'

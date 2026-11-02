@@ -54,7 +54,55 @@ paths:
               example:
                 status: unavailable
 components:
+  responses:
+    Unauthorized:
+      description: |
+        Missing or malformed credentials (`unauthenticated`), invalid access
+        token (`invalid_token`) or expired access token (`token_expired`).
+      headers:
+        WWW-Authenticate:
+          description: '`Bearer`, or `Bearer error="invalid_token"` for an invalid or expired token (RFC 6750).'
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
   schemas:
+    Error:
+      description: Single error format of the API. Clients translate `code`; `message` is only an English fallback.
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code:
+              $ref: "#/components/schemas/ErrorCode"
+            message:
+              type: string
+              description: English fallback text, never shown as is by the apps.
+            params:
+              type: object
+              description: Values for the client's text (a deadline...); never personal data.
+              additionalProperties:
+                type: string
+            request_id:
+              type: string
+              description: Identifier of the request, also in the server logs.
+    ErrorCode:
+      description: Stable error codes. Each ticket adds the codes it returns.
+      type: string
+      enum:
+        - unauthenticated
+        - invalid_token
+        - token_expired
+        - not_found
+        - validation_failed
+        - internal_error
     Health:
       type: object
       required: [status]
