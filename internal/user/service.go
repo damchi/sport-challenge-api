@@ -23,8 +23,11 @@ func NewService(repo repository) *Service {
 }
 
 // GetOrCreateBySubject returns the local user of an auth subject, created
-// with an empty profile (no pseudo) on first login. An anonymized account
-// answers account_deleted: deleting an account is final.
+// with an empty profile (no pseudo) on first login. A row that is already
+// anonymized answers account_deleted. Anonymization replaces auth_subject, so
+// a deleted subject no longer matches that row: SC-API-039 keeps a
+// fingerprint of deleted subjects, checked here before any insert, to make
+// the deletion final.
 func (s *Service) GetOrCreateBySubject(ctx context.Context, subject string) (User, error) {
 	u, err := s.repo.GetOrCreateBySubject(ctx, subject)
 	if err != nil {
