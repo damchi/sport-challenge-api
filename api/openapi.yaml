@@ -7,12 +7,17 @@ info:
     change it first, then run `make generate`.
 
     Health endpoints live at the root; business routes live under `/api/v1`.
+
+    Every route requires an Auth0 access token (`bearerAuth`), declared once
+    below: a new route is protected without adding anything. Only the health
+    probes opt out with `security: []`.
   license:
     name: Proprietary
     url: https://github.com/damchi/sport-challenge-api
 servers:
   - url: /
-security: []
+security:
+  - bearerAuth: []
 tags:
   - name: health
     description: Liveness and readiness probes.
@@ -23,6 +28,7 @@ paths:
       summary: Liveness probe
       description: Always returns 200 while the process is able to serve requests.
       tags: [health]
+      security: []
       responses:
         "200":
           description: The process is alive.
@@ -36,6 +42,7 @@ paths:
       summary: Readiness probe
       description: Returns 200 when the database answers, 503 otherwise.
       tags: [health]
+      security: []
       responses:
         "200":
           description: The API can serve traffic.
@@ -54,11 +61,18 @@ paths:
               example:
                 status: unavailable
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Auth0 access token of a user (audience of the API); machine-to-machine tokens are refused.
   responses:
     Unauthorized:
       description: |
         Missing or malformed credentials (`unauthenticated`), invalid access
-        token (`invalid_token`) or expired access token (`token_expired`).
+        token (`invalid_token`), expired access token (`token_expired`) or
+        deleted account (`account_deleted`).
       headers:
         WWW-Authenticate:
           description: '`Bearer`, or `Bearer error="invalid_token"` for an invalid or expired token (RFC 6750).'

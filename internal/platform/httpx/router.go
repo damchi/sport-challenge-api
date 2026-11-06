@@ -15,6 +15,10 @@ import (
 // is logged as a 500 with its request identifier). Unknown routes answer
 // 404 not_found in the API error format.
 //
+// RedirectTrailingSlash is off: Gin answers that redirect before any
+// middleware, so "/path/" would skip the request log and the authentication.
+// It goes to NoRoute instead, behind the same middlewares as any request.
+//
 // ContextWithFallback makes the *gin.Context, which the generated handlers
 // receive as their context.Context, expose the request context: its values
 // (the authenticated claims) and its cancellation. Gin reuses its contexts:
@@ -24,6 +28,7 @@ import (
 func NewRouter(logger *slog.Logger) *gin.Engine {
 	r := gin.New()
 	r.ContextWithFallback = true
+	r.RedirectTrailingSlash = false
 	r.Use(
 		RequestIDMiddleware(),
 		LoggerMiddleware(logger),

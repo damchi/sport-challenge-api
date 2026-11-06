@@ -17,9 +17,11 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/health"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
+	"github.com/damchi/sport-challenge-api/internal/user"
 )
 
 // shutdownTimeout stays under the 10 seconds Cloud Run waits after SIGTERM.
@@ -56,17 +58,21 @@ func run() error {
 	defer pool.Close()
 	pingDatabase(ctx, logger, pool.Ping)
 
+	// ctx stops the background JWKS refresh when the API shuts down.
+	verifier, err := auth.NewAuth0Verifier(ctx, cfg.Auth0Domain, cfg.Auth0Audience)
+	if err != nil {
+		return err
+	}
+	gdb, err := db.NewGorm(pool, logger)
+	if err != nil {
+		return err
+	}
+	users := user.NewService(user.NewRepository(gdb))
+
 	gin.SetMode(gin.ReleaseMode)
-	router := httpx.NewRouter(logger)
-	// The generated defaults send err.Error() to the client: every error
-	// handler is replaced by one that answers in the API error format.
-	strict := api.NewStrictHandlerWithOptions(health.NewHandler(pool, logger), nil, api.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
-		HandlerErrorFunc:         httpx.ErrorHandler(logger),
-		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
-	})
-	api.RegisterHandlersWithOptions(router, strict, api.GinServerOptions{
-		ErrorHandler: httpx.InvalidParamHandler(logger),
+	router := newRouter(logger, health.NewHandler(pool, logger), verifier, func(ctx context.Context, subject string) (string, error) {
+		u, err := users.GetOrCreateBySubject(ctx, subject)
+		return u.ID, err
 	})
 	logRoutes(logger, router.Routes())
 
@@ -99,6 +105,37 @@ func run() error {
 	}
 	logger.Info("server stopped")
 	return nil
+}
+
+// newRouter registers the routes of the contract behind the protection:
+// Authenticate then CurrentUser on every route except the public list below.
+// Protect is added before the routes, so it applies to all of them, including
+// the ones added later.
+func newRouter(logger *slog.Logger, handler api.StrictServerInterface, verifier auth.TokenVerifier, resolve auth.UserIDResolver) *gin.Engine {
+	// The only routes served without an access token. Keep it in line with
+	// the "security: []" of api/openapi.yaml.
+	public := []string{
+		"GET /healthz",
+		"GET /readyz",
+	}
+	router := httpx.NewRouter(logger)
+	// CORS (SC-API-012) goes before Protect: Protect lets OPTIONS through
+	// for it to answer the preflights.
+	router.Use(auth.Protect(public,
+		auth.Authenticate(verifier, logger),
+		auth.CurrentUser(resolve, logger),
+	))
+	// The generated defaults send err.Error() to the client: every error
+	// handler is replaced by one that answers in the API error format.
+	strict := api.NewStrictHandlerWithOptions(handler, nil, api.StrictGinServerOptions{
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		HandlerErrorFunc:         httpx.ErrorHandler(logger),
+		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
+	})
+	api.RegisterHandlersWithOptions(router, strict, api.GinServerOptions{
+		ErrorHandler: httpx.InvalidParamHandler(logger),
+	})
+	return router
 }
 
 // pingDatabase only warns when the database does not answer at startup: the
