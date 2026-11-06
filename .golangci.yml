@@ -1,5 +1,10 @@
 version: "2"
 
+# Lint the integration tests too.
+run:
+  build-tags:
+    - integration
+
 linters:
   default: none
   enable:

@@ -654,12 +654,13 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Toutes ses participations actives passent à `abandoned` (comme un abandon).
 - [ ] Ses activités restent, rattachées au compte anonymisé, pour ne pas fausser les résultats.
 - [ ] Les requêtes suivantes avec son jeton renvoient 401 `account_deleted`.
-- [ ] Une transaction couvre l'anonymisation et les abandons.
+- [ ] **Suppression définitive** : l'ancien `sub` est conservé sous forme d'empreinte (SHA-256, jamais en clair), par exemple dans une table `deleted_subjects` (migration incluse dans ce ticket). `user.GetOrCreateBySubject` (ticket 019) vérifie cette empreinte **avant** d'insérer et renvoie `account_deleted` sans créer de compte, même si l'ancien jeton est encore valide ou si la suppression chez Auth0 est en attente.
+- [ ] Une transaction couvre l'anonymisation, l'empreinte du `sub` et les abandons.
 - [ ] Après la validation de la transaction, l'utilisateur est **supprimé chez Auth0** (API de gestion). Si l'appel échoue, une ligne `pending_auth0_deletion` est créée (migration incluse dans ce ticket) et la tâche du worker `retry-auth0-deletions` (ticket 057) la rejoue jusqu'au succès.
 - [ ] Ce ticket crée le client de l'API de gestion Auth0 et ses variables de configuration (ajoutées à `.env.example`).
 - [ ] Les identifiants de l'API de gestion viennent de Secret Manager ; ils n'apparaissent jamais dans les logs.
 
-**Tests** : intégration (compte avec plusieurs challenges, reconnexion).
+**Tests** : intégration (compte avec plusieurs challenges, reconnexion ; reconnexion avec l'ancien `sub` après suppression : `account_deleted` et aucun nouveau compte créé).
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
 **Commit** : `feat(user): add account deletion with anonymization and abandonment`
 **Statut** : À faire
