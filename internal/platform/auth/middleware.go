@@ -36,7 +36,8 @@ func ClaimsFromContext(ctx context.Context) (Claims, bool) {
 // is a 500, logged: it must not look like a bad token to the client. On
 // success the claims go in the request context. It never logs the token, nor
 // the verification error (it echoes values the client chose, such as the key
-// ID).
+// ID). It never calls c.Next, so Protect can chain CurrentUser after it: keep
+// it that way.
 func Authenticate(verifier TokenVerifier, logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		headers := c.Request.Header.Values("Authorization")
@@ -84,8 +85,9 @@ func Authenticate(verifier TokenVerifier, logger *slog.Logger) gin.HandlerFunc {
 			return
 		}
 
+		// No c.Next(): Gin runs the next handler on return, and Protect can
+		// then chain CurrentUser after this middleware.
 		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), claimsKey{}, claims))
-		c.Next()
 	}
 }
 
