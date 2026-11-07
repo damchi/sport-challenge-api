@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,6 +31,9 @@ type Config struct {
 	// (sport-challenge-dev.ca.auth0.com); Auth0Audience is the API identifier.
 	Auth0Domain   string
 	Auth0Audience string
+	// CORSAllowedOrigins are the web origins allowed to call the API from a
+	// browser (scheme://host[:port], lowercase). Empty: no browser origin.
+	CORSAllowedOrigins []string
 }
 
 // Load reads the configuration through getenv (os.Getenv in production).
@@ -81,11 +85,55 @@ func Load(getenv func(string) string) (Config, error) {
 		problems = append(problems, "AUTH0_AUDIENCE is required")
 	}
 
+	if origins, ok := parseOrigins(get("CORS_ALLOWED_ORIGINS")); !ok {
+		problems = append(problems, "CORS_ALLOWED_ORIGINS must be a comma-separated list of origins (http or https scheme, host, optional port, nothing else), never *")
+	} else {
+		cfg.CORSAllowedOrigins = origins
+	}
+
 	if len(problems) > 0 {
 		return Config{}, errors.New("invalid configuration: " + strings.Join(problems, "; "))
 	}
 	return cfg, nil
 }
+
+// parseOrigins reads a comma-separated list of origins such as
+// "https://app.example.com,http://localhost:5173". Each one must be exactly
+// what a browser sends in the Origin header: no wildcard, path, query,
+// fragment, credentials, default port (a browser never sends
+// https://host:443), trailing dot or non-ASCII host (browsers send the
+// punycode form). Empty entries are ignored.
+func parseOrigins(raw string) ([]string, bool) {
+	var origins []string
+	for entry := range strings.SplitSeq(raw, ",") {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		if entry == "" {
+			continue
+		}
+		u, err := url.Parse(entry)
+		// Rebuilt from scheme and host only, the origin must give back the
+		// entry: anything else (path, query, fragment, credentials) differs.
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" ||
+			strings.Contains(u.Host, "*") || u.Scheme+"://"+u.Host != entry ||
+			strings.HasSuffix(u.Host, ":") || u.Port() == defaultPorts[u.Scheme] ||
+			strings.HasSuffix(u.Hostname(), ".") || !isASCII(u.Host) {
+			return nil, false
+		}
+		origins = append(origins, entry)
+	}
+	return origins, true
+}
+
+func isASCII(v string) bool {
+	for i := range len(v) {
+		if v[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+var defaultPorts = map[string]string{"http": "80", "https": "443"}
 
 // hostName accepts a DNS host name such as sport-challenge-dev.ca.auth0.com.
 // It rejects anything that would change the JWKS URL built from it (@, ?, #...).

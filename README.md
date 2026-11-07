@@ -447,7 +447,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | 1 | `Recovery` | Transforme un plantage en erreur 500 propre, sans arrêter le serveur |
 | 2 | `RequestID` | Identifiant de requête, repris dans les logs et les réponses d'erreur |
 | 3 | `Logger` | Logs structurés (`slog`), sans donnée personnelle ni jeton |
-| 4 | `CORS` | Origines explicites (web uniquement), jamais `*` avec des identifiants |
+| 4 | `CORS` | Origines explicites (web uniquement, `CORS_ALLOWED_ORIGINS`), jamais `*` ; répond aux pré-requêtes `OPTIONS` sans jeton ; pas de cookie, donc pas d'`Allow-Credentials` |
 | 5 | `RateLimitIP` | Limite de débit par adresse IP, avant tout travail coûteux ; répond 429 au-delà |
 | 6 | `Authenticate` | Lit le jeton `Bearer`, le vérifie (signature par JWKS, émetteur, audience, expiration), place les informations du jeton dans le contexte |
 | 7 | `CurrentUser` | Retrouve l'utilisateur local à partir de l'identifiant du fournisseur (`sub`), le crée au premier login, place son identifiant dans le contexte |

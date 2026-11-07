@@ -2,6 +2,7 @@ package config
 
 import (
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -115,7 +116,7 @@ func TestLoad(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Load() error = %v", err)
 				}
-				if got != tt.want {
+				if !reflect.DeepEqual(got, tt.want) {
 					t.Fatalf("Load() = %+v, want %+v", got, tt.want)
 				}
 				return
@@ -127,6 +128,64 @@ func TestLoad(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not contain %q", err, want)
 				}
+			}
+		})
+	}
+}
+
+func TestLoadCORSAllowedOrigins(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    []string
+		wantErr bool
+	}{
+		{name: "absent: no browser origin", raw: ""},
+		{name: "one origin", raw: "https://app.example.com", want: []string{"https://app.example.com"}},
+		{name: "list with spaces, port and empty entries", raw: " https://app.example.com , ,http://localhost:5173,", want: []string{"https://app.example.com", "http://localhost:5173"}},
+		{name: "lowercased", raw: "HTTPS://App.Example.com", want: []string{"https://app.example.com"}},
+		{name: "wildcard", raw: "*", wantErr: true},
+		{name: "wildcard subdomain", raw: "https://*.example.com", wantErr: true},
+		{name: "trailing slash", raw: "https://app.example.com/", wantErr: true},
+		{name: "path", raw: "https://app.example.com/app", wantErr: true},
+		{name: "query", raw: "https://app.example.com?x=1", wantErr: true},
+		{name: "empty query", raw: "https://app.example.com?", wantErr: true},
+		{name: "fragment", raw: "https://app.example.com#x", wantErr: true},
+		{name: "credentials", raw: "https://user@app.example.com", wantErr: true},
+		{name: "no scheme", raw: "app.example.com", wantErr: true},
+		{name: "other scheme", raw: "ftp://app.example.com", wantErr: true},
+		{name: "null origin", raw: "null", wantErr: true},
+		{name: "default https port", raw: "https://app.example.com:443", wantErr: true},
+		{name: "default http port", raw: "http://localhost:80", wantErr: true},
+		{name: "empty port", raw: "https://app.example.com:", wantErr: true},
+		{name: "port without host", raw: "https://:443", wantErr: true},
+		{name: "trailing dot", raw: "https://app.example.com.", wantErr: true},
+		{name: "unicode host", raw: "https://café.example.com", wantErr: true},
+		{name: "punycode host", raw: "https://xn--caf-dma.example.com", want: []string{"https://xn--caf-dma.example.com"}},
+		{name: "explicit other port", raw: "https://app.example.com:8443", want: []string{"https://app.example.com:8443"}},
+		{name: "one bad entry fails the list", raw: "https://app.example.com,https://other.example.com/", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Load(envFrom(map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test",
+				"CORS_ALLOWED_ORIGINS": tt.raw,
+			}))
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS must be") {
+					t.Fatalf("Load() error = %v, want a CORS_ALLOWED_ORIGINS error", err)
+				}
+				if strings.Contains(err.Error(), "example.com") {
+					t.Fatalf("error echoes the value: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if !reflect.DeepEqual(got.CORSAllowedOrigins, tt.want) {
+				t.Fatalf("CORSAllowedOrigins = %q, want %q", got.CORSAllowedOrigins, tt.want)
 			}
 		})
 	}
