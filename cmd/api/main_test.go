@@ -236,11 +236,12 @@ func TestPreflightSkipsAuthentication(t *testing.T) {
 	})
 	r.GET("/api/v1/me", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
-	// No CORS middleware yet (SC-API-012): the preflight reaches no route.
+	// No CORS middleware yet (SC-API-012): the preflight skips the
+	// authentication and reaches no route. SC-API-012 turns this into a 204.
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/me", nil)
 	req.Header.Set("Authorization", "Bearer some.access.token")
-	if status, code := serve(t, r, req); status == http.StatusUnauthorized || code == "unauthenticated" {
-		t.Fatalf("preflight got %d %q, want no authentication", status, code)
+	if status, code := serve(t, r, req); status != http.StatusNotFound || code != "not_found" {
+		t.Fatalf("preflight got %d %q, want 404 not_found", status, code)
 	}
 }
 
