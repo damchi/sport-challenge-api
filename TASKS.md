@@ -388,10 +388,10 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] `GET /me` renvoie : identifiant, pseudo, avatar, langue, `profile_complete` (vrai si le pseudo est renseigné).
 - [ ] `PATCH /me` modifie pseudo et langue (`fr` ou `en`). La clé d'avatar viendra avec l'upload d'avatar (ticket 023, V1.1) : en V1, l'avatar affiché est formé des initiales du pseudo.
-- [ ] Pseudo : 3 à 20 caractères parmi lettres, chiffres, `_`, `.` et `-` ; unique sans tenir compte de la casse (D5 ✅) ; conflit : 409 `validation_failed` avec le champ `pseudo`.
-- [ ] 🟡 Créer ou rejoindre un challenge exige un profil complet (erreur `profile_incomplete`, appliquée dans les tickets 029 et 033).
+- [ ] Pseudo : 3 à 20 caractères parmi lettres ASCII, chiffres, `_`, `.` et `-` ; unique sans tenir compte de la casse (D5 ✅) ; conflit : 409 `validation_failed` avec le champ `pseudo`. `PATCH` : un champ absent est inchangé, `null` est refusé.
+- [ ] ✅ Créer ou rejoindre un challenge exige un profil complet : le code `profile_incomplete` (403) est ajouté à `apperr` et au contrat ici, la règle est appliquée dans les tickets 029 et 033.
 
-- [ ] Introduit les helpers de réponse de succès (200, 201, 204) et la conversion des erreurs de validation de requête en 400 `validation_failed` avec la liste des champs fautifs dans `params` (premier endpoint qui en a besoin).
+- [ ] Introduit la validation des requêtes contre le contrat et leur conversion en 400 `validation_failed` avec la liste des champs fautifs dans `params.fields` (séparés par des virgules) ; les réponses de succès sont les types générés par le serveur strict (premier endpoint qui en a besoin).
 
 **Tests** : validation du pseudo, unicité, `profile_complete`.
 **Revue** : `go-reviewer`.

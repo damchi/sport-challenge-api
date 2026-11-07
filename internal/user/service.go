@@ -2,7 +2,9 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 )
@@ -10,6 +12,8 @@ import (
 // repository is what the service needs from the storage.
 type repository interface {
 	GetOrCreateBySubject(ctx context.Context, subject string) (User, error)
+	GetByID(ctx context.Context, id string) (User, error)
+	UpdateProfile(ctx context.Context, id string, changes ProfileChanges) (User, error)
 }
 
 // Service holds the use cases of the local users.
@@ -35,6 +39,42 @@ func (s *Service) GetOrCreateBySubject(ctx context.Context, subject string) (Use
 	}
 	if u.AnonymizedAt != nil {
 		return User{}, apperr.New(apperr.CodeAccountDeleted, nil)
+	}
+	return u, nil
+}
+
+// Profile returns the profile of user actorID. Each user only reads their
+// own profile: the ID comes from the access token, never from the request.
+func (s *Service) Profile(ctx context.Context, actorID string) (User, error) {
+	u, err := s.repo.GetByID(ctx, actorID)
+	if errors.Is(err, errUserNotFound) {
+		return User{}, apperr.New(apperr.CodeNotFound, err)
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("get profile: %w", err)
+	}
+	return u, nil
+}
+
+// UpdateProfile changes the pseudo and the language of user actorID. Invalid
+// fields answer 400 validation_failed; a pseudo already taken, regardless of
+// case, answers 409 validation_failed, both listing the fields in
+// params.fields.
+func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes ProfileChanges) (User, error) {
+	if fields := invalidProfileFields(changes); len(fields) > 0 {
+		return User{}, apperr.InvalidFields(nil, fields...)
+	}
+	u, err := s.repo.UpdateProfile(ctx, actorID, changes)
+	switch {
+	case errors.Is(err, errPseudoTaken):
+		e := apperr.InvalidFields(err, "pseudo")
+		// The request is valid but conflicts with another user's pseudo.
+		e.Status = http.StatusConflict
+		return User{}, e
+	case errors.Is(err, errUserNotFound):
+		return User{}, apperr.New(apperr.CodeNotFound, err)
+	case err != nil:
+		return User{}, fmt.Errorf("update profile: %w", err)
 	}
 	return u, nil
 }

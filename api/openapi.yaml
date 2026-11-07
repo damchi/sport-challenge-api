@@ -21,6 +21,8 @@ security:
 tags:
   - name: health
     description: Liveness and readiness probes.
+  - name: me
+    description: Profile of the authenticated user.
 paths:
   /healthz:
     get:
@@ -60,6 +62,56 @@ paths:
                 $ref: "#/components/schemas/Readiness"
               example:
                 status: unavailable
+  /api/v1/me:
+    get:
+      operationId: getMe
+      summary: Read my profile
+      description: |
+        Profile of the authenticated user, created empty on first login. The
+        profile is complete once the pseudo is set: creating or joining a
+        challenge requires it (`profile_incomplete`).
+      tags: [me]
+      responses:
+        "200":
+          description: The profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      operationId: patchMe
+      summary: Update my profile
+      description: |
+        Changes the pseudo and the language. An absent field is left
+        unchanged; `null` is refused (a pseudo cannot be removed).
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeUpdate"
+      responses:
+        "200":
+          description: The updated profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: |
+            The pseudo is already taken, regardless of case
+            (`validation_failed`, `params.fields` = `pseudo`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   securitySchemes:
     bearerAuth:
@@ -78,6 +130,15 @@ components:
           description: '`Bearer`, or `Bearer error="invalid_token"` for an invalid or expired token (RFC 6750).'
           schema:
             type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValidationFailed:
+      description: |
+        The request does not match the contract (`validation_failed`).
+        `params.fields` lists the invalid fields, comma-separated
+        (`pseudo,language`).
       content:
         application/json:
           schema:
@@ -115,6 +176,7 @@ components:
         - invalid_token
         - token_expired
         - account_deleted
+        - profile_incomplete
         - not_found
         - validation_failed
         - internal_error
@@ -134,3 +196,46 @@ components:
         status:
           type: string
           enum: [ok, unavailable]
+    Pseudo:
+      description: 3 to 20 ASCII letters, digits, `_`, `.` or `-`; unique regardless of case.
+      type: string
+      pattern: "^[A-Za-z0-9_.-]{3,20}$"
+      example: marie_92
+    Language:
+      type: string
+      enum: [fr, en]
+    Me:
+      type: object
+      required: [id, pseudo, avatar, language, profile_complete]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Pseudo"
+          description: Null until the user chooses one.
+        avatar:
+          type: string
+          nullable: true
+          description: Avatar image; always null in V1, where the apps show the pseudo's initials.
+        language:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Language"
+          description: Null until the user chooses one.
+        profile_complete:
+          type: boolean
+          description: True once the pseudo is set.
+    MeUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        pseudo:
+          $ref: "#/components/schemas/Pseudo"
+        language:
+          $ref: "#/components/schemas/Language"

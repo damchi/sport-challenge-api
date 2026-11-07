@@ -17,3 +17,15 @@ type User struct {
 	UpdatedAt    time.Time `gorm:"->"`
 	AnonymizedAt *time.Time
 }
+
+// ProfileChanges are the profile fields to change; nil leaves a field as is.
+type ProfileChanges struct {
+	Pseudo   *string
+	Language *string
+}
+
+// ProfileComplete reports whether the user chose a pseudo, required to
+// create or join a challenge.
+func (u User) ProfileComplete() bool {
+	return u.Pseudo != nil
+}

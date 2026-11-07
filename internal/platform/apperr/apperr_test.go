@@ -16,6 +16,7 @@ func TestNew(t *testing.T) {
 		{CodeInvalidToken, http.StatusUnauthorized},
 		{CodeTokenExpired, http.StatusUnauthorized},
 		{CodeAccountDeleted, http.StatusUnauthorized},
+		{CodeProfileIncomplete, http.StatusForbidden},
 		{CodeNotFound, http.StatusNotFound},
 		{CodeValidationFailed, http.StatusBadRequest},
 		{CodeInternal, http.StatusInternalServerError},
@@ -27,6 +28,17 @@ func TestNew(t *testing.T) {
 				t.Fatalf("New(%s) = %+v, want status %d and a message", tt.code, e, tt.wantStatus)
 			}
 		})
+	}
+}
+
+func TestInvalidFields(t *testing.T) {
+	cause := errors.New("pattern mismatch")
+	e := InvalidFields(cause, "language", "pseudo")
+	if e.Code != CodeValidationFailed || e.Status != http.StatusBadRequest || e.Params[FieldsParam] != "language,pseudo" || !errors.Is(e, cause) {
+		t.Fatalf("InvalidFields() = %+v, want validation_failed with fields language,pseudo", e)
+	}
+	if e := InvalidFields(cause); e.Params != nil {
+		t.Fatalf("InvalidFields() without fields has params %v", e.Params)
 	}
 }
 

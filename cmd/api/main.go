@@ -70,10 +70,14 @@ func run() error {
 	users := user.NewService(user.NewRepository(gdb))
 
 	gin.SetMode(gin.ReleaseMode)
-	router := newRouter(logger, cfg.CORSAllowedOrigins, health.NewHandler(pool, logger), verifier, func(ctx context.Context, subject string) (string, error) {
+	handlers := server{Handler: health.NewHandler(pool, logger), userHandler: user.NewHandler(users)}
+	router, err := newRouter(logger, cfg.CORSAllowedOrigins, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
 		u, err := users.GetOrCreateBySubject(ctx, subject)
 		return u.ID, err
 	})
+	if err != nil {
+		return err
+	}
 	logRoutes(logger, router.Routes())
 
 	srv := &http.Server{
@@ -107,11 +111,31 @@ func run() error {
 	return nil
 }
 
+// server gathers the handlers of every operation of the contract.
+type server struct {
+	health.Handler
+	userHandler
+}
+
+// userHandler names the embedded *user.Handler: embedding it directly would
+// clash with health.Handler, as both fields would be called Handler.
+type userHandler = *user.Handler
+
 // newRouter registers the routes of the contract behind the protection:
 // Authenticate then CurrentUser on every route except the public list below.
 // Protect is added before the routes, so it applies to all of them, including
-// the ones added later.
-func newRouter(logger *slog.Logger, allowedOrigins []string, handler api.StrictServerInterface, verifier auth.TokenVerifier, resolve auth.UserIDResolver) *gin.Engine {
+// the ones added later. Each request is then checked against the contract
+// before its handler runs.
+func newRouter(logger *slog.Logger, allowedOrigins []string, handler api.StrictServerInterface, verifier auth.TokenVerifier, resolve auth.UserIDResolver) (*gin.Engine, error) {
+	spec, err := api.GetSpec()
+	if err != nil {
+		return nil, fmt.Errorf("load embedded contract: %w", err)
+	}
+	validate, err := httpx.RequestValidator(spec, logger)
+	if err != nil {
+		return nil, err
+	}
+
 	// The only routes served without an access token. Keep it in line with
 	// the "security: []" of api/openapi.yaml.
 	public := []string{
@@ -135,8 +159,9 @@ func newRouter(logger *slog.Logger, allowedOrigins []string, handler api.StrictS
 	})
 	api.RegisterHandlersWithOptions(router, strict, api.GinServerOptions{
 		ErrorHandler: httpx.InvalidParamHandler(logger),
+		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
-	return router
+	return router, nil
 }
 
 // pingDatabase only warns when the database does not answer at startup: the

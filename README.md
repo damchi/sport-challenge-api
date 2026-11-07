@@ -119,6 +119,9 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 ### 2.8 Profil et langues
 
 - ✅ Pseudo et avatar. Pseudo **unique sans tenir compte de la casse**, de 3 à 20 caractères (lettres, chiffres, `_`, `.`, `-`).
+- ✅ Les lettres du pseudo sont **ASCII** (`a-z`, `A-Z`, sans accent) : l'unicité sans tenir compte de la casse est la même partout, et deux pseudos ne peuvent pas se ressembler à l'œil en étant différents.
+- ✅ Le profil est **complet** dès que le pseudo est choisi ; un pseudo ne peut plus être retiré, seulement changé. **Créer ou rejoindre un challenge exige un profil complet** (erreur `profile_incomplete`).
+- ✅ En V1, l'avatar affiché est formé des initiales du pseudo ; l'envoi d'une image vient en V1.1.
 - ✅ Langues : **français et anglais**.
 - ✅ Unité : **km uniquement** pour le moment.
 

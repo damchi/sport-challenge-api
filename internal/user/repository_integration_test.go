@@ -118,3 +118,111 @@ func TestServiceRefusesAnAnonymizedAccount(t *testing.T) {
 		t.Fatalf("%d rows, want the anonymized one only", n)
 	}
 }
+
+func newUser(t *testing.T, repo *Repository, subject string) User {
+	t.Helper()
+	u, err := repo.GetOrCreateBySubject(t.Context(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
+func TestUpdateProfile(t *testing.T) {
+	repo, _ := newRepository(t)
+	u := newUser(t, repo, "email|profile")
+
+	got, err := repo.UpdateProfile(t.Context(), u.ID, ProfileChanges{Pseudo: ptr("Marie_92"), Language: ptr("fr")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Pseudo == nil || *got.Pseudo != "Marie_92" || got.Language == nil || *got.Language != "fr" || !got.UpdatedAt.After(u.UpdatedAt) && !got.UpdatedAt.Equal(u.UpdatedAt) {
+		t.Fatalf("user = %+v, want pseudo Marie_92 and language fr", got)
+	}
+
+	// Only the language changes: the pseudo stays.
+	got, err = repo.UpdateProfile(t.Context(), u.ID, ProfileChanges{Language: ptr("en")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Pseudo == nil || *got.Pseudo != "Marie_92" || *got.Language != "en" {
+		t.Fatalf("user = %+v, want pseudo kept and language en", got)
+	}
+
+	// The user can change the case of their own pseudo.
+	if got, err = repo.UpdateProfile(t.Context(), u.ID, ProfileChanges{Pseudo: ptr("marie_92")}); err != nil || *got.Pseudo != "marie_92" {
+		t.Fatalf("got %+v, %v, want pseudo marie_92", got, err)
+	}
+
+	// Nothing to change: the stored row comes back.
+	if got, err = repo.UpdateProfile(t.Context(), u.ID, ProfileChanges{}); err != nil || got.ID != u.ID {
+		t.Fatalf("got %+v, %v, want the stored user", got, err)
+	}
+}
+
+func TestUpdateProfilePseudoIsUniqueRegardlessOfCase(t *testing.T) {
+	repo, _ := newRepository(t)
+	first := newUser(t, repo, "email|first")
+	second := newUser(t, repo, "email|second")
+	if _, err := repo.UpdateProfile(t.Context(), first.ID, ProfileChanges{Pseudo: ptr("Marie")}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := repo.UpdateProfile(t.Context(), second.ID, ProfileChanges{Pseudo: ptr("mARIE"), Language: ptr("fr")})
+	if !errors.Is(err, errPseudoTaken) {
+		t.Fatalf("error = %v, want errPseudoTaken", err)
+	}
+	got, err := repo.GetByID(t.Context(), second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Pseudo != nil || got.Language != nil {
+		t.Fatalf("user = %+v, want nothing written on conflict", got)
+	}
+}
+
+func TestUpdateProfileConcurrentPseudo(t *testing.T) {
+	repo, _ := newRepository(t)
+	const users = 10
+	ids := make([]string, users)
+	for i := range users {
+		ids[i] = newUser(t, repo, "email|race-"+string(rune('a'+i))).ID
+	}
+
+	errs := make([]error, users)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range users {
+		wg.Go(func() {
+			<-start
+			_, errs[i] = repo.UpdateProfile(t.Context(), ids[i], ProfileChanges{Pseudo: ptr("winner")})
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	var won int
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			won++
+		case !errors.Is(err, errPseudoTaken):
+			t.Fatalf("user %d: %v, want nil or errPseudoTaken", i, err)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d users got the pseudo, want 1", won)
+	}
+}
+
+func TestUnknownUser(t *testing.T) {
+	repo, _ := newRepository(t)
+	const missing = "00000000-0000-0000-0000-000000000000"
+
+	if _, err := repo.GetByID(t.Context(), missing); !errors.Is(err, errUserNotFound) {
+		t.Fatalf("GetByID error = %v, want errUserNotFound", err)
+	}
+	if _, err := repo.UpdateProfile(t.Context(), missing, ProfileChanges{Language: ptr("fr")}); !errors.Is(err, errUserNotFound) {
+		t.Fatalf("UpdateProfile error = %v, want errUserNotFound", err)
+	}
+}
