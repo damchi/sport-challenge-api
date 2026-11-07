@@ -126,11 +126,13 @@ type pingerFunc func(context.Context) error
 
 func (f pingerFunc) Ping(ctx context.Context) error { return f(ctx) }
 
+const webOrigin = "https://app.example.com"
+
 func newTestRouter(t *testing.T, verifier auth.TokenVerifier, resolve auth.UserIDResolver) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return newRouter(logger, health.NewHandler(pingerFunc(func(context.Context) error { return nil }), logger), verifier, resolve)
+	return newRouter(logger, []string{webOrigin}, health.NewHandler(pingerFunc(func(context.Context) error { return nil }), logger), verifier, resolve)
 }
 
 func serve(t *testing.T, r *gin.Engine, req *http.Request) (int, string) {
@@ -236,12 +238,16 @@ func TestPreflightSkipsAuthentication(t *testing.T) {
 	})
 	r.GET("/api/v1/me", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
-	// No CORS middleware yet (SC-API-012): the preflight skips the
-	// authentication and reaches no route. SC-API-012 turns this into a 204.
+	// A browser sends no token with a preflight.
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/me", nil)
-	req.Header.Set("Authorization", "Bearer some.access.token")
-	if status, code := serve(t, r, req); status != http.StatusNotFound || code != "not_found" {
-		t.Fatalf("preflight got %d %q, want 404 not_found", status, code)
+	req.Header.Set("Origin", webOrigin)
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	req.Header.Set("Access-Control-Request-Headers", "authorization")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Origin") != webOrigin {
+		t.Fatalf("preflight got %d, Access-Control-Allow-Origin %q, want 204 for %s",
+			rec.Code, rec.Header().Get("Access-Control-Allow-Origin"), webOrigin)
 	}
 }
 

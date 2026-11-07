@@ -70,7 +70,7 @@ func run() error {
 	users := user.NewService(user.NewRepository(gdb))
 
 	gin.SetMode(gin.ReleaseMode)
-	router := newRouter(logger, health.NewHandler(pool, logger), verifier, func(ctx context.Context, subject string) (string, error) {
+	router := newRouter(logger, cfg.CORSAllowedOrigins, health.NewHandler(pool, logger), verifier, func(ctx context.Context, subject string) (string, error) {
 		u, err := users.GetOrCreateBySubject(ctx, subject)
 		return u.ID, err
 	})
@@ -111,7 +111,7 @@ func run() error {
 // Authenticate then CurrentUser on every route except the public list below.
 // Protect is added before the routes, so it applies to all of them, including
 // the ones added later.
-func newRouter(logger *slog.Logger, handler api.StrictServerInterface, verifier auth.TokenVerifier, resolve auth.UserIDResolver) *gin.Engine {
+func newRouter(logger *slog.Logger, allowedOrigins []string, handler api.StrictServerInterface, verifier auth.TokenVerifier, resolve auth.UserIDResolver) *gin.Engine {
 	// The only routes served without an access token. Keep it in line with
 	// the "security: []" of api/openapi.yaml.
 	public := []string{
@@ -119,8 +119,9 @@ func newRouter(logger *slog.Logger, handler api.StrictServerInterface, verifier 
 		"GET /readyz",
 	}
 	router := httpx.NewRouter(logger)
-	// CORS (SC-API-012) goes before Protect: Protect lets OPTIONS through
-	// for it to answer the preflights.
+	// CORS goes before Protect: it answers the preflights, which Protect lets
+	// through without a token.
+	router.Use(httpx.CORS(allowedOrigins))
 	router.Use(auth.Protect(public,
 		auth.Authenticate(verifier, logger),
 		auth.CurrentUser(resolve, logger),
