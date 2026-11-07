@@ -60,7 +60,8 @@ func (r *Repository) GetByID(ctx context.Context, id string) (User, error) {
 }
 
 // UpdateProfile writes the changed profile columns of user id and returns the
-// row as stored. A pseudo already used by another user, in any case, gives
+// row as stored. An unknown or anonymized user gives errUserNotFound. A
+// pseudo already used by another user, in any case, gives
 // errPseudoTaken: the unique index decides, so two concurrent requests
 // cannot both take it.
 func (r *Repository) UpdateProfile(ctx context.Context, id string, changes ProfileChanges) (User, error) {
@@ -72,7 +73,9 @@ func (r *Repository) UpdateProfile(ctx context.Context, id string, changes Profi
 		columns["language"] = *changes.Language
 	}
 	if len(columns) > 0 {
-		res := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Updates(columns)
+		// An anonymized account is never written again, even by a PATCH
+		// racing the account deletion: it counts as not found.
+		res := r.db.WithContext(ctx).Model(&User{}).Where("id = ? AND anonymized_at IS NULL", id).Updates(columns)
 		var pgErr *pgconn.PgError
 		switch {
 		case errors.As(res.Error, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == pseudoIndex:

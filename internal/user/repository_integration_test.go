@@ -226,3 +226,24 @@ func TestUnknownUser(t *testing.T) {
 		t.Fatalf("UpdateProfile error = %v, want errUserNotFound", err)
 	}
 }
+
+func TestUpdateProfileNeverWritesAnAnonymizedAccount(t *testing.T) {
+	repo, pool := newRepository(t)
+	var id string
+	if err := pool.QueryRow(t.Context(),
+		"INSERT INTO users (auth_subject, anonymized_at) VALUES ('anonymized|1', now()) RETURNING id").Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := repo.UpdateProfile(t.Context(), id, ProfileChanges{Pseudo: ptr("revived"), Language: ptr("fr")})
+	if !errors.Is(err, errUserNotFound) {
+		t.Fatalf("error = %v, want errUserNotFound", err)
+	}
+	var pseudo, language *string
+	if err := pool.QueryRow(t.Context(), "SELECT pseudo, language FROM users WHERE id = $1", id).Scan(&pseudo, &language); err != nil {
+		t.Fatal(err)
+	}
+	if pseudo != nil || language != nil {
+		t.Fatalf("pseudo %v, language %v written on an anonymized account, want nothing", pseudo, language)
+	}
+}
