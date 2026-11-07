@@ -239,6 +239,13 @@ func TestUpdateProfileNeverWritesAnAnonymizedAccount(t *testing.T) {
 	if !errors.Is(err, errUserNotFound) {
 		t.Fatalf("error = %v, want errUserNotFound", err)
 	}
+	// Nothing to change ({}): the row is not served either.
+	if _, err := repo.UpdateProfile(t.Context(), id, ProfileChanges{}); !errors.Is(err, errUserNotFound) {
+		t.Fatalf("empty update error = %v, want errUserNotFound", err)
+	}
+	if _, err := repo.GetByID(t.Context(), id); !errors.Is(err, errUserNotFound) {
+		t.Fatalf("GetByID error = %v, want errUserNotFound", err)
+	}
 	var pseudo, language *string
 	if err := pool.QueryRow(t.Context(), "SELECT pseudo, language FROM users WHERE id = $1", id).Scan(&pseudo, &language); err != nil {
 		t.Fatal(err)

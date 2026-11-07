@@ -46,10 +46,12 @@ func (r *Repository) GetOrCreateBySubject(ctx context.Context, subject string) (
 	return u, nil
 }
 
-// GetByID returns the user of id, or errUserNotFound.
+// GetByID returns the active user of id. An unknown or anonymized user gives
+// errUserNotFound: a deleted account is never served, even to a request
+// racing the deletion.
 func (r *Repository) GetByID(ctx context.Context, id string) (User, error) {
 	var u User
-	err := r.db.WithContext(ctx).Where("id = ?", id).Take(&u).Error
+	err := r.db.WithContext(ctx).Where("id = ? AND anonymized_at IS NULL", id).Take(&u).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return User{}, fmt.Errorf("read user: %w", errUserNotFound)
 	}
