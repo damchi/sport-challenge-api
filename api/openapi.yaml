@@ -218,6 +218,7 @@ components:
         - token_expired
         - account_deleted
         - profile_incomplete
+        - challenge_not_found
         - not_found
         - validation_failed
         - internal_error

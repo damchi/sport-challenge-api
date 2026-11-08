@@ -19,9 +19,12 @@ const (
 	CodeTokenExpired    Code = "token_expired"
 	CodeAccountDeleted  Code = "account_deleted"
 	// CodeProfileIncomplete refuses creating or joining a challenge until
-	// the pseudo is set.
+	// the pseudo is set: a condition to meet, not a missing right (422).
 	CodeProfileIncomplete Code = "profile_incomplete"
 	CodeNotFound          Code = "not_found"
+	// CodeChallengeNotFound also answers a private challenge the user may
+	// not see: its existence is never revealed.
+	CodeChallengeNotFound Code = "challenge_not_found"
 	CodeValidationFailed  Code = "validation_failed"
 	CodeInternal          Code = "internal_error"
 )
@@ -43,7 +46,9 @@ func definitionOf(code Code) (definition, bool) {
 	case CodeAccountDeleted:
 		return definition{http.StatusUnauthorized, "Account deleted"}, true
 	case CodeProfileIncomplete:
-		return definition{http.StatusForbidden, "Profile incomplete"}, true
+		return definition{http.StatusUnprocessableEntity, "Profile incomplete"}, true
+	case CodeChallengeNotFound:
+		return definition{http.StatusNotFound, "Challenge not found"}, true
 	case CodeNotFound:
 		return definition{http.StatusNotFound, "Resource not found"}, true
 	case CodeValidationFailed:

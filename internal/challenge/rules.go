@@ -76,7 +76,7 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 	if draft.Description != nil && utf8.RuneCountInString(*draft.Description) > maxDescription {
 		fields = append(fields, "description")
 	}
-	if draft.Visibility != "public" && draft.Visibility != "private" {
+	if draft.Visibility != VisibilityPublic && draft.Visibility != VisibilityPrivate {
 		fields = append(fields, "visibility")
 	}
 	if draft.Weeks < minWeeks || draft.Weeks > maxWeeks {

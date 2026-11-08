@@ -16,8 +16,9 @@ func TestNew(t *testing.T) {
 		{CodeInvalidToken, http.StatusUnauthorized},
 		{CodeTokenExpired, http.StatusUnauthorized},
 		{CodeAccountDeleted, http.StatusUnauthorized},
-		{CodeProfileIncomplete, http.StatusForbidden},
+		{CodeProfileIncomplete, http.StatusUnprocessableEntity},
 		{CodeNotFound, http.StatusNotFound},
+		{CodeChallengeNotFound, http.StatusNotFound},
 		{CodeValidationFailed, http.StatusBadRequest},
 		{CodeInternal, http.StatusInternalServerError},
 	}
