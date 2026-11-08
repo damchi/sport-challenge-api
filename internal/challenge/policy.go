@@ -39,21 +39,6 @@ const (
 	RoleCreator
 )
 
-func (r Role) String() string {
-	switch r {
-	case RoleInvited:
-		return "invited"
-	case RoleAbandoned:
-		return "abandoned"
-	case RoleParticipant:
-		return "participant"
-	case RoleCreator:
-		return "creator"
-	default:
-		return "outsider"
-	}
-}
-
 // RoleOf returns the role of a membership. A creator stays a creator even
 // after abandoning (they can still delete the challenge); a participation,
 // active or abandoned, outranks an invitation.

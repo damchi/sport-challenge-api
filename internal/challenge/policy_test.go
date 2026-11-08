@@ -44,37 +44,33 @@ func TestRoleOf(t *testing.T) {
 // participants (abandoned included) and invited users only.
 func TestCanView(t *testing.T) {
 	tests := []struct {
+		name       string
 		role       Role
 		visibility string
 		want       bool
 	}{
-		{RoleCreator, VisibilityPublic, true},
-		{RoleParticipant, VisibilityPublic, true},
-		{RoleAbandoned, VisibilityPublic, true},
-		{RoleInvited, VisibilityPublic, true},
-		{RoleOutsider, VisibilityPublic, true},
-
-		{RoleCreator, VisibilityPrivate, true},
-		{RoleParticipant, VisibilityPrivate, true},
-		{RoleAbandoned, VisibilityPrivate, true},
-		{RoleInvited, VisibilityPrivate, true},
-		{RoleOutsider, VisibilityPrivate, false},
-
-		// An unknown visibility is never visible, whatever the role.
-		{RoleCreator, "unlisted", false},
-		{RoleParticipant, "unlisted", false},
-		{RoleAbandoned, "unlisted", false},
-		{RoleInvited, "unlisted", false},
-		{RoleOutsider, "unlisted", false},
-		{RoleCreator, "", false},
-		{RoleOutsider, "", false},
-
-		// A role value RoleOf never returns is never let in.
-		{Role(99), VisibilityPrivate, false},
-		{Role(-1), VisibilityPrivate, false},
+		{name: "creator, public", role: RoleCreator, visibility: VisibilityPublic, want: true},
+		{name: "participant, public", role: RoleParticipant, visibility: VisibilityPublic, want: true},
+		{name: "abandoned, public", role: RoleAbandoned, visibility: VisibilityPublic, want: true},
+		{name: "invited, public", role: RoleInvited, visibility: VisibilityPublic, want: true},
+		{name: "outsider, public", role: RoleOutsider, visibility: VisibilityPublic, want: true},
+		{name: "creator, private", role: RoleCreator, visibility: VisibilityPrivate, want: true},
+		{name: "participant, private", role: RoleParticipant, visibility: VisibilityPrivate, want: true},
+		{name: "abandoned, private", role: RoleAbandoned, visibility: VisibilityPrivate, want: true},
+		{name: "invited, private", role: RoleInvited, visibility: VisibilityPrivate, want: true},
+		{name: "outsider, private", role: RoleOutsider, visibility: VisibilityPrivate, want: false},
+		{name: "creator, unlisted", role: RoleCreator, visibility: "unlisted", want: false},
+		{name: "participant, unlisted", role: RoleParticipant, visibility: "unlisted", want: false},
+		{name: "abandoned, unlisted", role: RoleAbandoned, visibility: "unlisted", want: false},
+		{name: "invited, unlisted", role: RoleInvited, visibility: "unlisted", want: false},
+		{name: "outsider, unlisted", role: RoleOutsider, visibility: "unlisted", want: false},
+		{name: "creator, empty", role: RoleCreator, visibility: "", want: false},
+		{name: "outsider, empty", role: RoleOutsider, visibility: "", want: false},
+		{name: "role 99, private", role: Role(99), visibility: VisibilityPrivate, want: false},
+		{name: "role -1, private", role: Role(-1), visibility: VisibilityPrivate, want: false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.role.String()+" "+tt.visibility, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			if got := CanView(tt.role, tt.visibility); got != tt.want {
 				t.Fatalf("CanView(%v, %q) = %v, want %v", tt.role, tt.visibility, got, tt.want)
 			}

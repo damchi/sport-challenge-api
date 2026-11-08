@@ -726,8 +726,9 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Fonction pure `IsLocked(now, startedAt, challenges)` : verrouillée si, pour au moins un challenge actif où elle compte, la semaine qui contient `startedAt` est terminée (`now >= fin de semaine`).
 - [ ] Le calcul des semaines passe par `scoring/window` (heure locale du challenge).
 - [ ] L'**horloge** fait foi : le verrouillage ne dépend pas du passage du worker.
+- [ ] Une activité ne compte (et ne se verrouille) que dans les challenges où l'auteur est **participant actif** : la règle lit le statut de participation (`challenge.Membership.Participant`), jamais le rôle. Un créateur qui a abandonné reste `RoleCreator` (ticket 028) mais ne concourt plus.
 
-**Tests** : une seconde avant et à l'instant de fin de semaine ; deux challenges aux semaines décalées ; changement d'heure ; challenge supprimé ignoré ; participant abandonné ignoré.
+**Tests** : une seconde avant et à l'instant de fin de semaine ; deux challenges aux semaines décalées ; changement d'heure ; challenge supprimé ignoré ; participant abandonné ignoré ; créateur qui a abandonné ignoré.
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
 **Commit** : `feat(activity): add authorization and week-lock policy`
 **Statut** : À faire
