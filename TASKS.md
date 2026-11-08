@@ -468,9 +468,11 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Titre de 3 à 80 caractères, description jusqu'à 2000.
 - [ ] Visibilité `public` ou `private` ; fuseau IANA valide ; `members_can_invite` booléen.
-- [ ] Dates saisies en jours locaux ; début = minuit local du premier jour ; fin = début + N × 7 jours **calculés en heure locale** (`AddDate`, jamais 7 × 24 h) et converti en UTC. Début aujourd'hui ou plus tard.
+- [ ] Dates saisies en jours locaux ; début = minuit local du premier jour ; fin = début + N × 7 jours **calculés en heure locale** (`AddDate`, jamais 7 × 24 h) et converti en UTC. Début entre aujourd'hui et 365 jours plus tard, dans le fuseau du challenge.
 - [ ] Durée = nombre entier de semaines, de 2 à 52 (D3 ✅).
-- [ ] Un challenge a toujours les 3 catégories (D2 ✅) ; seul l'incrément X de la catégorie 3 est saisi, en mètres, strictement positif et 100 km au plus.
+- [ ] Un challenge a toujours les 3 catégories (D2 ✅) ; le créateur saisit l'incrément X de la catégorie 3, en mètres, strictement positif et 100 km au plus.
+- [ ] Coefficients de distance choisis par le créateur (décision du ticket 024) : chaque sport fourni est un sport à distance du catalogue, coefficient entre 0,1 et 2 avec deux décimales au plus, sauf `run`, référence toujours ×1 ; les sports non fournis prennent le coefficient suggéré (ticket 029).
+- [ ] Une règle non respectée donne 400 `validation_failed` avec les champs fautifs dans `params.fields` (convention du ticket 021).
 - [ ] Fonctions pures, sans base ni horloge système (l'instant courant est passé en paramètre).
 
 **Tests** : table-driven ; changement d'heure (mars et novembre, `America/Toronto`) ; durée de 1 ou 53 semaines refusée.
@@ -500,8 +502,9 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Profil complet exigé (`profile_incomplete`).
 - [ ] Une transaction crée le challenge, le créateur, le participant (statut actif) et les 3 catégories.
 - [ ] Le créateur peut choisir le coefficient de chaque sport à distance (entre 0,1 et 2, deux décimales au plus, comme la colonne `numeric(4,2)` : une valeur plus précise est refusée, jamais arrondie en silence) ; un sport non précisé prend le coefficient suggéré du catalogue. Les coefficients obtenus sont **copiés** dans les paramètres de la catégorie 2 (figés) ; la catégorie 3 reçoit `{ "sport": "run", "step_meters": X }`.
+- [ ] Le titre est enregistré sans espaces autour (`strings.TrimSpace`), comme il est compté par `challenge/rules.go`.
 - [ ] Réponse 201 avec le challenge complet.
-- [ ] Erreurs de validation : 422 avec code stable.
+- [ ] Erreurs de validation : 400 `validation_failed` avec les champs fautifs dans `params.fields` (convention du ticket 021, règles de `challenge/rules.go`).
 
 - [ ] Introduit `platform/clock` (interface `Clock`, implémentation réelle, `FakeClock` avec `Set` et `Advance`) : « début aujourd'hui ou plus tard » en dépend. Le décalage de staging viendra au ticket 073.
 - [ ] Introduit le helper `WithTx(ctx, fn)` : validation si `fn` réussit, annulation sinon (y compris sur panique) ; la création multi-tables est son premier usage.
@@ -1091,6 +1094,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Image de build Go puis image minimale (binaire statique, utilisateur non root).
+- [ ] Base des fuseaux horaires incluse dans le binaire (`import _ "time/tzdata"` dans `cmd/api` et `cmd/worker`, ou `-tags timetzdata`) : sans elle, `time.LoadLocation` échoue dans une image minimale et tout fuseau serait refusé (`challenge/rules.go`).
 - [ ] Une seule image, deux commandes : `api` et `worker`.
 - [ ] Aucun secret dans l'image ; taille raisonnable.
 - [ ] La CI (ticket 068) construit l'image à chaque pull request.

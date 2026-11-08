@@ -20,6 +20,7 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 
 - ✅ Un utilisateur peut créer plusieurs challenges.
 - ✅ Le créateur choisit la durée en **nombre entier de semaines, de 2 à 52** (ex. 6 semaines) : pas de dernière semaine partielle.
+- ✅ Le challenge commence à minuit (heure locale) d'un jour choisi entre **aujourd'hui et un an plus tard**, dans son fuseau.
 - ✅ Un challenge a **toujours les 3 catégories** ; le créateur règle seulement l'incrément X de la catégorie 3.
 - ✅ **Plusieurs créateurs** possibles pour un même challenge.
 - ✅ Visibilité :
@@ -79,7 +80,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 | Roller | ×0,5 |
 | Ski de fond | ×0,5 |
 
-- ✅ Ce sont des **suggestions** : le catalogue propose un coefficient pour chaque sport à distance, et le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**.
+- ✅ Ce sont des **suggestions** : le catalogue propose un coefficient pour chaque sport à distance, et le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**. La course reste la référence : son coefficient est toujours ×1.
 - ✅ Les coefficients sont **figés à la création du challenge** : ni une modification ultérieure du catalogue ni les créateurs ne les changent pour un challenge en cours.
 - Conséquence assumée : la marche compte pleinement, donc un marcheur peut battre un coureur en distance pure.
 

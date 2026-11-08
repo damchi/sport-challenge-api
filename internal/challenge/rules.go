@@ -1,0 +1,164 @@
+// Package challenge manages the challenges: creation, listing, participation.
+package challenge
+
+import (
+	"errors"
+	"math"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+)
+
+var errInvalidTimezone = errors.New("invalid time zone")
+
+// Limits of README §2.1 and of decisions D2 and D3.
+const (
+	minTitle            = 3
+	maxTitle            = 80
+	maxDescription      = 2000
+	minWeeks            = 2
+	maxWeeks            = 52
+	maxEliminationStep  = 100_000 // meters
+	minDistanceFactor   = 0.1
+	maxDistanceFactor   = 2
+	distanceFactorScale = 100 // two decimals at most, like numeric(4,2)
+	startDateLayout     = time.DateOnly
+	maxDaysAhead        = 365
+	// referenceSport is the ×1 reference of the distance category: every
+	// distance is brought back to a running distance, so its factor is fixed.
+	referenceSport       = "run"
+	factorFieldPrefix    = "distance_factors."
+	unknownFactorsFields = "distance_factors"
+)
+
+// Draft is a challenge as its creator describes it.
+type Draft struct {
+	Title       string
+	Description *string
+	// Visibility is "public" or "private".
+	Visibility       string
+	MembersCanInvite bool
+	// Timezone is the IANA name of the place the challenge is run from; the
+	// weeks are cut in it.
+	Timezone string
+	// StartDate is the first local day, as YYYY-MM-DD: today or later, at
+	// most a year ahead.
+	StartDate string
+	Weeks     int
+	// EliminationStepMeters is the increment X of the run elimination category.
+	EliminationStepMeters int
+	// DistanceFactors are the factors the creator chose, by sport code; the
+	// other distance sports keep their suggested factor. run is the ×1
+	// reference and cannot be changed.
+	DistanceFactors map[string]float64
+}
+
+// Window is the period of a challenge, [StartsAt, EndsAt) in UTC.
+type Window struct {
+	Location *time.Location
+	StartsAt time.Time
+	EndsAt   time.Time
+}
+
+// Validate checks draft against the challenge rules, at the instant now
+// (from platform/clock), with distanceSports the sports of the catalogue that
+// have a distance. It returns the window of the challenge: from local
+// midnight of the first day, for a whole number of weeks counted in local
+// days (AddDate: a week across a time change lasts 167 or 169 hours). A
+// broken rule gives 400 validation_failed listing the fields, sorted.
+func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Window, error) {
+	var fields []string
+
+	if n := utf8.RuneCountInString(strings.TrimSpace(draft.Title)); n < minTitle || n > maxTitle {
+		fields = append(fields, "title")
+	}
+	if draft.Description != nil && utf8.RuneCountInString(*draft.Description) > maxDescription {
+		fields = append(fields, "description")
+	}
+	if draft.Visibility != "public" && draft.Visibility != "private" {
+		fields = append(fields, "visibility")
+	}
+	if draft.Weeks < minWeeks || draft.Weeks > maxWeeks {
+		fields = append(fields, "weeks")
+	}
+	if draft.EliminationStepMeters <= 0 || draft.EliminationStepMeters > maxEliminationStep {
+		fields = append(fields, "elimination_step_meters")
+	}
+	fields = append(fields, invalidFactors(draft.DistanceFactors, distanceSports)...)
+
+	loc, locErr := location(draft.Timezone)
+	if locErr != nil {
+		fields = append(fields, "timezone")
+	}
+	day, dayErr := time.Parse(startDateLayout, draft.StartDate)
+	if dayErr != nil {
+		fields = append(fields, "start_date")
+	}
+
+	var window Window
+	// "Today or later" needs both the day and the time zone.
+	if locErr == nil && dayErr == nil {
+		start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+		y, m, d := now.In(loc).Date()
+		today := time.Date(y, m, d, 0, 0, 0, 0, loc)
+		if start.Before(today) || start.After(today.AddDate(0, 0, maxDaysAhead)) {
+			fields = append(fields, "start_date")
+		}
+		window = Window{
+			Location: loc,
+			StartsAt: start.UTC(),
+			EndsAt:   start.AddDate(0, 0, 7*draft.Weeks).UTC(),
+		}
+	}
+
+	if len(fields) > 0 {
+		slices.Sort(fields)
+		return Window{}, apperr.InvalidFields(nil, fields...)
+	}
+	return window, nil
+}
+
+// location loads an IANA time zone. It refuses the empty name and "Local",
+// which time.LoadLocation turns into UTC and the server's zone.
+func location(name string) (*time.Location, error) {
+	if name == "" || name == "Local" {
+		return nil, errInvalidTimezone
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, errInvalidTimezone
+	}
+	return loc, nil
+}
+
+// invalidFactors returns the fields of factors that break the rules: a known
+// distance sport is named ("distance_factors.ride"); a code outside the
+// distance sports gives "distance_factors" only, so a value the client chose
+// is never sent back.
+func invalidFactors(factors map[string]float64, distanceSports map[string]bool) []string {
+	var fields []string
+	unknown := false
+	for code, factor := range factors {
+		if !distanceSports[code] {
+			unknown = true
+			continue
+		}
+		if code == referenceSport {
+			fields = append(fields, factorFieldPrefix+code)
+			continue
+		}
+		// Written in the positive so that NaN, for which every comparison
+		// is false, is refused.
+		scaled := factor * distanceFactorScale
+		if !(factor >= minDistanceFactor && factor <= maxDistanceFactor) || math.Abs(scaled-math.Round(scaled)) > 1e-9 {
+			fields = append(fields, factorFieldPrefix+code)
+		}
+	}
+	if unknown {
+		fields = append(fields, unknownFactorsFields)
+	}
+	return fields
+}
