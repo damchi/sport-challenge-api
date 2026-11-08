@@ -389,7 +389,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] `GET /me` renvoie : identifiant, pseudo, avatar, langue, `profile_complete` (vrai si le pseudo est renseigné).
 - [ ] `PATCH /me` modifie pseudo et langue (`fr` ou `en`). La clé d'avatar viendra avec l'upload d'avatar (ticket 023, V1.1) : en V1, l'avatar affiché est formé des initiales du pseudo.
 - [ ] Pseudo : 3 à 20 caractères parmi lettres ASCII, chiffres, `_`, `.` et `-` ; unique sans tenir compte de la casse (D5 ✅) ; conflit : 409 `validation_failed` avec le champ `pseudo`. `PATCH` : un champ absent est inchangé, `null` est refusé.
-- [ ] ✅ Créer ou rejoindre un challenge exige un profil complet : le code `profile_incomplete` (403) est ajouté à `apperr` et au contrat ici, la règle est appliquée dans les tickets 029 et 033.
+- [ ] ✅ Créer ou rejoindre un challenge exige un profil complet : le code `profile_incomplete` (422, décision du ticket 028) est ajouté à `apperr` et au contrat ici, la règle est appliquée dans les tickets 029 et 033.
 
 - [ ] Introduit la validation des requêtes contre le contrat et leur conversion en 400 `validation_failed` avec la liste des champs fautifs dans `params.fields` (séparés par des virgules) ; les réponses de succès sont les types générés par le serveur strict (premier endpoint qui en a besoin).
 
@@ -539,9 +539,9 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Renvoie le challenge, ses catégories, mon rôle et mon statut.
 - [ ] Champs calculés par le serveur : `can_join`, `registration_deadline` (fin de la semaine 1), numéro de la semaine courante, `week_ends_at`, statut du challenge.
-- [ ] Challenge privé sans accès, inexistant ou supprimé : 404 `challenge_not_found`.
+- [ ] Challenge privé sans accès, inexistant ou supprimé : 404 `challenge_not_found` (`challenge.RequireView` pour le premier cas), avec exactement le même corps de réponse dans les trois cas : rien ne révèle qu'un challenge privé existe.
 
-**Tests** : intégration ; bornes (juste avant et juste après la fin de la semaine 1).
+**Tests** : intégration ; bornes (juste avant et juste après la fin de la semaine 1) ; corps de réponse identique pour un challenge inexistant, supprimé et privé sans accès.
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
 **Commit** : `feat(challenge): add challenge detail endpoint with server-computed flags`
 **Statut** : À faire
@@ -582,7 +582,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Le participant actif passe au statut `abandoned` (avec `abandoned_at`), éliminé de toutes les catégories, **définitivement**.
-- [ ] Un créateur peut abandonner : il reste créateur.
+- [ ] Un créateur peut abandonner : il reste créateur, avec tous ses droits de créateur (décision du ticket 028), mais ne saisit plus d'activité.
 - [ ] Déjà abandonné : réponse idempotente 200 ; challenge terminé : 422 `challenge_ended`.
 - [ ] Non participant : 404.
 
@@ -640,7 +640,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Renvoie pseudo, avatar, statut (actif ou abandonné) et date d'inscription, avec pagination par curseur.
-- [ ] Visible selon la politique (challenge privé : participants et invités seulement).
+- [ ] Visible selon la politique, comme le challenge (`challenge.CanView` : challenge privé visible par les créateurs, les participants, y compris ceux qui ont abandonné, et les invités).
 - [ ] Un utilisateur anonymisé s'affiche avec un pseudo neutre prévu par le frontend (champ vide côté API).
 
 - [ ] Ajoute à `policy.go` la règle de visibilité de la liste des participants, avec ses tests.
@@ -772,7 +772,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Un non-participant d'un challenge public ne voit que le classement : 404.
 - [ ] Chaque activité expose : sport (ou libellé du sport « autre »), date, durée, distance éventuelle, vitesse calculée, source, `locked`.
 
-- [ ] Ajoute à `policy.go` la règle de visibilité des activités d'un participant, avec ses tests « autorisé » et « interdit ».
+- [ ] Ajoute à `policy.go` la règle de visibilité des activités d'un participant (README §5.7 : participants du même challenge, y compris ceux qui ont abandonné, et créateurs ; un non-participant d'un challenge public ne voit que le classement), avec ses tests « autorisé » et « interdit ».
 **Tests** : visibilité (participant, créateur, non-participant, challenge privé), pagination.
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
 **Commit** : `feat(activity): add activity listing for self and challenge participants`
@@ -1050,6 +1050,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] 🟡 Lien réutilisable jusqu'à la fin de la semaine 1 (date limite d'inscription).
 
 - [ ] Ajoute à `policy.go` la règle `CanInvite` (créateurs ; participants si `members_can_invite`), avec ses tests.
+- [ ] Définit `Membership.Invited` (ticket 028), qui donne la lecture d'un challenge privé : seulement une invitation **valide** (non expirée, non révoquée) et **liée à l'utilisateur**, jamais le simple fait de connaître un jeton ; la requête le vérifie.
 **Tests** : jeton invalide, expiré, révoqué ; droits de création.
 **Revue** : `migration-reviewer`, `go-reviewer`, `security-reviewer`.
 **Commit** : `feat(invitation): add invitation table and service`

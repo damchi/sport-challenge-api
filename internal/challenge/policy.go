@@ -1,0 +1,104 @@
+package challenge
+
+import "github.com/damchi/sport-challenge-api/internal/platform/apperr"
+
+// Visibilities of a challenge.
+const (
+	VisibilityPublic  = "public"
+	VisibilityPrivate = "private"
+)
+
+// ParticipantStatus is the status of a participation (column
+// participants.status); empty when the user never joined.
+type ParticipantStatus string
+
+// Participation statuses.
+const (
+	ParticipantActive    ParticipantStatus = "active"
+	ParticipantAbandoned ParticipantStatus = "abandoned"
+)
+
+// Membership is what the service knows about a user and a challenge, read in
+// the same query as the challenge.
+type Membership struct {
+	Creator     bool
+	Participant ParticipantStatus
+	// Invited is true when the user holds a valid invitation (tickets 065, 066).
+	Invited bool
+}
+
+// Role is the role of a user in a challenge, from none to the strongest.
+type Role int
+
+// Roles, as listed in the rights matrix of README §5.7.
+const (
+	RoleOutsider Role = iota
+	RoleInvited
+	RoleAbandoned
+	RoleParticipant
+	RoleCreator
+)
+
+func (r Role) String() string {
+	switch r {
+	case RoleInvited:
+		return "invited"
+	case RoleAbandoned:
+		return "abandoned"
+	case RoleParticipant:
+		return "participant"
+	case RoleCreator:
+		return "creator"
+	default:
+		return "outsider"
+	}
+}
+
+// RoleOf returns the role of a membership. A creator stays a creator even
+// after abandoning (they can still delete the challenge); a participation,
+// active or abandoned, outranks an invitation.
+func RoleOf(m Membership) Role {
+	switch {
+	case m.Creator:
+		return RoleCreator
+	case m.Participant == ParticipantActive:
+		return RoleParticipant
+	case m.Participant == ParticipantAbandoned:
+		return RoleAbandoned
+	case m.Invited:
+		return RoleInvited
+	default:
+		return RoleOutsider
+	}
+}
+
+// CanView reports whether role may see a challenge of that visibility and
+// its leaderboard (README §5.7): every logged-in user for a public challenge;
+// creators, participants (abandoned included) and invited users for a
+// private one.
+func CanView(role Role, visibility string) bool {
+	switch visibility {
+	case VisibilityPublic:
+		return true
+	case VisibilityPrivate:
+		// An allowlist: a role this switch does not know is never let in.
+		switch role {
+		case RoleCreator, RoleParticipant, RoleAbandoned, RoleInvited:
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
+// RequireView is CanView for a use case: a challenge the user may not see
+// answers 404 challenge_not_found, never 403, so a private challenge's
+// existence is not revealed.
+func RequireView(role Role, visibility string) error {
+	if !CanView(role, visibility) {
+		return apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	return nil
+}

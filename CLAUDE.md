@@ -95,7 +95,7 @@ Règles de dépendance :
 ## Sécurité
 
 - Valide le JWT (signature JWKS, audience, expiration) dans un middleware ; l'utilisateur local est dans le contexte.
-- **Chaque** route vérifie l'autorisation dans le service (créateur, participant, public). Un challenge privé n'est lisible que par ses participants et invités.
+- **Chaque** route vérifie l'autorisation dans le service (créateur, participant, public). Un challenge privé n'est lisible que par ses créateurs, ses participants (y compris ceux qui ont abandonné ou ont été exclus) et ses invités ; pour les autres, il est introuvable (404). Matrice complète au README §5.7.
 - Les requêtes SQL brutes sont toujours paramétrées.
 - Aucun secret dans le dépôt : Secret Manager en déploiement, `.env` local ignoré par git.
 - Ne lis pas et n'affiche pas `.env` ni les fichiers de secrets.

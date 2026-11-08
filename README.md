@@ -469,7 +469,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 
 **Autorisation** (pas dans un middleware)
 - Chaque service vérifie le rôle : créateur, participant ou public. Un utilisateur ne peut jamais agir sur une ressource d'un autre en changeant un identifiant.
-- ✅ Un challenge privé n'est lisible que par ses participants et invités ; une ressource privée inconnue renvoie 404 plutôt que 403 pour ne pas révéler son existence.
+- ✅ Un challenge privé n'est lisible que par ses créateurs, participants et invités ; un participant qui a abandonné (ou a été exclu) le voit encore, avec le détail des activités, sans pouvoir agir. Un **créateur** qui abandonne garde tous ses droits de créateur (modifier, inviter, exclure, ajouter un créateur, supprimer), mais ne concourt plus : il ne saisit plus d'activité. Une ressource privée inconnue renvoie 404 plutôt que 403 pour ne pas révéler son existence.
 
 **Comment l'autorisation est vérifiée** : chaque cas d'usage du service reçoit explicitement **qui agit** (`actorID`), charge la ressource, puis appelle une fonction de politique pure (`policy.go`) avant toute écriture. Le handler ne peut pas contourner le service, et le repository n'est jamais appelé directement par un handler. Les listes filtrent dans la requête SQL (jamais « tout charger puis retirer »).
 
@@ -478,7 +478,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Action | Qui peut |
 |---|---|
 | Voir un challenge public et son classement | tout utilisateur connecté (✅) |
-| Voir un challenge privé et son classement | participants, invités et créateurs (✅) |
+| Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅) |
 | Rejoindre un challenge public | tout utilisateur connecté, jusqu'à la fin de la semaine 1 (✅) |
 | Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) |
 | Inviter | créateurs ; participants seulement si le créateur l'a autorisé à la création (✅) |
@@ -492,9 +492,14 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Modifier ou supprimer une activité | son auteur, tant que sa semaine n'est pas terminée (✅) |
 | Abandonner (« quitter ») un challenge | le participant, pour lui-même ; équivaut à un abandon définitif (✅) |
 | Supprimer le challenge | créateurs, à tout moment (✅) |
-| Voir le détail des activités (date, sport, durée, distance) d'un participant | les participants du même challenge et les créateurs (✅) ; un non-participant d'un challenge public ne voit que le classement (✅) |
+| Voir le détail des activités (date, sport, durée, distance) d'un participant | les participants du même challenge (y compris ceux qui ont abandonné) et les créateurs (✅) ; un non-participant d'un challenge public ne voit que le classement (✅) |
 
-**Codes de réponse** : ressource inexistante ou privée inaccessible → 404 ; ressource visible mais action interdite → 403 `forbidden` ; règle métier violée (par exemple modifier les catégories) → 422 avec un code stable.
+**Codes de réponse** :
+- ressource inexistante ou privée inaccessible → 404 (`challenge_not_found`…) ;
+- ressource visible mais action interdite → 403 `forbidden` ;
+- entrée invalide (format, bornes, dates, champ inconnu) → 400 `validation_failed`, avec les champs fautifs dans `params.fields` ;
+- entrée valide mais action contraire à une règle métier → 422 avec un code stable (`profile_incomplete`, `registration_closed`, `challenge_ended`, `field_not_editable`, `cannot_exclude_creator`…) ;
+- conflit avec une autre donnée (pseudo déjà pris) → 409.
 
 **Protections** : l'identifiant de l'acteur vient toujours du contexte (jamais d'un paramètre) ; le contrôle et l'écriture se font dans la même transaction quand une course est possible (rejoindre à la limite de la semaine 1, suppression du challenge pendant qu'un participant le rejoint) ; chaque règle a un test « interdit » ; l'agent `security-reviewer` vérifie ce point à chaque revue.
 
