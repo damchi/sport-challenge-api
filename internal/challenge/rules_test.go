@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	// The time zone database, embedded: the tests do not depend on the
+	// machine's (a minimal image or runner may have none).
+	_ "time/tzdata"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 )
@@ -206,9 +209,6 @@ func TestValidateWindow(t *testing.T) {
 			}
 			if !w.StartsAt.Equal(tt.wantFrom) || !w.EndsAt.Equal(tt.wantTo) {
 				t.Fatalf("window [%s, %s), want [%s, %s)", w.StartsAt, w.EndsAt, tt.wantFrom, tt.wantTo)
-			}
-			if w.Location.String() != tt.draft.Timezone {
-				t.Fatalf("location %s, want %s", w.Location, tt.draft.Timezone)
 			}
 			if w.StartsAt.Location() != time.UTC || w.EndsAt.Location() != time.UTC {
 				t.Fatalf("window in %s and %s, want UTC (timestamptz)", w.StartsAt.Location(), w.EndsAt.Location())

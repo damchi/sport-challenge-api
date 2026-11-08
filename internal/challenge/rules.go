@@ -57,7 +57,6 @@ type Draft struct {
 
 // Window is the period of a challenge, [StartsAt, EndsAt) in UTC.
 type Window struct {
-	Location *time.Location
 	StartsAt time.Time
 	EndsAt   time.Time
 }
@@ -108,7 +107,6 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 			fields = append(fields, "start_date")
 		}
 		window = Window{
-			Location: loc,
 			StartsAt: start.UTC(),
 			EndsAt:   start.AddDate(0, 0, 7*draft.Weeks).UTC(),
 		}
