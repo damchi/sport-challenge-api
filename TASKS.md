@@ -451,11 +451,11 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 `E4` · Task · Phase 4 · Estimation 3 · Dépend de : 016
 
 **Critères d'acceptation**
-- [ ] `challenge` : titre, description, visibilité (`CHECK` : `private` ou `public`), `members_can_invite`, `timezone`, `starts_at` et `ends_at` (`timestamptz`), `created_by`, `deleted_at`, `created_at`, `updated_at`.
-- [ ] `challenge_creator` (clé : challenge, utilisateur).
-- [ ] `category` : challenge, type (`CHECK` : `cumulative_time`, `cumulative_distance`, `run_elimination`), position, `params jsonb` ; unicité (challenge, type).
-- [ ] `participant` : clé (challenge, utilisateur), statut (`CHECK` : `active` ou `abandoned`), `joined_at`, `abandoned_at`.
-- [ ] Index : `participant (user_id)`, `category (challenge_id)`, `challenge (visibility, starts_at) WHERE deleted_at IS NULL`.
+- [ ] `challenges` (tables au pluriel, comme `users` et `sports`) : titre, description, visibilité (`CHECK` : `private` ou `public`), `members_can_invite`, `timezone`, `starts_at` et `ends_at` (`timestamptz`, `ends_at > starts_at`), `created_by`, `deleted_at` (suppression logique ✅), `created_at`, `updated_at`.
+- [ ] `challenge_creators` (clé : challenge, utilisateur).
+- [ ] `categories` : challenge, type (`CHECK` : `cumulative_time`, `cumulative_distance`, `run_elimination`), position (1 à 3), `params jsonb` (objet) ; unicité (challenge, type) et (challenge, position).
+- [ ] `participants` : clé (challenge, utilisateur), statut (`CHECK` : `active` ou `abandoned`), `joined_at` et `abandoned_at` sans valeur par défaut (fixés par le service depuis `platform/clock`) ; `abandoned_at` renseigné si et seulement si le statut est `abandoned`.
+- [ ] Index : `participants (user_id)`, `categories (challenge_id)` (servi par l'index unique (challenge, type)), `challenges (visibility, starts_at) WHERE deleted_at IS NULL`.
 - [ ] Clés étrangères : aucune suppression en cascade des résultats (anonymisation).
 
 **Revue** : `migration-reviewer`.

@@ -30,7 +30,7 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Après le début, on peut modifier le **titre** et la **description**, mais **pas les catégories**.
 - ✅ Personne ne « quitte » vraiment un challenge : l'action « quitter » (ou la suppression de son compte) équivaut à un **abandon**. Les créateurs peuvent **supprimer le challenge**.
 - ✅ Un challenge est **supprimable à tout moment** par n'importe quel créateur, même en cours et avec des participants, après une confirmation qui avertit que tout disparaît pour tous.
-- 🟡 Suppression logique immédiate (le challenge disparaît pour tous), puis purge définitive selon la politique de conservation des données.
+- ✅ Suppression **logique** immédiate : le challenge disparaît pour tous (`deleted_at`), ses lignes restent en base. La purge définitive suit la politique de conservation des données (❓, §8).
 
 ### 2.2 Participation
 
@@ -407,11 +407,11 @@ flowchart TD
 
 | Entité | Champs clés |
 |---|---|
-| `user` | id, identifiant du fournisseur d'auth, pseudo, avatar, langue |
-| `challenge` | id, titre, description, visibilité, invités peuvent inviter, fuseau, début et fin (UTC), statut |
-| `challenge_creator` | challenge, utilisateur |
-| `category` | challenge, nom, type (temps cumulé, distance cumulée, course avec élimination), paramètres figés |
-| `participant` | challenge, utilisateur, statut (actif ou abandonné), date d'inscription |
+| `users` | id, identifiant du fournisseur d'auth, pseudo, avatar, langue |
+| `challenges` | id, titre, description, visibilité, invités peuvent inviter, fuseau, début et fin (UTC), créé par, suppression logique (`deleted_at`) ; le statut (à venir, en cours, terminé) se déduit des dates |
+| `challenge_creators` | challenge, utilisateur |
+| `categories` | challenge, type (temps cumulé, distance cumulée, course avec élimination), position, paramètres figés (`params`) ; le nom est traduit par le frontend |
+| `participants` | challenge, utilisateur, statut (actif ou abandonné), date d'inscription, date d'abandon |
 | `invitation` | challenge, invité par, jeton ou destinataire, état |
 | `sports` | code, mode de distance (obligatoire, interdite, facultative), coefficient suggéré (libellés traduits par le frontend) |
 | `activity` | utilisateur, sport, libellé du sport (si « autre »), date de début (UTC), durée, distance, source (manuelle ou fournisseur), identifiant externe, clé d'idempotence |
@@ -581,4 +581,5 @@ Garmin et Coros (demandes de partenariat à lancer tôt, les délais sont longs)
 - ❓ Agrégateur ou connexions directes pour les synchronisations (à trancher avant la V2).
 - ✅ Package d'erreurs maison (Faunadex) : examiné, non repris. `platform/apperr` suit le contrat du §5.8 ; ses messages FR/EN pourront alimenter les fichiers de traduction du frontend. Le `translator` (`go-i18n`, fichiers `.toml`) pourra servir plus tard aux textes émis par le serveur (courriels, notifications).
 - ❓ Pseudos qui se ressemblent (`marie.92`, `marie_92`, `marie-92`) et pseudos réservés (`admin`, `support`…) : faut-il les refuser ? Aujourd'hui seule la casse est ignorée pour l'unicité.
+- ❓ Purge définitive des challenges supprimés : après quel délai, et par quelle tâche du worker ?
 - ❓ Confirmer les points marqués 🟡.
