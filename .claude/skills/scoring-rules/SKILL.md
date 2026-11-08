@@ -17,19 +17,19 @@ Source de vérité : `README.md` §2.3 à §2.6. Le package `internal/scoring` e
 
 Il n'y a **pas** de catégorie « course cumulée » séparée.
 
-Coefficients : course ×1 ; marche, randonnée, natation et autres sports à km plus lents ×1 ; vélo ×0,3 ; aviron, roller, ski de fond ×0,5. **Figés** dans le challenge à sa création.
+Coefficients **suggérés** par le catalogue (`sports.suggested_factor`) : course ×1 ; marche, randonnée, natation et autres sports à km plus lents ×1 ; vélo ×0,3 ; aviron, roller, ski de fond ×0,5 ; « autre » ×1 si une distance est saisie (D9). Le créateur choisit ceux de son challenge à la création (0,1 à 2, deux décimales), sauf la course, référence toujours ×1 (README §2.4). Ils sont ensuite **figés** dans les paramètres de la catégorie 2 ; le scorer lit ces paramètres, jamais le catalogue.
 
 ## Fenêtre et semaines
 
-- Début = minuit local du premier jour, fin = minuit local du lendemain du dernier jour, dans le **fuseau du challenge**, stockés en UTC.
+- Début = minuit local du premier jour (entre aujourd'hui et un an plus tard), fin = début + N × 7 jours **locaux** (`AddDate`), avec N entier de 2 à 52 : pas de semaine partielle. Le tout dans le **fuseau du challenge**, stocké en UTC (`challenge/rules.go`).
 - Une activité compte si `started_at ∈ [début, fin)`.
-- Semaines : `début.In(fuseau).AddDate(0, 0, 7*(n-1))`. **Jamais** `7*24*time.Hour` (changement d'heure). La dernière semaine peut être partielle.
+- Semaines : `début.In(fuseau).AddDate(0, 0, 7*(n-1))`. **Jamais** `7*24*time.Hour` (changement d'heure). Toutes les semaines sont complètes.
 
 ## Élimination
 
 - **X** = incrément en km, paramètre de la catégorie (défini par le créateur). Règle : `distance(s+1) >= distance(s) + X`, « au minimum » (✅). Sinon, éliminé de la catégorie en fin de semaine.
 - ✅ `distance(s)` = distance **réellement courue** en semaine s (cumul de toutes les courses de la semaine, pas une seule sortie). **Si elle dépasse le minimum, elle devient la nouvelle base** : `minimum(s+1) = distance(s) + X`. Exemple X = 2 : 5 km en semaine 1 → minimum 7 en semaine 2 ; si 10 km courus → minimum 12 en semaine 3. Il n'y a **pas** de calendrier fixe.
-- 🟡 Conséquences : pas de distance de départ, **aucune élimination en semaine 1**, et `minimum(s+1)` est **définitif** dès la fin de la semaine s (pas de délai de grâce).
+- ✅ Conséquences : pas de distance de départ, **aucune élimination en semaine 1**, et `minimum(s+1)` est **définitif** dès la fin de la semaine s (pas de délai de grâce).
 - Une semaine est jugée à l'**instant exact de sa fin** (fuseau du challenge) : **pas de délai de grâce**. Le résultat est déterministe : il ne dépend pas du moment où le worker tourne. ✅ Une semaine terminée est verrouillée (aucun ajout, modification ni suppression d'activité datée de cette semaine).
 - Éliminé = éliminé de **cette catégorie seulement**, définitivement.
 - Statut en cours de semaine : « objectif atteint », « en cours » ou « à risque ». Jamais d'élimination avant la fin de la semaine.
