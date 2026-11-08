@@ -79,8 +79,8 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 | Roller | ×0,5 |
 | Ski de fond | ×0,5 |
 
-- Ce sont des ordres de grandeur à ajuster.
-- ✅ Les coefficients sont **figés à la création du challenge** : une modification ultérieure du catalogue ne change pas un challenge en cours.
+- ✅ Ce sont des **suggestions** : le catalogue propose un coefficient pour chaque sport à distance, et le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**.
+- ✅ Les coefficients sont **figés à la création du challenge** : ni une modification ultérieure du catalogue ni les créateurs ne les changent pour un challenge en cours.
 - Conséquence assumée : la marche compte pleinement, donc un marcheur peut battre un coureur en distance pure.
 
 ### 2.5 Activités
@@ -93,8 +93,8 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ La **vitesse (ou l'allure) n'est jamais saisie** : elle est calculée automatiquement à partir de la durée et de la distance.
 - 🟡 Les activités saisies à la main sont marquées « manuelle » (surtout utile à partir de la V2, quand des activités synchronisées s'ajoutent).
 - ❓ Aucun plafond de vitesse en V1 par défaut (seulement des bornes techniques : durée et distance positives, valeurs maximales raisonnables). À revoir si des abus apparaissent.
-- 🟡 Un **catalogue de sports** dans l'app définit, pour chaque sport : s'il produit des km, et son coefficient.
-- ✅ Un utilisateur peut **saisir un sport à la main** s'il n'est pas proposé : il choisit « autre » et écrit un libellé libre (2 à 40 caractères). ✅ Un sport saisi à la main compte toujours pour le **temps** (catégorie 1) ; la distance est **facultative** : s'il y en a une, il compte aussi pour la catégorie 2 (🟡 coefficient ×1), sinon non.
+- ✅ Un **catalogue de sports** définit, pour chaque sport : si la distance est obligatoire, interdite ou facultative (« autre »), et son coefficient suggéré (§2.4).
+- ✅ Un utilisateur peut **saisir un sport à la main** s'il n'est pas proposé : il choisit « autre » et écrit un libellé libre (2 à 40 caractères). ✅ Un sport saisi à la main compte toujours pour le **temps** (catégorie 1) ; la distance est **facultative** : s'il y en a une, il compte aussi pour la catégorie 2 (✅ coefficient suggéré ×1, modifiable par le créateur comme les autres), sinon non.
 - ✅ **Une activité est saisie une seule fois** et compte dans **tous** les challenges de l'utilisateur dont la fenêtre la contient. Conséquence : une activité est non modifiable dès que sa semaine est terminée dans **l'un** de ces challenges.
 
 ### 2.6 Classement et équité
@@ -284,7 +284,7 @@ sportchallenge-api/
 │   │                                liens d'invitation, règle « les invités peuvent inviter »
 │   │
 │   ├── sport/
-│   │   ├── catalog.go               catalogue : code, nom, produit des km, coefficient
+│   │   ├── catalog.go               catalogue : code, mode de distance, coefficient suggéré
 │   │   ├── service.go               lecture du catalogue, copie des coefficients dans le challenge
 │   │   └── handler.go               GET /sports
 │   │
@@ -413,7 +413,7 @@ flowchart TD
 | `category` | challenge, nom, type (temps cumulé, distance cumulée, course avec élimination), paramètres figés |
 | `participant` | challenge, utilisateur, statut (actif ou abandonné), date d'inscription |
 | `invitation` | challenge, invité par, jeton ou destinataire, état |
-| `sport` | code, nom, produit des km, coefficient |
+| `sports` | code, mode de distance (obligatoire, interdite, facultative), coefficient suggéré (libellés traduits par le frontend) |
 | `activity` | utilisateur, sport, libellé du sport (si « autre »), date de début (UTC), durée, distance, source (manuelle ou fournisseur), identifiant externe, clé d'idempotence |
 | `week_closure` | challenge, numéro de semaine, date de clôture |
 | `elimination` | participant, catégorie, semaine d'élimination |
