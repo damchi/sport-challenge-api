@@ -26,7 +26,6 @@ const (
 	maxDistanceFactor   = 2
 	distanceFactorScale = 100 // two decimals at most, like numeric(4,2)
 	startDateLayout     = time.DateOnly
-	maxDaysAhead        = 365
 	// referenceSport is the ×1 reference of the distance category: every
 	// distance is brought back to a running distance, so its factor is fixed.
 	referenceSport       = "run"
@@ -104,7 +103,8 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 		start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 		y, m, d := now.In(loc).Date()
 		today := time.Date(y, m, d, 0, 0, 0, 0, loc)
-		if start.Before(today) || start.After(today.AddDate(0, 0, maxDaysAhead)) {
+		// At most a year ahead: the same day next year, in local days.
+		if start.Before(today) || start.After(today.AddDate(1, 0, 0)) {
 			fields = append(fields, "start_date")
 		}
 		window = Window{

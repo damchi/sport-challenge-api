@@ -69,8 +69,8 @@ func TestValidate(t *testing.T) {
 		// Start: a local day, today or later in the challenge's time zone.
 		{name: "starts today", draft: valid()},
 		{name: "starts tomorrow", draft: with(func(d *Draft) { d.StartDate = "2026-03-05" })},
-		{name: "starts in 365 days", draft: with(func(d *Draft) { d.StartDate = "2027-03-04" })},
-		{name: "starts in 366 days", draft: with(func(d *Draft) { d.StartDate = "2027-03-05" }), wantFields: "start_date"},
+		{name: "starts the same day next year", draft: with(func(d *Draft) { d.StartDate = "2027-03-04" })},
+		{name: "starts the day after next year", draft: with(func(d *Draft) { d.StartDate = "2027-03-05" }), wantFields: "start_date"},
 		{name: "starts in year 9999", draft: with(func(d *Draft) { d.StartDate = "9999-12-31" }), wantFields: "start_date"},
 		{name: "started yesterday", draft: with(func(d *Draft) { d.StartDate = "2026-03-03" }), wantFields: "start_date"},
 		{name: "not a date", draft: with(func(d *Draft) { d.StartDate = "04/03/2026" }), wantFields: "start_date"},
@@ -238,6 +238,18 @@ func TestValidateWindowIsNeverFixedDurations(t *testing.T) {
 				t.Fatalf("window lasts %s, want %s (local weeks, not 14 × 24 h)", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateAYearAheadIsACalendarYear(t *testing.T) {
+	// From 2027-03-01, a year ahead is 2028-03-01: 366 days later, since
+	// 2028-02-29 exists. 365 days would stop at 2028-02-29.
+	from := time.Date(2027, 3, 1, 17, 0, 0, 0, time.UTC)
+	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-01" }), from, distanceSports); err != nil {
+		t.Fatalf("start the same day next year refused: %v", err)
+	}
+	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-02" }), from, distanceSports); err == nil {
+		t.Fatal("start after the same day next year accepted")
 	}
 }
 

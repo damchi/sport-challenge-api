@@ -468,7 +468,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Titre de 3 à 80 caractères, description jusqu'à 2000.
 - [ ] Visibilité `public` ou `private` ; fuseau IANA valide ; `members_can_invite` booléen.
-- [ ] Dates saisies en jours locaux ; début = minuit local du premier jour ; fin = début + N × 7 jours **calculés en heure locale** (`AddDate`, jamais 7 × 24 h) et converti en UTC. Début entre aujourd'hui et 365 jours plus tard, dans le fuseau du challenge.
+- [ ] Dates saisies en jours locaux ; début = minuit local du premier jour ; fin = début + N × 7 jours **calculés en heure locale** (`AddDate`, jamais 7 × 24 h) et converti en UTC. Début entre aujourd'hui et le même jour un an plus tard, dans le fuseau du challenge.
 - [ ] Durée = nombre entier de semaines, de 2 à 52 (D3 ✅).
 - [ ] Un challenge a toujours les 3 catégories (D2 ✅) ; le créateur saisit l'incrément X de la catégorie 3, en mètres, strictement positif et 100 km au plus.
 - [ ] Coefficients de distance choisis par le créateur (décision du ticket 024) : chaque sport fourni est un sport à distance du catalogue, coefficient entre 0,1 et 2 avec deux décimales au plus, sauf `run`, référence toujours ×1 ; les sports non fournis prennent le coefficient suggéré (ticket 029).
