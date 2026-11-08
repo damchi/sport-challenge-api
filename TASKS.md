@@ -519,6 +519,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Paramètres : `scope` (`public` ou `mine`), `status` (`upcoming`, `ongoing`, `finished`, calculé avec l'horloge), `limit`, `cursor`.
 - [ ] Pagination par curseur sur (`starts_at`, `id`).
 - [ ] `public` : challenges publics non supprimés ; `mine` : ceux dont l'utilisateur est créateur ou participant.
+- [ ] `mine` s'appuie sur l'index `participants (user_id)` : tout créateur est participant (tickets 029 et 036, le statut abandonné garde la ligne). Si la requête lit aussi `challenge_creators`, le ticket ajoute l'index `challenge_creators (user_id)` par une nouvelle migration.
 - [ ] Éléments : identifiant, titre, visibilité, dates et fuseau, nombre de participants, mon statut.
 - [ ] Le filtrage se fait dans la requête SQL ; un challenge privé n'apparaît jamais dans `public`.
 
