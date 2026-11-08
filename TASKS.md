@@ -388,10 +388,10 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] `GET /me` renvoie : identifiant, pseudo, avatar, langue, `profile_complete` (vrai si le pseudo est renseigné).
 - [ ] `PATCH /me` modifie pseudo et langue (`fr` ou `en`). La clé d'avatar viendra avec l'upload d'avatar (ticket 023, V1.1) : en V1, l'avatar affiché est formé des initiales du pseudo.
-- [ ] Pseudo : 3 à 20 caractères parmi lettres, chiffres, `_`, `.` et `-` ; unique sans tenir compte de la casse (D5 ✅) ; conflit : 409 `validation_failed` avec le champ `pseudo`.
-- [ ] 🟡 Créer ou rejoindre un challenge exige un profil complet (erreur `profile_incomplete`, appliquée dans les tickets 029 et 033).
+- [ ] Pseudo : 3 à 20 caractères parmi lettres ASCII, chiffres, `_`, `.` et `-` ; unique sans tenir compte de la casse (D5 ✅) ; conflit : 409 `validation_failed` avec le champ `pseudo`. `PATCH` : un champ absent est inchangé, `null` est refusé.
+- [ ] ✅ Créer ou rejoindre un challenge exige un profil complet : le code `profile_incomplete` (403) est ajouté à `apperr` et au contrat ici, la règle est appliquée dans les tickets 029 et 033.
 
-- [ ] Introduit les helpers de réponse de succès (200, 201, 204) et la conversion des erreurs de validation de requête en 400 `validation_failed` avec la liste des champs fautifs dans `params` (premier endpoint qui en a besoin).
+- [ ] Introduit la validation des requêtes contre le contrat et leur conversion en 400 `validation_failed` avec la liste des champs fautifs dans `params.fields` (séparés par des virgules) ; les réponses de succès sont les types générés par le serveur strict (premier endpoint qui en a besoin).
 
 **Tests** : validation du pseudo, unicité, `profile_complete`.
 **Revue** : `go-reviewer`.
@@ -656,11 +656,12 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Les requêtes suivantes avec son jeton renvoient 401 `account_deleted`.
 - [ ] **Suppression définitive** : l'ancien `sub` est conservé sous forme d'empreinte (SHA-256, jamais en clair), par exemple dans une table `deleted_subjects` (migration incluse dans ce ticket). `user.GetOrCreateBySubject` (ticket 019) vérifie cette empreinte **avant** d'insérer et renvoie `account_deleted` sans créer de compte, même si l'ancien jeton est encore valide ou si la suppression chez Auth0 est en attente.
 - [ ] Une transaction couvre l'anonymisation, l'empreinte du `sub` et les abandons.
+- [ ] La mise à jour du profil exclut déjà les comptes anonymisés (`anonymized_at IS NULL` dans `user.Repository.UpdateProfile`, ticket 021) : garder cette condition et vérifier qu'un `PATCH /me` concurrent d'une suppression ne réécrit pas de pseudo sur le compte anonymisé.
 - [ ] Après la validation de la transaction, l'utilisateur est **supprimé chez Auth0** (API de gestion). Si l'appel échoue, une ligne `pending_auth0_deletion` est créée (migration incluse dans ce ticket) et la tâche du worker `retry-auth0-deletions` (ticket 057) la rejoue jusqu'au succès.
 - [ ] Ce ticket crée le client de l'API de gestion Auth0 et ses variables de configuration (ajoutées à `.env.example`).
 - [ ] Les identifiants de l'API de gestion viennent de Secret Manager ; ils n'apparaissent jamais dans les logs.
 
-**Tests** : intégration (compte avec plusieurs challenges, reconnexion ; reconnexion avec l'ancien `sub` après suppression : `account_deleted` et aucun nouveau compte créé).
+**Tests** : intégration (compte avec plusieurs challenges, reconnexion ; reconnexion avec l'ancien `sub` après suppression : `account_deleted` et aucun nouveau compte créé ; mise à jour du profil d'un compte anonymisé refusée, sans écriture).
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
 **Commit** : `feat(user): add account deletion with anonymization and abandonment`
 **Statut** : À faire
@@ -1080,7 +1081,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] `RateLimitUser` : limite par utilisateur sur les routes d'écriture (`POST`, `PATCH`, `DELETE`) ; s'ajoute à la limite par IP.
 - [ ] Valeurs en configuration (`RATE_LIMIT_IP_RPS`, `RATE_LIMIT_IP_BURST`, `RATE_LIMIT_USER_RPS`, `RATE_LIMIT_USER_BURST`), ajoutées à `.env.example`.
 
-**Tests** : dépassement par IP et par utilisateur, deux utilisateurs indépendants, `X-Forwarded-For` falsifié.
+**Tests** : dépassement par IP et par utilisateur, deux utilisateurs indépendants, `X-Forwarded-For` falsifié ; `PATCH /me` au-delà de la limite par utilisateur répond 429 avant tout 409 (le 409 « pseudo pris » permettrait sinon d'énumérer les pseudos).
 **Revue** : `go-reviewer`, `security-reviewer`.
 **Commit** : `feat(httpx): add per-IP and per-user rate limiting`
 **Statut** : À faire

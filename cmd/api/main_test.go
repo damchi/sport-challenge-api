@@ -19,6 +19,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/health"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/user"
 )
 
 func TestNewLoggerIsCloudLoggingCompatible(t *testing.T) {
@@ -132,7 +133,13 @@ func newTestRouter(t *testing.T, verifier auth.TokenVerifier, resolve auth.UserI
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return newRouter(logger, []string{webOrigin}, health.NewHandler(pingerFunc(func(context.Context) error { return nil }), logger), verifier, resolve)
+	// No request in these tests reaches a /me handler: its service stays nil.
+	handlers := server{Handler: health.NewHandler(pingerFunc(func(context.Context) error { return nil }), logger), userHandler: user.NewHandler(nil)}
+	r, err := newRouter(logger, []string{webOrigin}, handlers, verifier, resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }
 
 func serve(t *testing.T, r *gin.Engine, req *http.Request) (int, string) {
@@ -215,14 +222,14 @@ func TestProtectedRouteResolvesTheCurrentUser(t *testing.T) {
 				}
 				return userID, tt.resolveErr
 			})
-			r.GET("/api/v1/me", func(c *gin.Context) {
+			r.GET("/api/v1/probe", func(c *gin.Context) {
 				if id, _ := auth.UserID(c); id != userID {
 					t.Errorf("user ID = %q, want %q", id, userID)
 				}
 				c.Status(http.StatusNoContent)
 			})
 
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/probe", nil)
 			req.Header.Set("Authorization", "Bearer some.access.token")
 			if status, code := serve(t, r, req); status != tt.wantStatus || code != tt.wantCode {
 				t.Fatalf("got %d %q, want %d %q", status, code, tt.wantStatus, tt.wantCode)
@@ -236,8 +243,6 @@ func TestPreflightSkipsAuthentication(t *testing.T) {
 		t.Error("user resolved for a preflight")
 		return "", nil
 	})
-	r.GET("/api/v1/me", func(c *gin.Context) { c.Status(http.StatusNoContent) })
-
 	// A browser sends no token with a preflight.
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/me", nil)
 	req.Header.Set("Origin", webOrigin)

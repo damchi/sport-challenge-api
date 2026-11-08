@@ -5,3 +5,5 @@ generate:
   gin-server: true
   strict-server: true
   models: true
+  # The spec itself, for the request validation middleware.
+  embedded-spec: true

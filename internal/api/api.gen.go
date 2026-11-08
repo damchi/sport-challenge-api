@@ -5,13 +5,58 @@ package api
 
 import (
 	"bytes"
+	"compress/flate"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
+	"strings"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
+	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// Defines values for ErrorCode.
+const (
+	ErrorCodeAccountDeleted    ErrorCode = "account_deleted"
+	ErrorCodeInternalError     ErrorCode = "internal_error"
+	ErrorCodeInvalidToken      ErrorCode = "invalid_token"
+	ErrorCodeNotFound          ErrorCode = "not_found"
+	ErrorCodeProfileIncomplete ErrorCode = "profile_incomplete"
+	ErrorCodeTokenExpired      ErrorCode = "token_expired"
+	ErrorCodeUnauthenticated   ErrorCode = "unauthenticated"
+	ErrorCodeValidationFailed  ErrorCode = "validation_failed"
+)
+
+// Valid indicates whether the value is a known member of the ErrorCode enum.
+func (e ErrorCode) Valid() bool {
+	switch e {
+	case ErrorCodeAccountDeleted:
+		return true
+	case ErrorCodeInternalError:
+		return true
+	case ErrorCodeInvalidToken:
+		return true
+	case ErrorCodeNotFound:
+		return true
+	case ErrorCodeProfileIncomplete:
+		return true
+	case ErrorCodeTokenExpired:
+		return true
+	case ErrorCodeUnauthenticated:
+		return true
+	case ErrorCodeValidationFailed:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for HealthStatus.
 const (
@@ -22,6 +67,24 @@ const (
 func (e HealthStatus) Valid() bool {
 	switch e {
 	case HealthStatusOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Language.
+const (
+	En Language = "en"
+	Fr Language = "fr"
+)
+
+// Valid indicates whether the value is a known member of the Language enum.
+func (e Language) Valid() bool {
+	switch e {
+	case En:
+		return true
+	case Fr:
 		return true
 	default:
 		return false
@@ -46,6 +109,26 @@ func (e ReadinessStatus) Valid() bool {
 	}
 }
 
+// Error Single error format of the API. Clients translate `code`; `message` is only an English fallback.
+type Error struct {
+	Error struct {
+		// Code Stable error codes. Each ticket adds the codes it returns.
+		Code ErrorCode `json:"code"`
+
+		// Message English fallback text, never shown as is by the apps.
+		Message string `json:"message"`
+
+		// Params Values for the client's text (a deadline...); never personal data.
+		Params *map[string]string `json:"params,omitempty"`
+
+		// RequestId Identifier of the request, also in the server logs.
+		RequestId *string `json:"request_id,omitempty"`
+	} `json:"error"`
+}
+
+// ErrorCode Stable error codes. Each ticket adds the codes it returns.
+type ErrorCode string
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -53,6 +136,40 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// Language defines model for Language.
+type Language string
+
+// Me defines model for Me.
+type Me struct {
+	// Avatar Avatar image; always null in V1, where the apps show the pseudo's initials.
+	Avatar *string            `json:"avatar"`
+	Id     openapi_types.UUID `json:"id"`
+
+	// Language Null until the user chooses one.
+	Language *Language `json:"language"`
+
+	// ProfileComplete True once the pseudo is set.
+	ProfileComplete bool `json:"profile_complete"`
+
+	// Pseudo Null until the user chooses one.
+	Pseudo *Pseudo `json:"pseudo"`
+}
+
+// MeUpdate defines model for MeUpdate.
+type MeUpdate struct {
+	Language *Language `json:"language,omitempty"`
+
+	// Pseudo 3 to 20 ASCII letters, digits, `_`, `.` or `-`; unique regardless of case.
+	//
+	// Example: marie_92
+	Pseudo *Pseudo `json:"pseudo,omitempty"`
+}
+
+// Pseudo 3 to 20 ASCII letters, digits, `_`, `.` or `-`; unique regardless of case.
+//
+// Example: marie_92
+type Pseudo = string
 
 // Readiness defines model for Readiness.
 type Readiness struct {
@@ -62,8 +179,23 @@ type Readiness struct {
 // ReadinessStatus defines model for Readiness.Status.
 type ReadinessStatus string
 
+// Unauthorized Single error format of the API. Clients translate `code`; `message` is only an English fallback.
+type Unauthorized = Error
+
+// ValidationFailed Single error format of the API. Clients translate `code`; `message` is only an English fallback.
+type ValidationFailed = Error
+
+// PatchMeJSONRequestBody defines body for PatchMe for application/json ContentType.
+type PatchMeJSONRequestBody = MeUpdate
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// GetMe Read my profile
+	// (GET /api/v1/me)
+	GetMe(c *gin.Context)
+	// PatchMe Update my profile
+	// (PATCH /api/v1/me)
+	PatchMe(c *gin.Context)
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(c *gin.Context)
@@ -80,6 +212,32 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(c *gin.Context)
+
+// GetMe operation middleware
+func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetMe(c)
+}
+
+// PatchMe operation middleware
+func (siw *ServerInterfaceWrapper) PatchMe(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchMe(c)
+}
 
 // GetHealthz operation middleware
 func (siw *ServerInterfaceWrapper) GetHealthz(c *gin.Context) {
@@ -136,6 +294,124 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 
 	router.GET(options.BaseURL+"/healthz", wrapper.GetHealthz)
 	router.GET(options.BaseURL+"/readyz", wrapper.GetReadyz)
+	router.GET(options.BaseURL+"/api/v1/me", wrapper.GetMe)
+	router.PATCH(options.BaseURL+"/api/v1/me", wrapper.PatchMe)
+}
+
+type UnauthorizedResponseHeaders struct {
+	WWWAuthenticate *string
+}
+type UnauthorizedJSONResponse struct {
+	Body Error
+
+	Headers UnauthorizedResponseHeaders
+}
+
+type ValidationFailedJSONResponse Error
+
+type GetMeRequestObject struct {
+}
+
+type GetMeResponseObject interface {
+	VisitGetMeResponse(w http.ResponseWriter) error
+}
+
+type GetMe200JSONResponse Me
+
+func (response GetMe200JSONResponse) VisitGetMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMe401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetMe401JSONResponse) VisitGetMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchMeRequestObject struct {
+	Body *PatchMeJSONRequestBody
+}
+
+type PatchMeResponseObject interface {
+	VisitPatchMeResponse(w http.ResponseWriter) error
+}
+
+type PatchMe200JSONResponse Me
+
+func (response PatchMe200JSONResponse) VisitPatchMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchMe400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response PatchMe400JSONResponse) VisitPatchMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchMe401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response PatchMe401JSONResponse) VisitPatchMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchMe409JSONResponse Error
+
+func (response PatchMe409JSONResponse) VisitPatchMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type GetHealthzRequestObject struct {
@@ -196,6 +472,12 @@ func (response GetReadyz503JSONResponse) VisitGetReadyzResponse(w http.ResponseW
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// GetMe Read my profile
+	// (GET /api/v1/me)
+	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
+	// PatchMe Update my profile
+	// (PATCH /api/v1/me)
+	PatchMe(ctx context.Context, request PatchMeRequestObject) (PatchMeResponseObject, error)
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
@@ -261,6 +543,72 @@ type strictHandler struct {
 	options     StrictGinServerOptions
 }
 
+// GetMe operation middleware
+func (sh *strictHandler) GetMe(ctx *gin.Context) {
+	var request GetMeRequestObject
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMe(ctx, request.(GetMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMe")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetMeResponseObject); ok {
+		if err := validResponse.VisitGetMeResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PatchMe operation middleware
+func (sh *strictHandler) PatchMe(ctx *gin.Context) {
+	var request PatchMeRequestObject
+
+	var body PatchMeJSONRequestBody
+	var err error
+	// A request validator built on kin-openapi's openapi3filter with
+	// KeepValidatedValue leaves the value it validated on the body. Bind
+	// that value, matching member names exactly, so the handler receives
+	// what was validated instead of a second, case-insensitive decode.
+	if vb, ok := ctx.Request.Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+		err = ctx.ShouldBindJSON(&body)
+	} else if binding.Validator != nil {
+		// ShouldBindJSON runs the struct validator after decoding; keep that.
+		err = binding.Validator.ValidateStruct(&body)
+	}
+	if err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PatchMe(ctx, request.(PatchMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PatchMe")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(PatchMeResponseObject); ok {
+		if err := validResponse.VisitPatchMeResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetHealthz operation middleware
 func (sh *strictHandler) GetHealthz(ctx *gin.Context) {
 	var request GetHealthzRequestObject
@@ -307,4 +655,136 @@ func (sh *strictHandler) GetReadyz(ctx *gin.Context) {
 	} else if response != nil {
 		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
 	}
+}
+
+// Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
+// Stored as a slice of fixed-width chunks rather than one concatenated
+// const string: with thousands of chunks the chained `+` fold is several
+// times slower for the Go compiler than parsing a slice literal.
+var swaggerSpec = []string{
+	"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",
+	"MwA=",
+}
+
+// decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
+// after base64-decoding and flate-decompressing the embedded blob.
+func decodeSpec() ([]byte, error) {
+	encoded := strings.Join(swaggerSpec, "")
+	compressed, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("error base64 decoding spec: %w", err)
+	}
+	zr := flate.NewReader(bytes.NewReader(compressed))
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(zr); err != nil {
+		return nil, fmt.Errorf("read flate: %w", err)
+	}
+	if err := zr.Close(); err != nil {
+		return nil, fmt.Errorf("close flate reader: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+var rawSpec = decodeSpecCached()
+
+// a naive cache of the decoded OpenAPI spec
+func decodeSpecCached() func() ([]byte, error) {
+	data, err := decodeSpec()
+	return func() ([]byte, error) {
+		return data, err
+	}
+}
+
+// Constructs a synthetic filesystem for resolving external references when loading openapi specifications.
+func PathToRawSpec(pathToFile string) map[string]func() ([]byte, error) {
+	res := make(map[string]func() ([]byte, error))
+	if len(pathToFile) > 0 {
+		res[pathToFile] = rawSpec
+	}
+
+	return res
+}
+
+// GetSpec returns the OpenAPI specification corresponding to the generated
+// code in this file. External references in the spec are resolved through
+// PathToRawSpec; externally-referenced files must be embedded in their
+// corresponding Go packages (via the import-mapping feature). URL-based
+// external refs are not supported.
+func GetSpec() (swagger *openapi3.T, err error) {
+	resolvePath := PathToRawSpec("")
+
+	loader := openapi3.NewLoader()
+	loader.IsExternalRefsAllowed = true
+	loader.ReadFromURIFunc = func(loader *openapi3.Loader, url *url.URL) ([]byte, error) {
+		pathToFile := url.String()
+		pathToFile = path.Clean(pathToFile)
+		getSpec, ok := resolvePath[pathToFile]
+		if !ok {
+			err1 := fmt.Errorf("path not found: %s", pathToFile)
+			return nil, err1
+		}
+		return getSpec()
+	}
+	var specData []byte
+	specData, err = rawSpec()
+	if err != nil {
+		return
+	}
+	swagger, err = loader.LoadFromData(specData)
+	if err != nil {
+		return
+	}
+	return
+}
+
+// GetSpecJSON returns the raw JSON bytes of the embedded OpenAPI
+// specification: decompressed but not unmarshaled. External references
+// are not resolved here; the bytes are the spec exactly as embedded by
+// codegen. The result is cached at package init time, so repeated calls
+// are cheap.
+func GetSpecJSON() ([]byte, error) {
+	return rawSpec()
+}
+
+// GetSwagger returns the OpenAPI specification corresponding to the
+// generated code in this file.
+//
+// Deprecated: GetSwagger predates kin-openapi renaming openapi3.Swagger
+// to openapi3.T. Use [GetSpec] instead. This wrapper is retained for
+// backwards compatibility.
+func GetSwagger() (*openapi3.T, error) {
+	return GetSpec()
 }

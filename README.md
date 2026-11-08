@@ -119,6 +119,9 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 ### 2.8 Profil et langues
 
 - ✅ Pseudo et avatar. Pseudo **unique sans tenir compte de la casse**, de 3 à 20 caractères (lettres, chiffres, `_`, `.`, `-`).
+- ✅ Les lettres du pseudo sont **ASCII** (`a-z`, `A-Z`, sans accent) : l'unicité sans tenir compte de la casse est la même partout, et deux pseudos ne peuvent pas se ressembler à l'œil en étant différents.
+- ✅ Le profil est **complet** dès que le pseudo est choisi ; un pseudo ne peut plus être retiré, seulement changé. **Créer ou rejoindre un challenge exige un profil complet** (erreur `profile_incomplete`).
+- ✅ En V1, l'avatar affiché est formé des initiales du pseudo ; l'envoi d'une image vient en V1.1.
 - ✅ Langues : **français et anglais**.
 - ✅ Unité : **km uniquement** pour le moment.
 
@@ -577,4 +580,5 @@ Garmin et Coros (demandes de partenariat à lancer tôt, les délais sont longs)
 - ❓ (V2) Synchronisations tardives (Garmin, Coros) : sans délai de grâce, une activité reçue après la fin de sa semaine ne compte pas. À revisiter à l'arrivée des synchronisations.
 - ❓ Agrégateur ou connexions directes pour les synchronisations (à trancher avant la V2).
 - ✅ Package d'erreurs maison (Faunadex) : examiné, non repris. `platform/apperr` suit le contrat du §5.8 ; ses messages FR/EN pourront alimenter les fichiers de traduction du frontend. Le `translator` (`go-i18n`, fichiers `.toml`) pourra servir plus tard aux textes émis par le serveur (courriels, notifications).
+- ❓ Pseudos qui se ressemblent (`marie.92`, `marie_92`, `marie-92`) et pseudos réservés (`admin`, `support`…) : faut-il les refuser ? Aujourd'hui seule la casse est ignorée pour l'unicité.
 - ❓ Confirmer les points marqués 🟡.

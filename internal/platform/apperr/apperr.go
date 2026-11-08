@@ -6,6 +6,7 @@ package apperr
 import (
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // Code is a stable snake_case identifier, part of the API contract.
@@ -13,13 +14,16 @@ type Code string
 
 // Codes currently returned by the API.
 const (
-	CodeUnauthenticated  Code = "unauthenticated"
-	CodeInvalidToken     Code = "invalid_token"
-	CodeTokenExpired     Code = "token_expired"
-	CodeAccountDeleted   Code = "account_deleted"
-	CodeNotFound         Code = "not_found"
-	CodeValidationFailed Code = "validation_failed"
-	CodeInternal         Code = "internal_error"
+	CodeUnauthenticated Code = "unauthenticated"
+	CodeInvalidToken    Code = "invalid_token"
+	CodeTokenExpired    Code = "token_expired"
+	CodeAccountDeleted  Code = "account_deleted"
+	// CodeProfileIncomplete refuses creating or joining a challenge until
+	// the pseudo is set.
+	CodeProfileIncomplete Code = "profile_incomplete"
+	CodeNotFound          Code = "not_found"
+	CodeValidationFailed  Code = "validation_failed"
+	CodeInternal          Code = "internal_error"
 )
 
 type definition struct {
@@ -38,6 +42,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnauthorized, "Access token expired"}, true
 	case CodeAccountDeleted:
 		return definition{http.StatusUnauthorized, "Account deleted"}, true
+	case CodeProfileIncomplete:
+		return definition{http.StatusForbidden, "Profile incomplete"}, true
 	case CodeNotFound:
 		return definition{http.StatusNotFound, "Resource not found"}, true
 	case CodeValidationFailed:
@@ -72,6 +78,21 @@ func New(code Code, cause error) *Error {
 		}
 	}
 	return &Error{Code: code, Status: def.status, Message: def.message, cause: cause}
+}
+
+// FieldsParam is the parameter of validation_failed listing the invalid
+// fields, comma-separated ("pseudo,language").
+const FieldsParam = "fields"
+
+// InvalidFields returns validation_failed with fields in params.fields (no
+// parameter when fields is empty). Fields are names of the contract, never
+// values of the request.
+func InvalidFields(cause error, fields ...string) *Error {
+	e := New(CodeValidationFailed, cause)
+	if len(fields) > 0 {
+		e.Params = map[string]string{FieldsParam: strings.Join(fields, ",")}
+	}
+	return e
 }
 
 // Error implements error; it includes the cause, for logs only.

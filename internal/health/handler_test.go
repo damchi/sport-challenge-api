@@ -22,6 +22,18 @@ type fakePinger struct{ err error }
 
 func (f fakePinger) Ping(context.Context) error { return f.err }
 
+// healthOnly completes the contract with the operations of other modules,
+// never called here.
+type healthOnly struct{ Handler }
+
+func (healthOnly) GetMe(context.Context, api.GetMeRequestObject) (api.GetMeResponseObject, error) {
+	return nil, nil
+}
+
+func (healthOnly) PatchMe(context.Context, api.PatchMeRequestObject) (api.PatchMeResponseObject, error) {
+	return nil, nil
+}
+
 // serve sends a GET to path through the real router and checks the response
 // against the contract.
 func serve(t *testing.T, db Pinger, path string) *httptest.ResponseRecorder {
@@ -34,7 +46,7 @@ func serveWithLogs(t *testing.T, db Pinger, path string, logs io.Writer) *httpte
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	r := httpx.NewRouter(logger)
-	api.RegisterHandlers(r, api.NewStrictHandler(NewHandler(db, logger), nil))
+	api.RegisterHandlers(r, api.NewStrictHandler(healthOnly{NewHandler(db, logger)}, nil))
 
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
