@@ -80,7 +80,7 @@ Chaque code est ajouté à `apperr` par le premier ticket qui le renvoie.
 
 | # | Point | Proposition utilisée dans le backlog | Tickets |
 |---|---|---|---|
-| D9 ✅ | Un sport saisi à la main compte-t-il pour la **distance** ? | Oui **si une distance est saisie**, sinon non : pour `other`, la distance est **facultative** ; il compte toujours pour le temps (catégorie 1) ; avec distance, il compte pour la catégorie 2 avec un coefficient ×1 (hypothèse, à confirmer) | 024, 042, 050 |
+| D9 ✅ | Un sport saisi à la main compte-t-il pour la **distance** ? | Oui **si une distance est saisie**, sinon non : pour `other`, la distance est **facultative** ; il compte toujours pour le temps (catégorie 1) ; avec distance, il compte pour la catégorie 2 avec le coefficient du challenge (suggéré ×1). Les coefficients sont des **suggestions** que le créateur ajuste à la création (0,1 à 2), puis figés | 024, 029, 042, 050 |
 
 ## Tickets fusionnés (anciens tickets de préparation)
 
@@ -422,12 +422,11 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 `E3` · Task · Phase 3 · Estimation 2 · Dépend de : 002, 003
 
 **Critères d'acceptation**
-- [ ] Table `sport` : `code text` clé primaire, `has_distance boolean`, `distance_factor numeric(4,2)` avec `CHECK > 0`.
-- [ ] Données idempotentes (`ON CONFLICT DO NOTHING`) : `run` ×1, `walk` ×1, `hike` ×1, `swim` ×1, `ride` ×0,3, `rowing` ×0,5, `roller` ×0,5, `xc_ski` ×0,5 (tous avec distance) ; `yoga`, `climbing`, `strength` sans distance ; `other` avec distance **facultative** et coefficient ×1 (D9).
+- [ ] Table `sports` (pluriel, comme `users`) : `code text` clé primaire ; `distance_mode text` (`required`, `none` ou `optional`) ; `suggested_factor numeric(4,2)`, coefficient **suggéré** entre 0,1 et 2, nul si et seulement si le sport n'a pas de distance.
+- [ ] Données idempotentes (`ON CONFLICT DO NOTHING`) : `run` ×1, `walk` ×1, `hike` ×1, `swim` ×1, `ride` ×0,3, `rowing` ×0,5, `roller` ×0,5, `xc_ski` ×0,5 (distance obligatoire) ; `yoga`, `climbing`, `strength` sans distance ; `other` avec distance **facultative** et coefficient suggéré ×1 (D9).
 - [ ] Les libellés ne sont **pas** en base : le frontend traduit les codes.
 - [ ] Un utilisateur peut saisir un sport absent de la liste : il choisit `other` et renseigne un libellé libre, stocké sur l'activité (tickets 041 et 042). Pour `other`, la distance est facultative (D9 ✅).
 
-**Points à valider** : coefficient ×1 du sport `other` quand une distance est saisie (D9).
 **Revue** : `migration-reviewer`.
 **Commit** : `feat(sport): add sport catalogue migration with reference data`
 **Statut** : À faire
@@ -436,7 +435,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 `E3` · Story · Phase 3 · Estimation 1 · Dépend de : 024, 020
 
 **Critères d'acceptation**
-- [ ] `GET /sports` renvoie code, `has_distance` et `distance_factor`.
+- [ ] `GET /sports` renvoie code, `distance_mode` (`required`, `none`, `optional`) et `suggested_factor` (nul sans distance) : le frontend pré-remplit avec eux les coefficients du formulaire de création.
 - [ ] Réponse mise en cache côté HTTP (en-tête de durée courte).
 
 **Tests** : intégration.
@@ -500,7 +499,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Profil complet exigé (`profile_incomplete`).
 - [ ] Une transaction crée le challenge, le créateur, le participant (statut actif) et les 3 catégories.
-- [ ] Les coefficients du catalogue de sports sont **copiés** dans les paramètres de la catégorie 2 (figés) ; la catégorie 3 reçoit `{ "sport": "run", "step_meters": X }`.
+- [ ] Le créateur peut choisir le coefficient de chaque sport à distance (entre 0,1 et 2, deux décimales au plus, comme la colonne `numeric(4,2)` : une valeur plus précise est refusée, jamais arrondie en silence) ; un sport non précisé prend le coefficient suggéré du catalogue. Les coefficients obtenus sont **copiés** dans les paramètres de la catégorie 2 (figés) ; la catégorie 3 reçoit `{ "sport": "run", "step_meters": X }`.
 - [ ] Réponse 201 avec le challenge complet.
 - [ ] Erreurs de validation : 422 avec code stable.
 
@@ -508,7 +507,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Introduit le helper `WithTx(ctx, fn)` : validation si `fn` réussit, annulation sinon (y compris sur panique) ; la création multi-tables est son premier usage.
 - [ ] Ajoute à `apperr` les codes utilisés ici (`validation_failed`, `profile_incomplete`…).
 
-**Tests** : intégration (création complète, coefficients figés même si le catalogue change ensuite, profil incomplet).
+**Tests** : intégration (création complète, coefficients choisis par le créateur et coefficients suggérés par défaut, coefficient hors de 0,1 à 2 refusé, coefficients figés même si le catalogue change ensuite, profil incomplet).
 **Revue** : `go-reviewer`, `spec-guardian`, `security-reviewer`.
 **Commit** : `feat(challenge): add challenge creation endpoint`
 **Statut** : À faire
@@ -822,10 +821,10 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Somme des distances multipliées par le coefficient du sport, lu dans les paramètres **figés** de la catégorie.
-- [ ] Les sports sans distance (yoga…) ne comptent pas ; le sport « autre » compte (×1) seulement si une distance est saisie (D9).
-- [ ] Course, marche, randonnée et natation ×1 ; vélo ×0,3 ; aviron, roller et ski de fond ×0,5.
+- [ ] Les sports sans distance (yoga…) ne comptent pas ; le sport « autre » compte (avec son coefficient du challenge) seulement si une distance est saisie (D9).
+- [ ] Les coefficients sont ceux du challenge, choisis à sa création (par défaut les suggestions : course, marche, randonnée et natation ×1 ; vélo ×0,3 ; aviron, roller et ski de fond ×0,5).
 
-**Tests** : chaque coefficient, sport sans distance, « autre » avec et sans distance, coefficients figés malgré un changement du catalogue.
+**Tests** : chaque coefficient suggéré, un coefficient choisi par le créateur, sport sans distance, « autre » avec et sans distance, coefficients figés malgré un changement du catalogue.
 **Revue** : `go-reviewer`, `spec-guardian`.
 **Commit** : `feat(scoring): add cumulative distance scorer with frozen factors`
 **Statut** : À faire
