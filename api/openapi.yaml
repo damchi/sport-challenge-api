@@ -23,6 +23,8 @@ tags:
     description: Liveness and readiness probes.
   - name: me
     description: Profile of the authenticated user.
+  - name: sports
+    description: Catalogue of sports.
 paths:
   /healthz:
     get:
@@ -80,6 +82,8 @@ paths:
                 $ref: "#/components/schemas/Me"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       operationId: patchMe
       summary: Update my profile
@@ -112,6 +116,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/sports:
+    get:
+      operationId: getSports
+      summary: List the sports
+      description: |
+        Catalogue of sports, sorted by code. The apps translate the codes and
+        prefill the distance factors of the challenge creation form with the
+        suggested ones; the creator may change them.
+      tags: [sports]
+      responses:
+        "200":
+          description: The catalogue.
+          headers:
+            Cache-Control:
+              description: The catalogue rarely changes; private because the request is authenticated.
+              required: true
+              schema:
+                type: string
+                example: private, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SportList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -130,6 +163,14 @@ components:
           description: '`Bearer`, or `Bearer error="invalid_token"` for an invalid or expired token (RFC 6750).'
           schema:
             type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: |
+        Technical failure (`internal_error`), logged with its `request_id`;
+        the cause is never sent back.
       content:
         application/json:
           schema:
@@ -239,3 +280,33 @@ components:
           $ref: "#/components/schemas/Pseudo"
         language:
           $ref: "#/components/schemas/Language"
+    SportList:
+      type: object
+      required: [sports]
+      additionalProperties: false
+      properties:
+        sports:
+          type: array
+          items:
+            $ref: "#/components/schemas/Sport"
+    Sport:
+      type: object
+      required: [code, distance_mode, suggested_factor]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          description: Stable code, translated by the apps (`run`, `ride`, `other`...).
+          example: ride
+        distance_mode:
+          type: string
+          enum: [required, none, optional]
+          description: Whether an activity of this sport has a distance; `optional` for `other`.
+        suggested_factor:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0.1
+          maximum: 2
+          description: Suggested distance factor (0.1 to 2, two decimals); null for sports without distance.
+          example: 0.3

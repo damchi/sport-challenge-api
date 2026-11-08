@@ -21,6 +21,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
+	"github.com/damchi/sport-challenge-api/internal/sport"
 	"github.com/damchi/sport-challenge-api/internal/user"
 )
 
@@ -70,7 +71,12 @@ func run() error {
 	users := user.NewService(user.NewRepository(gdb))
 
 	gin.SetMode(gin.ReleaseMode)
-	handlers := server{Handler: health.NewHandler(pool, logger), userHandler: user.NewHandler(users)}
+	sports := sport.NewService(sport.NewRepository(gdb))
+	handlers := server{
+		Handler:      health.NewHandler(pool, logger),
+		userHandler:  user.NewHandler(users),
+		sportHandler: sport.NewHandler(sports),
+	}
 	router, err := newRouter(logger, cfg.CORSAllowedOrigins, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
 		u, err := users.GetOrCreateBySubject(ctx, subject)
 		return u.ID, err
@@ -115,11 +121,16 @@ func run() error {
 type server struct {
 	health.Handler
 	userHandler
+	sportHandler
 }
 
-// userHandler names the embedded *user.Handler: embedding it directly would
-// clash with health.Handler, as both fields would be called Handler.
-type userHandler = *user.Handler
+// These aliases name the embedded handlers: embedding *user.Handler and
+// *sport.Handler directly would clash with health.Handler, as every field
+// would be called Handler.
+type (
+	userHandler  = *user.Handler
+	sportHandler = *sport.Handler
+)
 
 // newRouter registers the routes of the contract behind the protection:
 // Authenticate then CurrentUser on every route except the public list below.

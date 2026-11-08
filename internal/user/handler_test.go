@@ -68,6 +68,10 @@ func (meHandlers) GetReadyz(context.Context, api.GetReadyzRequestObject) (api.Ge
 	return nil, nil
 }
 
+func (meHandlers) GetSports(context.Context, api.GetSportsRequestObject) (api.GetSportsResponseObject, error) {
+	return nil, nil
+}
+
 type response struct {
 	status int
 	body   map[string]any

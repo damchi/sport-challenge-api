@@ -34,6 +34,10 @@ func (healthOnly) PatchMe(context.Context, api.PatchMeRequestObject) (api.PatchM
 	return nil, nil
 }
 
+func (healthOnly) GetSports(context.Context, api.GetSportsRequestObject) (api.GetSportsResponseObject, error) {
+	return nil, nil
+}
+
 // serve sends a GET to path through the real router and checks the response
 // against the contract.
 func serve(t *testing.T, db Pinger, path string) *httptest.ResponseRecorder {
