@@ -363,3 +363,59 @@ func TestAbandonDeletedChallenge(t *testing.T) {
 		t.Fatalf("status %s (%v), want nothing written", status, err)
 	}
 }
+
+func TestAbandonWithoutParticipationWritesNothing(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	outsider := insertProfile(t, pool, "abandon_outsider")
+	if _, err := svc.Abandon(t.Context(), outsider, id); !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) {
+		t.Fatalf("error = %v, want not_found (visible, never joined)", err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1", outsider); n != 0 {
+		t.Fatalf("%d participations stored, want 0", n)
+	}
+}
+
+// TestJoinAndAbandonRace: users join and abandon at the same time. The lock
+// shared by both (withLockedMembership) serializes them: the join always
+// succeeds; the abandon either comes first (nothing to abandon, 404) or
+// after (the participation ends abandoned). Never a 500, never a mixed state.
+func TestJoinAndAbandonRace(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	const users = 8
+	type outcome struct{ joinErr, abandonErr error }
+	results := make([]outcome, users)
+	ids := make([]string, users)
+	for i := range users {
+		ids[i] = insertProfile(t, pool, "race_"+string(rune('a'+i)))
+	}
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range users {
+		wg.Go(func() {
+			<-start
+			_, results[i].joinErr = svc.Join(t.Context(), ids[i], id)
+		})
+		wg.Go(func() {
+			<-start
+			_, results[i].abandonErr = svc.Abandon(t.Context(), ids[i], id)
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	for i, r := range results {
+		if r.joinErr != nil {
+			t.Fatalf("user %d: join %v, want it to succeed", i, r.joinErr)
+		}
+		var status string
+		if err := pool.QueryRow(t.Context(), "SELECT status FROM participants WHERE challenge_id = $1 AND user_id = $2", id, ids[i]).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case r.abandonErr == nil && status == "abandoned":
+		case errors.Is(r.abandonErr, apperr.New(apperr.CodeNotFound, nil)) && status == "active":
+		default:
+			t.Fatalf("user %d: abandon %v with status %s, want abandoned after the join or 404 before it", i, r.abandonErr, status)
+		}
+	}
+}
