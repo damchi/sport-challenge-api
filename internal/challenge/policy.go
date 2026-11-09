@@ -141,3 +141,26 @@ func RequireEdit(role Role) error {
 	}
 	return nil
 }
+
+// AbandonRefusal is the abandon rule (README §2.2): an active participant,
+// creators included, may abandon until the end of the challenge (endsAt
+// excluded: 422 challenge_ended from that instant); abandoning is final, so
+// abandoning again changes nothing (noop, no error). A challenge the user may
+// not see is not found (404 challenge_not_found); a visible one the user
+// never joined has no participation to abandon (404 not_found).
+func AbandonRefusal(m Membership, visibility string, now, endsAt time.Time) (noop bool, err error) {
+	if err := RequireView(RoleOf(m), visibility); err != nil {
+		return false, err
+	}
+	switch m.Participant {
+	case ParticipantAbandoned:
+		return true, nil
+	case ParticipantActive:
+		if !now.Before(endsAt) {
+			return false, apperr.New(apperr.CodeChallengeEnded, nil)
+		}
+		return false, nil
+	default:
+		return false, apperr.New(apperr.CodeNotFound, nil)
+	}
+}

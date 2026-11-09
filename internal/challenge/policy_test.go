@@ -198,3 +198,50 @@ func TestJoinRefusal(t *testing.T) {
 		})
 	}
 }
+
+// TestAbandonRefusal: an active participant may abandon until the end of
+// the challenge; abandoning again changes nothing; a hidden challenge is not
+// found, a visible one without participation has nothing to abandon.
+func TestAbandonRefusal(t *testing.T) {
+	endsAt := time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)
+	before, at := endsAt.Add(-time.Second), endsAt
+	tests := []struct {
+		name       string
+		m          Membership
+		visibility string
+		now        time.Time
+		wantNoop   bool
+		want       apperr.Code // empty: abandon
+	}{
+		{name: "active, one second before the end", m: active, visibility: VisibilityPublic, now: before},
+		{name: "active creator: keeps the creator role", m: creatorActive, visibility: VisibilityPrivate, now: before},
+		{name: "already abandoned: nothing to do", m: abandoned, visibility: VisibilityPublic, now: before, wantNoop: true},
+		{name: "already abandoned, after the end", m: abandoned, visibility: VisibilityPublic, now: at, wantNoop: true},
+		{name: "already abandoned a private challenge: still visible, nothing to do", m: abandoned, visibility: VisibilityPrivate, now: before, wantNoop: true},
+		{name: "creator who abandoned: nothing to do", m: creatorAbandoned, visibility: VisibilityPublic, now: before, wantNoop: true},
+		{name: "at the exact end", m: active, visibility: VisibilityPublic, now: at, want: apperr.CodeChallengeEnded},
+		{name: "outsider of a public challenge", m: outsider, visibility: VisibilityPublic, now: before, want: apperr.CodeNotFound},
+		{name: "invited, never joined", m: invited, visibility: VisibilityPrivate, now: before, want: apperr.CodeNotFound},
+		{name: "creator without participation", m: creatorNotJoined, visibility: VisibilityPublic, now: before, want: apperr.CodeNotFound},
+		{name: "outsider of a private challenge: hidden", m: outsider, visibility: VisibilityPrivate, now: before, want: apperr.CodeChallengeNotFound},
+		{name: "unknown status: no participation", m: unknownStatus, visibility: VisibilityPublic, now: before, want: apperr.CodeNotFound},
+		{name: "unknown visibility: hidden", m: active, visibility: "unlisted", now: before, want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			noop, err := AbandonRefusal(tt.m, tt.visibility, tt.now, endsAt)
+			if noop != tt.wantNoop {
+				t.Fatalf("noop = %v, want %v", noop, tt.wantNoop)
+			}
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("AbandonRefusal() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("AbandonRefusal() = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}

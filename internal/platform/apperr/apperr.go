@@ -31,6 +31,8 @@ const (
 	// CodeParticipationAbandoned refuses joining again after abandoning:
 	// abandoning is final.
 	CodeParticipationAbandoned Code = "participation_abandoned"
+	// CodeChallengeEnded refuses a change to a finished challenge.
+	CodeChallengeEnded Code = "challenge_ended"
 	// CodeFieldNotEditable refuses a change to a field frozen at creation.
 	CodeFieldNotEditable Code = "field_not_editable"
 	// CodeChallengeNotFound also answers a private challenge the user may
@@ -67,6 +69,8 @@ func definitionOf(code Code) (definition, bool) {
 	case CodeParticipationAbandoned:
 		// A business rule (abandoning is final), not a data conflict: 422.
 		return definition{http.StatusUnprocessableEntity, "Participation abandoned"}, true
+	case CodeChallengeEnded:
+		return definition{http.StatusUnprocessableEntity, "Challenge ended"}, true
 	case CodeFieldNotEditable:
 		return definition{http.StatusUnprocessableEntity, "Field not editable"}, true
 	case CodeChallengeNotFound:

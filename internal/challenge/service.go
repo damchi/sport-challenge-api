@@ -21,6 +21,7 @@ type repository interface {
 	Categories(ctx context.Context, id string) ([]Category, error)
 	UpdateText(ctx context.Context, id string, changes TextChanges) error
 	Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
+	Abandon(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (bool, time.Time, error)) error
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -242,6 +243,30 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 			return time.Time{}, apperr.New(apperr.CodeProfileIncomplete, nil)
 		}
 		return now, nil
+	})
+	switch {
+	case errors.Is(err, errChallengeNotFound):
+		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	case errors.Is(err, errAlreadyParticipant):
+		return Detail{}, apperr.New(apperr.CodeAlreadyParticipant, nil)
+	case err != nil:
+		return Detail{}, err
+	}
+	return s.Get(ctx, actorID, id)
+}
+
+// Abandon ends the participation of actorID in challenge id, for good: the
+// participant is eliminated from every category and shown as abandoned. A
+// creator keeps the creator rights but no longer competes. Abandoning again
+// changes nothing (200, idempotent); a finished challenge answers 422
+// challenge_ended. The rule (AbandonRefusal) is checked on the challenge
+// locked by the repository, at the clock's now once locked. It returns the
+// challenge as the actor now sees it.
+func (s *Service) Abandon(ctx context.Context, actorID, id string) (Detail, error) {
+	err := s.repo.Abandon(ctx, id, actorID, func(c Challenge, m Membership) (bool, time.Time, error) {
+		now := s.clock.Now()
+		noop, err := AbandonRefusal(m, c.Visibility, now, c.EndsAt)
+		return noop, now, err
 	})
 	if errors.Is(err, errChallengeNotFound) {
 		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)

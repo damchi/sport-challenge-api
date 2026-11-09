@@ -27,6 +27,7 @@ type fakeRepository struct {
 	membership     Membership
 	categoriesRead bool
 	updated        *TextChanges
+	abandonedAt    time.Time
 }
 
 func (f *fakeRepository) Get(context.Context, string, string) (Challenge, Membership, error) {
@@ -63,6 +64,24 @@ func (f *fakeRepository) Join(_ context.Context, _, _ string, decide func(Challe
 	}
 	f.joinedAt = joinedAt
 	f.membership.Participant = ParticipantActive
+	return nil
+}
+
+func (f *fakeRepository) Abandon(_ context.Context, _, _ string, decide func(Challenge, Membership) (bool, time.Time, error)) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.challenge == nil {
+		return fmt.Errorf("abandon challenge: %w", errChallengeNotFound)
+	}
+	noop, at, err := decide(*f.challenge, f.membership)
+	if err != nil {
+		return fmt.Errorf("abandon challenge: %w", err)
+	}
+	if !noop {
+		f.abandonedAt = at
+		f.membership.Participant = ParticipantAbandoned
+	}
 	return nil
 }
 
@@ -567,5 +586,77 @@ func TestServiceJoinFailures(t *testing.T) {
 				t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
 			}
 		})
+	}
+}
+
+func TestServiceAbandon(t *testing.T) {
+	endsAt := time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC) // stored()
+	tests := []struct {
+		name       string
+		visibility string
+		membership Membership
+		now        time.Time
+		wantWrite  bool
+		wantRole   Role
+		want       apperr.Code
+	}{
+		{name: "active participant", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, now: endsAt.Add(-time.Second), wantWrite: true, wantRole: RoleAbandoned},
+		{name: "creator keeps the creator role", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantActive}, now: endsAt.Add(-time.Hour), wantWrite: true, wantRole: RoleCreator},
+		{name: "again: idempotent, nothing written", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantAbandoned}, now: endsAt.Add(-time.Hour), wantRole: RoleAbandoned},
+		{name: "at the exact end", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, now: endsAt, want: apperr.CodeChallengeEnded},
+		{name: "never joined", visibility: VisibilityPublic, now: endsAt.Add(-time.Hour), want: apperr.CodeNotFound},
+		{name: "hidden", visibility: VisibilityPrivate, now: endsAt.Add(-time.Hour), want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
+			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).Abandon(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+			if tt.want != "" {
+				if !errors.Is(err, apperr.New(tt.want, nil)) {
+					t.Fatalf("error = %v, want %s", err, tt.want)
+				}
+				if !repo.abandonedAt.IsZero() {
+					t.Fatal("participation written despite the refusal")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wrote := !repo.abandonedAt.IsZero(); wrote != tt.wantWrite || (wrote && !repo.abandonedAt.Equal(tt.now)) {
+				t.Fatalf("abandoned at %s, want written %v at the clock's now", repo.abandonedAt, tt.wantWrite)
+			}
+			if d.Role != tt.wantRole || d.Participant != ParticipantAbandoned {
+				t.Fatalf("detail role %v, participation %s, want %v and abandoned", d.Role, d.Participant, tt.wantRole)
+			}
+		})
+	}
+}
+
+func TestServiceJoinDuplicateFromStorage(t *testing.T) {
+	// The insert found the participation already there: 409, not a 500.
+	repo := &duplicateJoin{fakeRepository: fakeRepository{challenge: stored(VisibilityPublic)}}
+	_, err := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, clock.NewFake(now)).Join(t.Context(), actor, "x")
+	if !errors.Is(err, apperr.New(apperr.CodeAlreadyParticipant, nil)) {
+		t.Fatalf("error = %v, want already_participant", err)
+	}
+}
+
+type duplicateJoin struct{ fakeRepository }
+
+func (d *duplicateJoin) Join(context.Context, string, string, func(Challenge, Membership) (time.Time, error)) error {
+	return fmt.Errorf("join challenge: %w", errAlreadyParticipant)
+}
+
+func TestServiceAbandonMissingAndFailure(t *testing.T) {
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Abandon(t.Context(), actor, "x")
+	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("missing: %v, want challenge_not_found", err)
+	}
+	storage := errors.New("connection refused")
+	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Abandon(t.Context(), actor, "x")
+	var appErr *apperr.Error
+	if !errors.Is(err, storage) || errors.As(err, &appErr) {
+		t.Fatalf("storage: %v, want it wrapped as an internal error", err)
 	}
 }
