@@ -116,21 +116,24 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Summary, error) {
 var errChallengeNotFound = errors.New("challenge not found")
 
 // membershipQuery reads challenge @id unless deleted, with the membership of
-// @actor; the lock clause, if any, is appended by the caller.
+// @actor. It never takes a lock: under READ COMMITTED, a statement that
+// waits for a lock keeps the snapshot taken before the wait, so its
+// membership subqueries would miss a participation committed meanwhile.
+// Join locks the challenge in a statement of its own, then runs this query.
 const membershipQuery = `SELECT c.*,
 	EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
 	(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant
 	FROM challenges c WHERE c.id = @id AND c.deleted_at IS NULL`
 
-// readWithMembership runs membershipQuery (with lock appended) on gdb. A
-// missing or deleted challenge gives errChallengeNotFound.
-func readWithMembership(gdb *gorm.DB, id, actorID, lock string) (Challenge, Membership, error) {
+// readWithMembership runs membershipQuery on gdb. A missing or deleted
+// challenge gives errChallengeNotFound.
+func readWithMembership(gdb *gorm.DB, id, actorID string) (Challenge, Membership, error) {
 	var row struct {
 		Challenge
 		Creator     bool
 		Participant *string
 	}
-	err := gdb.Raw(membershipQuery+lock, map[string]any{"id": id, "actor": actorID}).Scan(&row).Error
+	err := gdb.Raw(membershipQuery, map[string]any{"id": id, "actor": actorID}).Scan(&row).Error
 	if err != nil {
 		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", err)
 	}
@@ -150,7 +153,7 @@ func readWithMembership(gdb *gorm.DB, id, actorID, lock string) (Challenge, Memb
 // private challenge costs the same before the service decides what the
 // actor may see. A missing or deleted challenge gives errChallengeNotFound.
 func (r *Repository) Get(ctx context.Context, id, actorID string) (Challenge, Membership, error) {
-	return readWithMembership(r.db.WithContext(ctx), id, actorID, "")
+	return readWithMembership(r.db.WithContext(ctx), id, actorID)
 }
 
 // Join adds actorID to challenge id as an active participant, in one
@@ -170,7 +173,7 @@ func (r *Repository) Join(ctx context.Context, id, actorID string, decide func(C
 		if len(locked) == 0 {
 			return fmt.Errorf("lock challenge: %w", errChallengeNotFound)
 		}
-		c, m, err := readWithMembership(tx, id, actorID, "")
+		c, m, err := readWithMembership(tx, id, actorID)
 		if err != nil {
 			return err
 		}
