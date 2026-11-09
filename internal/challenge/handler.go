@@ -132,6 +132,10 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 			return nil, apperr.InvalidFields(err, "cursor")
 		}
 		after.ID = id.String()
+		// A position without its date (forged cursor) would restart the list.
+		if after.StartsAt.IsZero() {
+			return nil, apperr.InvalidFields(nil, "cursor")
+		}
 	}
 
 	page, err := h.service.List(ctx, actorID, scope, status, limit, after)

@@ -216,6 +216,7 @@ func TestListChallengesRefusals(t *testing.T) {
 		{name: "cursor not base64", query: "cursor=%21%21", wantFields: "cursor"},
 		{name: "cursor with a bad id", query: "cursor=eyJzIjoiMjAyNi0wMy0wNFQwNTowMDowMFoiLCJpIjoieCJ9", wantFields: "cursor"},
 		{name: "cursor of JSON null", query: "cursor=bnVsbA", wantFields: "cursor"},
+		{name: "cursor without its date", query: "cursor=eyJpIjoiMTExMTExMTEtMTExMS0xMTExLTExMTEtMTExMTExMTExMTExIn0", wantFields: "cursor"},
 		{name: "cursor with a bad date", query: "cursor=eyJzIjoibm90IGEgZGF0ZSIsImkiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ", wantFields: "cursor"},
 	}
 	for _, tt := range tests {
