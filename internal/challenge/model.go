@@ -148,6 +148,28 @@ type Page struct {
 	Next  *Position
 }
 
+// Participant is a participation in a listing. Pseudo is nil for an
+// anonymized account.
+type Participant struct {
+	UserID   string
+	Status   ParticipantStatus
+	JoinedAt time.Time
+	Pseudo   *string
+}
+
+// ParticipantPosition is the place of a participant in the listing: the
+// pagination key (joined_at, user_id), encoded in the cursor.
+type ParticipantPosition struct {
+	JoinedAt time.Time `json:"j"`
+	UserID   string    `json:"u"`
+}
+
+// ParticipantPage is a page of participants; Next is nil on the last page.
+type ParticipantPage struct {
+	Items []Participant
+	Next  *ParticipantPosition
+}
+
 // Detail is a challenge as one user sees it, with the fields the server
 // computes from the current instant.
 type Detail struct {

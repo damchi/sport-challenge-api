@@ -254,6 +254,114 @@ func TestListChallengesNormalizesTheCursorID(t *testing.T) {
 	}
 }
 
+const participantsPath = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/participants"
+
+func TestListParticipants(t *testing.T) {
+	repo := &fakeRepository{challenge: stored(VisibilityPublic), participants: participants(3)}
+	profiles := fakeProfiles{pseudos: map[string]string{"00000000-0000-0000-0000-000000000001": "marie_92"}}
+	svc := NewService(repo, profiles, fakeCatalogue{}, clock.NewFake(now))
+
+	rec, out := serve(t, svc, http.MethodGet, participantsPath+"?limit=2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	items, _ := out["items"].([]any)
+	first, _ := items[0].(map[string]any)
+	second, _ := items[1].(map[string]any)
+	if len(items) != 2 || first["pseudo"] != "marie_92" || first["status"] != "active" || first["avatar"] != nil {
+		t.Fatalf("items %v, want 2 items, the first with its pseudo", out["items"])
+	}
+	// An anonymized account: pseudo null, for the apps' neutral name.
+	if pseudo, ok := second["pseudo"]; !ok || pseudo != nil || second["status"] != "abandoned" {
+		t.Fatalf("second item %v, want abandoned with a null pseudo", second)
+	}
+	cursor, _ := out["next_cursor"].(string)
+	if cursor == "" {
+		t.Fatalf("next_cursor %v, want a cursor for the second page", out["next_cursor"])
+	}
+
+	// The cursor gives the position of the last item back to the query.
+	if rec, _ := serve(t, svc, http.MethodGet, participantsPath+"?cursor="+cursor, ""); rec.Code != http.StatusOK {
+		t.Fatalf("second page: status %d", rec.Code)
+	}
+	after := repo.participantsAsked.after
+	if after == nil || after.UserID != "00000000-0000-0000-0000-000000000002" || !after.JoinedAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("after %+v, want the position of the second item", after)
+	}
+	if repo.participantsAsked.limit != defaultLimit+1 {
+		t.Fatalf("limit %d, want %d by default", repo.participantsAsked.limit, defaultLimit+1)
+	}
+}
+
+func TestListParticipantsHidden(t *testing.T) {
+	// A private challenge the user does not see answers like a missing one.
+	for name, repo := range map[string]*fakeRepository{
+		"hidden":  {challenge: stored(VisibilityPrivate), participants: participants(1)},
+		"missing": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, participantsPath, "")
+			e, _ := out["error"].(map[string]any)
+			if rec.Code != http.StatusNotFound || e["code"] != "challenge_not_found" {
+				t.Fatalf("got %d %v, want 404 challenge_not_found", rec.Code, out)
+			}
+			if repo.participantsAsked != nil {
+				t.Fatal("participants read despite the refusal")
+			}
+		})
+	}
+}
+
+func TestListParticipantsRefusals(t *testing.T) {
+	cursor := func(v any) string {
+		c, err := httpx.EncodeCursor(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	tests := []struct {
+		name       string
+		target     string
+		wantFields string
+	}{
+		// A bad path parameter answers 400 without naming it, as on every route.
+		{name: "bad challenge id", target: "/api/v1/challenges/x/participants"},
+		{name: "limit 0", target: participantsPath + "?limit=0", wantFields: "limit"},
+		{name: "limit over 100", target: participantsPath + "?limit=101", wantFields: "limit"},
+		{name: "cursor not base64", target: participantsPath + "?cursor=%21%21", wantFields: "cursor"},
+		{name: "cursor with a bad id", target: participantsPath + "?cursor=" + cursor(map[string]any{"j": now, "u": "x"}), wantFields: "cursor"},
+		{name: "cursor without its date", target: participantsPath + "?cursor=" + cursor(map[string]any{"u": "11111111-1111-1111-1111-111111111111"}), wantFields: "cursor"},
+		{name: "cursor with a bad date", target: participantsPath + "?cursor=" + cursor(map[string]any{"j": "not a date", "u": "11111111-1111-1111-1111-111111111111"}), wantFields: "cursor"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPublic)}
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, tt.target, "")
+			e, _ := out["error"].(map[string]any)
+			params, _ := e["params"].(map[string]any)
+			if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || (tt.wantFields != "" && params["fields"] != tt.wantFields) {
+				t.Fatalf("got %d %v, want 400 validation_failed on %s", rec.Code, out, tt.wantFields)
+			}
+			if repo.participantsAsked != nil {
+				t.Fatal("query run despite the refusal")
+			}
+		})
+	}
+}
+
+func TestListParticipantsNormalizesTheCursorID(t *testing.T) {
+	cursor, err := httpx.EncodeCursor(ParticipantPosition{JoinedAt: now, UserID: "urn:uuid:11111111-1111-1111-1111-111111111111"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &fakeRepository{challenge: stored(VisibilityPublic)}
+	rec, _ := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, participantsPath+"?cursor="+cursor, "")
+	if rec.Code != http.StatusOK || repo.participantsAsked == nil || repo.participantsAsked.after.UserID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("got %d, query %+v, want the canonical id", rec.Code, repo.participantsAsked)
+	}
+}
+
 func TestGetChallenge(t *testing.T) {
 	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantAbandoned}}
 	repo.challenge.Categories = []Category{{Type: CategoryCumulativeTime, Position: 1}}

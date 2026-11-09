@@ -61,6 +61,25 @@ func (r *Repository) GetByID(ctx context.Context, id string) (User, error) {
 	return u, nil
 }
 
+// Pseudos returns the pseudo of each user of ids that has one. An anonymized
+// user is left out, like an unknown one: its pseudo is never served.
+func (r *Repository) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {
+	var rows []struct {
+		ID     string
+		Pseudo string
+	}
+	err := r.db.WithContext(ctx).Model(&User{}).Select("id, pseudo").
+		Where("id IN ? AND anonymized_at IS NULL AND pseudo IS NOT NULL", ids).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("read pseudos: %w", err)
+	}
+	pseudos := make(map[string]string, len(rows))
+	for _, row := range rows {
+		pseudos[row.ID] = row.Pseudo
+	}
+	return pseudos, nil
+}
+
 // UpdateProfile writes the changed profile columns of user id and returns the
 // row as stored. An unknown or anonymized user gives errUserNotFound. A
 // pseudo already used by another user, in any case, gives

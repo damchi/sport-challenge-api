@@ -30,6 +30,23 @@ func (p sqlProfiles) ProfileComplete(ctx context.Context, id string) (bool, erro
 	return complete, err
 }
 
+func (p sqlProfiles) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {
+	rows, err := p.pool.Query(ctx, "SELECT id::text, pseudo FROM users WHERE id = ANY($1::uuid[]) AND anonymized_at IS NULL AND pseudo IS NOT NULL", ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pseudos := map[string]string{}
+	for rows.Next() {
+		var id, pseudo string
+		if err := rows.Scan(&id, &pseudo); err != nil {
+			return nil, err
+		}
+		pseudos[id] = pseudo
+	}
+	return pseudos, rows.Err()
+}
+
 type sqlCatalogue struct{ pool *pgxpool.Pool }
 
 func (c sqlCatalogue) SuggestedFactors(ctx context.Context) (map[string]float64, error) {

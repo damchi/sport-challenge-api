@@ -438,6 +438,53 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/participants:
+    get:
+      operationId: listParticipants
+      summary: List the participants
+      description: |
+        Visible to whoever sees the challenge: every user for a public one;
+        its creators, participants (abandoned included) and invited users
+        for a private one. Anyone else, like a missing or deleted challenge,
+        gets the same 404 `challenge_not_found`. Every participant is listed,
+        abandoned or excluded ones included (shown as abandoned), in order
+        of registration.
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the previous page, as is.
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: A page of participants.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParticipantPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ChallengeNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/participants/{userId}:
     delete:
       operationId: excludeParticipant
@@ -853,6 +900,44 @@ components:
           type: string
           nullable: true
           description: Pass it as `cursor` for the next page; null on the last page.
+    ParticipantPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Participant"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.
+    Participant:
+      type: object
+      required: [user_id, pseudo, avatar, status, joined_at]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Pseudo"
+          description: Null for a deleted (anonymized) account; the apps show a neutral name.
+        avatar:
+          type: string
+          nullable: true
+          description: Avatar image; always null in V1, where the apps show the pseudo's initials.
+        status:
+          type: string
+          enum: [active, abandoned]
+          description: "`abandoned` also covers an excluded participant and a deleted account."
+        joined_at:
+          type: string
+          format: date-time
     ChallengeSummary:
       type: object
       required: [id, title, visibility, timezone, starts_at, ends_at, participant_count, my_status]

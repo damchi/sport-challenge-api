@@ -794,3 +794,83 @@ func TestDeleteByACreatorWhoAbandoned(t *testing.T) {
 		t.Fatal("challenge not deleted")
 	}
 }
+
+func TestParticipantsListing(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	// Joined one minute apart, so the order of registration is known.
+	ids := []string{creatorID}
+	for _, subject := range []string{"list_a", "list_b", "list_c"} {
+		clk.Advance(time.Minute)
+		u := insertProfile(t, pool, subject)
+		if _, err := svc.Join(t.Context(), u, id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u)
+	}
+	if _, err := svc.Abandon(t.Context(), ids[1], id); err != nil {
+		t.Fatal(err)
+	}
+	// A deleted account: abandoned and anonymized (ticket 039 does both).
+	if _, err := pool.Exec(t.Context(), "UPDATE participants SET status = 'abandoned', abandoned_at = joined_at WHERE user_id = $1", ids[2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", ids[2]); err != nil {
+		t.Fatal(err)
+	}
+
+	// An outsider of the public challenge reads it, two by two.
+	outsider := insertProfile(t, pool, "list_outsider")
+	var got []Participant
+	var after *ParticipantPosition
+	for range 3 {
+		page, err := svc.Participants(t.Context(), outsider, id, 2, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, page.Items...)
+		if after = page.Next; after == nil {
+			break
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("%d participants, want 4", len(got))
+	}
+	wantStatus := []ParticipantStatus{ParticipantActive, ParticipantAbandoned, ParticipantAbandoned, ParticipantActive}
+	for i, p := range got {
+		if p.UserID != ids[i] || p.Status != wantStatus[i] {
+			t.Fatalf("participant %d: %s %s, want %s %s in order of registration", i, p.UserID, p.Status, ids[i], wantStatus[i])
+		}
+	}
+	if p := got[1].Pseudo; p == nil || *p != "list_a" {
+		t.Fatalf("abandoned participant pseudo %v, want list_a kept", p)
+	}
+	if got[2].Pseudo != nil {
+		t.Fatalf("anonymized participant pseudo %q, want none", *got[2].Pseudo)
+	}
+	if !got[3].JoinedAt.Equal(now.Add(3 * time.Minute)) {
+		t.Fatalf("joined at %s, want the instant of the join", got[3].JoinedAt)
+	}
+
+	// Private: the abandoned participant still sees the list, an outsider gets 404.
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET visibility = 'private' WHERE id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Participants(t.Context(), ids[1], id, 20, nil); err != nil {
+		t.Fatalf("abandoned participant of a private challenge: %v", err)
+	}
+	notFound := apperr.New(apperr.CodeChallengeNotFound, nil)
+	if _, err := svc.Participants(t.Context(), outsider, id, 20, nil); !errors.Is(err, notFound) {
+		t.Fatalf("outsider of a private challenge: %v, want challenge_not_found", err)
+	}
+	// Deleted: hidden for everyone.
+	if err := svc.Delete(t.Context(), creatorID, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Participants(t.Context(), creatorID, id, 20, nil); !errors.Is(err, notFound) {
+		t.Fatalf("deleted challenge: %v, want challenge_not_found", err)
+	}
+}

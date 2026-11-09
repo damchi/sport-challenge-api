@@ -16,6 +16,7 @@ type fakeRepository struct {
 	err  error
 	// changes records the last UpdateProfile call, when set.
 	changes *ProfileChanges
+	pseudos map[string]string
 }
 
 func (f fakeRepository) GetOrCreateBySubject(context.Context, string) (User, error) {
@@ -31,6 +32,38 @@ func (f fakeRepository) UpdateProfile(_ context.Context, _ string, changes Profi
 		*f.changes = changes
 	}
 	return f.user, f.err
+}
+
+func (f fakeRepository) Pseudos(context.Context, []string) (map[string]string, error) {
+	return f.pseudos, f.err
+}
+
+func TestServicePseudos(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	stored := map[string]string{"u1": "marie_92"}
+	tests := []struct {
+		name    string
+		repo    fakeRepository
+		ids     []string
+		want    map[string]string
+		wantErr error
+	}{
+		// No user to look up: the database is not queried.
+		{name: "nobody", repo: fakeRepository{err: storageErr}, want: map[string]string{}},
+		{name: "some users", repo: fakeRepository{pseudos: stored}, ids: []string{"u1", "u2"}, want: stored},
+		{name: "storage failure", repo: fakeRepository{err: storageErr}, ids: []string{"u1"}, wantErr: storageErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NewService(tt.repo).Pseudos(t.Context(), tt.ids)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == nil && (got == nil || len(got) != len(tt.want) || got["u1"] != tt.want["u1"]) {
+				t.Fatalf("Pseudos() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestServiceGetOrCreateBySubject(t *testing.T) {
