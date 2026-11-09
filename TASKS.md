@@ -611,7 +611,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Réservé aux créateurs ; corps : identifiant de l'utilisateur.
-- [ ] 🟡 La cible doit être un participant actif ; sinon 422.
+- [ ] ✅ La cible doit être un participant actif ; sinon 422 `not_active_participant` (décision du ticket 036). Challenge terminé : 422 `challenge_ended`. Acteur non créateur : 403 `forbidden` ; challenge caché : 404 `challenge_not_found`.
 - [ ] Idempotent : ajouter un créateur existant renvoie 200.
 - [ ] L'écriture dans `challenge_creators` passe par `withLockedMembership` (verrou sur la ligne du challenge, comme rejoindre, abandonner et exclure) : une exclusion concurrente ne peut pas viser quelqu'un en train de devenir créateur. Test de cette course.
 

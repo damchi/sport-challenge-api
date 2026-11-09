@@ -315,3 +315,23 @@ func (h *Handler) ExcludeParticipant(ctx context.Context, req api.ExcludePartici
 	}
 	return api.ExcludeParticipant204Response{}, nil
 }
+
+// AddCreator makes a participant a creator, on behalf of a creator.
+func (h *Handler) AddCreator(ctx context.Context, req api.AddCreatorRequestObject) (api.AddCreatorResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	if req.Body == nil {
+		return nil, apperr.InvalidFields(nil)
+	}
+	d, err := h.service.AddCreator(ctx, actorID, req.ChallengeId.String(), req.Body.UserId.String())
+	if err != nil {
+		return nil, err
+	}
+	out, err := toDetail(d)
+	if err != nil {
+		return nil, err
+	}
+	return api.AddCreator200JSONResponse(out), nil
+}

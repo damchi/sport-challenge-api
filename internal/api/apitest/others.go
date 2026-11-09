@@ -75,3 +75,7 @@ func (unimplemented) AbandonChallenge(context.Context, api.AbandonChallengeReque
 func (unimplemented) ExcludeParticipant(context.Context, api.ExcludeParticipantRequestObject) (api.ExcludeParticipantResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) AddCreator(context.Context, api.AddCreatorRequestObject) (api.AddCreatorResponseObject, error) {
+	return nil, errNotImplemented
+}

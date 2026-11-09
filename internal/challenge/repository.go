@@ -251,6 +251,33 @@ func (r *Repository) Exclude(ctx context.Context, id, actorID, targetID string, 
 	return nil
 }
 
+// AddCreator makes targetID a creator of challenge id, on behalf of actorID,
+// under the lock of withLockedMembership: an exclusion of the same target
+// waits for it, then sees the new creator. decide gets the challenge, the
+// membership of the actor and the one of the target (read after the lock),
+// and refuses with an error, or answers that nothing is to write.
+func (r *Repository) AddCreator(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (noop bool, err error)) error {
+	err := r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, actor Membership) error {
+		_, target, err := readWithMembership(tx, id, targetID)
+		if err != nil {
+			return err
+		}
+		noop, err := decide(c, actor, target)
+		if err != nil || noop {
+			return err
+		}
+		// The lock makes a duplicate impossible; DO NOTHING keeps it harmless.
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&creator{ChallengeID: id, UserID: targetID}).Error; err != nil {
+			return fmt.Errorf("insert creator: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("add creator: %w", err)
+	}
+	return nil
+}
+
 // abandonParticipation turns the active participation of userID in
 // challenge id into an abandon at the given instant: by the user's choice,
 // or by an exclusion, both shown alike.
