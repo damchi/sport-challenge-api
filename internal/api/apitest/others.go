@@ -63,3 +63,7 @@ func (unimplemented) GetChallenge(context.Context, api.GetChallengeRequestObject
 func (unimplemented) UpdateChallenge(context.Context, api.UpdateChallengeRequestObject) (api.UpdateChallengeResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) JoinChallenge(context.Context, api.JoinChallengeRequestObject) (api.JoinChallengeResponseObject, error) {
+	return nil, errNotImplemented
+}

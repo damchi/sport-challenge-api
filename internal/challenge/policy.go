@@ -92,22 +92,38 @@ func RequireView(role Role, visibility string) error {
 	return nil
 }
 
-// CanJoin reports whether role may join a challenge of that visibility at
-// now (README §5.7): a public one for every logged-in user, a private one on
-// invitation, strictly before deadline (the end of week 1), and never twice:
-// a participant, active or abandoned, cannot join again. The profile
-// completeness is checked apart (profile_incomplete).
-func CanJoin(role Role, visibility string, now, deadline time.Time) bool {
-	if !now.Before(deadline) {
-		return false
+// CanJoin reports whether a user with membership m may join a challenge of
+// that visibility at now: JoinRefusal gives no reason.
+func CanJoin(m Membership, visibility string, now, deadline time.Time) bool {
+	return JoinRefusal(m, visibility, now, deadline) == nil
+}
+
+// JoinRefusal is the join rule of README §5.7, with the reason of a refusal:
+// a challenge the user may not see is not found (404); a public one is open
+// to every logged-in user and a private one on invitation, strictly before
+// deadline, the end of week 1 (422 registration_closed); never twice: an
+// active participant is already in (409 already_participant), an abandoned
+// one is out for good (422 participation_abandoned), creators included. It
+// reads the participation itself, not the role: a creator who abandoned
+// keeps the creator role but no longer competes. The profile completeness is
+// checked apart (profile_incomplete).
+func JoinRefusal(m Membership, visibility string, now, deadline time.Time) error {
+	if err := RequireView(RoleOf(m), visibility); err != nil {
+		return err
 	}
-	switch role {
-	case RoleOutsider:
-		return visibility == VisibilityPublic
-	case RoleInvited:
-		return visibility == VisibilityPublic || visibility == VisibilityPrivate
+	switch {
+	case m.Participant == ParticipantActive:
+		return apperr.New(apperr.CodeAlreadyParticipant, nil)
+	case m.Participant == ParticipantAbandoned:
+		return apperr.New(apperr.CodeParticipationAbandoned, nil)
+	case m.Creator:
+		// Every creator is a participant (tickets 029, 036): none to add.
+		return apperr.New(apperr.CodeAlreadyParticipant, nil)
+	case !now.Before(deadline):
+		return apperr.New(apperr.CodeRegistrationClosed, nil)
 	default:
-		return false
+		// Visible and not in: public for everyone, private for the invited.
+		return nil
 	}
 }
 

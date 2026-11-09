@@ -312,6 +312,56 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/join:
+    post:
+      operationId: joinChallenge
+      summary: Join a challenge
+      description: |
+        Makes the user an active participant, ranked in every category.
+        Open until the end of week 1 (`registration_closed` from that exact
+        instant); a public challenge to every logged-in user, a private one
+        on invitation (otherwise the same 404 as a missing challenge). Never
+        twice: `already_participant`, or `participation_abandoned` after an
+        abandon, which is final. Requires a complete profile
+        (`profile_incomplete`).
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: Joined; the challenge as the user now sees it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeDetail"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ChallengeNotFound"
+        "409":
+          description: Already a participant (`already_participant`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            Registration closed after week 1 (`registration_closed`), abandoned
+            for good (`participation_abandoned`), or incomplete profile
+            (`profile_incomplete`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -402,6 +452,9 @@ components:
         - challenge_not_found
         - forbidden
         - field_not_editable
+        - registration_closed
+        - already_participant
+        - participation_abandoned
         - not_found
         - validation_failed
         - internal_error

@@ -20,6 +20,7 @@ type repository interface {
 	Get(ctx context.Context, id, actorID string) (Challenge, Membership, error)
 	Categories(ctx context.Context, id string) ([]Category, error)
 	UpdateText(ctx context.Context, id string, changes TextChanges) error
+	Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -163,7 +164,7 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
 		Role:                 role,
 		Participant:          m.Participant,
 		Status:               StatusAt(now, c.StartsAt, c.EndsAt),
-		CanJoin:              CanJoin(role, c.Visibility, now, deadline),
+		CanJoin:              CanJoin(m, c.Visibility, now, deadline),
 		RegistrationDeadline: deadline,
 		CurrentWeek:          week,
 		WeekEndsAt:           weekEnd,
@@ -208,6 +209,48 @@ func (s *Service) UpdateText(ctx context.Context, actorID, id string, frozen []s
 	}
 	if err != nil {
 		return Detail{}, fmt.Errorf("update challenge: %w", err)
+	}
+	return s.Get(ctx, actorID, id)
+}
+
+// Join makes actorID an active participant of challenge id, joined at the
+// clock's now once the challenge is locked. The join rule (JoinRefusal: visibility, already in,
+// abandoned, end of week 1), then the complete profile (422
+// profile_incomplete), are checked on the challenge locked by the
+// repository, in the transaction that writes the participation. The
+// profile is read before the transaction: reading it inside would take a
+// second pool connection while the lock is held, and concurrent joins could
+// exhaust the pool. It returns the challenge as the actor now sees it.
+func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) {
+	complete, err := s.profiles.ProfileComplete(ctx, actorID)
+	if err != nil {
+		return Detail{}, fmt.Errorf("check profile: %w", err)
+	}
+	err = s.repo.Join(ctx, id, actorID, func(c Challenge, m Membership) (time.Time, error) {
+		// Read once the lock is held: a join waiting for it is judged at
+		// the instant it may write, never before the end of week 1.
+		now := s.clock.Now()
+		// Visibility first: nothing else may answer for a hidden challenge.
+		if err := RequireView(RoleOf(m), c.Visibility); err != nil {
+			return time.Time{}, err
+		}
+		loc, err := location(c.Timezone)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
+		}
+		if err := JoinRefusal(m, c.Visibility, now, RegistrationDeadline(c.StartsAt, loc)); err != nil {
+			return time.Time{}, err
+		}
+		if !complete {
+			return time.Time{}, apperr.New(apperr.CodeProfileIncomplete, nil)
+		}
+		return now, nil
+	})
+	if errors.Is(err, errChallengeNotFound) {
+		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return Detail{}, err
 	}
 	return s.Get(ctx, actorID, id)
 }

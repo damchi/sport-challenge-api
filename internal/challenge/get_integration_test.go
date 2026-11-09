@@ -6,8 +6,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
@@ -157,5 +160,124 @@ func TestUpdateTextStoresTheChange(t *testing.T) {
 	}
 	if err := pool.QueryRow(t.Context(), "SELECT title FROM challenges WHERE id = $1", c.ID).Scan(&stored); err != nil || stored != "New title" {
 		t.Fatalf("title %q (%v), want the deleted challenge untouched", stored, err)
+	}
+}
+
+// joinFixture is a public challenge of 6 weeks from 2026-03-04 (Toronto)
+// created by a creator, and a service whose clock the test moves.
+func joinFixture(t *testing.T) (svc *Service, clk *clock.FakeClock, pool *pgxpool.Pool, challengeID string) {
+	t.Helper()
+	pseudo := "marie_92"
+	creatorSvc, pool, creatorID := setup(t, &pseudo)
+	c, err := creatorSvc.Create(t.Context(), creatorID, valid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clk = clock.NewFake(now)
+	return NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, clk), clk, pool, c.ID
+}
+
+func insertProfile(t *testing.T, pool *pgxpool.Pool, subject string) string {
+	t.Helper()
+	var id string
+	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ($1, $1) RETURNING id", subject).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestJoinAtTheEndOfWeekOne(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	deadline := time.Date(2026, 3, 11, 4, 0, 0, 0, time.UTC) // local midnight, after the time change
+
+	early := insertProfile(t, pool, "join_early")
+	clk.Set(deadline.Add(-time.Second))
+	if _, err := svc.Join(t.Context(), early, id); err != nil {
+		t.Fatalf("one second before the end of week 1: %v", err)
+	}
+	var status string
+	var joinedAt time.Time
+	if err := pool.QueryRow(t.Context(), "SELECT status, joined_at FROM participants WHERE challenge_id = $1 AND user_id = $2", id, early).Scan(&status, &joinedAt); err != nil {
+		t.Fatal(err)
+	}
+	if status != "active" || !joinedAt.Equal(deadline.Add(-time.Second)) {
+		t.Fatalf("stored %s joined at %s, want active at the clock's now", status, joinedAt)
+	}
+
+	late := insertProfile(t, pool, "join_late")
+	clk.Set(deadline)
+	if _, err := svc.Join(t.Context(), late, id); !errors.Is(err, apperr.New(apperr.CodeRegistrationClosed, nil)) {
+		t.Fatalf("at the exact end of week 1: %v, want registration_closed", err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1", late); n != 0 {
+		t.Fatalf("%d participations stored after the deadline, want 0", n)
+	}
+}
+
+func TestJoinAbandonIsFinal(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	user := insertProfile(t, pool, "join_quitter")
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, 'abandoned', $3, $3)", id, user, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Join(t.Context(), user, id); !errors.Is(err, apperr.New(apperr.CodeParticipationAbandoned, nil)) {
+		t.Fatalf("error = %v, want participation_abandoned", err)
+	}
+}
+
+func TestJoinRefusalsStoreNothing(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	incomplete := insertTestUser(t, pool, "join_no_pseudo")
+	if _, err := svc.Join(t.Context(), incomplete, id); !errors.Is(err, apperr.New(apperr.CodeProfileIncomplete, nil)) {
+		t.Fatalf("error = %v, want profile_incomplete", err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET deleted_at = now() WHERE id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	user := insertProfile(t, pool, "join_deleted")
+	if _, err := svc.Join(t.Context(), user, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("deleted challenge: %v, want challenge_not_found", err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id IN ($1, $2)", incomplete, user); n != 0 {
+		t.Fatalf("%d participations stored, want 0", n)
+	}
+}
+
+// TestJoinRace: the same user joins from 10 requests at once; the lock on
+// the challenge makes exactly one succeed and the others see them in.
+func TestJoinRace(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	user := insertProfile(t, pool, "join_racer")
+	const n = 10
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range n {
+		wg.Go(func() {
+			<-start
+			_, errs[i] = svc.Join(t.Context(), user, id)
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	var joined int
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			joined++
+		case !errors.Is(err, apperr.New(apperr.CodeAlreadyParticipant, nil)):
+			t.Fatalf("request %d: %v, want nil or already_participant", i, err)
+		}
+	}
+	if joined != 1 {
+		t.Fatalf("%d requests joined, want exactly 1", joined)
+	}
+	if c := count(t, pool, "SELECT count(*) FROM participants WHERE challenge_id = $1 AND user_id = $2", id, user); c != 1 {
+		t.Fatalf("%d participations stored, want 1", c)
 	}
 }

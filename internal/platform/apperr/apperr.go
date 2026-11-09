@@ -24,6 +24,13 @@ const (
 	CodeNotFound          Code = "not_found"
 	// CodeForbidden refuses an action on a resource the user may see.
 	CodeForbidden Code = "forbidden"
+	// CodeRegistrationClosed refuses joining from the end of week 1.
+	CodeRegistrationClosed Code = "registration_closed"
+	// CodeAlreadyParticipant refuses joining a challenge twice.
+	CodeAlreadyParticipant Code = "already_participant"
+	// CodeParticipationAbandoned refuses joining again after abandoning:
+	// abandoning is final.
+	CodeParticipationAbandoned Code = "participation_abandoned"
 	// CodeFieldNotEditable refuses a change to a field frozen at creation.
 	CodeFieldNotEditable Code = "field_not_editable"
 	// CodeChallengeNotFound also answers a private challenge the user may
@@ -53,6 +60,13 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "Profile incomplete"}, true
 	case CodeForbidden:
 		return definition{http.StatusForbidden, "Forbidden"}, true
+	case CodeRegistrationClosed:
+		return definition{http.StatusUnprocessableEntity, "Registration closed"}, true
+	case CodeAlreadyParticipant:
+		return definition{http.StatusConflict, "Already a participant"}, true
+	case CodeParticipationAbandoned:
+		// A business rule (abandoning is final), not a data conflict: 422.
+		return definition{http.StatusUnprocessableEntity, "Participation abandoned"}, true
 	case CodeFieldNotEditable:
 		return definition{http.StatusUnprocessableEntity, "Field not editable"}, true
 	case CodeChallengeNotFound:

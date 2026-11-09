@@ -400,3 +400,64 @@ func TestUpdateChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 		t.Fatalf("bodies %v and %v, want the same challenge_not_found", bodies[0], bodies[1])
 	}
 }
+
+func TestJoinChallenge(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/join"
+	before := clock.NewFake(time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	tests := []struct {
+		name       string
+		repo       *fakeRepository
+		profile    bool
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "joined", repo: &fakeRepository{challenge: stored(VisibilityPublic)}, profile: true, wantStatus: 201},
+		{name: "already in", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantActive}}, profile: true, wantStatus: 409, wantCode: "already_participant"},
+		{name: "abandoned", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantAbandoned}}, profile: true, wantStatus: 422, wantCode: "participation_abandoned"},
+		{name: "private", repo: &fakeRepository{challenge: stored(VisibilityPrivate)}, profile: true, wantStatus: 404, wantCode: "challenge_not_found"},
+		{name: "incomplete profile", repo: &fakeRepository{challenge: stored(VisibilityPublic)}, wantStatus: 422, wantCode: "profile_incomplete"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{complete: tt.profile}, fakeCatalogue{}, before), http.MethodPost, target, "")
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if tt.wantStatus == 201 {
+				if out["my_role"] != "participant" || out["my_status"] != "active" || out["can_join"] != false {
+					t.Fatalf("body %v, want the actor now an active participant", out)
+				}
+				return
+			}
+			if e, _ := out["error"].(map[string]any); e["code"] != tt.wantCode {
+				t.Fatalf("code %v, want %s", e["code"], tt.wantCode)
+			}
+		})
+	}
+
+	// Registration closed: the clock at the exact end of week 1.
+	closed := clock.NewFake(time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC))
+	rec, out := serve(t, NewService(&fakeRepository{challenge: stored(VisibilityPublic)}, fakeProfiles{complete: true}, fakeCatalogue{}, closed), http.MethodPost, target, "")
+	if e, _ := out["error"].(map[string]any); rec.Code != 422 || e["code"] != "registration_closed" {
+		t.Fatalf("got %d %v, want 422 registration_closed", rec.Code, out)
+	}
+}
+
+// TestJoinChallengeNotFoundIsTheSameAnswer: joining a missing challenge and
+// a private one without invitation answer the same 404.
+func TestJoinChallengeNotFoundIsTheSameAnswer(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/join"
+	var bodies []map[string]any
+	for _, repo := range []*fakeRepository{{}, {challenge: stored(VisibilityPrivate)}} {
+		rec, out := serve(t, NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPost, target, "")
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status %d, want 404", rec.Code)
+		}
+		e, _ := out["error"].(map[string]any)
+		delete(e, "request_id")
+		bodies = append(bodies, out)
+	}
+	if !reflect.DeepEqual(bodies[0], bodies[1]) {
+		t.Fatalf("bodies %v and %v, want the same challenge_not_found", bodies[0], bodies[1])
+	}
+}
