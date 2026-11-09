@@ -343,6 +343,9 @@ func TestUpdateChallenge(t *testing.T) {
 		{name: "frozen fields", membership: creator, body: `{"title":"New title","weeks":8,"visibility":"private"}`, wantStatus: 422, wantCode: "field_not_editable", wantFields: "visibility,weeks"},
 		{name: "unknown field", membership: creator, body: `{"titel":"New title"}`, wantStatus: 400, wantCode: "validation_failed"},
 		{name: "null title", membership: creator, body: `{"title":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
+		{name: "null description", membership: creator, body: `{"description":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "description"},
+		{name: "description over 2000 characters", membership: creator, body: `{"description":"` + strings.Repeat("é", 2001) + `"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "description"},
+		{name: "creator who abandoned", membership: Membership{Creator: true, Participant: ParticipantAbandoned}, body: `{"title":"New title"}`, wantStatus: 200},
 		{name: "title too short", membership: creator, body: `{"title":" ab "}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
 	}
 	for _, tt := range tests {
@@ -368,5 +371,27 @@ func TestUpdateChallenge(t *testing.T) {
 				t.Fatal("challenge written despite the refusal")
 			}
 		})
+	}
+}
+
+// TestUpdateChallengeNotFoundIsTheSameAnswer: a missing challenge and a
+// private one the actor may not see answer the same 404 on edit too.
+func TestUpdateChallengeNotFoundIsTheSameAnswer(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111"
+	var bodies []map[string]any
+	for _, repo := range []*fakeRepository{{}, {challenge: stored(VisibilityPrivate)}} {
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPatch, target, `{"title":"New title"}`)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status %d, want 404", rec.Code)
+		}
+		e, _ := out["error"].(map[string]any)
+		delete(e, "request_id")
+		bodies = append(bodies, out)
+		if repo.updated != nil {
+			t.Fatal("challenge written")
+		}
+	}
+	if !reflect.DeepEqual(bodies[0], bodies[1]) {
+		t.Fatalf("bodies %v and %v, want the same challenge_not_found", bodies[0], bodies[1])
 	}
 }

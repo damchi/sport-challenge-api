@@ -552,7 +552,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Réservé aux créateurs (sinon 403 `forbidden`).
 - [ ] Seuls `title` et `description` sont modifiables, à tout moment, y compris après le début.
-- [ ] Tout autre champ du challenge (catégories, dates, visibilité…) : 422 `field_not_editable`, avec les champs dans `params.fields` ; un champ inconnu reste un 400 `validation_failed`. Ordre des contrôles : challenge visible (sinon 404), créateur (sinon 403), champs figés (422), longueurs (400). Une `description` vide l'efface ; `null` est refusé.
+- [ ] Tout autre champ du challenge (catégories, dates, visibilité…) : 422 `field_not_editable`, avec les champs dans `params.fields` ; un champ inconnu reste un 400 `validation_failed`. Ordre des contrôles, pour un corps conforme au contrat : challenge visible (sinon 404), créateur (sinon 403), champs figés (422), longueurs (400) ; un corps hors contrat (champ inconnu, `null`, description trop longue) répond 400 avant tout, sans rien révéler. Un champ figé envoyé à `null` est ignoré. Modifiable aussi après la fin du challenge (« à tout moment »). Une `description` vide l'efface ; `null` est refusé.
 - [ ] Mêmes validations de longueur que la création.
 
 - [ ] Ajoute à `policy.go` la règle `CanEdit` (créateurs seulement), avec ses tests « autorisé » et « interdit ».

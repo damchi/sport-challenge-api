@@ -508,7 +508,7 @@ components:
         description:
           type: string
           maxLength: 2000
-          description: 2000 characters at most.
+          description: 2000 characters at most; an empty string means no description.
         visibility:
           type: string
           enum: [public, private]

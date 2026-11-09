@@ -80,9 +80,14 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 	// catalogue says (README §2.4).
 	factors[referenceSport] = 1
 
+	// An empty description is no description, as on edit.
+	description := draft.Description
+	if description != nil && *description == "" {
+		description = nil
+	}
 	c, err := s.repo.Create(ctx, Challenge{
 		Title:            strings.TrimSpace(draft.Title),
-		Description:      draft.Description,
+		Description:      description,
 		Visibility:       draft.Visibility,
 		MembersCanInvite: draft.MembersCanInvite,
 		Timezone:         draft.Timezone,

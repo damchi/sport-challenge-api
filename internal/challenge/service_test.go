@@ -168,6 +168,18 @@ func TestServiceCreateFreezesRunAtOne(t *testing.T) {
 	}
 }
 
+func TestServiceCreateEmptyDescriptionIsNone(t *testing.T) {
+	repo := &fakeRepository{}
+	empty := ""
+	if _, err := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, clock.NewFake(now)).
+		Create(t.Context(), actor, with(func(d *Draft) { d.Description = &empty })); err != nil {
+		t.Fatal(err)
+	}
+	if repo.created.Description != nil {
+		t.Fatalf("description %q stored, want none", *repo.created.Description)
+	}
+}
+
 func TestServiceCreateDoesNotChangeTheCatalogue(t *testing.T) {
 	catalogue := suggested()
 	svc := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{factors: catalogue}, clock.NewFake(now))
@@ -393,6 +405,7 @@ func TestServiceUpdateText(t *testing.T) {
 		wantFields string
 	}{
 		{name: "creator edits, even after the end", visibility: VisibilityPublic, membership: creator, changes: TextChanges{Title: str(" New title ")}},
+		{name: "creator who abandoned keeps the right", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantAbandoned}, changes: TextChanges{Title: str("New title")}},
 		{name: "participant: forbidden", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, changes: TextChanges{Title: str("New title")}, wantCode: apperr.CodeForbidden},
 		{name: "outsider of a public challenge: forbidden", visibility: VisibilityPublic, changes: TextChanges{Title: str("New title")}, wantCode: apperr.CodeForbidden},
 		{name: "outsider of a private challenge: not found", visibility: VisibilityPrivate, changes: TextChanges{Title: str("New title")}, wantCode: apperr.CodeChallengeNotFound},
