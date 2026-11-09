@@ -145,3 +145,30 @@ func TestCanJoin(t *testing.T) {
 		})
 	}
 }
+
+// TestCanEdit: creators only (README §5.7), every other role forbidden.
+func TestCanEdit(t *testing.T) {
+	for role, want := range map[Role]bool{
+		RoleCreator:     true,
+		RoleParticipant: false,
+		RoleAbandoned:   false,
+		RoleInvited:     false,
+		RoleOutsider:    false,
+		Role(99):        false,
+	} {
+		if got := CanEdit(role); got != want {
+			t.Errorf("CanEdit(%d) = %v, want %v", role, got, want)
+		}
+	}
+}
+
+func TestRequireEdit(t *testing.T) {
+	if err := RequireEdit(RoleCreator); err != nil {
+		t.Fatalf("creator refused: %v", err)
+	}
+	err := RequireEdit(RoleParticipant)
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeForbidden || appErr.Status != http.StatusForbidden {
+		t.Fatalf("RequireEdit(participant) = %v, want 403 forbidden", err)
+	}
+}

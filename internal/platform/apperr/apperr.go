@@ -22,6 +22,10 @@ const (
 	// the pseudo is set: a condition to meet, not a missing right (422).
 	CodeProfileIncomplete Code = "profile_incomplete"
 	CodeNotFound          Code = "not_found"
+	// CodeForbidden refuses an action on a resource the user may see.
+	CodeForbidden Code = "forbidden"
+	// CodeFieldNotEditable refuses a change to a field frozen at creation.
+	CodeFieldNotEditable Code = "field_not_editable"
 	// CodeChallengeNotFound also answers a private challenge the user may
 	// not see: its existence is never revealed.
 	CodeChallengeNotFound Code = "challenge_not_found"
@@ -47,6 +51,10 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnauthorized, "Account deleted"}, true
 	case CodeProfileIncomplete:
 		return definition{http.StatusUnprocessableEntity, "Profile incomplete"}, true
+	case CodeForbidden:
+		return definition{http.StatusForbidden, "Forbidden"}, true
+	case CodeFieldNotEditable:
+		return definition{http.StatusUnprocessableEntity, "Field not editable"}, true
 	case CodeChallengeNotFound:
 		return definition{http.StatusNotFound, "Challenge not found"}, true
 	case CodeNotFound:

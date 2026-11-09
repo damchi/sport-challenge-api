@@ -151,3 +151,31 @@ func (r *Repository) Categories(ctx context.Context, id string) ([]Category, err
 	}
 	return cats, nil
 }
+
+// UpdateText writes the changed title and description of challenge id
+// (an empty description is stored as none). A deleted challenge is never
+// written and gives errChallengeNotFound.
+func (r *Repository) UpdateText(ctx context.Context, id string, changes TextChanges) error {
+	columns := map[string]any{}
+	if changes.Title != nil {
+		columns["title"] = *changes.Title
+	}
+	if d := changes.Description; d != nil {
+		if *d == "" {
+			columns["description"] = nil
+		} else {
+			columns["description"] = *d
+		}
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+	res := r.db.WithContext(ctx).Model(&Challenge{}).Where("id = ? AND deleted_at IS NULL", id).Updates(columns)
+	if res.Error != nil {
+		return fmt.Errorf("update challenge: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("update challenge: %w", errChallengeNotFound)
+	}
+	return nil
+}

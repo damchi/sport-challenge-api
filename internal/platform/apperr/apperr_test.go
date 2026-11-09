@@ -19,6 +19,8 @@ func TestNew(t *testing.T) {
 		{CodeProfileIncomplete, http.StatusUnprocessableEntity},
 		{CodeNotFound, http.StatusNotFound},
 		{CodeChallengeNotFound, http.StatusNotFound},
+		{CodeForbidden, http.StatusForbidden},
+		{CodeFieldNotEditable, http.StatusUnprocessableEntity},
 		{CodeValidationFailed, http.StatusBadRequest},
 		{CodeInternal, http.StatusInternalServerError},
 	}

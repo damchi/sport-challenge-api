@@ -71,10 +71,10 @@ type Window struct {
 func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Window, error) {
 	var fields []string
 
-	if n := utf8.RuneCountInString(strings.TrimSpace(draft.Title)); n < minTitle || n > maxTitle || hasControl(draft.Title, "") {
+	if !validTitle(draft.Title) {
 		fields = append(fields, "title")
 	}
-	if d := draft.Description; d != nil && (utf8.RuneCountInString(*d) > maxDescription || hasControl(*d, "\n\r\t")) {
+	if d := draft.Description; d != nil && !validDescription(*d) {
 		fields = append(fields, "description")
 	}
 	if draft.Visibility != VisibilityPublic && draft.Visibility != VisibilityPrivate {
@@ -118,6 +118,48 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 		return Window{}, apperr.InvalidFields(nil, fields...)
 	}
 	return window, nil
+}
+
+// validTitle checks a title, at creation and on edit: 3 to 80 characters
+// once surrounding spaces are removed, no control character.
+func validTitle(title string) bool {
+	n := utf8.RuneCountInString(strings.TrimSpace(title))
+	return n >= minTitle && n <= maxTitle && !hasControl(title, "")
+}
+
+// validDescription checks a description: 2000 characters at most, no
+// control character but line breaks and tabs.
+func validDescription(d string) bool {
+	return utf8.RuneCountInString(d) <= maxDescription && !hasControl(d, "\n\r\t")
+}
+
+// TextChanges are the fields of a challenge its creators may edit at any
+// time; nil leaves a field as is, and an empty description removes it.
+type TextChanges struct {
+	Title       *string
+	Description *string
+}
+
+// ValidateText checks changes with the rules of the creation and returns
+// them normalized (title trimmed).
+func ValidateText(changes TextChanges) (TextChanges, error) {
+	var fields []string
+	if t := changes.Title; t != nil {
+		if !validTitle(*t) {
+			fields = append(fields, "title")
+		} else {
+			trimmed := strings.TrimSpace(*t)
+			changes.Title = &trimmed
+		}
+	}
+	if d := changes.Description; d != nil && !validDescription(*d) {
+		fields = append(fields, "description")
+	}
+	if len(fields) > 0 {
+		slices.Sort(fields)
+		return TextChanges{}, apperr.InvalidFields(nil, fields...)
+	}
+	return changes, nil
 }
 
 // hasControl reports whether s holds a control character other than those

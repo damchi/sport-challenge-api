@@ -264,6 +264,54 @@ paths:
           $ref: "#/components/responses/ChallengeNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateChallenge
+      summary: Edit the title and the description
+      description: |
+        Creators only (403 `forbidden`), at any time, even after the start.
+        Only `title` and `description` change; every other field of the
+        challenge is frozen at creation and answers 422 `field_not_editable`
+        with the fields in `params.fields`. An absent field is left as is;
+        an empty `description` removes it. `null` is refused for `title` and
+        `description`; a frozen field sent as `null` changes nothing and is
+        ignored, like an absent one.
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChallengeUpdate"
+      responses:
+        "200":
+          description: The challenge after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeDetail"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ChallengeNotFound"
+        "422":
+          description: A field frozen at creation was sent (`field_not_editable`, `params.fields`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -282,6 +330,12 @@ components:
           description: '`Bearer`, or `Bearer error="invalid_token"` for an invalid or expired token (RFC 6750).'
           schema:
             type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: The resource is visible but the action is not allowed to the user (`forbidden`).
       content:
         application/json:
           schema:
@@ -346,6 +400,8 @@ components:
         - account_deleted
         - profile_incomplete
         - challenge_not_found
+        - forbidden
+        - field_not_editable
         - not_found
         - validation_failed
         - internal_error
@@ -452,7 +508,7 @@ components:
         description:
           type: string
           maxLength: 2000
-          description: 2000 characters at most.
+          description: 2000 characters at most; an empty string means no description.
         visibility:
           type: string
           enum: [public, private]
@@ -660,3 +716,36 @@ components:
           format: date-time
           nullable: true
           description: End of the current week; null before the start and after the end.
+    ChallengeUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          description: |
+            3 to 80 characters once surrounding spaces are removed; checked by
+            the service.
+        description:
+          type: string
+          maxLength: 2000
+          description: 2000 characters at most; an empty string removes the description.
+        visibility:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        members_can_invite:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        timezone:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        start_date:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        weeks:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        elimination_step_meters:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        distance_factors:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        categories:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        starts_at:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+        ends_at:
+          description: Frozen at creation; sending it answers 422 `field_not_editable`.

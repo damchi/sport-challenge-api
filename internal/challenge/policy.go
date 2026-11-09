@@ -110,3 +110,18 @@ func CanJoin(role Role, visibility string, now, deadline time.Time) bool {
 		return false
 	}
 }
+
+// CanEdit reports whether role may edit the title and the description of a
+// challenge (README §5.7): its creators only.
+func CanEdit(role Role) bool {
+	return role == RoleCreator
+}
+
+// RequireEdit is CanEdit for a use case: 403 forbidden, as the actor may
+// already see the challenge.
+func RequireEdit(role Role) error {
+	if !CanEdit(role) {
+		return apperr.New(apperr.CodeForbidden, nil)
+	}
+	return nil
+}
