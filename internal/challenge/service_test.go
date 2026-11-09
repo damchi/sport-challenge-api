@@ -410,6 +410,7 @@ func TestServiceUpdateText(t *testing.T) {
 		{name: "outsider of a public challenge: forbidden", visibility: VisibilityPublic, changes: TextChanges{Title: str("New title")}, wantCode: apperr.CodeForbidden},
 		{name: "outsider of a private challenge: not found", visibility: VisibilityPrivate, changes: TextChanges{Title: str("New title")}, wantCode: apperr.CodeChallengeNotFound},
 		{name: "frozen fields, sorted", visibility: VisibilityPublic, membership: creator, frozen: []string{"weeks", "categories"}, wantCode: apperr.CodeFieldNotEditable, wantFields: "categories,weeks"},
+		{name: "frozen fields on a private challenge not visible: not found first", visibility: VisibilityPrivate, frozen: []string{"weeks"}, wantCode: apperr.CodeChallengeNotFound},
 		{name: "frozen fields are checked after the right", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, frozen: []string{"weeks"}, wantCode: apperr.CodeForbidden},
 		{name: "invalid title", visibility: VisibilityPublic, membership: creator, changes: TextChanges{Title: str("ab")}, wantCode: apperr.CodeValidationFailed, wantFields: "title"},
 		{name: "invalid description", visibility: VisibilityPublic, membership: creator, changes: TextChanges{Description: str("a\x00b")}, wantCode: apperr.CodeValidationFailed, wantFields: "description"},

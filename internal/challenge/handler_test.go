@@ -379,8 +379,13 @@ func TestUpdateChallenge(t *testing.T) {
 func TestUpdateChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111"
 	var bodies []map[string]any
-	for _, repo := range []*fakeRepository{{}, {challenge: stored(VisibilityPrivate)}} {
-		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPatch, target, `{"title":"New title"}`)
+	// The private one also gets a frozen field: 404 comes before 422, so the
+	// answer still tells nothing.
+	for body, repo := range map[string]*fakeRepository{
+		`{"title":"New title"}`:           {},
+		`{"title":"New title","weeks":8}`: {challenge: stored(VisibilityPrivate)},
+	} {
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPatch, target, body)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status %d, want 404", rec.Code)
 		}
