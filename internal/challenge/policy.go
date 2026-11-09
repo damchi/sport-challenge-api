@@ -92,6 +92,13 @@ func RequireView(role Role, visibility string) error {
 	return nil
 }
 
+// ParticipantsRefusal tells why a user with membership m may not list the
+// participants of a challenge of that visibility, or nil if they may: the
+// list is visible to whoever sees the challenge, and hidden (404) otherwise.
+func ParticipantsRefusal(m Membership, visibility string) error {
+	return RequireView(RoleOf(m), visibility)
+}
+
 // CanJoin reports whether a user with membership m may join a challenge of
 // that visibility at now: JoinRefusal gives no reason.
 func CanJoin(m Membership, visibility string, now, deadline time.Time) bool {

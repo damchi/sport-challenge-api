@@ -304,6 +304,62 @@ func (h *Handler) AbandonChallenge(ctx context.Context, req api.AbandonChallenge
 	return api.AbandonChallenge200JSONResponse(out), nil
 }
 
+// ListParticipants answers a page of the participants of a challenge.
+func (h *Handler) ListParticipants(ctx context.Context, req api.ListParticipantsRequestObject) (api.ListParticipantsResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	p := req.Params
+	limit := defaultLimit
+	if p.Limit != nil {
+		limit = *p.Limit
+	}
+	var after *ParticipantPosition
+	if p.Cursor != nil {
+		after = &ParticipantPosition{}
+		if err := httpx.DecodeCursor(*p.Cursor, after); err != nil {
+			return nil, err
+		}
+		// Normalized, and checked whole, as for ListChallenges.
+		id, err := uuid.Parse(after.UserID)
+		if err != nil {
+			return nil, apperr.InvalidFields(err, "cursor")
+		}
+		after.UserID = id.String()
+		if after.JoinedAt.IsZero() {
+			return nil, apperr.InvalidFields(nil, "cursor")
+		}
+	}
+
+	page, err := h.service.Participants(ctx, actorID, req.ChallengeId.String(), limit, after)
+	if err != nil {
+		return nil, err
+	}
+	out := api.ParticipantPage{Items: make([]api.Participant, 0, len(page.Items))}
+	for _, participant := range page.Items {
+		id, err := uuid.Parse(participant.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("participant id: %w", err)
+		}
+		// Avatar stays null in V1: the avatar upload comes with SC-API-023.
+		out.Items = append(out.Items, api.Participant{
+			UserId:   id,
+			Pseudo:   participant.Pseudo,
+			Status:   api.ParticipantStatus(participant.Status),
+			JoinedAt: participant.JoinedAt.UTC(),
+		})
+	}
+	if page.Next != nil {
+		cursor, err := httpx.EncodeCursor(page.Next)
+		if err != nil {
+			return nil, err
+		}
+		out.NextCursor = &cursor
+	}
+	return api.ListParticipants200JSONResponse(out), nil
+}
+
 // ExcludeParticipant excludes a participant on behalf of a creator.
 func (h *Handler) ExcludeParticipant(ctx context.Context, req api.ExcludeParticipantRequestObject) (api.ExcludeParticipantResponseObject, error) {
 	actorID, ok := auth.UserID(ctx)

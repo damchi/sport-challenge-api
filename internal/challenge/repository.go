@@ -155,6 +155,30 @@ func (r *Repository) Get(ctx context.Context, id, actorID string) (Challenge, Me
 	return readWithMembership(r.db.WithContext(ctx), id, actorID)
 }
 
+// Participants returns up to limit participations of challenge id, abandoned
+// ones included, in order of registration (joined_at, user_id), after the
+// position after when set. Pseudos are not read: they belong to module user.
+func (r *Repository) Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error) {
+	q := r.db.WithContext(ctx).Table("participants").
+		Select("user_id, status, joined_at").Where("challenge_id = ?", id)
+	if after != nil {
+		q = q.Where("(joined_at, user_id) > (?, ?)", after.JoinedAt, after.UserID)
+	}
+	var rows []struct {
+		UserID   string
+		Status   string
+		JoinedAt time.Time
+	}
+	if err := q.Order("joined_at, user_id").Limit(limit).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list participants: %w", err)
+	}
+	items := make([]Participant, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, Participant{UserID: row.UserID, Status: ParticipantStatus(row.Status), JoinedAt: row.JoinedAt})
+	}
+	return items, nil
+}
+
 // errAlreadyParticipant means the participation to insert already exists.
 var errAlreadyParticipant = errors.New("already a participant")
 

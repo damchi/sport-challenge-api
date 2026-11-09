@@ -25,11 +25,14 @@ type repository interface {
 	Exclude(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, time.Time, error)) error
 	AddCreator(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, error)) error
 	Delete(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
+	Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error)
 }
 
-// Profiles tells whether a user's profile is complete (module user).
+// Profiles tells whether a user's profile is complete, and gives the pseudos
+// of users, none for an anonymized account (module user).
 type Profiles interface {
 	ProfileComplete(ctx context.Context, userID string) (bool, error)
+	Pseudos(ctx context.Context, userIDs []string) (map[string]string, error)
 }
 
 // Catalogue gives the suggested factor of every sport with a distance
@@ -132,6 +135,51 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 		page.Items = items[:limit]
 		last := page.Items[limit-1]
 		page.Next = &Position{StartsAt: last.StartsAt, ID: last.ID}
+	}
+	return page, nil
+}
+
+// Participants returns a page of the participants of challenge id, visible
+// to whoever sees the challenge (ParticipantsRefusal): anyone else gets the
+// same 404 challenge_not_found as for a missing challenge. An anonymized
+// account has no pseudo.
+func (s *Service) Participants(ctx context.Context, actorID, id string, limit int, after *ParticipantPosition) (ParticipantPage, error) {
+	if limit < 1 {
+		return ParticipantPage{}, apperr.InvalidFields(nil, "limit")
+	}
+	c, m, err := s.repo.Get(ctx, id, actorID)
+	if errors.Is(err, errChallengeNotFound) {
+		return ParticipantPage{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return ParticipantPage{}, fmt.Errorf("list participants: %w", err)
+	}
+	if err := ParticipantsRefusal(m, c.Visibility); err != nil {
+		return ParticipantPage{}, err
+	}
+	// One more than asked tells whether a next page exists.
+	items, err := s.repo.Participants(ctx, id, limit+1, after)
+	if err != nil {
+		return ParticipantPage{}, fmt.Errorf("list participants: %w", err)
+	}
+	page := ParticipantPage{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		last := page.Items[limit-1]
+		page.Next = &ParticipantPosition{JoinedAt: last.JoinedAt, UserID: last.UserID}
+	}
+	ids := make([]string, len(page.Items))
+	for i, p := range page.Items {
+		ids[i] = p.UserID
+	}
+	pseudos, err := s.profiles.Pseudos(ctx, ids)
+	if err != nil {
+		return ParticipantPage{}, fmt.Errorf("list participants: %w", err)
+	}
+	for i := range page.Items {
+		if pseudo, ok := pseudos[page.Items[i].UserID]; ok {
+			page.Items[i].Pseudo = &pseudo
+		}
 	}
 	return page, nil
 }

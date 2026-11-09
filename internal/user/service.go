@@ -14,6 +14,7 @@ type repository interface {
 	GetOrCreateBySubject(ctx context.Context, subject string) (User, error)
 	GetByID(ctx context.Context, id string) (User, error)
 	UpdateProfile(ctx context.Context, id string, changes ProfileChanges) (User, error)
+	Pseudos(ctx context.Context, ids []string) (map[string]string, error)
 }
 
 // Service holds the use cases of the local users.
@@ -87,4 +88,13 @@ func (s *Service) ProfileComplete(ctx context.Context, id string) (bool, error) 
 		return false, err
 	}
 	return u.ProfileComplete(), nil
+}
+
+// Pseudos returns the pseudo of each user of ids that has one; an anonymized
+// user has none, and the apps show a neutral name.
+func (s *Service) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+	return s.repo.Pseudos(ctx, ids)
 }

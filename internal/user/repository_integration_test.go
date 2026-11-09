@@ -254,3 +254,27 @@ func TestUpdateProfileNeverWritesAnAnonymizedAccount(t *testing.T) {
 		t.Fatalf("pseudo %v, language %v written on an anonymized account, want nothing", pseudo, language)
 	}
 }
+
+func TestPseudos(t *testing.T) {
+	repo, pool := newRepository(t)
+	named := newUser(t, repo, "email|named")
+	if _, err := repo.UpdateProfile(t.Context(), named.ID, ProfileChanges{Pseudo: ptr("marie_92")}); err != nil {
+		t.Fatal(err)
+	}
+	unnamed := newUser(t, repo, "email|unnamed")
+	// An anonymized row that kept its pseudo: it is still never served.
+	var gone string
+	if err := pool.QueryRow(t.Context(),
+		"INSERT INTO users (auth_subject, pseudo, anonymized_at) VALUES ('anonymized|2', 'ghost', now()) RETURNING id").Scan(&gone); err != nil {
+		t.Fatal(err)
+	}
+	unknown := "00000000-0000-0000-0000-000000000000"
+
+	pseudos, err := repo.Pseudos(t.Context(), []string{named.ID, unnamed.ID, gone, unknown})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pseudos) != 1 || pseudos[named.ID] != "marie_92" {
+		t.Fatalf("pseudos %v, want only %s: marie_92", pseudos, named.ID)
+	}
+}

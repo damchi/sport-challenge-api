@@ -32,6 +32,22 @@ type fakeRepository struct {
 	target       Membership
 	creatorAdded bool
 	deletedAt    time.Time
+	// participants serve Participants; participantsAsked records the call.
+	participants      []Participant
+	participantsAsked *participantsCall
+}
+
+type participantsCall struct {
+	limit int
+	after *ParticipantPosition
+}
+
+func (f *fakeRepository) Participants(_ context.Context, _ string, limit int, after *ParticipantPosition) ([]Participant, error) {
+	f.participantsAsked = &participantsCall{limit: limit, after: after}
+	if len(f.participants) > limit {
+		return f.participants[:limit], nil
+	}
+	return f.participants, nil
 }
 
 func (f *fakeRepository) Get(context.Context, string, string) (Challenge, Membership, error) {
@@ -167,12 +183,18 @@ func (f *fakeRepository) Create(_ context.Context, c Challenge, joinedAt time.Ti
 }
 
 type fakeProfiles struct {
-	complete bool
-	err      error
+	complete  bool
+	err       error
+	pseudos   map[string]string
+	pseudoErr error
 }
 
 func (f fakeProfiles) ProfileComplete(context.Context, string) (bool, error) {
 	return f.complete, f.err
+}
+
+func (f fakeProfiles) Pseudos(context.Context, []string) (map[string]string, error) {
+	return f.pseudos, f.pseudoErr
 }
 
 type fakeCatalogue struct {
@@ -856,5 +878,127 @@ func TestServiceDeleteMissingAndFailure(t *testing.T) {
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("storage: %v, want it wrapped as an internal error", err)
+	}
+}
+
+// participants returns n participations joined one minute apart, the
+// second one abandoned.
+func participants(n int) []Participant {
+	items := make([]Participant, n)
+	for i := range items {
+		items[i] = Participant{
+			UserID:   fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1),
+			Status:   ParticipantActive,
+			JoinedAt: now.Add(time.Duration(i) * time.Minute),
+		}
+	}
+	if n > 1 {
+		items[1].Status = ParticipantAbandoned
+	}
+	return items
+}
+
+func TestServiceParticipants(t *testing.T) {
+	tests := []struct {
+		name      string
+		available int
+		limit     int
+		wantItems int
+		wantNext  bool
+	}{
+		{name: "more than a page", available: 5, limit: 2, wantItems: 2, wantNext: true},
+		{name: "exactly a page: no next page", available: 2, limit: 2, wantItems: 2},
+		{name: "less than a page", available: 1, limit: 20, wantItems: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPublic), participants: participants(tt.available)}
+			after := &ParticipantPosition{JoinedAt: now, UserID: "00000000-0000-0000-0000-000000000009"}
+			profiles := fakeProfiles{pseudos: map[string]string{"00000000-0000-0000-0000-000000000001": "marie_92"}}
+			page, err := NewService(repo, profiles, fakeCatalogue{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, after)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Items) != tt.wantItems || (page.Next != nil) != tt.wantNext {
+				t.Fatalf("%d items, next %v, want %d items, next %v", len(page.Items), page.Next, tt.wantItems, tt.wantNext)
+			}
+			if tt.wantNext {
+				last := page.Items[len(page.Items)-1]
+				if page.Next.UserID != last.UserID || !page.Next.JoinedAt.Equal(last.JoinedAt) {
+					t.Fatalf("next %+v, want the position of the last item %+v", page.Next, last)
+				}
+			}
+			// The query asks one more item, after the given position.
+			if q := repo.participantsAsked; q == nil || q.limit != tt.limit+1 || q.after != after {
+				t.Fatalf("query %+v, want limit %d after the cursor", q, tt.limit+1)
+			}
+			if p := page.Items[0].Pseudo; p == nil || *p != "marie_92" {
+				t.Fatalf("first pseudo %v, want marie_92", p)
+			}
+			// No pseudo (anonymized account): left nil, for a neutral name.
+			if len(page.Items) > 1 && (page.Items[1].Pseudo != nil || page.Items[1].Status != ParticipantAbandoned) {
+				t.Fatalf("second item %+v, want abandoned without pseudo", page.Items[1])
+			}
+		})
+	}
+}
+
+func TestServiceParticipantsVisibility(t *testing.T) {
+	tests := []struct {
+		name       string
+		visibility string
+		membership Membership
+		want       apperr.Code // empty: listed
+	}{
+		{name: "outsider of a public challenge", visibility: VisibilityPublic},
+		{name: "participant of a private challenge", visibility: VisibilityPrivate, membership: Membership{Participant: ParticipantActive}},
+		{name: "abandoned participant of a private challenge", visibility: VisibilityPrivate, membership: Membership{Participant: ParticipantAbandoned}},
+		{name: "outsider of a private challenge: hidden", visibility: VisibilityPrivate, want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership, participants: participants(2)}
+			_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", 20, nil)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("error = %v, want the list", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("error = %v, want %s", err, tt.want)
+			}
+			if repo.participantsAsked != nil {
+				t.Fatal("participants read despite the refusal")
+			}
+		})
+	}
+}
+
+func TestServiceParticipantsFailures(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	tests := []struct {
+		name     string
+		repo     *fakeRepository
+		profiles fakeProfiles
+		limit    int
+		wantCode apperr.Code
+		wantErr  error
+	}{
+		{name: "empty page", repo: &fakeRepository{challenge: stored(VisibilityPublic)}, limit: 0, wantCode: apperr.CodeValidationFailed},
+		{name: "missing challenge", repo: &fakeRepository{}, limit: 20, wantCode: apperr.CodeChallengeNotFound},
+		{name: "storage failure", repo: &fakeRepository{err: storageErr}, limit: 20, wantErr: storageErr},
+		{name: "pseudo failure", repo: &fakeRepository{challenge: stored(VisibilityPublic), participants: participants(1)}, profiles: fakeProfiles{pseudoErr: storageErr}, limit: 20, wantErr: storageErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewService(tt.repo, tt.profiles, fakeCatalogue{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, nil)
+			if tt.wantCode != "" && !errors.Is(err, apperr.New(tt.wantCode, nil)) {
+				t.Fatalf("error = %v, want %s", err, tt.wantCode)
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want the cause kept", err)
+			}
+		})
 	}
 }
