@@ -214,10 +214,10 @@ func (s *Service) UpdateText(ctx context.Context, actorID, id string, frozen []s
 }
 
 // Join makes actorID an active participant of challenge id, joined at the
-// clock's now once the challenge is locked. The join rule (JoinRefusal: visibility, already in,
-// abandoned, end of week 1), then the complete profile (422
-// profile_incomplete), are checked on the challenge locked by the
-// repository, in the transaction that writes the participation. The
+// clock's now once the challenge is locked. The join rule (JoinRefusal:
+// visibility, already in, abandoned, end of week 1), then the complete
+// profile (422 profile_incomplete), are checked on the challenge locked by
+// the repository, in the transaction that writes the participation. The
 // profile is read before the transaction: reading it inside would take a
 // second pool connection while the lock is held, and concurrent joins could
 // exhaust the pool. It returns the challenge as the actor now sees it.
@@ -230,10 +230,7 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 		// Read once the lock is held: a join waiting for it is judged at
 		// the instant it may write, never before the end of week 1.
 		now := s.clock.Now()
-		// Visibility first: nothing else may answer for a hidden challenge.
-		if err := RequireView(RoleOf(m), c.Visibility); err != nil {
-			return time.Time{}, err
-		}
+		// The time zone was validated at creation: it cannot fail here.
 		loc, err := location(c.Timezone)
 		if err != nil {
 			return time.Time{}, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
