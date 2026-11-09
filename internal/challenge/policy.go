@@ -1,6 +1,10 @@
 package challenge
 
-import "github.com/damchi/sport-challenge-api/internal/platform/apperr"
+import (
+	"time"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+)
 
 // Visibilities of a challenge.
 const (
@@ -19,7 +23,7 @@ const (
 )
 
 // Membership is what the service knows about a user and a challenge, read in
-// the same query as the challenge.
+// the same query as the challenge (Repository.Get).
 type Membership struct {
 	Creator     bool
 	Participant ParticipantStatus
@@ -86,4 +90,23 @@ func RequireView(role Role, visibility string) error {
 		return apperr.New(apperr.CodeChallengeNotFound, nil)
 	}
 	return nil
+}
+
+// CanJoin reports whether role may join a challenge of that visibility at
+// now (README §5.7): a public one for every logged-in user, a private one on
+// invitation, strictly before deadline (the end of week 1), and never twice:
+// a participant, active or abandoned, cannot join again. The profile
+// completeness is checked apart (profile_incomplete).
+func CanJoin(role Role, visibility string, now, deadline time.Time) bool {
+	if !now.Before(deadline) {
+		return false
+	}
+	switch role {
+	case RoleOutsider:
+		return visibility == VisibilityPublic
+	case RoleInvited:
+		return visibility == VisibilityPublic || visibility == VisibilityPrivate
+	default:
+		return false
+	}
 }

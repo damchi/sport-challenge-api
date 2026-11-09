@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -246,5 +248,81 @@ func TestListChallengesNormalizesTheCursorID(t *testing.T) {
 	rec, _ := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges?cursor="+cursor, "")
 	if rec.Code != http.StatusOK || repo.listed.After == nil || repo.listed.After.ID != "11111111-1111-1111-1111-111111111111" {
 		t.Fatalf("got %d, after %+v, want the canonical id", rec.Code, repo.listed.After)
+	}
+}
+
+func TestGetChallenge(t *testing.T) {
+	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantAbandoned}}
+	repo.challenge.Categories = []Category{{Type: CategoryCumulativeTime, Position: 1}}
+	clk := clock.NewFake(time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC))
+	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clk), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	want := map[string]any{
+		"my_role": "abandoned", "my_status": "abandoned", "status": "ongoing", "can_join": false,
+		"current_week": 1.0, "week_ends_at": "2026-03-09T04:00:00Z", "registration_deadline": "2026-03-09T04:00:00Z",
+	}
+	for k, v := range want {
+		if out[k] != v {
+			t.Errorf("%s = %v, want %v", k, out[k], v)
+		}
+	}
+}
+
+func TestGetChallengeNotFoundIsTheSameAnswer(t *testing.T) {
+	type answer struct {
+		status  int
+		headers http.Header
+		body    map[string]any
+	}
+	answers := map[string]answer{}
+	// A deleted challenge reaches the service as a missing one (the
+	// integration tests check the storage side).
+	for name, repo := range map[string]*fakeRepository{
+		"missing or deleted": {},
+		"private, not mine":  {challenge: stored(VisibilityPrivate)},
+	} {
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
+		headers := rec.Header().Clone()
+		headers.Del("X-Request-ID") // differs for every request
+		e, _ := out["error"].(map[string]any)
+		delete(e, "request_id")
+		answers[name] = answer{status: rec.Code, headers: headers, body: out}
+	}
+	a, b := answers["missing or deleted"], answers["private, not mine"]
+	if a.status != http.StatusNotFound || a.status != b.status || !reflect.DeepEqual(a.headers, b.headers) || !reflect.DeepEqual(a.body, b.body) {
+		t.Fatalf("answers differ:\n%+v\n%+v", a, b)
+	}
+	if e, _ := a.body["error"].(map[string]any); e["code"] != "challenge_not_found" {
+		t.Fatalf("body %v, want challenge_not_found", a.body)
+	}
+}
+
+func TestGetChallengeOutsideTheWindowHasNoWeek(t *testing.T) {
+	repo := &fakeRepository{challenge: stored(VisibilityPublic)}
+	for name, at := range map[string]time.Time{
+		"before the start": time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+		"after the end":    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(at)), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status %d", name, rec.Code)
+		}
+		if v, ok := out["current_week"]; !ok || v != nil {
+			t.Errorf("%s: current_week = %v, want null", name, v)
+		}
+		if v, ok := out["week_ends_at"]; !ok || v != nil {
+			t.Errorf("%s: week_ends_at = %v, want null", name, v)
+		}
+	}
+}
+
+func TestGetChallengeBadID(t *testing.T) {
+	rec, out := serve(t, NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges/not-a-uuid", "")
+	e, _ := out["error"].(map[string]any)
+	if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" {
+		t.Fatalf("got %d %v, want 400 validation_failed", rec.Code, out)
 	}
 }

@@ -232,6 +232,38 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}:
+    get:
+      operationId: getChallenge
+      summary: Read a challenge
+      description: |
+        The challenge, its categories, the user's role and participation,
+        and fields computed by the server from the current instant. A
+        challenge that does not exist, was deleted, or is private and not
+        visible to the user answers the same 404 `challenge_not_found`.
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeDetail"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ChallengeNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -250,6 +282,14 @@ components:
           description: '`Bearer`, or `Bearer error="invalid_token"` for an invalid or expired token (RFC 6750).'
           schema:
             type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ChallengeNotFound:
+      description: |
+        No such challenge, a deleted one, or a private one the user may not
+        see (`challenge_not_found`): the same answer in every case.
       content:
         application/json:
           schema:
@@ -558,3 +598,65 @@ components:
           enum: [active, abandoned]
           nullable: true
           description: The user's participation; null when not a participant.
+    ChallengeDetail:
+      type: object
+      required: [id, title, description, visibility, members_can_invite, timezone, starts_at, ends_at, categories, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        visibility:
+          type: string
+          enum: [public, private]
+        members_can_invite:
+          type: boolean
+        timezone:
+          type: string
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+        my_role:
+          type: string
+          enum: [creator, participant, abandoned, invited, outsider]
+          description: The user's role in the challenge.
+        my_status:
+          type: string
+          enum: [active, abandoned]
+          nullable: true
+          description: The user's participation; null when not a participant.
+        status:
+          type: string
+          enum: [upcoming, ongoing, finished]
+        can_join:
+          type: boolean
+          description: |
+            Whether the user may join now (rights, before the end of week 1,
+            not already a participant). The complete profile is checked apart
+            (`profile_complete` of `GET /me`).
+        registration_deadline:
+          type: string
+          format: date-time
+          description: End of week 1, when joining closes.
+        current_week:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: Number of the current week; null before the start and after the end.
+        week_ends_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: End of the current week; null before the start and after the end.

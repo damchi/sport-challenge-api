@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 )
@@ -106,6 +107,40 @@ func TestRequireView(t *testing.T) {
 			var appErr *apperr.Error
 			if !errors.As(err, &appErr) || appErr.Code != apperr.CodeChallengeNotFound || appErr.Status != http.StatusNotFound {
 				t.Fatalf("RequireView() = %v, want 404 challenge_not_found", err)
+			}
+		})
+	}
+}
+
+// TestCanJoin follows README §5.7: public challenges to every logged-in
+// user, private ones on invitation, until the end of week 1 (refused at the
+// exact instant), never twice (abandoning is final).
+func TestCanJoin(t *testing.T) {
+	deadline := time.Date(2026, 3, 9, 5, 0, 0, 0, time.UTC)
+	before, at := deadline.Add(-time.Second), deadline
+	tests := []struct {
+		name       string
+		role       Role
+		visibility string
+		now        time.Time
+		want       bool
+	}{
+		{name: "outsider, public, before the deadline", role: RoleOutsider, visibility: VisibilityPublic, now: before, want: true},
+		{name: "invited, public", role: RoleInvited, visibility: VisibilityPublic, now: before, want: true},
+		{name: "invited, private", role: RoleInvited, visibility: VisibilityPrivate, now: before, want: true},
+		{name: "outsider, private: not invited", role: RoleOutsider, visibility: VisibilityPrivate, now: before},
+		{name: "at the exact deadline", role: RoleOutsider, visibility: VisibilityPublic, now: at},
+		{name: "after the deadline", role: RoleInvited, visibility: VisibilityPrivate, now: at.Add(time.Hour)},
+		{name: "already a participant", role: RoleParticipant, visibility: VisibilityPublic, now: before},
+		{name: "abandoned: final", role: RoleAbandoned, visibility: VisibilityPublic, now: before},
+		{name: "creator: already a participant", role: RoleCreator, visibility: VisibilityPublic, now: before},
+		{name: "unknown visibility", role: RoleOutsider, visibility: "unlisted", now: before},
+		{name: "unknown role", role: Role(99), visibility: VisibilityPublic, now: before},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CanJoin(tt.role, tt.visibility, tt.now, deadline); got != tt.want {
+				t.Fatalf("CanJoin() = %v, want %v", got, tt.want)
 			}
 		})
 	}

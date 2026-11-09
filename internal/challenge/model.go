@@ -147,3 +147,18 @@ type Page struct {
 	Items []Summary
 	Next  *Position
 }
+
+// Detail is a challenge as one user sees it, with the fields the server
+// computes from the current instant.
+type Detail struct {
+	Challenge
+	Role        Role
+	Participant ParticipantStatus
+	Status      string
+	CanJoin     bool
+	// RegistrationDeadline is the end of week 1.
+	RegistrationDeadline time.Time
+	// CurrentWeek is 0, and WeekEndsAt zero, outside the window.
+	CurrentWeek int
+	WeekEndsAt  time.Time
+}

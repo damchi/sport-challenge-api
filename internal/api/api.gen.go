@@ -80,18 +80,102 @@ func (e ChallengeCreateVisibility) Valid() bool {
 	}
 }
 
+// Defines values for ChallengeDetailMyRole.
+const (
+	ChallengeDetailMyRoleAbandoned   ChallengeDetailMyRole = "abandoned"
+	ChallengeDetailMyRoleCreator     ChallengeDetailMyRole = "creator"
+	ChallengeDetailMyRoleInvited     ChallengeDetailMyRole = "invited"
+	ChallengeDetailMyRoleOutsider    ChallengeDetailMyRole = "outsider"
+	ChallengeDetailMyRoleParticipant ChallengeDetailMyRole = "participant"
+)
+
+// Valid indicates whether the value is a known member of the ChallengeDetailMyRole enum.
+func (e ChallengeDetailMyRole) Valid() bool {
+	switch e {
+	case ChallengeDetailMyRoleAbandoned:
+		return true
+	case ChallengeDetailMyRoleCreator:
+		return true
+	case ChallengeDetailMyRoleInvited:
+		return true
+	case ChallengeDetailMyRoleOutsider:
+		return true
+	case ChallengeDetailMyRoleParticipant:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChallengeDetailMyStatus.
+const (
+	ChallengeDetailMyStatusAbandoned ChallengeDetailMyStatus = "abandoned"
+	ChallengeDetailMyStatusActive    ChallengeDetailMyStatus = "active"
+)
+
+// Valid indicates whether the value is a known member of the ChallengeDetailMyStatus enum.
+func (e ChallengeDetailMyStatus) Valid() bool {
+	switch e {
+	case ChallengeDetailMyStatusAbandoned:
+		return true
+	case ChallengeDetailMyStatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChallengeDetailStatus.
+const (
+	ChallengeDetailStatusFinished ChallengeDetailStatus = "finished"
+	ChallengeDetailStatusOngoing  ChallengeDetailStatus = "ongoing"
+	ChallengeDetailStatusUpcoming ChallengeDetailStatus = "upcoming"
+)
+
+// Valid indicates whether the value is a known member of the ChallengeDetailStatus enum.
+func (e ChallengeDetailStatus) Valid() bool {
+	switch e {
+	case ChallengeDetailStatusFinished:
+		return true
+	case ChallengeDetailStatusOngoing:
+		return true
+	case ChallengeDetailStatusUpcoming:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChallengeDetailVisibility.
+const (
+	ChallengeDetailVisibilityPrivate ChallengeDetailVisibility = "private"
+	ChallengeDetailVisibilityPublic  ChallengeDetailVisibility = "public"
+)
+
+// Valid indicates whether the value is a known member of the ChallengeDetailVisibility enum.
+func (e ChallengeDetailVisibility) Valid() bool {
+	switch e {
+	case ChallengeDetailVisibilityPrivate:
+		return true
+	case ChallengeDetailVisibilityPublic:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ChallengeSummaryMyStatus.
 const (
-	Abandoned ChallengeSummaryMyStatus = "abandoned"
-	Active    ChallengeSummaryMyStatus = "active"
+	ChallengeSummaryMyStatusAbandoned ChallengeSummaryMyStatus = "abandoned"
+	ChallengeSummaryMyStatusActive    ChallengeSummaryMyStatus = "active"
 )
 
 // Valid indicates whether the value is a known member of the ChallengeSummaryMyStatus enum.
 func (e ChallengeSummaryMyStatus) Valid() bool {
 	switch e {
-	case Abandoned:
+	case ChallengeSummaryMyStatusAbandoned:
 		return true
-	case Active:
+	case ChallengeSummaryMyStatusActive:
 		return true
 	default:
 		return false
@@ -247,19 +331,19 @@ func (e ListChallengesParamsScope) Valid() bool {
 
 // Defines values for ListChallengesParamsStatus.
 const (
-	Finished ListChallengesParamsStatus = "finished"
-	Ongoing  ListChallengesParamsStatus = "ongoing"
-	Upcoming ListChallengesParamsStatus = "upcoming"
+	ListChallengesParamsStatusFinished ListChallengesParamsStatus = "finished"
+	ListChallengesParamsStatusOngoing  ListChallengesParamsStatus = "ongoing"
+	ListChallengesParamsStatusUpcoming ListChallengesParamsStatus = "upcoming"
 )
 
 // Valid indicates whether the value is a known member of the ListChallengesParamsStatus enum.
 func (e ListChallengesParamsStatus) Valid() bool {
 	switch e {
-	case Finished:
+	case ListChallengesParamsStatusFinished:
 		return true
-	case Ongoing:
+	case ListChallengesParamsStatusOngoing:
 		return true
-	case Upcoming:
+	case ListChallengesParamsStatusUpcoming:
 		return true
 	default:
 		return false
@@ -353,6 +437,51 @@ type ChallengeCreate struct {
 
 // ChallengeCreateVisibility defines model for ChallengeCreate.Visibility.
 type ChallengeCreateVisibility string
+
+// ChallengeDetail defines model for ChallengeDetail.
+type ChallengeDetail struct {
+	// CanJoin Whether the user may join now (rights, before the end of week 1,
+	// not already a participant). The complete profile is checked apart
+	// (`profile_complete` of `GET /me`).
+	CanJoin    bool       `json:"can_join"`
+	Categories []Category `json:"categories"`
+
+	// CurrentWeek Number of the current week; null before the start and after the end.
+	CurrentWeek      *int               `json:"current_week"`
+	Description      *string            `json:"description"`
+	EndsAt           time.Time          `json:"ends_at"`
+	Id               openapi_types.UUID `json:"id"`
+	MembersCanInvite bool               `json:"members_can_invite"`
+
+	// MyRole The user's role in the challenge.
+	MyRole ChallengeDetailMyRole `json:"my_role"`
+
+	// MyStatus The user's participation; null when not a participant.
+	MyStatus *ChallengeDetailMyStatus `json:"my_status"`
+
+	// RegistrationDeadline End of week 1, when joining closes.
+	RegistrationDeadline time.Time                 `json:"registration_deadline"`
+	StartsAt             time.Time                 `json:"starts_at"`
+	Status               ChallengeDetailStatus     `json:"status"`
+	Timezone             string                    `json:"timezone"`
+	Title                string                    `json:"title"`
+	Visibility           ChallengeDetailVisibility `json:"visibility"`
+
+	// WeekEndsAt End of the current week; null before the start and after the end.
+	WeekEndsAt *time.Time `json:"week_ends_at"`
+}
+
+// ChallengeDetailMyRole The user's role in the challenge.
+type ChallengeDetailMyRole string
+
+// ChallengeDetailMyStatus The user's participation; null when not a participant.
+type ChallengeDetailMyStatus string
+
+// ChallengeDetailStatus defines model for ChallengeDetail.Status.
+type ChallengeDetailStatus string
+
+// ChallengeDetailVisibility defines model for ChallengeDetail.Visibility.
+type ChallengeDetailVisibility string
 
 // ChallengePage defines model for ChallengePage.
 type ChallengePage struct {
@@ -478,6 +607,9 @@ type SportList struct {
 	Sports []Sport `json:"sports"`
 }
 
+// ChallengeNotFound Single error format of the API. Clients translate `code`; `message` is only an English fallback.
+type ChallengeNotFound = Error
+
 // InternalError Single error format of the API. Clients translate `code`; `message` is only an English fallback.
 type InternalError = Error
 
@@ -517,6 +649,9 @@ type ServerInterface interface {
 	// CreateChallenge Create a challenge
 	// (POST /api/v1/challenges)
 	CreateChallenge(c *gin.Context)
+	// GetChallenge Read a challenge
+	// (GET /api/v1/challenges/{challengeId})
+	GetChallenge(c *gin.Context, challengeId openapi_types.UUID)
 	// GetMe Read my profile
 	// (GET /api/v1/me)
 	GetMe(c *gin.Context)
@@ -605,6 +740,31 @@ func (siw *ServerInterfaceWrapper) CreateChallenge(c *gin.Context) {
 	}
 
 	siw.Handler.CreateChallenge(c)
+}
+
+// GetChallenge operation middleware
+func (siw *ServerInterfaceWrapper) GetChallenge(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "challengeId" -------------
+	var challengeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "challengeId", c.Param("challengeId"), &challengeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter challengeId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetChallenge(c, challengeId)
 }
 
 // GetMe operation middleware
@@ -706,7 +866,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/sports", wrapper.GetSports)
 	router.GET(options.BaseURL+"/api/v1/challenges", wrapper.ListChallenges)
 	router.POST(options.BaseURL+"/api/v1/challenges", wrapper.CreateChallenge)
+	router.GET(options.BaseURL+"/api/v1/challenges/:challengeId", wrapper.GetChallenge)
 }
+
+type ChallengeNotFoundJSONResponse Error
 
 type InternalErrorJSONResponse Error
 
@@ -858,6 +1021,87 @@ func (response CreateChallenge422JSONResponse) VisitCreateChallengeResponse(w ht
 type CreateChallenge500JSONResponse struct{ InternalErrorJSONResponse }
 
 func (response CreateChallenge500JSONResponse) VisitCreateChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetChallengeRequestObject struct {
+	ChallengeId openapi_types.UUID `json:"challengeId"`
+}
+
+type GetChallengeResponseObject interface {
+	VisitGetChallengeResponse(w http.ResponseWriter) error
+}
+
+type GetChallenge200JSONResponse ChallengeDetail
+
+func (response GetChallenge200JSONResponse) VisitGetChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetChallenge400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response GetChallenge400JSONResponse) VisitGetChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetChallenge401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetChallenge401JSONResponse) VisitGetChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetChallenge404JSONResponse struct{ ChallengeNotFoundJSONResponse }
+
+func (response GetChallenge404JSONResponse) VisitGetChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetChallenge500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response GetChallenge500JSONResponse) VisitGetChallengeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -1126,6 +1370,9 @@ type StrictServerInterface interface {
 	// CreateChallenge Create a challenge
 	// (POST /api/v1/challenges)
 	CreateChallenge(ctx context.Context, request CreateChallengeRequestObject) (CreateChallengeResponseObject, error)
+	// GetChallenge Read a challenge
+	// (GET /api/v1/challenges/{challengeId})
+	GetChallenge(ctx context.Context, request GetChallengeRequestObject) (GetChallengeResponseObject, error)
 	// GetMe Read my profile
 	// (GET /api/v1/me)
 	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
@@ -1261,6 +1508,32 @@ func (sh *strictHandler) CreateChallenge(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(CreateChallengeResponseObject); ok {
 		if err := validResponse.VisitCreateChallengeResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetChallenge operation middleware
+func (sh *strictHandler) GetChallenge(ctx *gin.Context, challengeId openapi_types.UUID) {
+	var request GetChallengeRequestObject
+
+	request.ChallengeId = challengeId
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetChallenge(ctx, request.(GetChallengeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetChallenge")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetChallengeResponseObject); ok {
+		if err := validResponse.VisitGetChallengeResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {
@@ -1411,73 +1684,80 @@ func (sh *strictHandler) GetReadyz(ctx *gin.Context) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"W/f4hDvM8J7wYMFBsXN/ff+/AwA=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -2,6 +2,7 @@ package challenge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -15,6 +16,8 @@ import (
 type repository interface {
 	Create(ctx context.Context, c Challenge, joinedAt time.Time) (Challenge, error)
 	List(ctx context.Context, q ListQuery) ([]Summary, error)
+	Get(ctx context.Context, id, actorID string) (Challenge, Membership, error)
+	Categories(ctx context.Context, id string) ([]Category, error)
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -119,4 +122,43 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 		page.Next = &Position{StartsAt: last.StartsAt, ID: last.ID}
 	}
 	return page, nil
+}
+
+// Get returns challenge id as actorID sees it. A missing or deleted
+// challenge, and a private one the actor may not see, all answer the same
+// 404 challenge_not_found: nothing tells that a private challenge exists.
+func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
+	c, m, err := s.repo.Get(ctx, id, actorID)
+	if errors.Is(err, errChallengeNotFound) {
+		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return Detail{}, fmt.Errorf("get challenge: %w", err)
+	}
+	role := RoleOf(m)
+	if err := RequireView(role, c.Visibility); err != nil {
+		return Detail{}, err
+	}
+	// Only a visible challenge reaches the next reads.
+	if c.Categories, err = s.repo.Categories(ctx, c.ID); err != nil {
+		return Detail{}, fmt.Errorf("get challenge: %w", err)
+	}
+	loc, err := location(c.Timezone)
+	if err != nil {
+		return Detail{}, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
+	}
+
+	now := s.clock.Now()
+	deadline := RegistrationDeadline(c.StartsAt, loc)
+	week, weekEnd := CurrentWeek(now, c.StartsAt, c.EndsAt, loc)
+	return Detail{
+		Challenge:            c,
+		Role:                 role,
+		Participant:          m.Participant,
+		Status:               StatusAt(now, c.StartsAt, c.EndsAt),
+		CanJoin:              CanJoin(role, c.Visibility, now, deadline),
+		RegistrationDeadline: deadline,
+		CurrentWeek:          week,
+		WeekEndsAt:           weekEnd,
+	}, nil
 }
