@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ type repository interface {
 	List(ctx context.Context, q ListQuery) ([]Summary, error)
 	Get(ctx context.Context, id, actorID string) (Challenge, Membership, error)
 	Categories(ctx context.Context, id string) ([]Category, error)
+	UpdateText(ctx context.Context, id string, changes TextChanges) error
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -161,4 +163,46 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
 		CurrentWeek:          week,
 		WeekEndsAt:           weekEnd,
 	}, nil
+}
+
+// UpdateText changes the title and the description of challenge id, the
+// only fields its creators may edit, at any time. Checks, in this order: the
+// challenge must be visible (404, like the detail), the actor a creator
+// (403), no frozen field sent (422 field_not_editable on frozen, the names
+// of the contract's fields), the texts valid (400). It returns the
+// challenge after the change, as the actor sees it.
+func (s *Service) UpdateText(ctx context.Context, actorID, id string, frozen []string, changes TextChanges) (Detail, error) {
+	c, m, err := s.repo.Get(ctx, id, actorID)
+	if errors.Is(err, errChallengeNotFound) {
+		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return Detail{}, fmt.Errorf("update challenge: %w", err)
+	}
+	role := RoleOf(m)
+	if err := RequireView(role, c.Visibility); err != nil {
+		return Detail{}, err
+	}
+	if err := RequireEdit(role); err != nil {
+		return Detail{}, err
+	}
+	if len(frozen) > 0 {
+		e := apperr.New(apperr.CodeFieldNotEditable, nil)
+		sorted := slices.Sorted(slices.Values(frozen))
+		e.Params = map[string]string{apperr.FieldsParam: strings.Join(sorted, ",")}
+		return Detail{}, e
+	}
+	changes, err = ValidateText(changes)
+	if err != nil {
+		return Detail{}, err
+	}
+	err = s.repo.UpdateText(ctx, id, changes)
+	if errors.Is(err, errChallengeNotFound) {
+		// Deleted meanwhile: gone for everyone.
+		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return Detail{}, fmt.Errorf("update challenge: %w", err)
+	}
+	return s.Get(ctx, actorID, id)
 }

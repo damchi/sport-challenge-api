@@ -123,3 +123,39 @@ func TestGetRegistrationDeadline(t *testing.T) {
 		t.Fatalf("at the deadline: can join %v, week %d, want registration closed in week 2", d.CanJoin, d.CurrentWeek)
 	}
 }
+
+func TestUpdateTextStoresTheChange(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, creatorID := setup(t, &pseudo)
+	desc := "Old description"
+	c, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Description = &desc }))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	title, empty := "  New title  ", ""
+	d, err := svc.UpdateText(t.Context(), creatorID, c.ID, nil, TextChanges{Title: &title, Description: &empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	var description *string
+	if err := pool.QueryRow(t.Context(), "SELECT title, description FROM challenges WHERE id = $1", c.ID).Scan(&stored, &description); err != nil {
+		t.Fatal(err)
+	}
+	if stored != "New title" || description != nil || d.Title != "New title" || d.Description != nil {
+		t.Fatalf("stored %q %v, detail %q %v, want the trimmed title and no description", stored, description, d.Title, d.Description)
+	}
+
+	// A deleted challenge is never written: not found, even for its creator.
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET deleted_at = now() WHERE id = $1", c.ID); err != nil {
+		t.Fatal(err)
+	}
+	again := "Again"
+	if _, err := svc.UpdateText(t.Context(), creatorID, c.ID, nil, TextChanges{Title: &again}); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("error = %v, want challenge_not_found", err)
+	}
+	if err := pool.QueryRow(t.Context(), "SELECT title FROM challenges WHERE id = $1", c.ID).Scan(&stored); err != nil || stored != "New title" {
+		t.Fatalf("title %q (%v), want the deleted challenge untouched", stored, err)
+	}
+}

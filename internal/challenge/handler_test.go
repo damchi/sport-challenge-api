@@ -326,3 +326,47 @@ func TestGetChallengeBadID(t *testing.T) {
 		t.Fatalf("got %d %v, want 400 validation_failed", rec.Code, out)
 	}
 }
+
+func TestUpdateChallenge(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111"
+	creator := Membership{Creator: true, Participant: ParticipantActive}
+	tests := []struct {
+		name       string
+		membership Membership
+		body       string
+		wantStatus int
+		wantCode   string
+		wantFields string
+	}{
+		{name: "creator", membership: creator, body: `{"title":"New title","description":""}`, wantStatus: 200},
+		{name: "participant", membership: Membership{Participant: ParticipantActive}, body: `{"title":"New title"}`, wantStatus: 403, wantCode: "forbidden"},
+		{name: "frozen fields", membership: creator, body: `{"title":"New title","weeks":8,"visibility":"private"}`, wantStatus: 422, wantCode: "field_not_editable", wantFields: "visibility,weeks"},
+		{name: "unknown field", membership: creator, body: `{"titel":"New title"}`, wantStatus: 400, wantCode: "validation_failed"},
+		{name: "null title", membership: creator, body: `{"title":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
+		{name: "title too short", membership: creator, body: `{"title":" ab "}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: tt.membership}
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPatch, target, tt.body)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if tt.wantStatus == 200 {
+				if out["title"] != "New title" || out["my_role"] != "creator" {
+					t.Fatalf("body %v, want the edited detail", out)
+				}
+				return
+			}
+			e, _ := out["error"].(map[string]any)
+			params, _ := e["params"].(map[string]any)
+			fields, _ := params["fields"].(string)
+			if e["code"] != tt.wantCode || fields != tt.wantFields {
+				t.Fatalf("got %v fields %q, want %s fields %q", e["code"], fields, tt.wantCode, tt.wantFields)
+			}
+			if repo.updated != nil {
+				t.Fatal("challenge written despite the refusal")
+			}
+		})
+	}
+}

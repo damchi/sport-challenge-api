@@ -288,3 +288,39 @@ func TestValidateTodayIsInTheChallengeTimeZone(t *testing.T) {
 		t.Fatal("start on the local yesterday accepted")
 	}
 }
+
+func TestValidateText(t *testing.T) {
+	str := func(s string) *string { return &s }
+	tests := []struct {
+		name       string
+		changes    TextChanges
+		wantTitle  *string
+		wantFields string
+	}{
+		{name: "nothing"},
+		{name: "title trimmed", changes: TextChanges{Title: str("  New title ")}, wantTitle: str("New title")},
+		{name: "description removed", changes: TextChanges{Description: str("")}},
+		{name: "title too short", changes: TextChanges{Title: str(" ab ")}, wantFields: "title"},
+		{name: "title with a control character", changes: TextChanges{Title: str("ab\x00cd")}, wantFields: "title"},
+		{name: "description too long", changes: TextChanges{Description: str(strings.Repeat("é", 2001))}, wantFields: "description"},
+		{name: "both invalid, sorted", changes: TextChanges{Title: str("x"), Description: str("a\x1bb")}, wantFields: "description,title"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ValidateText(tt.changes)
+			if tt.wantFields != "" {
+				var appErr *apperr.Error
+				if !errors.As(err, &appErr) || appErr.Params[apperr.FieldsParam] != tt.wantFields {
+					t.Fatalf("error = %v, want fields %q", err, tt.wantFields)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantTitle != nil && (got.Title == nil || *got.Title != *tt.wantTitle) {
+				t.Fatalf("title %v, want %q", got.Title, *tt.wantTitle)
+			}
+		})
+	}
+}

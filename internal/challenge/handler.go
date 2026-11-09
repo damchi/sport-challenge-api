@@ -183,9 +183,51 @@ func (h *Handler) GetChallenge(ctx context.Context, req api.GetChallengeRequestO
 	if err != nil {
 		return nil, err
 	}
-	base, err := toAPI(d.Challenge)
+	out, err := toDetail(d)
 	if err != nil {
 		return nil, err
+	}
+	return api.GetChallenge200JSONResponse(out), nil
+}
+
+// UpdateChallenge edits the title and the description.
+func (h *Handler) UpdateChallenge(ctx context.Context, req api.UpdateChallengeRequestObject) (api.UpdateChallengeResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	if req.Body == nil {
+		return nil, apperr.InvalidFields(nil)
+	}
+	b := req.Body
+	// The fields frozen at creation, by their contract name.
+	var frozen []string
+	for name, value := range map[string]any{
+		"categories": b.Categories, "distance_factors": b.DistanceFactors,
+		"elimination_step_meters": b.EliminationStepMeters, "ends_at": b.EndsAt,
+		"members_can_invite": b.MembersCanInvite, "start_date": b.StartDate,
+		"starts_at": b.StartsAt, "timezone": b.Timezone,
+		"visibility": b.Visibility, "weeks": b.Weeks,
+	} {
+		if value != nil {
+			frozen = append(frozen, name)
+		}
+	}
+	d, err := h.service.UpdateText(ctx, actorID, req.ChallengeId.String(), frozen, TextChanges{Title: b.Title, Description: b.Description})
+	if err != nil {
+		return nil, err
+	}
+	out, err := toDetail(d)
+	if err != nil {
+		return nil, err
+	}
+	return api.UpdateChallenge200JSONResponse(out), nil
+}
+
+func toDetail(d Detail) (api.ChallengeDetail, error) {
+	base, err := toAPI(d.Challenge)
+	if err != nil {
+		return api.ChallengeDetail{}, err
 	}
 	out := api.ChallengeDetail{
 		Id:                   base.Id,
@@ -210,7 +252,7 @@ func (h *Handler) GetChallenge(ctx context.Context, req api.GetChallengeRequestO
 		week, ends := d.CurrentWeek, d.WeekEndsAt.UTC()
 		out.CurrentWeek, out.WeekEndsAt = &week, &ends
 	}
-	return api.GetChallenge200JSONResponse(out), nil
+	return out, nil
 }
 
 func roleName(r Role) api.ChallengeDetailMyRole {

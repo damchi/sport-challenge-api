@@ -26,6 +26,7 @@ type fakeRepository struct {
 	challenge      *Challenge
 	membership     Membership
 	categoriesRead bool
+	updated        *TextChanges
 }
 
 func (f *fakeRepository) Get(context.Context, string, string) (Challenge, Membership, error) {
@@ -36,6 +37,17 @@ func (f *fakeRepository) Get(context.Context, string, string) (Challenge, Member
 		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", errChallengeNotFound)
 	}
 	return *f.challenge, f.membership, nil
+}
+
+func (f *fakeRepository) UpdateText(_ context.Context, _ string, changes TextChanges) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.updated = &changes
+	if changes.Title != nil {
+		f.challenge.Title = *changes.Title
+	}
+	return nil
 }
 
 func (f *fakeRepository) Categories(context.Context, string) ([]Category, error) {
@@ -367,3 +379,97 @@ func TestServiceGetStorageFailure(t *testing.T) {
 		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
 	}
 }
+
+func TestServiceUpdateText(t *testing.T) {
+	str := func(s string) *string { return &s }
+	creator := Membership{Creator: true, Participant: ParticipantActive}
+	tests := []struct {
+		name       string
+		visibility string
+		membership Membership
+		frozen     []string
+		changes    TextChanges
+		wantCode   apperr.Code
+		wantFields string
+	}{
+		{name: "creator edits, even after the end", visibility: VisibilityPublic, membership: creator, changes: TextChanges{Title: str(" New title ")}},
+		{name: "participant: forbidden", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, changes: TextChanges{Title: str("New title")}, wantCode: apperr.CodeForbidden},
+		{name: "outsider of a public challenge: forbidden", visibility: VisibilityPublic, changes: TextChanges{Title: str("New title")}, wantCode: apperr.CodeForbidden},
+		{name: "outsider of a private challenge: not found", visibility: VisibilityPrivate, changes: TextChanges{Title: str("New title")}, wantCode: apperr.CodeChallengeNotFound},
+		{name: "frozen fields, sorted", visibility: VisibilityPublic, membership: creator, frozen: []string{"weeks", "categories"}, wantCode: apperr.CodeFieldNotEditable, wantFields: "categories,weeks"},
+		{name: "frozen fields are checked after the right", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, frozen: []string{"weeks"}, wantCode: apperr.CodeForbidden},
+		{name: "invalid title", visibility: VisibilityPublic, membership: creator, changes: TextChanges{Title: str("ab")}, wantCode: apperr.CodeValidationFailed, wantFields: "title"},
+		{name: "invalid description", visibility: VisibilityPublic, membership: creator, changes: TextChanges{Description: str("a\x00b")}, wantCode: apperr.CodeValidationFailed, wantFields: "description"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
+			// After the end of the stored challenge (2026-03-23): edits never close.
+			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))).
+				UpdateText(t.Context(), actor, "11111111-1111-1111-1111-111111111111", tt.frozen, tt.changes)
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if repo.updated == nil || *repo.updated.Title != "New title" || d.Title != "New title" {
+					t.Fatalf("written %+v, detail title %q, want the trimmed title", repo.updated, d.Title)
+				}
+				return
+			}
+			var appErr *apperr.Error
+			if !errors.As(err, &appErr) || appErr.Code != tt.wantCode || appErr.Params[apperr.FieldsParam] != tt.wantFields {
+				t.Fatalf("error = %+v, want %s fields %q", appErr, tt.wantCode, tt.wantFields)
+			}
+			if repo.updated != nil {
+				t.Fatal("challenge written despite the refusal")
+			}
+		})
+	}
+}
+
+func TestServiceUpdateTextMissing(t *testing.T) {
+	title := "New title"
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).
+		UpdateText(t.Context(), actor, "x", nil, TextChanges{Title: &title})
+	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("error = %v, want challenge_not_found", err)
+	}
+}
+
+func TestServiceUpdateTextNothingOrEmptyDescription(t *testing.T) {
+	creator := Membership{Creator: true, Participant: ParticipantActive}
+	empty := ""
+	for name, changes := range map[string]TextChanges{
+		"nothing ({})":      {},
+		"empty description": {Description: &empty},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: creator}
+			if _, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).UpdateText(t.Context(), actor, "x", nil, changes); err != nil {
+				t.Fatal(err)
+			}
+			if repo.updated == nil || (changes.Description != nil && (repo.updated.Description == nil || *repo.updated.Description != "")) {
+				t.Fatalf("written %+v, want the changes as given", repo.updated)
+			}
+		})
+	}
+}
+
+func TestServiceUpdateTextStorageFailure(t *testing.T) {
+	storage := errors.New("connection refused")
+	repo := &failingUpdate{fakeRepository: fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Creator: true}}, err: storage}
+	title := "New title"
+	_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).UpdateText(t.Context(), actor, "x", nil, TextChanges{Title: &title})
+	var appErr *apperr.Error
+	if !errors.Is(err, storage) || errors.As(err, &appErr) {
+		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
+	}
+}
+
+// failingUpdate reads like the fake but fails the write.
+type failingUpdate struct {
+	fakeRepository
+	err error
+}
+
+func (f *failingUpdate) UpdateText(context.Context, string, TextChanges) error { return f.err }
