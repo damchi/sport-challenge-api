@@ -233,3 +233,23 @@ func AddCreatorRefusal(actor, target Membership, visibility string, now, endsAt 
 		return false, nil
 	}
 }
+
+// CanDelete reports whether role may delete a challenge (README §5.7): any
+// creator, at any time, even after abandoning.
+func CanDelete(role Role) bool {
+	return role == RoleCreator
+}
+
+// DeleteRefusal is the deletion rule: a challenge the user may not see is
+// not found (404 challenge_not_found), and only creators may delete it (403
+// forbidden), whether it is upcoming, ongoing or finished.
+func DeleteRefusal(m Membership, visibility string) error {
+	role := RoleOf(m)
+	if err := RequireView(role, visibility); err != nil {
+		return err
+	}
+	if !CanDelete(role) {
+		return apperr.New(apperr.CodeForbidden, nil)
+	}
+	return nil
+}

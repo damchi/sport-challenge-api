@@ -31,6 +31,7 @@ type fakeRepository struct {
 	// target is the membership of the user to exclude or make a creator.
 	target       Membership
 	creatorAdded bool
+	deletedAt    time.Time
 }
 
 func (f *fakeRepository) Get(context.Context, string, string) (Challenge, Membership, error) {
@@ -119,6 +120,21 @@ func (f *fakeRepository) AddCreator(_ context.Context, _, _, _ string, decide fu
 	if !noop {
 		f.creatorAdded = true
 	}
+	return nil
+}
+
+func (f *fakeRepository) Delete(_ context.Context, _, _ string, decide func(Challenge, Membership) (time.Time, error)) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.challenge == nil {
+		return fmt.Errorf("delete challenge: %w", errChallengeNotFound)
+	}
+	at, err := decide(*f.challenge, f.membership)
+	if err != nil {
+		return fmt.Errorf("delete challenge: %w", err)
+	}
+	f.deletedAt = at
 	return nil
 }
 
@@ -789,6 +805,54 @@ func TestServiceAddCreatorMissingAndFailure(t *testing.T) {
 	}
 	storage := errors.New("connection refused")
 	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).AddCreator(t.Context(), actor, "c", "t")
+	var appErr *apperr.Error
+	if !errors.Is(err, storage) || errors.As(err, &appErr) {
+		t.Fatalf("storage: %v, want it wrapped as an internal error", err)
+	}
+}
+
+func TestServiceDelete(t *testing.T) {
+	tests := []struct {
+		name       string
+		visibility string
+		membership Membership
+		now        time.Time
+		want       apperr.Code
+	}{
+		{name: "creator, ongoing", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantActive}, now: time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)},
+		{name: "creator, finished", visibility: VisibilityPrivate, membership: Membership{Creator: true, Participant: ParticipantActive}, now: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "creator, upcoming", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantActive}, now: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "creator who abandoned", visibility: VisibilityPrivate, membership: Membership{Creator: true, Participant: ParticipantAbandoned}, now: now},
+		{name: "participant: forbidden", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, now: now, want: apperr.CodeForbidden},
+		{name: "hidden", visibility: VisibilityPrivate, now: now, want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
+			err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).Delete(t.Context(), actor, "c")
+			if tt.want != "" {
+				if !errors.Is(err, apperr.New(tt.want, nil)) {
+					t.Fatalf("error = %v, want %s", err, tt.want)
+				}
+				if !repo.deletedAt.IsZero() {
+					t.Fatal("deleted despite the refusal")
+				}
+				return
+			}
+			if err != nil || !repo.deletedAt.Equal(tt.now) {
+				t.Fatalf("error %v, deleted at %s, want deleted at the clock's now", err, repo.deletedAt)
+			}
+		})
+	}
+}
+
+func TestServiceDeleteMissingAndFailure(t *testing.T) {
+	err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Delete(t.Context(), actor, "c")
+	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("missing: %v, want challenge_not_found", err)
+	}
+	storage := errors.New("connection refused")
+	err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Delete(t.Context(), actor, "c")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("storage: %v, want it wrapped as an internal error", err)

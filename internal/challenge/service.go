@@ -24,6 +24,7 @@ type repository interface {
 	Abandon(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (bool, time.Time, error)) error
 	Exclude(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, time.Time, error)) error
 	AddCreator(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, error)) error
+	Delete(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -314,4 +315,23 @@ func (s *Service) AddCreator(ctx context.Context, actorID, id, targetID string) 
 		return Detail{}, err
 	}
 	return s.Get(ctx, actorID, id)
+}
+
+// Delete soft-deletes challenge id on behalf of actorID, one of its
+// creators, at any time: from then on it is not found for everyone, its
+// creators included, and every write on it is refused. The rule
+// (DeleteRefusal) is checked on the challenge locked by the repository; the
+// deletion is stamped with the clock's now once locked. Deleting a deleted
+// challenge answers 404 like a missing one.
+func (s *Service) Delete(ctx context.Context, actorID, id string) error {
+	err := s.repo.Delete(ctx, id, actorID, func(c Challenge, m Membership) (time.Time, error) {
+		if err := DeleteRefusal(m, c.Visibility); err != nil {
+			return time.Time{}, err
+		}
+		return s.clock.Now(), nil
+	})
+	if errors.Is(err, errChallengeNotFound) {
+		return apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	return err
 }

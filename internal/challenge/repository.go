@@ -278,6 +278,35 @@ func (r *Repository) AddCreator(ctx context.Context, id, actorID, targetID strin
 	return nil
 }
 
+// Delete soft-deletes challenge id on behalf of actorID: deleted_at is set on
+// the challenge row itself, under the lock of withLockedMembership, so a
+// join, an abandon or any other write on the challenge either happens before
+// (and stays) or waits and then finds the challenge gone. decide gets the
+// challenge and the actor's membership and refuses with an error, or gives
+// the instant of the deletion. Nothing else is removed: participations,
+// categories and, later, activities stay for the final purge.
+func (r *Repository) Delete(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error {
+	err := r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, m Membership) error {
+		at, err := decide(c, m)
+		if err != nil {
+			return err
+		}
+		res := tx.Model(&Challenge{}).Where("id = ? AND deleted_at IS NULL", id).Update("deleted_at", at)
+		if res.Error != nil {
+			return fmt.Errorf("update challenge: %w", res.Error)
+		}
+		// The lock makes it impossible: a silent success would hide a bug.
+		if res.RowsAffected == 0 {
+			return errors.New("update challenge: not found under the lock")
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("delete challenge: %w", err)
+	}
+	return nil
+}
+
 // abandonParticipation turns the active participation of userID in
 // challenge id into an abandon at the given instant: by the user's choice,
 // or by an exclusion, both shown alike.

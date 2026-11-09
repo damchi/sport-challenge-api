@@ -626,9 +626,9 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Tout créateur peut supprimer le challenge **à tout moment**, même en cours.
-- [ ] 🟡 Suppression logique (`deleted_at`) : le challenge disparaît immédiatement pour tous (404) ; une purge définitive viendra selon la politique de conservation.
-- [ ] Les activités restent attachées aux utilisateurs (elles sont globales).
-- [ ] Le worker ignore les challenges supprimés.
+- [ ] ✅ Suppression logique (`deleted_at`, décision du ticket 026) : le challenge disparaît immédiatement pour tous, créateurs compris (404) ; une nouvelle suppression répond 404 ; une purge définitive viendra selon la politique de conservation (❓ README §8).
+- [ ] Les activités restent attachées aux utilisateurs (elles sont globales) : la suppression logique n'efface rien, et la table `activity` (ticket 041) n'a aucun lien vers un challenge.
+- [ ] Le worker ignore les challenges supprimés : critère porté par les tâches `close-weeks` (055) et `finalize-challenges` (056) ; toutes les lectures de l'API filtrent déjà `deleted_at`.
 - [ ] La suppression met à jour la ligne `challenges` elle-même (`deleted_at`), dans une transaction qui la verrouille : rejoindre (ticket 033) verrouille cette ligne, donc une suppression et une demande d'inscription concurrentes se sérialisent. Test d'intégration de cette course.
 
 - [ ] Ajoute à `policy.go` la règle `CanDelete` (créateurs seulement), avec ses tests.
@@ -926,6 +926,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Sous-commande `finalize-challenges` ajoutée à `cmd/worker`.
 - [ ] Pour chaque challenge dont la fin est atteinte sans snapshot : enregistre le classement final de chaque catégorie dans `result_snapshot`.
 - [ ] Idempotente ; aucun délai de grâce.
+- [ ] Ignore les challenges supprimés (ticket 037) : aucun résultat figé pour eux.
 - [ ] Après la fin, plus aucune activité ne peut être ajoutée au challenge.
 
 **Tests** : fin de challenge, double exécution, challenge supprimé.

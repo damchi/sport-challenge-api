@@ -670,3 +670,127 @@ func TestAddCreatorAndExcludeRace(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteMakesTheChallengeDisappear(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	member := insertProfile(t, pool, "delete_member")
+	if _, err := svc.Join(t.Context(), member, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Delete(t.Context(), member, id); !errors.Is(err, apperr.New(apperr.CodeForbidden, nil)) {
+		t.Fatalf("participant deletes: %v, want forbidden", err)
+	}
+
+	clk.Advance(48 * time.Hour) // ongoing
+	if err := svc.Delete(t.Context(), creatorID, id); err != nil {
+		t.Fatal(err)
+	}
+	var deletedAt time.Time
+	if err := pool.QueryRow(t.Context(), "SELECT deleted_at FROM challenges WHERE id = $1", id).Scan(&deletedAt); err != nil || !deletedAt.Equal(clk.Now()) {
+		t.Fatalf("deleted_at %s (%v), want the clock's now", deletedAt, err)
+	}
+	// Gone for everyone, creator included; data kept.
+	for name, user := range map[string]string{"creator": creatorID, "participant": member} {
+		if _, err := svc.Get(t.Context(), user, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+			t.Fatalf("%s reads: %v, want challenge_not_found", name, err)
+		}
+	}
+	if err := svc.Delete(t.Context(), creatorID, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("delete again: %v, want challenge_not_found", err)
+	}
+	// Every write is refused from then on, and writes nothing.
+	late := insertProfile(t, pool, "delete_late")
+	if _, err := svc.Join(t.Context(), late, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("join after deletion: %v, want challenge_not_found", err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1", late); n != 0 {
+		t.Fatalf("%d participations written after the deletion, want 0", n)
+	}
+	title := "After the deletion"
+	notFound := apperr.New(apperr.CodeChallengeNotFound, nil)
+	for name, call := range map[string]func() error{
+		"abandon":     func() error { _, err := svc.Abandon(t.Context(), member, id); return err },
+		"exclude":     func() error { return svc.Exclude(t.Context(), creatorID, id, member) },
+		"add creator": func() error { _, err := svc.AddCreator(t.Context(), creatorID, id, member); return err },
+		"edit": func() error {
+			_, err := svc.UpdateText(t.Context(), creatorID, id, nil, TextChanges{Title: &title})
+			return err
+		},
+	} {
+		if err := call(); !errors.Is(err, notFound) {
+			t.Fatalf("%s after deletion: %v, want challenge_not_found", name, err)
+		}
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE challenge_id = $1", id); n != 2 {
+		t.Fatalf("%d participations left, want both kept", n)
+	}
+	if page, err := svc.List(t.Context(), member, ScopeMine, "", 20, nil); err != nil || len(page.Items) != 0 {
+		t.Fatalf("mine after deletion: %d items (%v), want none", len(page.Items), err)
+	}
+	if page, err := svc.List(t.Context(), member, ScopePublic, "", 20, nil); err != nil || len(page.Items) != 0 {
+		t.Fatalf("public after deletion: %d items (%v), want none", len(page.Items), err)
+	}
+}
+
+// TestDeleteAndJoinRace: users join while a creator deletes. The lock on the
+// challenge row serializes them: a join either commits before the deletion
+// (and stays) or answers challenge_not_found, and there is never a 500.
+func TestDeleteAndJoinRace(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	const users = 8
+	ids := make([]string, users)
+	for i := range users {
+		ids[i] = insertProfile(t, pool, "delrace_"+string(rune('a'+i)))
+	}
+	joinErrs := make([]error, users)
+	var deleteErr error
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range users {
+		wg.Go(func() { <-start; _, joinErrs[i] = svc.Join(t.Context(), ids[i], id) })
+	}
+	wg.Go(func() { <-start; deleteErr = svc.Delete(t.Context(), creatorID, id) })
+	close(start)
+	wg.Wait()
+
+	if deleteErr != nil {
+		t.Fatalf("delete: %v", deleteErr)
+	}
+	// A join that commits just before the deletion stores its row but may
+	// still answer challenge_not_found: the challenge is read again after
+	// the commit. So every success has its row, and no join fails otherwise.
+	for i, err := range joinErrs {
+		stored := count(t, pool, "SELECT count(*) FROM participants WHERE challenge_id = $1 AND user_id = $2", id, ids[i])
+		switch {
+		case err == nil && stored != 1:
+			t.Fatalf("join %d succeeded with %d rows, want 1", i, stored)
+		case err != nil && !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)):
+			t.Fatalf("join %d: %v, want nil or challenge_not_found", i, err)
+		}
+	}
+}
+
+func TestDeleteByACreatorWhoAbandoned(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Abandon(t.Context(), creatorID, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Delete(t.Context(), creatorID, id); err != nil {
+		t.Fatalf("creator who abandoned deletes: %v, want allowed", err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM challenges WHERE id = $1 AND deleted_at IS NOT NULL", id); n != 1 {
+		t.Fatal("challenge not deleted")
+	}
+}
