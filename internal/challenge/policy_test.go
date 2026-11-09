@@ -112,40 +112,6 @@ func TestRequireView(t *testing.T) {
 	}
 }
 
-// TestCanJoin follows README §5.7: public challenges to every logged-in
-// user, private ones on invitation, until the end of week 1 (refused at the
-// exact instant), never twice (abandoning is final).
-func TestCanJoin(t *testing.T) {
-	deadline := time.Date(2026, 3, 9, 5, 0, 0, 0, time.UTC)
-	before, at := deadline.Add(-time.Second), deadline
-	tests := []struct {
-		name       string
-		role       Role
-		visibility string
-		now        time.Time
-		want       bool
-	}{
-		{name: "outsider, public, before the deadline", role: RoleOutsider, visibility: VisibilityPublic, now: before, want: true},
-		{name: "invited, public", role: RoleInvited, visibility: VisibilityPublic, now: before, want: true},
-		{name: "invited, private", role: RoleInvited, visibility: VisibilityPrivate, now: before, want: true},
-		{name: "outsider, private: not invited", role: RoleOutsider, visibility: VisibilityPrivate, now: before},
-		{name: "at the exact deadline", role: RoleOutsider, visibility: VisibilityPublic, now: at},
-		{name: "after the deadline", role: RoleInvited, visibility: VisibilityPrivate, now: at.Add(time.Hour)},
-		{name: "already a participant", role: RoleParticipant, visibility: VisibilityPublic, now: before},
-		{name: "abandoned: final", role: RoleAbandoned, visibility: VisibilityPublic, now: before},
-		{name: "creator: already a participant", role: RoleCreator, visibility: VisibilityPublic, now: before},
-		{name: "unknown visibility", role: RoleOutsider, visibility: "unlisted", now: before},
-		{name: "unknown role", role: Role(99), visibility: VisibilityPublic, now: before},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := CanJoin(tt.role, tt.visibility, tt.now, deadline); got != tt.want {
-				t.Fatalf("CanJoin() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 // TestCanEdit: creators only (README §5.7), every other role forbidden.
 func TestCanEdit(t *testing.T) {
 	for role, want := range map[Role]bool{
@@ -170,5 +136,65 @@ func TestRequireEdit(t *testing.T) {
 	var appErr *apperr.Error
 	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeForbidden || appErr.Status != http.StatusForbidden {
 		t.Fatalf("RequireEdit(participant) = %v, want 403 forbidden", err)
+	}
+}
+
+var (
+	outsider         = Membership{}
+	invited          = Membership{Invited: true}
+	active           = Membership{Participant: ParticipantActive}
+	abandoned        = Membership{Participant: ParticipantAbandoned}
+	creatorActive    = Membership{Creator: true, Participant: ParticipantActive}
+	creatorAbandoned = Membership{Creator: true, Participant: ParticipantAbandoned}
+	creatorNotJoined = Membership{Creator: true}
+	unknownStatus    = Membership{Participant: "bogus"}
+)
+
+// TestJoinRefusal gives the reason of every refusal, in order: not visible
+// (404), already in (409), abandoned for good (422), closed from the exact
+// end of week 1 (422). CanJoin is the same rule without the reason.
+func TestJoinRefusal(t *testing.T) {
+	deadline := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
+	before, at := deadline.Add(-time.Second), deadline
+	tests := []struct {
+		name       string
+		m          Membership
+		visibility string
+		now        time.Time
+		want       apperr.Code // empty: may join
+	}{
+		{name: "outsider, public, one second before", m: outsider, visibility: VisibilityPublic, now: before},
+		{name: "invited, public", m: invited, visibility: VisibilityPublic, now: before},
+		{name: "invited, private", m: invited, visibility: VisibilityPrivate, now: before},
+		{name: "unknown status counts as outsider", m: unknownStatus, visibility: VisibilityPublic, now: before},
+		{name: "outsider, private: not found", m: outsider, visibility: VisibilityPrivate, now: before, want: apperr.CodeChallengeNotFound},
+		{name: "outsider, private, after the deadline: still not found", m: outsider, visibility: VisibilityPrivate, now: at, want: apperr.CodeChallengeNotFound},
+		{name: "unknown visibility", m: outsider, visibility: "unlisted", now: before, want: apperr.CodeChallengeNotFound},
+		{name: "active participant", m: active, visibility: VisibilityPublic, now: before, want: apperr.CodeAlreadyParticipant},
+		{name: "active, after the deadline", m: active, visibility: VisibilityPublic, now: at, want: apperr.CodeAlreadyParticipant},
+		{name: "active creator", m: creatorActive, visibility: VisibilityPrivate, now: before, want: apperr.CodeAlreadyParticipant},
+		{name: "creator without participation", m: creatorNotJoined, visibility: VisibilityPublic, now: before, want: apperr.CodeAlreadyParticipant},
+		{name: "abandoned: final", m: abandoned, visibility: VisibilityPublic, now: before, want: apperr.CodeParticipationAbandoned},
+		{name: "abandoned, private, after the deadline", m: abandoned, visibility: VisibilityPrivate, now: at, want: apperr.CodeParticipationAbandoned},
+		{name: "creator who abandoned: final too", m: creatorAbandoned, visibility: VisibilityPublic, now: before, want: apperr.CodeParticipationAbandoned},
+		{name: "at the exact deadline", m: outsider, visibility: VisibilityPublic, now: at, want: apperr.CodeRegistrationClosed},
+		{name: "invited, private, at the deadline", m: invited, visibility: VisibilityPrivate, now: at, want: apperr.CodeRegistrationClosed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := JoinRefusal(tt.m, tt.visibility, tt.now, deadline)
+			if can := CanJoin(tt.m, tt.visibility, tt.now, deadline); can != (tt.want == "") {
+				t.Fatalf("CanJoin() = %v, want %v", can, tt.want == "")
+			}
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("JoinRefusal() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("JoinRefusal() = %v, want %s", err, tt.want)
+			}
+		})
 	}
 }

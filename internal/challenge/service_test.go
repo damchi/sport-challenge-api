@@ -50,6 +50,22 @@ func (f *fakeRepository) UpdateText(_ context.Context, _ string, changes TextCha
 	return nil
 }
 
+func (f *fakeRepository) Join(_ context.Context, _, _ string, decide func(Challenge, Membership) (time.Time, error)) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.challenge == nil {
+		return fmt.Errorf("join challenge: %w", errChallengeNotFound)
+	}
+	joinedAt, err := decide(*f.challenge, f.membership)
+	if err != nil {
+		return fmt.Errorf("join challenge: %w", err)
+	}
+	f.joinedAt = joinedAt
+	f.membership.Participant = ParticipantActive
+	return nil
+}
+
 func (f *fakeRepository) Categories(context.Context, string) ([]Category, error) {
 	if f.challenge == nil {
 		return nil, nil
@@ -487,3 +503,69 @@ type failingUpdate struct {
 }
 
 func (f *failingUpdate) UpdateText(context.Context, string, TextChanges) error { return f.err }
+
+func TestServiceJoin(t *testing.T) {
+	deadline := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC) // end of week 1 of stored()
+	tests := []struct {
+		name       string
+		visibility string
+		membership Membership
+		profile    bool
+		now        time.Time
+		want       apperr.Code // empty: joined
+	}{
+		{name: "one second before the end of week 1", visibility: VisibilityPublic, profile: true, now: deadline.Add(-time.Second)},
+		{name: "at the exact end of week 1", visibility: VisibilityPublic, profile: true, now: deadline, want: apperr.CodeRegistrationClosed},
+		{name: "already active", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, profile: true, now: deadline.Add(-time.Hour), want: apperr.CodeAlreadyParticipant},
+		{name: "abandoned, then again", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantAbandoned}, profile: true, now: deadline.Add(-time.Hour), want: apperr.CodeParticipationAbandoned},
+		{name: "active creator", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantActive}, profile: true, now: deadline.Add(-time.Hour), want: apperr.CodeAlreadyParticipant},
+		{name: "creator who abandoned", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantAbandoned}, profile: true, now: deadline.Add(-time.Hour), want: apperr.CodeParticipationAbandoned},
+		{name: "private without invitation", visibility: VisibilityPrivate, profile: true, now: deadline.Add(-time.Hour), want: apperr.CodeChallengeNotFound},
+		{name: "incomplete profile, after the rule", visibility: VisibilityPublic, now: deadline.Add(-time.Hour), want: apperr.CodeProfileIncomplete},
+		{name: "closed beats an incomplete profile", visibility: VisibilityPublic, now: deadline, want: apperr.CodeRegistrationClosed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
+			d, err := NewService(repo, fakeProfiles{complete: tt.profile}, fakeCatalogue{}, clock.NewFake(tt.now)).Join(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+			if tt.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !repo.joinedAt.Equal(tt.now) || d.Role != RoleParticipant {
+					t.Fatalf("joined at %s with role %v, want the clock's now and participant", repo.joinedAt, d.Role)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("error = %v, want %s", err, tt.want)
+			}
+			if !repo.joinedAt.IsZero() {
+				t.Fatal("participation written despite the refusal")
+			}
+		})
+	}
+}
+
+func TestServiceJoinMissing(t *testing.T) {
+	_, err := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{}, clock.NewFake(now)).Join(t.Context(), actor, "x")
+	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("error = %v, want challenge_not_found", err)
+	}
+}
+
+func TestServiceJoinFailures(t *testing.T) {
+	storage := errors.New("connection refused")
+	for name, svc := range map[string]*Service{
+		"profile lookup fails": NewService(&fakeRepository{challenge: stored(VisibilityPublic)}, fakeProfiles{err: storage}, fakeCatalogue{}, clock.NewFake(now)),
+		"storage fails":        NewService(&fakeRepository{err: storage}, fakeProfiles{complete: true}, fakeCatalogue{}, clock.NewFake(now)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := svc.Join(t.Context(), actor, "x")
+			var appErr *apperr.Error
+			if !errors.Is(err, storage) || errors.As(err, &appErr) {
+				t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
+			}
+		})
+	}
+}

@@ -567,9 +567,9 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Profil complet exigé.
 - [ ] Possible **jusqu'à la fin de la semaine 1** (instant exact calculé avec le fuseau) ; ensuite 422 `registration_closed`, pour tout le challenge.
-- [ ] Déjà actif : 409 `already_participant` ; a déjà abandonné : 409 `participation_abandoned` (définitif).
-- [ ] Challenge public : tout utilisateur connecté. Challenge privé sans invitation : 404 `challenge_not_found`, comme le détail (décision du ticket 031 : ne pas révéler qu'il existe). Les refus distincts (422 `registration_closed`, 409 `already_participant`, 409 `participation_abandoned`) se déduisent de la même lecture que `CanJoin`, qui ne donne pas la raison : ne pas dupliquer la règle.
-- [ ] Contrôle et écriture dans la même transaction, avec verrou sur le challenge (pas de course avec la suppression ou la limite de la semaine 1).
+- [ ] Déjà actif : 409 `already_participant` (conflit) ; a déjà abandonné, créateur compris : 422 `participation_abandoned` (règle métier : l'abandon est définitif ; décision du ticket 033, conforme au README §5.7).
+- [ ] Challenge public : tout utilisateur connecté. Challenge privé sans invitation : 404 `challenge_not_found`, comme le détail (décision du ticket 031 : ne pas révéler qu'il existe). Les refus distincts (422 `registration_closed`, 409 `already_participant`, 422 `participation_abandoned`) se déduisent de la même lecture que `CanJoin`, qui ne donne pas la raison : ne pas dupliquer la règle.
+- [ ] Contrôle et écriture dans la même transaction, avec verrou sur le challenge (pas de course avec la suppression ou la limite de la semaine 1). Le profil est lu avant la transaction, puis appliqué après `JoinRefusal` : le lire pendant le verrou prendrait une seconde connexion du pool, et des demandes simultanées pourraient l'épuiser (blocage constaté).
 
 - [ ] Applique la règle `CanJoin` de `policy.go` (introduite au ticket 031 : public, tout utilisateur connecté ; privé, invité seulement ; avant la fin de la semaine 1 ; jamais deux fois), puis vérifie le profil complet.
 **Tests** : une seconde avant la limite (accepté), à l'instant exact (refusé), course entre deux demandes, abandon puis nouvelle tentative.
@@ -628,6 +628,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] 🟡 Suppression logique (`deleted_at`) : le challenge disparaît immédiatement pour tous (404) ; une purge définitive viendra selon la politique de conservation.
 - [ ] Les activités restent attachées aux utilisateurs (elles sont globales).
 - [ ] Le worker ignore les challenges supprimés.
+- [ ] La suppression met à jour la ligne `challenges` elle-même (`deleted_at`), dans une transaction qui la verrouille : rejoindre (ticket 033) verrouille cette ligne, donc une suppression et une demande d'inscription concurrentes se sérialisent. Test d'intégration de cette course.
 
 - [ ] Ajoute à `policy.go` la règle `CanDelete` (créateurs seulement), avec ses tests.
 **Tests** : suppression en cours, accès ensuite (404), non-créateur (403).
@@ -659,6 +660,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Les requêtes suivantes avec son jeton renvoient 401 `account_deleted`.
 - [ ] **Suppression définitive** : l'ancien `sub` est conservé sous forme d'empreinte (SHA-256, jamais en clair), par exemple dans une table `deleted_subjects` (migration incluse dans ce ticket). `user.GetOrCreateBySubject` (ticket 019) vérifie cette empreinte **avant** d'insérer et renvoie `account_deleted` sans créer de compte, même si l'ancien jeton est encore valide ou si la suppression chez Auth0 est en attente.
 - [ ] Une transaction couvre l'anonymisation, l'empreinte du `sub` et les abandons.
+- [ ] Course avec « rejoindre » (ticket 033, qui lit l'utilisateur avant sa transaction) : une inscription validée pendant la suppression ne doit pas laisser de participation active au compte anonymisé ; la transaction de rejoindre vérifie que le compte n'est pas anonymisé (`anonymized_at IS NULL`), ou celle de 039 verrouille la ligne utilisateur. Test d'intégration de cette course.
 - [ ] La mise à jour du profil exclut déjà les comptes anonymisés (`anonymized_at IS NULL` dans `user.Repository.UpdateProfile`, ticket 021) : garder cette condition et vérifier qu'un `PATCH /me` concurrent d'une suppression ne réécrit pas de pseudo sur le compte anonymisé.
 - [ ] Après la validation de la transaction, l'utilisateur est **supprimé chez Auth0** (API de gestion). Si l'appel échoue, une ligne `pending_auth0_deletion` est créée (migration incluse dans ce ticket) et la tâche du worker `retry-auth0-deletions` (ticket 057) la rejoue jusqu'au succès.
 - [ ] Ce ticket crée le client de l'API de gestion Auth0 et ses variables de configuration (ajoutées à `.env.example`).

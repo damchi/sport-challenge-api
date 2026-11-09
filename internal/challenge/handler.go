@@ -269,3 +269,20 @@ func roleName(r Role) api.ChallengeDetailMyRole {
 		return api.ChallengeDetailMyRoleOutsider
 	}
 }
+
+// JoinChallenge makes the authenticated user a participant.
+func (h *Handler) JoinChallenge(ctx context.Context, req api.JoinChallengeRequestObject) (api.JoinChallengeResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	d, err := h.service.Join(ctx, actorID, req.ChallengeId.String())
+	if err != nil {
+		return nil, err
+	}
+	out, err := toDetail(d)
+	if err != nil {
+		return nil, err
+	}
+	return api.JoinChallenge201JSONResponse(out), nil
+}

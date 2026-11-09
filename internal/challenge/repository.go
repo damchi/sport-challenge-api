@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
 
@@ -114,21 +115,25 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Summary, error) {
 // errChallengeNotFound means no challenge, or a deleted one.
 var errChallengeNotFound = errors.New("challenge not found")
 
-// Get returns the challenge id unless deleted, without its categories, and
-// the membership of actorID in it, in one query: a missing, deleted or
-// private challenge costs the same before the service decides what the
-// actor may see. A missing or deleted challenge gives errChallengeNotFound.
-func (r *Repository) Get(ctx context.Context, id, actorID string) (Challenge, Membership, error) {
+// membershipQuery reads challenge @id unless deleted, with the membership of
+// @actor. It never takes a lock: under READ COMMITTED, a statement that
+// waits for a lock keeps the snapshot taken before the wait, so its
+// membership subqueries would miss a participation committed meanwhile.
+// Join locks the challenge in a statement of its own, then runs this query.
+const membershipQuery = `SELECT c.*,
+	EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
+	(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant
+	FROM challenges c WHERE c.id = @id AND c.deleted_at IS NULL`
+
+// readWithMembership runs membershipQuery on gdb. A missing or deleted
+// challenge gives errChallengeNotFound.
+func readWithMembership(gdb *gorm.DB, id, actorID string) (Challenge, Membership, error) {
 	var row struct {
 		Challenge
 		Creator     bool
 		Participant *string
 	}
-	err := r.db.WithContext(ctx).Raw(`SELECT c.*,
-		EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
-		(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant
-		FROM challenges c WHERE c.id = @id AND c.deleted_at IS NULL`,
-		map[string]any{"id": id, "actor": actorID}).Scan(&row).Error
+	err := gdb.Raw(membershipQuery, map[string]any{"id": id, "actor": actorID}).Scan(&row).Error
 	if err != nil {
 		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", err)
 	}
@@ -141,6 +146,57 @@ func (r *Repository) Get(ctx context.Context, id, actorID string) (Challenge, Me
 	}
 	// Invitations come with tickets 065 and 066: nobody is invited yet.
 	return row.Challenge, m, nil
+}
+
+// Get returns the challenge id unless deleted, without its categories, and
+// the membership of actorID in it, in one query: a missing, deleted or
+// private challenge costs the same before the service decides what the
+// actor may see. A missing or deleted challenge gives errChallengeNotFound.
+func (r *Repository) Get(ctx context.Context, id, actorID string) (Challenge, Membership, error) {
+	return readWithMembership(r.db.WithContext(ctx), id, actorID)
+}
+
+// Join adds actorID to challenge id as an active participant, in one
+// transaction: the challenge row is locked first (FOR UPDATE), so two joins,
+// or a join and a deletion, never interleave. The membership is read after
+// the lock, in a new statement, so it sees a participation committed by a
+// join that held the lock before. decide gets the challenge and that
+// membership and refuses with an error, nothing being written then;
+// otherwise it returns the instant of the join. A missing or deleted
+// challenge gives errChallengeNotFound.
+func (r *Repository) Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error {
+	err := db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+		var locked []string
+		if err := tx.Raw("SELECT id FROM challenges WHERE id = ? AND deleted_at IS NULL FOR UPDATE", id).Scan(&locked).Error; err != nil {
+			return fmt.Errorf("lock challenge: %w", err)
+		}
+		if len(locked) == 0 {
+			return fmt.Errorf("lock challenge: %w", errChallengeNotFound)
+		}
+		c, m, err := readWithMembership(tx, id, actorID)
+		if err != nil {
+			return err
+		}
+		joinedAt, err := decide(c, m)
+		if err != nil {
+			return err
+		}
+		// The lock makes a duplicate impossible; DO NOTHING keeps a 409 rather
+		// than a 500 should it ever happen.
+		p := participant{ChallengeID: id, UserID: actorID, Status: ParticipantActive, JoinedAt: joinedAt}
+		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&p)
+		if res.Error != nil {
+			return fmt.Errorf("insert participant: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return apperr.New(apperr.CodeAlreadyParticipant, nil)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("join challenge: %w", err)
+	}
+	return nil
 }
 
 // Categories returns the categories of challenge id, in position order.
