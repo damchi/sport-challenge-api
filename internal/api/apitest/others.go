@@ -79,3 +79,7 @@ func (unimplemented) ExcludeParticipant(context.Context, api.ExcludeParticipantR
 func (unimplemented) AddCreator(context.Context, api.AddCreatorRequestObject) (api.AddCreatorResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) DeleteChallenge(context.Context, api.DeleteChallengeRequestObject) (api.DeleteChallengeResponseObject, error) {
+	return nil, errNotImplemented
+}

@@ -264,6 +264,35 @@ paths:
           $ref: "#/components/responses/ChallengeNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteChallenge
+      summary: Delete a challenge
+      description: |
+        Creators only (403 `forbidden`), at any time, even ongoing or
+        finished. The challenge disappears at once for everyone, its creators
+        included (404 from then on); its data stays until the final purge.
+        Deleting it again answers 404, like a missing challenge.
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ChallengeNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       operationId: updateChallenge
       summary: Edit the title and the description

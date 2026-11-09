@@ -614,3 +614,33 @@ func TestAddCreator(t *testing.T) {
 		t.Fatalf("at the exact end: %d %v, want 422 challenge_ended", rec.Code, out)
 	}
 }
+
+func TestDeleteChallenge(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111"
+	creator := Membership{Creator: true, Participant: ParticipantActive}
+	tests := []struct {
+		name       string
+		repo       *fakeRepository
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "creator", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator}, wantStatus: 204},
+		{name: "participant", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantActive}}, wantStatus: 403, wantCode: "forbidden"},
+		{name: "hidden", repo: &fakeRepository{challenge: stored(VisibilityPrivate)}, wantStatus: 404, wantCode: "challenge_not_found"},
+		{name: "missing or already deleted", repo: &fakeRepository{}, wantStatus: 404, wantCode: "challenge_not_found"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodDelete, target, "")
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if tt.wantStatus == 204 {
+				return
+			}
+			if e, _ := out["error"].(map[string]any); e["code"] != tt.wantCode {
+				t.Fatalf("code %v, want %s", e["code"], tt.wantCode)
+			}
+		})
+	}
+}

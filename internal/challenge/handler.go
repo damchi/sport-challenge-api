@@ -335,3 +335,15 @@ func (h *Handler) AddCreator(ctx context.Context, req api.AddCreatorRequestObjec
 	}
 	return api.AddCreator200JSONResponse(out), nil
 }
+
+// DeleteChallenge soft-deletes a challenge on behalf of a creator.
+func (h *Handler) DeleteChallenge(ctx context.Context, req api.DeleteChallengeRequestObject) (api.DeleteChallengeResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	if err := h.service.Delete(ctx, actorID, req.ChallengeId.String()); err != nil {
+		return nil, err
+	}
+	return api.DeleteChallenge204Response{}, nil
+}

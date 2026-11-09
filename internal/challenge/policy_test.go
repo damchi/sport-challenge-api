@@ -368,3 +368,45 @@ func TestAddCreatorRefusal(t *testing.T) {
 		})
 	}
 }
+
+// TestDeleteRefusal: any creator may delete, at any time (README §2.1),
+// even after abandoning; a visible non-creator is forbidden, a hidden
+// challenge not found.
+func TestDeleteRefusal(t *testing.T) {
+	tests := []struct {
+		name       string
+		m          Membership
+		visibility string
+		want       apperr.Code // empty: delete
+	}{
+		{name: "creator", m: creatorActive, visibility: VisibilityPublic},
+		{name: "creator who abandoned", m: creatorAbandoned, visibility: VisibilityPrivate},
+		{name: "participant: forbidden", m: active, visibility: VisibilityPublic, want: apperr.CodeForbidden},
+		{name: "abandoned: forbidden", m: abandoned, visibility: VisibilityPrivate, want: apperr.CodeForbidden},
+		{name: "invited: forbidden", m: invited, visibility: VisibilityPrivate, want: apperr.CodeForbidden},
+		{name: "outsider of a public challenge: forbidden", m: outsider, visibility: VisibilityPublic, want: apperr.CodeForbidden},
+		{name: "outsider of a private challenge: hidden", m: outsider, visibility: VisibilityPrivate, want: apperr.CodeChallengeNotFound},
+		{name: "unknown visibility: hidden", m: creatorActive, visibility: "unlisted", want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := DeleteRefusal(tt.m, tt.visibility)
+			can := CanDelete(RoleOf(tt.m))
+			if tt.want == "" && !can {
+				t.Fatal("CanDelete() = false for an allowed delete")
+			}
+			if tt.want == apperr.CodeForbidden && can {
+				t.Fatal("CanDelete() = true for a forbidden delete")
+			}
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("DeleteRefusal() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("DeleteRefusal() = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
