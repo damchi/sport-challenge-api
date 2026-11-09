@@ -23,6 +23,7 @@ func TestNew(t *testing.T) {
 		{CodeFieldNotEditable, http.StatusUnprocessableEntity},
 		{CodeRegistrationClosed, http.StatusUnprocessableEntity},
 		{CodeChallengeEnded, http.StatusUnprocessableEntity},
+		{CodeCannotExcludeCreator, http.StatusUnprocessableEntity},
 		{CodeAlreadyParticipant, http.StatusConflict},
 		{CodeParticipationAbandoned, http.StatusUnprocessableEntity},
 		{CodeValidationFailed, http.StatusBadRequest},

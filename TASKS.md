@@ -597,8 +597,8 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Réservé aux créateurs.
 - [ ] La cible devient `abandoned` : elle apparaît comme « a abandonné », sans mention d'exclusion.
-- [ ] 🟡 Un créateur ne peut pas être exclu : 422 `cannot_exclude_creator`.
-- [ ] Cible inconnue ou non participante : 404.
+- [ ] ✅ Un créateur ne peut pas être exclu : 422 `cannot_exclude_creator` (décision du ticket 035). Comme l'abandon : déjà abandonné, 204 sans effet ; challenge terminé, 422 `challenge_ended` ; même verrou que rejoindre et abandonner. Réponse 204.
+- [ ] Cible inconnue ou non participante : 404 `not_found` ; challenge caché pour l'acteur : 404 `challenge_not_found` ; acteur non créateur : 403 `forbidden`.
 
 - [ ] Ajoute à `policy.go` la règle `CanExclude` (créateurs seulement), avec ses tests.
 **Tests** : créateur, participant (interdit), cible créatrice.
@@ -613,6 +613,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Réservé aux créateurs ; corps : identifiant de l'utilisateur.
 - [ ] 🟡 La cible doit être un participant actif ; sinon 422.
 - [ ] Idempotent : ajouter un créateur existant renvoie 200.
+- [ ] L'écriture dans `challenge_creators` passe par `withLockedMembership` (verrou sur la ligne du challenge, comme rejoindre, abandonner et exclure) : une exclusion concurrente ne peut pas viser quelqu'un en train de devenir créateur. Test de cette course.
 
 - [ ] Ajoute à `policy.go` la règle `CanAddCreator` (créateurs seulement), avec ses tests.
 **Tests** : créateur, non créateur, cible non participante.
@@ -659,7 +660,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Ses activités restent, rattachées au compte anonymisé, pour ne pas fausser les résultats.
 - [ ] Les requêtes suivantes avec son jeton renvoient 401 `account_deleted`.
 - [ ] **Suppression définitive** : l'ancien `sub` est conservé sous forme d'empreinte (SHA-256, jamais en clair), par exemple dans une table `deleted_subjects` (migration incluse dans ce ticket). `user.GetOrCreateBySubject` (ticket 019) vérifie cette empreinte **avant** d'insérer et renvoie `account_deleted` sans créer de compte, même si l'ancien jeton est encore valide ou si la suppression chez Auth0 est en attente.
-- [ ] Une transaction couvre l'anonymisation, l'empreinte du `sub` et les abandons.
+- [ ] Une transaction couvre l'anonymisation, l'empreinte du `sub` et les abandons. Les participations passent à `abandoned` sous le verrou de chaque challenge (`withLockedMembership`, comme rejoindre, abandonner et exclure) : sinon une exclusion concurrente ne trouverait plus de participation active et répondrait 500.
 - [ ] Course avec « rejoindre » (ticket 033, qui lit l'utilisateur avant sa transaction) : une inscription validée pendant la suppression ne doit pas laisser de participation active au compte anonymisé ; la transaction de rejoindre vérifie que le compte n'est pas anonymisé (`anonymized_at IS NULL`), ou celle de 039 verrouille la ligne utilisateur. Test d'intégration de cette course.
 - [ ] La mise à jour du profil exclut déjà les comptes anonymisés (`anonymized_at IS NULL` dans `user.Repository.UpdateProfile`, ticket 021) : garder cette condition et vérifier qu'un `PATCH /me` concurrent d'une suppression ne réécrit pas de pseudo sur le compte anonymisé.
 - [ ] Après la validation de la transaction, l'utilisateur est **supprimé chez Auth0** (API de gestion). Si l'appel échoue, une ligne `pending_auth0_deletion` est créée (migration incluse dans ce ticket) et la tâche du worker `retry-auth0-deletions` (ticket 057) la rejoue jusqu'au succès.

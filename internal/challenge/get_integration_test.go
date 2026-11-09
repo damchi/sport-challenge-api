@@ -419,3 +419,156 @@ func TestJoinAndAbandonRace(t *testing.T) {
 		}
 	}
 }
+
+func TestExcludeIsStoredAsAnAbandon(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	member := insertProfile(t, pool, "exclude_member")
+	other := insertProfile(t, pool, "exclude_other")
+	for _, u := range []string{member, other} {
+		if _, err := svc.Join(t.Context(), u, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A participant may not exclude.
+	if err := svc.Exclude(t.Context(), other, id, member); !errors.Is(err, apperr.New(apperr.CodeForbidden, nil)) {
+		t.Fatalf("participant excludes: %v, want forbidden", err)
+	}
+	// Nobody excludes the creator.
+	if err := svc.Exclude(t.Context(), creatorID, id, creatorID); !errors.Is(err, apperr.New(apperr.CodeCannotExcludeCreator, nil)) {
+		t.Fatalf("creator excluded: %v, want cannot_exclude_creator", err)
+	}
+	// A user who never joined.
+	stranger := insertProfile(t, pool, "exclude_stranger")
+	if err := svc.Exclude(t.Context(), creatorID, id, stranger); !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) {
+		t.Fatalf("stranger: %v, want not_found", err)
+	}
+
+	clk.Advance(24 * time.Hour)
+	if err := svc.Exclude(t.Context(), creatorID, id, member); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	var abandonedAt time.Time
+	if err := pool.QueryRow(t.Context(), "SELECT status, abandoned_at FROM participants WHERE challenge_id = $1 AND user_id = $2", id, member).Scan(&status, &abandonedAt); err != nil {
+		t.Fatal(err)
+	}
+	if status != "abandoned" || !abandonedAt.Equal(clk.Now()) {
+		t.Fatalf("stored %s at %s, want abandoned at the clock's now", status, abandonedAt)
+	}
+	// Shown as an abandon, with no mention of the exclusion.
+	if d, err := svc.Get(t.Context(), member, id); err != nil || d.Role != RoleAbandoned || d.Participant != ParticipantAbandoned {
+		t.Fatalf("detail for the excluded: %+v, %v, want an abandon", d.Role, err)
+	}
+	// Excluded is final, like an abandon; excluding again changes nothing.
+	if _, err := svc.Join(t.Context(), member, id); !errors.Is(err, apperr.New(apperr.CodeParticipationAbandoned, nil)) {
+		t.Fatalf("rejoin after exclusion: %v, want participation_abandoned", err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, id, member); err != nil {
+		t.Fatalf("exclude again: %v, want nothing to do", err)
+	}
+	var again time.Time
+	if err := pool.QueryRow(t.Context(), "SELECT abandoned_at FROM participants WHERE challenge_id = $1 AND user_id = $2", id, member).Scan(&again); err != nil || !again.Equal(abandonedAt) {
+		t.Fatalf("abandoned_at %s (%v), want the first instant kept", again, err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE challenge_id = $1 AND status = 'active'", id); n != 2 {
+		t.Fatalf("%d active participations, want the creator and the other one", n)
+	}
+}
+
+func TestExcludeByACreatorWhoAbandonedAndAtTheEnd(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	early, late := insertProfile(t, pool, "exclude_early"), insertProfile(t, pool, "exclude_late")
+	for _, u := range []string{early, late} {
+		if _, err := svc.Join(t.Context(), u, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The creator abandons, and still excludes.
+	if _, err := svc.Abandon(t.Context(), creatorID, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, id, early); err != nil {
+		t.Fatalf("creator who abandoned excludes: %v, want allowed", err)
+	}
+	// At the exact end: refused, the target stays active.
+	clk.Set(time.Date(2026, 4, 15, 4, 0, 0, 0, time.UTC))
+	if err := svc.Exclude(t.Context(), creatorID, id, late); !errors.Is(err, apperr.New(apperr.CodeChallengeEnded, nil)) {
+		t.Fatalf("at the end: %v, want challenge_ended", err)
+	}
+	var status string
+	if err := pool.QueryRow(t.Context(), "SELECT status FROM participants WHERE challenge_id = $1 AND user_id = $2", id, late).Scan(&status); err != nil || status != "active" {
+		t.Fatalf("status %s (%v), want still active", status, err)
+	}
+}
+
+func TestExcludeDeletedChallenge(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	member := insertProfile(t, pool, "exclude_deleted")
+	if _, err := svc.Join(t.Context(), member, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET deleted_at = now() WHERE id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, id, member); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("error = %v, want challenge_not_found", err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1 AND status = 'active'", member); n != 1 {
+		t.Fatalf("%d active participations, want the participation untouched", n)
+	}
+}
+
+// TestExcludeAndAbandonRace: a creator excludes users while they abandon.
+// The shared lock serializes both: each user ends abandoned exactly once,
+// never a 500.
+func TestExcludeAndAbandonRace(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	const users = 8
+	ids := make([]string, users)
+	for i := range users {
+		ids[i] = insertProfile(t, pool, "exrace_"+string(rune('a'+i)))
+		if _, err := svc.Join(t.Context(), ids[i], id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make([]error, 2*users)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range users {
+		wg.Go(func() {
+			<-start
+			errs[2*i] = svc.Exclude(t.Context(), creatorID, id, ids[i])
+		})
+		wg.Go(func() {
+			<-start
+			_, errs[2*i+1] = svc.Abandon(t.Context(), ids[i], id)
+		})
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("request %d: %v, want both to succeed (the second one changes nothing)", i, err)
+		}
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE challenge_id = $1 AND status = 'abandoned'", id); n != users {
+		t.Fatalf("%d abandoned, want %d", n, users)
+	}
+}

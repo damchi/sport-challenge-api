@@ -28,6 +28,8 @@ type fakeRepository struct {
 	categoriesRead bool
 	updated        *TextChanges
 	abandonedAt    time.Time
+	// target is the membership of the user to exclude.
+	target Membership
 }
 
 func (f *fakeRepository) Get(context.Context, string, string) (Challenge, Membership, error) {
@@ -81,6 +83,23 @@ func (f *fakeRepository) Abandon(_ context.Context, _, _ string, decide func(Cha
 	if !noop {
 		f.abandonedAt = at
 		f.membership.Participant = ParticipantAbandoned
+	}
+	return nil
+}
+
+func (f *fakeRepository) Exclude(_ context.Context, _, _, _ string, decide func(Challenge, Membership, Membership) (bool, time.Time, error)) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.challenge == nil {
+		return fmt.Errorf("exclude participant: %w", errChallengeNotFound)
+	}
+	noop, at, err := decide(*f.challenge, f.membership, f.target)
+	if err != nil {
+		return fmt.Errorf("exclude participant: %w", err)
+	}
+	if !noop {
+		f.abandonedAt = at
 	}
 	return nil
 }
@@ -655,6 +674,55 @@ func TestServiceAbandonMissingAndFailure(t *testing.T) {
 	}
 	storage := errors.New("connection refused")
 	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Abandon(t.Context(), actor, "x")
+	var appErr *apperr.Error
+	if !errors.Is(err, storage) || errors.As(err, &appErr) {
+		t.Fatalf("storage: %v, want it wrapped as an internal error", err)
+	}
+}
+
+func TestServiceExclude(t *testing.T) {
+	endsAt := time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)
+	creator := Membership{Creator: true, Participant: ParticipantActive}
+	tests := []struct {
+		name      string
+		actor     Membership
+		target    Membership
+		now       time.Time
+		wantWrite bool
+		want      apperr.Code
+	}{
+		{name: "creator excludes a participant", actor: creator, target: Membership{Participant: ParticipantActive}, now: endsAt.Add(-time.Second), wantWrite: true},
+		{name: "already out: nothing written", actor: creator, target: Membership{Participant: ParticipantAbandoned}, now: endsAt.Add(-time.Hour)},
+		{name: "participant: forbidden", actor: Membership{Participant: ParticipantActive}, target: Membership{Participant: ParticipantActive}, now: endsAt.Add(-time.Hour), want: apperr.CodeForbidden},
+		{name: "creator target", actor: creator, target: creator, now: endsAt.Add(-time.Hour), want: apperr.CodeCannotExcludeCreator},
+		{name: "unknown target", actor: creator, now: endsAt.Add(-time.Hour), want: apperr.CodeNotFound},
+		{name: "finished", actor: creator, target: Membership{Participant: ParticipantActive}, now: endsAt, want: apperr.CodeChallengeEnded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: tt.actor, target: tt.target}
+			err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).Exclude(t.Context(), actor, "c", "t")
+			if tt.want != "" {
+				if !errors.Is(err, apperr.New(tt.want, nil)) {
+					t.Fatalf("error = %v, want %s", err, tt.want)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if wrote := !repo.abandonedAt.IsZero(); wrote != tt.wantWrite || (wrote && !repo.abandonedAt.Equal(tt.now)) {
+				t.Fatalf("abandoned at %s, want written %v at the clock's now", repo.abandonedAt, tt.wantWrite)
+			}
+		})
+	}
+}
+
+func TestServiceExcludeMissingAndFailure(t *testing.T) {
+	err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Exclude(t.Context(), actor, "c", "t")
+	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("missing: %v, want challenge_not_found", err)
+	}
+	storage := errors.New("connection refused")
+	err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Exclude(t.Context(), actor, "c", "t")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("storage: %v, want it wrapped as an internal error", err)

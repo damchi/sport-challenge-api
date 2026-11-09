@@ -31,6 +31,8 @@ const (
 	// CodeParticipationAbandoned refuses joining again after abandoning:
 	// abandoning is final.
 	CodeParticipationAbandoned Code = "participation_abandoned"
+	// CodeCannotExcludeCreator refuses excluding a creator of the challenge.
+	CodeCannotExcludeCreator Code = "cannot_exclude_creator"
 	// CodeChallengeEnded refuses a change to a finished challenge.
 	CodeChallengeEnded Code = "challenge_ended"
 	// CodeFieldNotEditable refuses a change to a field frozen at creation.
@@ -69,6 +71,8 @@ func definitionOf(code Code) (definition, bool) {
 	case CodeParticipationAbandoned:
 		// A business rule (abandoning is final), not a data conflict: 422.
 		return definition{http.StatusUnprocessableEntity, "Participation abandoned"}, true
+	case CodeCannotExcludeCreator:
+		return definition{http.StatusUnprocessableEntity, "A creator cannot be excluded"}, true
 	case CodeChallengeEnded:
 		return definition{http.StatusUnprocessableEntity, "Challenge ended"}, true
 	case CodeFieldNotEditable:

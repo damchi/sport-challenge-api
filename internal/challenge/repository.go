@@ -220,20 +220,50 @@ func (r *Repository) Abandon(ctx context.Context, id, actorID string, decide fun
 		if err != nil || noop {
 			return err
 		}
-		res := tx.Model(&participant{}).
-			Where("challenge_id = ? AND user_id = ? AND status = ?", id, actorID, ParticipantActive).
-			Updates(map[string]any{"status": ParticipantAbandoned, "abandoned_at": at})
-		if res.Error != nil {
-			return fmt.Errorf("update participant: %w", res.Error)
-		}
-		// The lock makes it impossible: a silent success would hide a bug.
-		if res.RowsAffected == 0 {
-			return errors.New("update participant: no active participation")
-		}
-		return nil
+		return abandonParticipation(tx, id, actorID, at)
 	})
 	if err != nil {
 		return fmt.Errorf("abandon challenge: %w", err)
+	}
+	return nil
+}
+
+// Exclude marks the active participation of targetID in challenge id as
+// abandoned, on behalf of actorID, under the lock of withLockedMembership.
+// decide gets the challenge, the membership of the actor and the one of the
+// target (read after the lock too), and refuses with an error, or answers
+// that nothing is to write, or gives the instant of the exclusion.
+func (r *Repository) Exclude(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (noop bool, at time.Time, err error)) error {
+	err := r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, actor Membership) error {
+		_, target, err := readWithMembership(tx, id, targetID)
+		if err != nil {
+			return err
+		}
+		noop, at, err := decide(c, actor, target)
+		if err != nil || noop {
+			return err
+		}
+		return abandonParticipation(tx, id, targetID, at)
+	})
+	if err != nil {
+		return fmt.Errorf("exclude participant: %w", err)
+	}
+	return nil
+}
+
+// abandonParticipation turns the active participation of userID in
+// challenge id into an abandon at the given instant: by the user's choice,
+// or by an exclusion, both shown alike.
+func abandonParticipation(tx *gorm.DB, id, userID string, at time.Time) error {
+	res := tx.Model(&participant{}).
+		Where("challenge_id = ? AND user_id = ? AND status = ?", id, userID, ParticipantActive).
+		Updates(map[string]any{"status": ParticipantAbandoned, "abandoned_at": at})
+	if res.Error != nil {
+		return fmt.Errorf("update participant: %w", res.Error)
+	}
+	// The lock makes it impossible: a silent success would hide a bug.
+	if res.RowsAffected == 0 {
+		return errors.New("update participant: no active participation")
 	}
 	return nil
 }

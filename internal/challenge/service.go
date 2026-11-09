@@ -22,6 +22,7 @@ type repository interface {
 	UpdateText(ctx context.Context, id string, changes TextChanges) error
 	Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
 	Abandon(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (bool, time.Time, error)) error
+	Exclude(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, time.Time, error)) error
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -275,4 +276,22 @@ func (s *Service) Abandon(ctx context.Context, actorID, id string) (Detail, erro
 		return Detail{}, err
 	}
 	return s.Get(ctx, actorID, id)
+}
+
+// Exclude makes targetID abandon challenge id on behalf of actorID, one of
+// its creators: the target is eliminated from every category for good and
+// shown as abandoned, with no mention of the exclusion. The rule
+// (ExcludeRefusal: visible, creator, target not a creator, target in, not
+// finished) is checked on the challenge locked by the repository, at the
+// clock's now once locked. Excluding someone already out changes nothing.
+func (s *Service) Exclude(ctx context.Context, actorID, id, targetID string) error {
+	err := s.repo.Exclude(ctx, id, actorID, targetID, func(c Challenge, actor, target Membership) (bool, time.Time, error) {
+		now := s.clock.Now()
+		noop, err := ExcludeRefusal(actor, target, c.Visibility, now, c.EndsAt)
+		return noop, now, err
+	})
+	if errors.Is(err, errChallengeNotFound) {
+		return apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	return err
 }

@@ -131,6 +131,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ Pas de système de contestation pour l'instant.
 - ✅ Les créateurs peuvent ajouter un créateur et exclure un participant.
 - ✅ Un participant exclu par un créateur apparaît comme un abandon (« a abandonné »), sans mention particulière ; il est éliminé de toutes les catégories, définitivement.
+- ✅ Un créateur ne peut pas être exclu (les créateurs sont à égalité ; un créateur peut toujours abandonner lui-même). Une exclusion n'est plus possible une fois le challenge terminé, et exclure quelqu'un qui a déjà abandonné ne change rien.
 - ✅ Pas de système de contestation en V1 : les participants se font confiance.
 
 ### 2.10 Modèle économique

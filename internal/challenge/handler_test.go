@@ -80,6 +80,9 @@ func serve(t *testing.T, svc *Service, method, target, body string) (*httptest.R
 	apitest.ValidateResponse(t, httptest.NewRequest(method, target, nil), rec)
 
 	var out map[string]any
+	if rec.Body.Len() == 0 { // 204
+		return rec, out
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("body is not JSON: %s", rec.Body)
 	}
@@ -519,5 +522,50 @@ func TestAbandonChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 	}
 	if !reflect.DeepEqual(bodies[0], bodies[1]) {
 		t.Fatalf("bodies %v and %v, want the same challenge_not_found", bodies[0], bodies[1])
+	}
+}
+
+func TestExcludeParticipant(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/participants/22222222-2222-2222-2222-222222222222"
+	during := clock.NewFake(time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC))
+	creator := Membership{Creator: true, Participant: ParticipantActive}
+	tests := []struct {
+		name       string
+		repo       *fakeRepository
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "creator", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: Membership{Participant: ParticipantActive}}, wantStatus: 204},
+		{name: "already out", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: Membership{Participant: ParticipantAbandoned}}, wantStatus: 204},
+		{name: "participant", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantActive}, target: Membership{Participant: ParticipantActive}}, wantStatus: 403, wantCode: "forbidden"},
+		{name: "creator target", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: creator}, wantStatus: 422, wantCode: "cannot_exclude_creator"},
+		{name: "unknown target", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator}, wantStatus: 404, wantCode: "not_found"},
+		{name: "hidden", repo: &fakeRepository{challenge: stored(VisibilityPrivate)}, wantStatus: 404, wantCode: "challenge_not_found"},
+	}
+	ended := &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: Membership{Participant: ParticipantActive}}
+	rec, out := serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC))), http.MethodDelete, target, "")
+	if e, _ := out["error"].(map[string]any); rec.Code != 422 || e["code"] != "challenge_ended" {
+		t.Fatalf("at the exact end: %d %v, want 422 challenge_ended", rec.Code, out)
+	}
+	rec, out = serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, during), http.MethodDelete, "/api/v1/challenges/11111111-1111-1111-1111-111111111111/participants/not-a-uuid", "")
+	if e, _ := out["error"].(map[string]any); rec.Code != 400 || e["code"] != "validation_failed" {
+		t.Fatalf("bad user id: %d %v, want 400 validation_failed", rec.Code, out)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, during), http.MethodDelete, target, "")
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if tt.wantStatus == 204 {
+				if rec.Body.Len() != 0 {
+					t.Fatalf("body %q, want none", rec.Body)
+				}
+				return
+			}
+			if e, _ := out["error"].(map[string]any); e["code"] != tt.wantCode {
+				t.Fatalf("code %v, want %s", e["code"], tt.wantCode)
+			}
+		})
 	}
 }
