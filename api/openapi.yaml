@@ -356,10 +356,13 @@ components:
       properties:
         title:
           type: string
-          description: 3 to 80 characters, surrounding spaces ignored.
+          description: |
+            3 to 80 characters once surrounding spaces are removed; checked by
+            the service, not by the schema, which would count those spaces.
           example: Spring run
         description:
           type: string
+          maxLength: 2000
           description: 2000 characters at most.
         visibility:
           type: string
@@ -397,6 +400,8 @@ components:
           additionalProperties:
             type: number
             format: double
+            minimum: 0.1
+            maximum: 2
           example:
             ride: 0.25
     Challenge:

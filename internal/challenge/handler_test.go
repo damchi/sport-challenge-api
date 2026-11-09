@@ -120,6 +120,8 @@ func TestCreateChallengeRefusals(t *testing.T) {
 		{name: "missing title", complete: true, body: strings.Replace(validBody, `"title":"Spring run",`, "", 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
 		{name: "NUL in the title: 400, not a 500 from the database", complete: true, body: strings.Replace(validBody, `"Spring run"`, `"Spring\u0000run"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
 		{name: "categories chosen by the client (D2)", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"categories":[]`, 1), wantStatus: 400, wantCode: "validation_failed"},
+		{name: "factor over 2: refused by the contract, key not echoed", complete: true, body: strings.Replace(validBody, `"ride":0.25`, `"ride":3`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors"},
+		{name: "description over 2000 characters", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"description":"`+strings.Repeat("é", 2001)+`"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "description"},
 		{name: "not JSON", complete: true, body: "title=Spring", wantStatus: 400, wantCode: "validation_failed"},
 		{name: "unknown field", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"created_by":"someone"`, 1), wantStatus: 400, wantCode: "validation_failed"},
 	}
