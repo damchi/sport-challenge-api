@@ -569,3 +569,48 @@ func TestExcludeParticipant(t *testing.T) {
 		})
 	}
 }
+
+func TestAddCreator(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/creators"
+	const body = `{"user_id":"22222222-2222-2222-2222-222222222222"}`
+	during := clock.NewFake(time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC))
+	creator := Membership{Creator: true, Participant: ParticipantActive}
+	tests := []struct {
+		name       string
+		repo       *fakeRepository
+		body       string
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "creator", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: Membership{Participant: ParticipantActive}}, body: body, wantStatus: 200},
+		{name: "already a creator", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: creator}, body: body, wantStatus: 200},
+		{name: "participant", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantActive}, target: Membership{Participant: ParticipantActive}}, body: body, wantStatus: 403, wantCode: "forbidden"},
+		{name: "target not participating", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator}, body: body, wantStatus: 422, wantCode: "not_active_participant"},
+		{name: "hidden", repo: &fakeRepository{challenge: stored(VisibilityPrivate)}, body: body, wantStatus: 404, wantCode: "challenge_not_found"},
+		{name: "bad user id", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator}, body: `{"user_id":"x"}`, wantStatus: 400, wantCode: "validation_failed"},
+		{name: "unknown field", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: creator}, body: `{"user_id":"22222222-2222-2222-2222-222222222222","role":"admin"}`, wantStatus: 400, wantCode: "validation_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, during), http.MethodPost, target, tt.body)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if tt.wantStatus == 200 {
+				if out["my_role"] != "creator" {
+					t.Fatalf("body %v, want the challenge seen by its creator", out)
+				}
+				return
+			}
+			if e, _ := out["error"].(map[string]any); e["code"] != tt.wantCode {
+				t.Fatalf("code %v, want %s", e["code"], tt.wantCode)
+			}
+		})
+	}
+
+	ended := &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: Membership{Participant: ParticipantActive}}
+	rec, out := serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC))), http.MethodPost, target, body)
+	if e, _ := out["error"].(map[string]any); rec.Code != 422 || e["code"] != "challenge_ended" {
+		t.Fatalf("at the exact end: %d %v, want 422 challenge_ended", rec.Code, out)
+	}
+}

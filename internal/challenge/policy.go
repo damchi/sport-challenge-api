@@ -201,3 +201,35 @@ func ExcludeRefusal(actor, target Membership, visibility string, now, endsAt tim
 		return false, apperr.New(apperr.CodeNotFound, nil)
 	}
 }
+
+// CanAddCreator reports whether role may make someone a creator (README
+// §5.7): creators only, even after abandoning.
+func CanAddCreator(role Role) bool {
+	return role == RoleCreator
+}
+
+// AddCreatorRefusal is the rule to make target a creator. On the actor: a
+// challenge the actor may not see is not found (404 challenge_not_found),
+// and only creators may add one (403 forbidden). On the target: a creator
+// already changes nothing (noop), only an active participant may become one
+// (422 not_active_participant: every creator is a participant), and a
+// finished challenge is frozen (422 challenge_ended from the exact endsAt).
+func AddCreatorRefusal(actor, target Membership, visibility string, now, endsAt time.Time) (noop bool, err error) {
+	role := RoleOf(actor)
+	if err := RequireView(role, visibility); err != nil {
+		return false, err
+	}
+	if !CanAddCreator(role) {
+		return false, apperr.New(apperr.CodeForbidden, nil)
+	}
+	switch {
+	case target.Creator:
+		return true, nil
+	case target.Participant != ParticipantActive:
+		return false, apperr.New(apperr.CodeNotActiveParticipant, nil)
+	case !now.Before(endsAt):
+		return false, apperr.New(apperr.CodeChallengeEnded, nil)
+	default:
+		return false, nil
+	}
+}

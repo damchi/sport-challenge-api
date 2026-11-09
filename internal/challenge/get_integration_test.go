@@ -572,3 +572,101 @@ func TestExcludeAndAbandonRace(t *testing.T) {
 		t.Fatalf("%d abandoned, want %d", n, users)
 	}
 }
+
+func TestAddCreatorGivesTheCreatorRights(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	member, quitter, stranger := insertProfile(t, pool, "co_member"), insertProfile(t, pool, "co_quitter"), insertProfile(t, pool, "co_stranger")
+	for _, u := range []string{member, quitter} {
+		if _, err := svc.Join(t.Context(), u, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Abandon(t.Context(), quitter, id); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.AddCreator(t.Context(), member, id, quitter); !errors.Is(err, apperr.New(apperr.CodeForbidden, nil)) {
+		t.Fatalf("participant adds: %v, want forbidden", err)
+	}
+	// Nobody makes themselves a creator.
+	if _, err := svc.AddCreator(t.Context(), member, id, member); !errors.Is(err, apperr.New(apperr.CodeForbidden, nil)) {
+		t.Fatalf("participant promotes themselves: %v, want forbidden", err)
+	}
+	for name, target := range map[string]string{"abandoned": quitter, "never joined": stranger} {
+		if _, err := svc.AddCreator(t.Context(), creatorID, id, target); !errors.Is(err, apperr.New(apperr.CodeNotActiveParticipant, nil)) {
+			t.Fatalf("%s target: %v, want not_active_participant", name, err)
+		}
+	}
+
+	if _, err := svc.AddCreator(t.Context(), creatorID, id, member); err != nil {
+		t.Fatal(err)
+	}
+	// Idempotent: adding again changes nothing.
+	if _, err := svc.AddCreator(t.Context(), creatorID, id, member); err != nil {
+		t.Fatalf("add again: %v, want nothing to do", err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM challenge_creators WHERE challenge_id = $1 AND user_id = $2", id, member); n != 1 {
+		t.Fatalf("%d creator rows, want 1", n)
+	}
+	// The new creator has the creator rights: edit, and cannot be excluded.
+	title := "Renamed by the new creator"
+	if _, err := svc.UpdateText(t.Context(), member, id, nil, TextChanges{Title: &title}); err != nil {
+		t.Fatalf("new creator edits: %v", err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, id, member); !errors.Is(err, apperr.New(apperr.CodeCannotExcludeCreator, nil)) {
+		t.Fatalf("exclude the new creator: %v, want cannot_exclude_creator", err)
+	}
+
+	clk.Set(time.Date(2026, 4, 15, 4, 0, 0, 0, time.UTC)) // the exact end
+	other := insertProfile(t, pool, "co_late")
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants (challenge_id, user_id, status, joined_at) VALUES ($1, $2, 'active', $3)", id, other, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddCreator(t.Context(), creatorID, id, other); !errors.Is(err, apperr.New(apperr.CodeChallengeEnded, nil)) {
+		t.Fatalf("after the end: %v, want challenge_ended", err)
+	}
+}
+
+// TestAddCreatorAndExcludeRace: a creator makes a participant a creator
+// while another excludes them. The shared lock serializes both: either the
+// promotion wins (the exclusion answers cannot_exclude_creator) or the
+// exclusion wins (the promotion answers not_active_participant). Never both.
+func TestAddCreatorAndExcludeRace(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	const users = 8
+	for i := range users {
+		target := insertProfile(t, pool, "corace_"+string(rune('a'+i)))
+		if _, err := svc.Join(t.Context(), target, id); err != nil {
+			t.Fatal(err)
+		}
+		var addErr, excludeErr error
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		wg.Go(func() { <-start; _, addErr = svc.AddCreator(t.Context(), creatorID, id, target) })
+		wg.Go(func() { <-start; excludeErr = svc.Exclude(t.Context(), creatorID, id, target) })
+		close(start)
+		wg.Wait()
+
+		var isCreator bool
+		var status string
+		if err := pool.QueryRow(t.Context(), `SELECT
+			EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = $1 AND user_id = $2),
+			(SELECT status FROM participants WHERE challenge_id = $1 AND user_id = $2)`, id, target).Scan(&isCreator, &status); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case addErr == nil && errors.Is(excludeErr, apperr.New(apperr.CodeCannotExcludeCreator, nil)) && isCreator && status == "active":
+		case excludeErr == nil && errors.Is(addErr, apperr.New(apperr.CodeNotActiveParticipant, nil)) && !isCreator && status == "abandoned":
+		default:
+			t.Fatalf("target %d: add %v, exclude %v, creator %v, status %s: want exactly one to win", i, addErr, excludeErr, isCreator, status)
+		}
+	}
+}

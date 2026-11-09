@@ -459,6 +459,52 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/creators:
+    post:
+      operationId: addCreator
+      summary: Add a creator
+      description: |
+        Creators only (403 `forbidden`). The target must be an active
+        participant (422 `not_active_participant`): every creator is a
+        participant. Adding an existing creator answers 200 and changes
+        nothing. A finished challenge answers 422 `challenge_ended`.
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatorAdd"
+      responses:
+        "200":
+          description: The target is a creator; the challenge as the user sees it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeDetail"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ChallengeNotFound"
+        "422":
+          description: The target is not an active participant (`not_active_participant`), or the challenge is finished (`challenge_ended`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -554,6 +600,7 @@ components:
         - participation_abandoned
         - challenge_ended
         - cannot_exclude_creator
+        - not_active_participant
         - not_found
         - validation_failed
         - internal_error
@@ -901,3 +948,12 @@ components:
           description: Frozen at creation; sending it answers 422 `field_not_editable`.
         ends_at:
           description: Frozen at creation; sending it answers 422 `field_not_editable`.
+    CreatorAdd:
+      type: object
+      required: [user_id]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: The participant to make a creator.

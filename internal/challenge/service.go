@@ -23,6 +23,7 @@ type repository interface {
 	Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
 	Abandon(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (bool, time.Time, error)) error
 	Exclude(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, time.Time, error)) error
+	AddCreator(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, error)) error
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -294,4 +295,23 @@ func (s *Service) Exclude(ctx context.Context, actorID, id, targetID string) err
 		return apperr.New(apperr.CodeChallengeNotFound, nil)
 	}
 	return err
+}
+
+// AddCreator makes targetID a creator of challenge id on behalf of actorID,
+// one of its creators: the new creator gets every creator right. The rule
+// (AddCreatorRefusal: visible, creator, target an active participant, not
+// finished) is checked on the challenge locked by the repository, at the
+// clock's now once locked. Adding an existing creator changes nothing. It
+// returns the challenge as the actor now sees it.
+func (s *Service) AddCreator(ctx context.Context, actorID, id, targetID string) (Detail, error) {
+	err := s.repo.AddCreator(ctx, id, actorID, targetID, func(c Challenge, actor, target Membership) (bool, error) {
+		return AddCreatorRefusal(actor, target, c.Visibility, s.clock.Now(), c.EndsAt)
+	})
+	if errors.Is(err, errChallengeNotFound) {
+		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return Detail{}, err
+	}
+	return s.Get(ctx, actorID, id)
 }

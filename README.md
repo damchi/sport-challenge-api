@@ -131,6 +131,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ Pas de système de contestation pour l'instant.
 - ✅ Les créateurs peuvent ajouter un créateur et exclure un participant.
 - ✅ Un participant exclu par un créateur apparaît comme un abandon (« a abandonné »), sans mention particulière ; il est éliminé de toutes les catégories, définitivement.
+- ✅ Seul un participant actif peut devenir créateur (tout créateur est donc participant) ; ajouter quelqu'un qui est déjà créateur ne change rien (même après la fin) ; nommer un nouveau créateur n'est plus possible une fois le challenge terminé.
 - ✅ Un créateur ne peut pas être exclu (les créateurs sont à égalité ; un créateur peut toujours abandonner lui-même). Une exclusion n'est plus possible une fois le challenge terminé, et exclure quelqu'un qui a déjà abandonné ne change rien.
 - ✅ Pas de système de contestation en V1 : les participants se font confiance.
 

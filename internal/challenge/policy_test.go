@@ -309,3 +309,62 @@ func TestExcludeRefusal(t *testing.T) {
 		})
 	}
 }
+
+// TestCanAddCreator: creators only (README §5.7), every other role forbidden.
+func TestCanAddCreator(t *testing.T) {
+	for role, want := range map[Role]bool{
+		RoleCreator: true, RoleParticipant: false, RoleAbandoned: false,
+		RoleInvited: false, RoleOutsider: false, Role(99): false,
+	} {
+		if got := CanAddCreator(role); got != want {
+			t.Errorf("CanAddCreator(%d) = %v, want %v", role, got, want)
+		}
+	}
+}
+
+// TestAddCreatorRefusal checks the actor, then the target: hidden (404), not
+// a creator (403), already a creator (nothing to do), not an active
+// participant (422), finished (422).
+func TestAddCreatorRefusal(t *testing.T) {
+	endsAt := time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)
+	before, at := endsAt.Add(-time.Second), endsAt
+	tests := []struct {
+		name       string
+		actor      Membership
+		target     Membership
+		visibility string
+		now        time.Time
+		wantNoop   bool
+		want       apperr.Code // empty: add
+	}{
+		{name: "creator adds an active participant", actor: creatorActive, target: active, visibility: VisibilityPublic, now: before},
+		{name: "creator who abandoned keeps the right", actor: creatorAbandoned, target: active, visibility: VisibilityPrivate, now: before},
+		{name: "already a creator: nothing to do", actor: creatorActive, target: creatorActive, visibility: VisibilityPublic, now: before, wantNoop: true},
+		{name: "already a creator, after the end", actor: creatorActive, target: creatorAbandoned, visibility: VisibilityPublic, now: at, wantNoop: true},
+		{name: "target abandoned", actor: creatorActive, target: abandoned, visibility: VisibilityPublic, now: before, want: apperr.CodeNotActiveParticipant},
+		{name: "target never joined", actor: creatorActive, target: outsider, visibility: VisibilityPublic, now: before, want: apperr.CodeNotActiveParticipant},
+		{name: "target only invited", actor: creatorActive, target: invited, visibility: VisibilityPrivate, now: before, want: apperr.CodeNotActiveParticipant},
+		{name: "at the exact end", actor: creatorActive, target: active, visibility: VisibilityPublic, now: at, want: apperr.CodeChallengeEnded},
+		{name: "participant: forbidden", actor: active, target: active, visibility: VisibilityPublic, now: before, want: apperr.CodeForbidden},
+		{name: "abandoned: forbidden", actor: abandoned, target: active, visibility: VisibilityPrivate, now: before, want: apperr.CodeForbidden},
+		{name: "outsider of a public challenge: forbidden", actor: outsider, target: active, visibility: VisibilityPublic, now: before, want: apperr.CodeForbidden},
+		{name: "outsider of a private challenge: hidden", actor: outsider, target: active, visibility: VisibilityPrivate, now: before, want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			noop, err := AddCreatorRefusal(tt.actor, tt.target, tt.visibility, tt.now, endsAt)
+			if noop != tt.wantNoop {
+				t.Fatalf("noop = %v, want %v", noop, tt.wantNoop)
+			}
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("AddCreatorRefusal() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("AddCreatorRefusal() = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
