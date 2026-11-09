@@ -1,0 +1,96 @@
+package challenge
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"strings"
+	"time"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/clock"
+)
+
+// repository is what the service needs from the storage.
+type repository interface {
+	Create(ctx context.Context, c Challenge, joinedAt time.Time) (Challenge, error)
+}
+
+// Profiles tells whether a user's profile is complete (module user).
+type Profiles interface {
+	ProfileComplete(ctx context.Context, userID string) (bool, error)
+}
+
+// Catalogue gives the suggested factor of every sport with a distance
+// (module sport).
+type Catalogue interface {
+	SuggestedFactors(ctx context.Context) (map[string]float64, error)
+}
+
+// Service holds the use cases of the challenges.
+type Service struct {
+	repo      repository
+	profiles  Profiles
+	catalogue Catalogue
+	clock     clock.Clock
+}
+
+// NewService returns a Service.
+func NewService(repo repository, profiles Profiles, catalogue Catalogue, c clock.Clock) *Service {
+	return &Service{repo: repo, profiles: profiles, catalogue: catalogue, clock: c}
+}
+
+// Create creates the challenge described by draft, with actorID as its
+// creator and first participant. The actor needs a complete profile (422
+// profile_incomplete). The distance factors are the catalogue's suggestions,
+// replaced by those of the draft, then frozen in the category.
+func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Challenge, error) {
+	complete, err := s.profiles.ProfileComplete(ctx, actorID)
+	if err != nil {
+		return Challenge{}, fmt.Errorf("check profile: %w", err)
+	}
+	if !complete {
+		return Challenge{}, apperr.New(apperr.CodeProfileIncomplete, nil)
+	}
+
+	suggested, err := s.catalogue.SuggestedFactors(ctx)
+	if err != nil {
+		return Challenge{}, fmt.Errorf("read catalogue: %w", err)
+	}
+	distanceSports := make(map[string]bool, len(suggested))
+	for code := range suggested {
+		distanceSports[code] = true
+	}
+
+	now := s.clock.Now()
+	window, err := Validate(draft, now, distanceSports)
+	if err != nil {
+		return Challenge{}, err
+	}
+
+	factors := maps.Clone(suggested)
+	maps.Copy(factors, draft.DistanceFactors)
+	// Running is the reference of the distance category, whatever the
+	// catalogue says (README §2.4).
+	factors[referenceSport] = 1
+
+	c, err := s.repo.Create(ctx, Challenge{
+		Title:            strings.TrimSpace(draft.Title),
+		Description:      draft.Description,
+		Visibility:       draft.Visibility,
+		MembersCanInvite: draft.MembersCanInvite,
+		Timezone:         draft.Timezone,
+		StartsAt:         window.StartsAt,
+		EndsAt:           window.EndsAt,
+		CreatedBy:        actorID,
+		Categories: []Category{
+			{Type: CategoryCumulativeTime, Position: 1, Params: Params{}},
+			{Type: CategoryCumulativeDistance, Position: 2, Params: Params{Factors: factors}},
+			{Type: CategoryRunElimination, Position: 3, Params: Params{Sport: referenceSport, StepMeters: draft.EliminationStepMeters}},
+		},
+	}, now)
+	if err != nil {
+		return Challenge{}, fmt.Errorf("store challenge: %w", err)
+	}
+	return c, nil
+}

@@ -45,7 +45,7 @@ func newMeRouter(t *testing.T, repo repository) *gin.Engine {
 		auth.Authenticate(acceptingVerifier{}, logger),
 		auth.CurrentUser(func(context.Context, string) (string, error) { return meID, nil }, logger),
 	))
-	strict := api.NewStrictHandlerWithOptions(meHandlers{NewHandler(NewService(repo))}, nil, api.StrictGinServerOptions{
+	strict := api.NewStrictHandlerWithOptions(meHandlers{Handler: NewHandler(NewService(repo))}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
@@ -58,18 +58,9 @@ func newMeRouter(t *testing.T, repo repository) *gin.Engine {
 }
 
 // meHandlers completes the contract with probes that are never called.
-type meHandlers struct{ *Handler }
-
-func (meHandlers) GetHealthz(context.Context, api.GetHealthzRequestObject) (api.GetHealthzResponseObject, error) {
-	return nil, nil
-}
-
-func (meHandlers) GetReadyz(context.Context, api.GetReadyzRequestObject) (api.GetReadyzResponseObject, error) {
-	return nil, nil
-}
-
-func (meHandlers) GetSports(context.Context, api.GetSportsRequestObject) (api.GetSportsResponseObject, error) {
-	return nil, nil
+type meHandlers struct {
+	*Handler
+	apitest.Others
 }
 
 type response struct {

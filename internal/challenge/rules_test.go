@@ -56,6 +56,13 @@ func TestValidate(t *testing.T) {
 		{name: "title of spaces only", draft: with(func(d *Draft) { d.Title = "     " }), wantFields: "title"},
 		{name: "title padded to 3 characters", draft: with(func(d *Draft) { d.Title = "  ab  " }), wantFields: "title"},
 
+		// Control characters: refused (PostgreSQL refuses NUL in text).
+		{name: "NUL in the title", draft: with(func(d *Draft) { d.Title = "ab\x00c" }), wantFields: "title"},
+		{name: "newline in the title", draft: with(func(d *Draft) { d.Title = "Spring\nrun" }), wantFields: "title"},
+		{name: "NUL in the description", draft: with(func(d *Draft) { s := "a\x00b"; d.Description = &s }), wantFields: "description"},
+		{name: "escape in the description", draft: with(func(d *Draft) { s := "a\x1bb"; d.Description = &s }), wantFields: "description"},
+		{name: "lines and tabs in the description", draft: with(func(d *Draft) { s := "Line 1\r\n\tLine 2"; d.Description = &s })},
+
 		// Description: optional, 2000 characters at most.
 		{name: "description of 2000 characters", draft: with(func(d *Draft) { d.Description = desc(2000) })},
 		{name: "description of 2001 characters", draft: with(func(d *Draft) { d.Description = desc(2001) }), wantFields: "description"},

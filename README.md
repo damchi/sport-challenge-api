@@ -80,7 +80,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 | Roller | ×0,5 |
 | Ski de fond | ×0,5 |
 
-- ✅ Ce sont des **suggestions** : le catalogue propose un coefficient pour chaque sport à distance, et le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**. La course reste la référence : son coefficient est toujours ×1.
+- ✅ Ce sont des **suggestions** : le catalogue propose un coefficient pour chaque sport à distance, et le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**. La course reste la référence : son coefficient est toujours ×1 et ne s'envoie pas à la création (refusé même à 1).
 - ✅ Les coefficients sont **figés à la création du challenge** : ni une modification ultérieure du catalogue ni les créateurs ne les changent pour un challenge en cours.
 - Conséquence assumée : la marche compte pleinement, donc un marcheur peut battre un coureur en distance pure.
 

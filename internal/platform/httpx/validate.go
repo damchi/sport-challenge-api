@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/gin-gonic/gin"
 
@@ -55,18 +57,30 @@ func RequestValidator(doc *openapi3.T, logger *slog.Logger) (gin.HandlerFunc, er
 			Options:    opts,
 		})
 		if err != nil {
-			RespondError(c, logger, apperr.InvalidFields(err, fieldsOf(err)...))
+			RespondError(c, logger, apperr.InvalidFields(err, fieldsOf(err, bodySchema(route))...))
 		}
 	}, nil
 }
 
+// bodySchema returns the JSON body schema of the route, nil without one.
+func bodySchema(route *routers.Route) *openapi3.Schema {
+	if route.Operation == nil || route.Operation.RequestBody == nil || route.Operation.RequestBody.Value == nil {
+		return nil
+	}
+	media := route.Operation.RequestBody.Value.Content.Get("application/json")
+	if media == nil || media.Schema == nil {
+		return nil
+	}
+	return media.Schema.Value
+}
+
 // fieldsOf lists, sorted and once each, the fields an error from
 // openapi3filter.ValidateRequest is about: the parameter name, or the path of
-// the body property ("pseudo", "items.0.distance"). The path is made of the
-// contract's property names and of array indexes; a schema with free-form
-// keys (additionalProperties with a schema) would add the client's keys to
-// it, so such a schema needs a filter here first.
-func fieldsOf(err error) []string {
+// the body property ("pseudo", "items.0.distance"). A body path keeps only
+// the property names declared in body and array indexes: it stops at the
+// first free-form key (an additionalProperties map such as
+// distance_factors), which the client chose and is never sent back.
+func fieldsOf(err error, body *openapi3.Schema) []string {
 	var fields []string
 	var walk func(error)
 	walk = func(err error) {
@@ -81,7 +95,7 @@ func fieldsOf(err error) []string {
 		case errors.As(err, &reqErr) && reqErr.Parameter != nil:
 			fields = append(fields, reqErr.Parameter.Name)
 		case errors.As(err, &schemaErr):
-			if path := strings.Join(schemaErr.JSONPointer(), "."); path != "" {
+			if path := declaredPath(body, schemaErr.JSONPointer()); path != "" {
 				fields = append(fields, path)
 			}
 		}
@@ -89,4 +103,27 @@ func fieldsOf(err error) []string {
 	walk(err)
 	slices.Sort(fields)
 	return slices.Compact(fields)
+}
+
+// declaredPath joins the leading segments of path that schema declares: a
+// property name, or an index of an array. A composed schema (allOf, oneOf,
+// anyOf) declares no properties at its own level, so the path stops there:
+// safe, but the field is then not named.
+func declaredPath(schema *openapi3.Schema, path []string) string {
+	var kept []string
+	for _, seg := range path {
+		if schema == nil {
+			break
+		}
+		if prop, ok := schema.Properties[seg]; ok && prop.Value != nil {
+			kept, schema = append(kept, seg), prop.Value
+			continue
+		}
+		if _, err := strconv.Atoi(seg); err == nil && schema.Items != nil && schema.Items.Value != nil {
+			kept, schema = append(kept, seg), schema.Items.Value
+			continue
+		}
+		break
+	}
+	return strings.Join(kept, ".")
 }

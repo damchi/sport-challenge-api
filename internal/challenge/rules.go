@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -70,10 +71,10 @@ type Window struct {
 func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Window, error) {
 	var fields []string
 
-	if n := utf8.RuneCountInString(strings.TrimSpace(draft.Title)); n < minTitle || n > maxTitle {
+	if n := utf8.RuneCountInString(strings.TrimSpace(draft.Title)); n < minTitle || n > maxTitle || hasControl(draft.Title, "") {
 		fields = append(fields, "title")
 	}
-	if draft.Description != nil && utf8.RuneCountInString(*draft.Description) > maxDescription {
+	if d := draft.Description; d != nil && (utf8.RuneCountInString(*d) > maxDescription || hasControl(*d, "\n\r\t")) {
 		fields = append(fields, "description")
 	}
 	if draft.Visibility != VisibilityPublic && draft.Visibility != VisibilityPrivate {
@@ -117,6 +118,15 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 		return Window{}, apperr.InvalidFields(nil, fields...)
 	}
 	return window, nil
+}
+
+// hasControl reports whether s holds a control character other than those
+// of allowed. PostgreSQL refuses NUL in a text column, and the other control
+// characters have no place in a title or a description.
+func hasControl(s, allowed string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsControl(r) && !strings.ContainsRune(allowed, r)
+	})
 }
 
 // location loads an IANA time zone. It refuses the empty name and "Local",

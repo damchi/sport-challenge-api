@@ -33,22 +33,9 @@ func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
 
 // sportsOnly completes the contract with the operations of other modules,
 // never called here.
-type sportsOnly struct{ *Handler }
-
-func (sportsOnly) GetHealthz(context.Context, api.GetHealthzRequestObject) (api.GetHealthzResponseObject, error) {
-	return nil, nil
-}
-
-func (sportsOnly) GetReadyz(context.Context, api.GetReadyzRequestObject) (api.GetReadyzResponseObject, error) {
-	return nil, nil
-}
-
-func (sportsOnly) GetMe(context.Context, api.GetMeRequestObject) (api.GetMeResponseObject, error) {
-	return nil, nil
-}
-
-func (sportsOnly) PatchMe(context.Context, api.PatchMeRequestObject) (api.PatchMeResponseObject, error) {
-	return nil, nil
+type sportsOnly struct {
+	*Handler
+	apitest.Others
 }
 
 // getSports serves GET /api/v1/sports as cmd/api does (authentication, then
@@ -62,7 +49,7 @@ func getSports(t *testing.T, repo repository) *httptest.ResponseRecorder {
 		auth.Authenticate(acceptingVerifier{}, logger),
 		auth.CurrentUser(func(context.Context, string) (string, error) { return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil }, logger),
 	))
-	api.RegisterHandlers(r, api.NewStrictHandlerWithOptions(sportsOnly{NewHandler(NewService(repo))}, nil, api.StrictGinServerOptions{
+	api.RegisterHandlers(r, api.NewStrictHandlerWithOptions(sportsOnly{Handler: NewHandler(NewService(repo))}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),

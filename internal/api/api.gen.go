@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,63 @@ import (
 	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// Defines values for CategoryType.
+const (
+	CumulativeDistance CategoryType = "cumulative_distance"
+	CumulativeTime     CategoryType = "cumulative_time"
+	RunElimination     CategoryType = "run_elimination"
+)
+
+// Valid indicates whether the value is a known member of the CategoryType enum.
+func (e CategoryType) Valid() bool {
+	switch e {
+	case CumulativeDistance:
+		return true
+	case CumulativeTime:
+		return true
+	case RunElimination:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChallengeVisibility.
+const (
+	ChallengeVisibilityPrivate ChallengeVisibility = "private"
+	ChallengeVisibilityPublic  ChallengeVisibility = "public"
+)
+
+// Valid indicates whether the value is a known member of the ChallengeVisibility enum.
+func (e ChallengeVisibility) Valid() bool {
+	switch e {
+	case ChallengeVisibilityPrivate:
+		return true
+	case ChallengeVisibilityPublic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChallengeCreateVisibility.
+const (
+	ChallengeCreateVisibilityPrivate ChallengeCreateVisibility = "private"
+	ChallengeCreateVisibilityPublic  ChallengeCreateVisibility = "public"
+)
+
+// Valid indicates whether the value is a known member of the ChallengeCreateVisibility enum.
+func (e ChallengeCreateVisibility) Valid() bool {
+	switch e {
+	case ChallengeCreateVisibilityPrivate:
+		return true
+	case ChallengeCreateVisibilityPublic:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for ErrorCode.
 const (
@@ -133,6 +191,92 @@ func (e SportDistanceMode) Valid() bool {
 	}
 }
 
+// Category defines model for Category.
+type Category struct {
+	// Params Frozen settings of the category.
+	Params   CategoryParams `json:"params"`
+	Position int            `json:"position"`
+	Type     CategoryType   `json:"type"`
+}
+
+// CategoryType defines model for Category.Type.
+type CategoryType string
+
+// CategoryParams Frozen settings of the category.
+type CategoryParams struct {
+	// Factors cumulative_distance only, distance factor by sport code.
+	Factors *map[string]float64 `json:"factors,omitempty"`
+
+	// Sport run_elimination only, always `run`.
+	Sport *string `json:"sport,omitempty"`
+
+	// StepMeters run_elimination only, increment X in meters.
+	StepMeters *int `json:"step_meters,omitempty"`
+}
+
+// Challenge defines model for Challenge.
+type Challenge struct {
+	Categories  []Category `json:"categories"`
+	Description *string    `json:"description"`
+
+	// EndsAt End of the window (excluded), in UTC.
+	EndsAt           time.Time          `json:"ends_at"`
+	Id               openapi_types.UUID `json:"id"`
+	MembersCanInvite bool               `json:"members_can_invite"`
+
+	// StartsAt Local midnight of the first day, in UTC.
+	StartsAt   time.Time           `json:"starts_at"`
+	Timezone   string              `json:"timezone"`
+	Title      string              `json:"title"`
+	Visibility ChallengeVisibility `json:"visibility"`
+}
+
+// ChallengeVisibility defines model for Challenge.Visibility.
+type ChallengeVisibility string
+
+// ChallengeCreate defines model for ChallengeCreate.
+type ChallengeCreate struct {
+	// Description 2000 characters at most.
+	Description *string `json:"description,omitempty"`
+
+	// DistanceFactors Factors chosen by the creator, by sport code (distance sports only,
+	// 0.1 to 2, two decimals at most). Send only the factors the creator
+	// changed: sports not given keep their suggested factor. `run` is
+	// refused, even at 1: it is the reference and always counts x1.
+	//
+	//
+	// Example: {"ride":0.25}
+	DistanceFactors *map[string]float64 `json:"distance_factors,omitempty"`
+
+	// EliminationStepMeters Increment X of the run elimination category, in meters.
+	EliminationStepMeters int `json:"elimination_step_meters"`
+
+	// MembersCanInvite Whether participants may invite people, not only creators.
+	MembersCanInvite *bool `json:"members_can_invite,omitempty"`
+
+	// StartDate First local day, between today and the same day next year in `timezone`.
+	//
+	// Example: 2026-12-07
+	StartDate openapi_types.Date `json:"start_date"`
+
+	// Timezone IANA time zone of the place the challenge is run from; the weeks are cut in it.
+	//
+	// Example: America/Toronto
+	Timezone string `json:"timezone"`
+
+	// Title 3 to 80 characters, surrounding spaces ignored.
+	//
+	// Example: Spring run
+	Title      string                    `json:"title"`
+	Visibility ChallengeCreateVisibility `json:"visibility"`
+
+	// Weeks Duration in whole weeks.
+	Weeks int `json:"weeks"`
+}
+
+// ChallengeCreateVisibility defines model for ChallengeCreate.Visibility.
+type ChallengeCreateVisibility string
+
 // Error Single error format of the API. Clients translate `code`; `message` is only an English fallback.
 type Error struct {
 	Error struct {
@@ -236,11 +380,17 @@ type Unauthorized = Error
 // ValidationFailed Single error format of the API. Clients translate `code`; `message` is only an English fallback.
 type ValidationFailed = Error
 
+// CreateChallengeJSONRequestBody defines body for CreateChallenge for application/json ContentType.
+type CreateChallengeJSONRequestBody = ChallengeCreate
+
 // PatchMeJSONRequestBody defines body for PatchMe for application/json ContentType.
 type PatchMeJSONRequestBody = MeUpdate
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// CreateChallenge Create a challenge
+	// (POST /api/v1/challenges)
+	CreateChallenge(c *gin.Context)
 	// GetMe Read my profile
 	// (GET /api/v1/me)
 	GetMe(c *gin.Context)
@@ -266,6 +416,19 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(c *gin.Context)
+
+// CreateChallenge operation middleware
+func (siw *ServerInterfaceWrapper) CreateChallenge(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateChallenge(c)
+}
 
 // GetMe operation middleware
 func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
@@ -364,6 +527,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/me", wrapper.GetMe)
 	router.PATCH(options.BaseURL+"/api/v1/me", wrapper.PatchMe)
 	router.GET(options.BaseURL+"/api/v1/sports", wrapper.GetSports)
+	router.POST(options.BaseURL+"/api/v1/challenges", wrapper.CreateChallenge)
 }
 
 type InternalErrorJSONResponse Error
@@ -378,6 +542,87 @@ type UnauthorizedJSONResponse struct {
 }
 
 type ValidationFailedJSONResponse Error
+
+type CreateChallengeRequestObject struct {
+	Body *CreateChallengeJSONRequestBody
+}
+
+type CreateChallengeResponseObject interface {
+	VisitCreateChallengeResponse(w http.ResponseWriter) error
+}
+
+type CreateChallenge201JSONResponse Challenge
+
+func (response CreateChallenge201JSONResponse) VisitCreateChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateChallenge400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateChallenge400JSONResponse) VisitCreateChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateChallenge401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response CreateChallenge401JSONResponse) VisitCreateChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateChallenge422JSONResponse Error
+
+func (response CreateChallenge422JSONResponse) VisitCreateChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateChallenge500JSONResponse struct{ InternalErrorJSONResponse }
+
+func (response CreateChallenge500JSONResponse) VisitCreateChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type GetMeRequestObject struct {
 }
@@ -630,6 +875,9 @@ func (response GetReadyz503JSONResponse) VisitGetReadyzResponse(w http.ResponseW
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// CreateChallenge Create a challenge
+	// (POST /api/v1/challenges)
+	CreateChallenge(ctx context.Context, request CreateChallengeRequestObject) (CreateChallengeResponseObject, error)
 	// GetMe Read my profile
 	// (GET /api/v1/me)
 	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
@@ -702,6 +950,48 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictGinServerOptions
+}
+
+// CreateChallenge operation middleware
+func (sh *strictHandler) CreateChallenge(ctx *gin.Context) {
+	var request CreateChallengeRequestObject
+
+	var body CreateChallengeJSONRequestBody
+	var err error
+	// A request validator built on kin-openapi's openapi3filter with
+	// KeepValidatedValue leaves the value it validated on the body. Bind
+	// that value, matching member names exactly, so the handler receives
+	// what was validated instead of a second, case-insensitive decode.
+	if vb, ok := ctx.Request.Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+		err = ctx.ShouldBindJSON(&body)
+	} else if binding.Validator != nil {
+		// ShouldBindJSON runs the struct validator after decoding; keep that.
+		err = binding.Validator.ValidateStruct(&body)
+	}
+	if err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateChallenge(ctx, request.(CreateChallengeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateChallenge")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CreateChallengeResponseObject); ok {
+		if err := validResponse.VisitCreateChallengeResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // GetMe operation middleware
@@ -847,48 +1137,64 @@ func (sh *strictHandler) GetReadyz(ctx *gin.Context) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"3taU9EGsblb/GwA=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
