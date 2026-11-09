@@ -9,6 +9,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
 )
 
 // Handler implements the challenge operations of the API contract.
@@ -95,4 +96,79 @@ func toAPI(c Challenge) (api.Challenge, error) {
 		})
 	}
 	return out, nil
+}
+
+// defaultLimit is the page size when the client gives none (the contract's
+// default).
+const defaultLimit = 20
+
+// ListChallenges answers a page of challenges for the authenticated user.
+func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequestObject) (api.ListChallengesResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	p := req.Params
+	scope, status, limit := ScopePublic, "", defaultLimit
+	if p.Scope != nil {
+		scope = string(*p.Scope)
+	}
+	if p.Status != nil {
+		status = string(*p.Status)
+	}
+	if p.Limit != nil {
+		limit = *p.Limit
+	}
+	var after *Position
+	if p.Cursor != nil {
+		after = &Position{}
+		if err := httpx.DecodeCursor(*p.Cursor, after); err != nil {
+			return nil, err
+		}
+		// Normalized: uuid.Parse also accepts forms PostgreSQL refuses
+		// (urn:uuid:..., {...}).
+		id, err := uuid.Parse(after.ID)
+		if err != nil {
+			return nil, apperr.InvalidFields(err, "cursor")
+		}
+		after.ID = id.String()
+		// A position without its date (forged cursor) would restart the list.
+		if after.StartsAt.IsZero() {
+			return nil, apperr.InvalidFields(nil, "cursor")
+		}
+	}
+
+	page, err := h.service.List(ctx, actorID, scope, status, limit, after)
+	if err != nil {
+		return nil, err
+	}
+	out := api.ChallengePage{Items: make([]api.ChallengeSummary, 0, len(page.Items))}
+	for _, c := range page.Items {
+		id, err := uuid.Parse(c.ID)
+		if err != nil {
+			return nil, fmt.Errorf("challenge id: %w", err)
+		}
+		item := api.ChallengeSummary{
+			Id:               id,
+			Title:            c.Title,
+			Visibility:       api.ChallengeSummaryVisibility(c.Visibility),
+			Timezone:         c.Timezone,
+			StartsAt:         c.StartsAt.UTC(),
+			EndsAt:           c.EndsAt.UTC(),
+			ParticipantCount: c.ParticipantCount,
+		}
+		if c.MyStatus != nil {
+			status := api.ChallengeSummaryMyStatus(*c.MyStatus)
+			item.MyStatus = &status
+		}
+		out.Items = append(out.Items, item)
+	}
+	if page.Next != nil {
+		cursor, err := httpx.EncodeCursor(page.Next)
+		if err != nil {
+			return nil, err
+		}
+		out.NextCursor = &cursor
+	}
+	return api.ListChallenges200JSONResponse(out), nil
 }

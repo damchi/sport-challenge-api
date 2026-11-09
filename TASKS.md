@@ -520,10 +520,10 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Paramètres : `scope` (`public` ou `mine`), `status` (`upcoming`, `ongoing`, `finished`, calculé avec l'horloge), `limit`, `cursor`.
-- [ ] Pagination par curseur sur (`starts_at`, `id`).
+- [ ] Pagination par curseur sur (`starts_at`, `id`). Tri : à venir et en cours, le début le plus proche d'abord ; terminés, le plus récent d'abord ; sans filtre de statut, début croissant (décision du ticket 030).
 - [ ] `public` : challenges publics non supprimés ; `mine` : ceux dont l'utilisateur est créateur ou participant.
 - [ ] `mine` s'appuie sur l'index `participants (user_id)` : tout créateur est participant (tickets 029 et 036, le statut abandonné garde la ligne). Si la requête lit aussi `challenge_creators`, le ticket ajoute l'index `challenge_creators (user_id)` par une nouvelle migration.
-- [ ] Éléments : identifiant, titre, visibilité, dates et fuseau, nombre de participants, mon statut.
+- [ ] Éléments : identifiant, titre, visibilité, dates et fuseau, nombre de participants (tous les inscrits, y compris ceux qui ont abandonné : décision du ticket 030), mon statut (`active`, `abandoned` ou nul).
 - [ ] Le filtrage se fait dans la requête SQL ; un challenge privé n'apparaît jamais dans `public`.
 
 - [ ] Introduit l'enveloppe de pagination `{ "items": [], "next_cursor": null }` et l'encodage du curseur dans `httpx` (premier endpoint de liste).

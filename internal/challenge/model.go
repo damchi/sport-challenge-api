@@ -96,3 +96,54 @@ type participant struct {
 }
 
 func (participant) TableName() string { return "participants" }
+
+// Scopes of a listing.
+const (
+	ScopePublic = "public"
+	ScopeMine   = "mine"
+)
+
+// Statuses of a challenge, from the current instant.
+const (
+	StatusUpcoming = "upcoming"
+	StatusOngoing  = "ongoing"
+	StatusFinished = "finished"
+)
+
+// ListQuery selects a page of challenges for an actor. Status is empty for
+// every status.
+type ListQuery struct {
+	ActorID string
+	Scope   string
+	Status  string
+	Now     time.Time
+	Limit   int
+	// After is the position of the last item of the previous page.
+	After *Position
+}
+
+// Position is the place of a challenge in a listing: the pagination key
+// (starts_at, id), encoded in the cursor.
+type Position struct {
+	StartsAt time.Time `json:"s"`
+	ID       string    `json:"i"`
+}
+
+// Summary is a challenge in a listing.
+type Summary struct {
+	ID               string
+	Title            string
+	Visibility       string
+	Timezone         string
+	StartsAt         time.Time
+	EndsAt           time.Time
+	ParticipantCount int
+	// MyStatus is the actor's participation, nil when not a participant.
+	MyStatus *string
+}
+
+// Page is a page of a listing; Next is nil on the last page.
+type Page struct {
+	Items []Summary
+	Next  *Position
+}

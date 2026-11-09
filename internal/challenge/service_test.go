@@ -3,6 +3,7 @@ package challenge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -18,6 +19,20 @@ type fakeRepository struct {
 	created  *Challenge
 	joinedAt time.Time
 	err      error
+	// summaries and listed serve List.
+	summaries []Summary
+	listed    ListQuery
+}
+
+func (f *fakeRepository) List(_ context.Context, q ListQuery) ([]Summary, error) {
+	f.listed = q
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.summaries) > q.Limit {
+		return f.summaries[:q.Limit], nil
+	}
+	return f.summaries, nil
 }
 
 func (f *fakeRepository) Create(_ context.Context, c Challenge, joinedAt time.Time) (Challenge, error) {
@@ -186,5 +201,67 @@ func TestServiceCreateUsesTheClock(t *testing.T) {
 	var appErr *apperr.Error
 	if !errors.As(err, &appErr) || !strings.Contains(appErr.Params[apperr.FieldsParam], "start_date") {
 		t.Fatalf("error = %v, want start_date refused a day later", err)
+	}
+}
+
+func summaries(n int) []Summary {
+	out := make([]Summary, n)
+	for i := range out {
+		out[i] = Summary{ID: fmt.Sprintf("00000000-0000-0000-0000-%012d", i), StartsAt: now.AddDate(0, 0, i)}
+	}
+	return out
+}
+
+func TestServiceList(t *testing.T) {
+	tests := []struct {
+		name      string
+		available int
+		limit     int
+		wantItems int
+		wantNext  bool
+	}{
+		{name: "more than a page", available: 5, limit: 2, wantItems: 2, wantNext: true},
+		{name: "exactly a page: no next page", available: 2, limit: 2, wantItems: 2},
+		{name: "less than a page", available: 1, limit: 20, wantItems: 1},
+		{name: "nothing", available: 0, limit: 20, wantItems: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{summaries: summaries(tt.available)}
+			clk := clock.NewFake(now)
+			page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clk).List(t.Context(), actor, ScopeMine, StatusOngoing, tt.limit, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Items) != tt.wantItems || (page.Next != nil) != tt.wantNext {
+				t.Fatalf("%d items, next %v, want %d items, next %v", len(page.Items), page.Next, tt.wantItems, tt.wantNext)
+			}
+			if tt.wantNext {
+				last := page.Items[len(page.Items)-1]
+				if page.Next.ID != last.ID || !page.Next.StartsAt.Equal(last.StartsAt) {
+					t.Fatalf("next %+v, want the position of the last item %+v", page.Next, last)
+				}
+			}
+			// The query asks one more item, with the actor and the clock's now.
+			q := repo.listed
+			if q.Limit != tt.limit+1 || q.ActorID != actor || q.Scope != ScopeMine || q.Status != StatusOngoing || !q.Now.Equal(now) {
+				t.Fatalf("query %+v, want limit %d for the actor at the clock's now", q, tt.limit+1)
+			}
+		})
+	}
+}
+
+func TestServiceListRefusesAnEmptyPage(t *testing.T) {
+	_, err := NewService(&fakeRepository{summaries: summaries(3)}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 0, nil)
+	if !errors.Is(err, apperr.New(apperr.CodeValidationFailed, nil)) {
+		t.Fatalf("error = %v, want validation_failed on limit", err)
+	}
+}
+
+func TestServiceListStorageFailure(t *testing.T) {
+	storage := errors.New("connection refused")
+	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
+	if !errors.Is(err, storage) {
+		t.Fatalf("error = %v, want it to wrap %v", err, storage)
 	}
 }

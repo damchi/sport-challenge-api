@@ -84,19 +84,31 @@ func fieldsOf(err error, body *openapi3.Schema) []string {
 	var fields []string
 	var walk func(error)
 	walk = func(err error) {
-		var multi openapi3.MultiError
-		var reqErr *openapi3filter.RequestError
-		var schemaErr *openapi3.SchemaError
-		switch {
-		case errors.As(err, &multi):
-			for _, e := range multi {
-				walk(e)
+		// The concrete type first: a parameter's RequestError wraps a
+		// MultiError (several broken bounds), which errors.As would reach
+		// before the parameter's name.
+		switch e := err.(type) {
+		case openapi3.MultiError:
+			for _, inner := range e {
+				walk(inner)
 			}
-		case errors.As(err, &reqErr) && reqErr.Parameter != nil:
-			fields = append(fields, reqErr.Parameter.Name)
-		case errors.As(err, &schemaErr):
-			if path := declaredPath(body, schemaErr.JSONPointer()); path != "" {
+		case *openapi3filter.RequestError:
+			if e.Parameter != nil {
+				fields = append(fields, e.Parameter.Name)
+				return
+			}
+			walk(e.Err) // the body
+		case *openapi3.SchemaError:
+			if path := declaredPath(body, e.JSONPointer()); path != "" {
 				fields = append(fields, path)
+			}
+		case interface{ Unwrap() []error }: // errors.Join
+			for _, inner := range e.Unwrap() {
+				walk(inner)
+			}
+		default:
+			if inner := errors.Unwrap(err); inner != nil {
+				walk(inner)
 			}
 		}
 	}

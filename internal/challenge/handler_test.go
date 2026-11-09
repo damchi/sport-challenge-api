@@ -35,6 +35,11 @@ type challengesOnly struct {
 // contract.
 func post(t *testing.T, svc *Service, body string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
+	return serve(t, svc, http.MethodPost, "/api/v1/challenges", body)
+}
+
+func serve(t *testing.T, svc *Service, method, target, body string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	spec, err := api.GetSpec()
@@ -59,12 +64,18 @@ func post(t *testing.T, svc *Service, body string) (*httptest.ResponseRecorder, 
 		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/challenges", strings.NewReader(body))
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req := httptest.NewRequest(method, target, reader)
 	req.Header.Set("Authorization", "Bearer some.access.token")
-	req.Header.Set("Content-Type", "application/json")
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
-	apitest.ValidateResponse(t, httptest.NewRequest(http.MethodPost, "/api/v1/challenges", nil), rec)
+	apitest.ValidateResponse(t, httptest.NewRequest(method, target, nil), rec)
 
 	var out map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -141,5 +152,99 @@ func TestCreateChallengeRefusals(t *testing.T) {
 				t.Fatal("challenge stored despite the refusal")
 			}
 		})
+	}
+}
+
+func TestListChallenges(t *testing.T) {
+	desc := "abandoned"
+	repo := &fakeRepository{summaries: []Summary{
+		{ID: "11111111-1111-1111-1111-111111111111", Title: "A", Visibility: "public", Timezone: "UTC", StartsAt: now, EndsAt: now.AddDate(0, 0, 14), ParticipantCount: 3, MyStatus: &desc},
+		{ID: "22222222-2222-2222-2222-222222222222", Title: "B", Visibility: "public", Timezone: "UTC", StartsAt: now.AddDate(0, 0, 1), EndsAt: now.AddDate(0, 0, 15), ParticipantCount: 1},
+	}}
+	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now))
+
+	rec, out := serve(t, svc, http.MethodGet, "/api/v1/challenges?scope=mine&status=ongoing&limit=1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	items, _ := out["items"].([]any)
+	first, _ := items[0].(map[string]any)
+	if len(items) != 1 || first["my_status"] != "abandoned" || first["participant_count"] != 3.0 {
+		t.Fatalf("items %v, want 1 item with my status and the count", out["items"])
+	}
+	cursor, _ := out["next_cursor"].(string)
+	if cursor == "" {
+		t.Fatalf("next_cursor %v, want a cursor for the second page", out["next_cursor"])
+	}
+	if q := repo.listed; q.Scope != ScopeMine || q.Status != StatusOngoing || q.ActorID != actor {
+		t.Fatalf("query %+v, want the parameters and the actor from the token", q)
+	}
+
+	// The cursor gives the position of the last item back to the query.
+	if rec, _ := serve(t, svc, http.MethodGet, "/api/v1/challenges?cursor="+cursor, ""); rec.Code != http.StatusOK {
+		t.Fatalf("second page: status %d", rec.Code)
+	}
+	if after := repo.listed.After; after == nil || after.ID != "11111111-1111-1111-1111-111111111111" || !after.StartsAt.Equal(now) {
+		t.Fatalf("after %+v, want the position of the first item", after)
+	}
+}
+
+func TestListChallengesDefaults(t *testing.T) {
+	repo := &fakeRepository{}
+	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges", "")
+	if rec.Code != http.StatusOK || out["next_cursor"] != nil {
+		t.Fatalf("got %d %v, want 200 with no next page", rec.Code, out)
+	}
+	if items, ok := out["items"].([]any); !ok || len(items) != 0 {
+		t.Fatalf("items %v, want an empty list, not null", out["items"])
+	}
+	if q := repo.listed; q.Scope != ScopePublic || q.Status != "" || q.Limit != defaultLimit+1 || q.After != nil {
+		t.Fatalf("query %+v, want public, every status, %d per page", q, defaultLimit)
+	}
+}
+
+func TestListChallengesRefusals(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      string
+		wantFields string
+	}{
+		{name: "unknown scope", query: "scope=all", wantFields: "scope"},
+		{name: "unknown status", query: "status=cancelled", wantFields: "status"},
+		{name: "limit 0", query: "limit=0", wantFields: "limit"},
+		{name: "limit over 100", query: "limit=101", wantFields: "limit"},
+		{name: "cursor not base64", query: "cursor=%21%21", wantFields: "cursor"},
+		{name: "cursor with a bad id", query: "cursor=eyJzIjoiMjAyNi0wMy0wNFQwNTowMDowMFoiLCJpIjoieCJ9", wantFields: "cursor"},
+		{name: "cursor of JSON null", query: "cursor=bnVsbA", wantFields: "cursor"},
+		{name: "cursor without its date", query: "cursor=eyJpIjoiMTExMTExMTEtMTExMS0xMTExLTExMTEtMTExMTExMTExMTExIn0", wantFields: "cursor"},
+		{name: "cursor with a bad date", query: "cursor=eyJzIjoibm90IGEgZGF0ZSIsImkiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ", wantFields: "cursor"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{}
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges?"+tt.query, "")
+			e, _ := out["error"].(map[string]any)
+			params, _ := e["params"].(map[string]any)
+			if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || params["fields"] != tt.wantFields {
+				t.Fatalf("got %d %v, want 400 validation_failed on %s", rec.Code, out, tt.wantFields)
+			}
+			if repo.listed.ActorID != "" {
+				t.Fatal("query run despite the refusal")
+			}
+		})
+	}
+}
+
+func TestListChallengesNormalizesTheCursorID(t *testing.T) {
+	// A forged cursor whose id is a urn: uuid.Parse accepts it, PostgreSQL
+	// would not; the query gets the canonical form.
+	cursor, err := httpx.EncodeCursor(Position{StartsAt: now, ID: "urn:uuid:11111111-1111-1111-1111-111111111111"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &fakeRepository{}
+	rec, _ := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges?cursor="+cursor, "")
+	if rec.Code != http.StatusOK || repo.listed.After == nil || repo.listed.After.ID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("got %d, after %+v, want the canonical id", rec.Code, repo.listed.After)
 	}
 }
