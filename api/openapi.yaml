@@ -120,6 +120,26 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteMe
+      summary: Delete my account
+      description: |
+        Final: the account is anonymized (pseudo and avatar erased) and
+        abandons every challenge not finished; a finished challenge keeps its
+        results under a neutral name. The user is also deleted at the auth
+        provider. Every later request with a token of this account, even
+        one still valid, answers 401 `account_deleted`; logging in again
+        with this identity never creates a new account. The client asks for confirmation first.
+        A 500 may come after the account is deleted: retrying then answers
+        401 `account_deleted`, which the client treats as done.
+      tags: [me]
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/sports:
     get:
       operationId: getSports

@@ -20,28 +20,28 @@ func TestLoad(t *testing.T) {
 	}{
 		{
 			name: "valid",
-			vars: map[string]string{"ENV": "staging", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test"},
-			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test"},
+			vars: map[string]string{"ENV": "staging", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
+			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret"},
 		},
 		{
 			name: "log level is case insensitive",
-			vars: map[string]string{"ENV": "local", "PORT": "1", "LOG_LEVEL": "DEBUG", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test"},
-			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test"},
+			vars: map[string]string{"ENV": "local", "PORT": "1", "LOG_LEVEL": "DEBUG", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
+			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret"},
 		},
 		{
 			name: "surrounding spaces are ignored",
-			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   ", "DATABASE_URL": " postgres://localhost/x ", "AUTH0_DOMAIN": " tenant.ca.auth0.com ", "AUTH0_AUDIENCE": " https://api.test "},
-			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test"},
+			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   ", "DATABASE_URL": " postgres://localhost/x ", "AUTH0_DOMAIN": " tenant.ca.auth0.com ", "AUTH0_AUDIENCE": " https://api.test ", "AUTH0_MGMT_CLIENT_ID": " mgmt-id ", "AUTH0_MGMT_CLIENT_SECRET": " mgmt-secret "}, //nolint:gosec // test value, not a credential
+			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret"},
 		},
 		{
 			name:    "blank values count as missing",
-			vars:    map[string]string{"ENV": " ", "PORT": "\t", "LOG_LEVEL": " ", "DATABASE_URL": " ", "AUTH0_DOMAIN": " ", "AUTH0_AUDIENCE": " "},
-			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required", "AUTH0_DOMAIN is required", "AUTH0_AUDIENCE is required"},
+			vars:    map[string]string{"ENV": " ", "PORT": "\t", "LOG_LEVEL": " ", "DATABASE_URL": " ", "AUTH0_DOMAIN": " ", "AUTH0_AUDIENCE": " ", "AUTH0_MGMT_CLIENT_ID": " ", "AUTH0_MGMT_CLIENT_SECRET": " "},
+			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required", "AUTH0_DOMAIN is required", "AUTH0_AUDIENCE is required", "AUTH0_MGMT_CLIENT_ID is required", "AUTH0_MGMT_CLIENT_SECRET is required"},
 		},
 		{
 			name:    "all missing are reported together",
 			vars:    map[string]string{},
-			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required", "AUTH0_DOMAIN is required", "AUTH0_AUDIENCE is required"},
+			wantErr: []string{"ENV is required", "PORT is required", "LOG_LEVEL is required", "DATABASE_URL is required", "AUTH0_DOMAIN is required", "AUTH0_AUDIENCE is required", "AUTH0_MGMT_CLIENT_ID is required", "AUTH0_MGMT_CLIENT_SECRET is required"},
 		},
 		{
 			name: "all invalid are reported together",
@@ -57,6 +57,7 @@ func TestLoad(t *testing.T) {
 			vars: map[string]string{
 				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
 				"AUTH0_DOMAIN": "https://tenant.ca.auth0.com/", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
 			},
 			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
 		},
@@ -65,6 +66,7 @@ func TestLoad(t *testing.T) {
 			vars: map[string]string{
 				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
 				"AUTH0_DOMAIN": "x@evil.com", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
 			},
 			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
 		},
@@ -73,6 +75,7 @@ func TestLoad(t *testing.T) {
 			vars: map[string]string{
 				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
 				"AUTH0_DOMAIN": "tenant.ca.auth0.com?x=1", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
 			},
 			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
 		},
@@ -81,6 +84,7 @@ func TestLoad(t *testing.T) {
 			vars: map[string]string{
 				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
 				"AUTH0_DOMAIN": "localhost", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
 			},
 			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
 		},
@@ -89,6 +93,7 @@ func TestLoad(t *testing.T) {
 			vars: map[string]string{
 				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
 				"AUTH0_DOMAIN": "tenant .ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
 			},
 			wantErr: []string{"AUTH0_DOMAIN must be a host name"},
 		},
@@ -97,15 +102,17 @@ func TestLoad(t *testing.T) {
 			vars: map[string]string{
 				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
 				"AUTH0_DOMAIN": "Tenant.CA.Auth0.com", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
 			},
 			want: Config{
 				Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x",
 				Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test",
+				Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret",
 			},
 		},
 		{
 			name:    "port out of range",
-			vars:    map[string]string{"ENV": "production", "PORT": "70000", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test"},
+			vars:    map[string]string{"ENV": "production", "PORT": "70000", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
 			wantErr: []string{"PORT must be an integer between 1 and 65535"},
 		},
 	}
@@ -170,6 +177,7 @@ func TestLoadCORSAllowedOrigins(t *testing.T) {
 			got, err := Load(envFrom(map[string]string{
 				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
 				"AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
 				"CORS_ALLOWED_ORIGINS": tt.raw,
 			}))
 			if tt.wantErr {

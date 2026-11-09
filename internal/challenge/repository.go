@@ -28,6 +28,11 @@ func NewRepository(gdb *gorm.DB) *Repository {
 // returns the challenge as stored.
 func (r *Repository) Create(ctx context.Context, c Challenge, joinedAt time.Time) (Challenge, error) {
 	err := db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+		// A creator whose account is being deleted would otherwise keep an
+		// active participation the deletion never saw.
+		if err := lockUser(tx, c.CreatedBy); err != nil {
+			return err
+		}
 		// RETURNING fills the columns the database sets (id, timestamps).
 		if err := tx.Clauses(clause.Returning{}).Create(&c).Error; err != nil {
 			return fmt.Errorf("insert challenge: %w", err)
@@ -155,6 +160,20 @@ func (r *Repository) Get(ctx context.Context, id, actorID string) (Challenge, Me
 	return readWithMembership(r.db.WithContext(ctx), id, actorID)
 }
 
+// ActiveParticipations returns the challenges, not deleted and not finished
+// at now, where userID is an active participant, by id. It reads in the
+// transaction of ctx, if any (account deletion).
+func (r *Repository) ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error) {
+	var ids []string
+	err := db.Conn(ctx, r.db).Raw(`SELECT c.id FROM participants p JOIN challenges c ON c.id = p.challenge_id
+		WHERE p.user_id = ? AND p.status = 'active' AND c.deleted_at IS NULL AND c.ends_at > ?
+		ORDER BY c.id`, userID, now).Scan(&ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("list active participations: %w", err)
+	}
+	return ids, nil
+}
+
 // Participants returns up to limit participations of challenge id, abandoned
 // ones included, in order of registration (joined_at, user_id), after the
 // position after when set. Pseudos are not read: they belong to module user.
@@ -181,6 +200,25 @@ func (r *Repository) Participants(ctx context.Context, id string, limit int, aft
 
 // errAlreadyParticipant means the participation to insert already exists.
 var errAlreadyParticipant = errors.New("already a participant")
+
+// errAccountDeleted means the user's account was deleted (anonymized).
+var errAccountDeleted = errors.New("account deleted")
+
+// lockUser takes the row of user id FOR SHARE, before any lock on a
+// challenge: the order of an account deletion (the user row, then each of
+// its challenges), so that the two never wait for each other in a cycle.
+// Every write that references a user (a foreign key locks the row too) takes
+// it first. An anonymized or unknown user gives errAccountDeleted.
+func lockUser(tx *gorm.DB, id string) error {
+	var anonymized []bool
+	if err := tx.Raw("SELECT anonymized_at IS NOT NULL FROM users WHERE id = ? FOR SHARE", id).Scan(&anonymized).Error; err != nil {
+		return fmt.Errorf("lock user: %w", err)
+	}
+	if len(anonymized) == 0 || anonymized[0] {
+		return errAccountDeleted
+	}
+	return nil
+}
 
 // withLockedMembership runs fn in a transaction on challenge id, locked
 // first (FOR UPDATE) so that writes on its participations, and its deletion,
@@ -210,9 +248,25 @@ func (r *Repository) withLockedMembership(ctx context.Context, id, actorID strin
 // and refuses with an error, nothing being written then; otherwise it
 // returns the instant of the join. An existing participation gives
 // errAlreadyParticipant (the lock makes it impossible, the insert stays
-// safe).
+// safe); an anonymized account (deleted meanwhile) gives errAccountDeleted.
 func (r *Repository) Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error {
-	err := r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, m Membership) error {
+	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
+		// A deletion in progress makes the join wait, then refuse; a join in
+		// progress makes the deletion wait, then abandon it.
+		if err := lockUser(db.Conn(ctx, r.db), actorID); err != nil {
+			return err
+		}
+		return r.joinLocked(ctx, id, actorID, decide)
+	})
+	if err != nil {
+		return fmt.Errorf("join challenge: %w", err)
+	}
+	return nil
+}
+
+// joinLocked inserts the participation under the lock of withLockedMembership.
+func (r *Repository) joinLocked(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error {
+	return r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, m Membership) error {
 		joinedAt, err := decide(c, m)
 		if err != nil {
 			return err
@@ -227,10 +281,6 @@ func (r *Repository) Join(ctx context.Context, id, actorID string, decide func(C
 		}
 		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("join challenge: %w", err)
-	}
-	return nil
 }
 
 // Abandon marks the active participation of actorID in challenge id as
@@ -281,7 +331,25 @@ func (r *Repository) Exclude(ctx context.Context, id, actorID, targetID string, 
 // membership of the actor and the one of the target (read after the lock),
 // and refuses with an error, or answers that nothing is to write.
 func (r *Repository) AddCreator(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (noop bool, err error)) error {
-	err := r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, actor Membership) error {
+	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
+		// The target's row before the challenge (the creator row references
+		// it). A target deleted meanwhile is no reason to fail here: its
+		// participation, read after the lock, is abandoned, and the rule
+		// refuses it as for anyone not active.
+		if err := lockUser(db.Conn(ctx, r.db), targetID); err != nil && !errors.Is(err, errAccountDeleted) {
+			return err
+		}
+		return r.addCreatorLocked(ctx, id, actorID, targetID, decide)
+	})
+	if err != nil {
+		return fmt.Errorf("add creator: %w", err)
+	}
+	return nil
+}
+
+// addCreatorLocked inserts the creator row under the lock of withLockedMembership.
+func (r *Repository) addCreatorLocked(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (noop bool, err error)) error {
+	return r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, actor Membership) error {
 		_, target, err := readWithMembership(tx, id, targetID)
 		if err != nil {
 			return err
@@ -296,10 +364,6 @@ func (r *Repository) AddCreator(ctx context.Context, id, actorID, targetID strin
 		}
 		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("add creator: %w", err)
-	}
-	return nil
 }
 
 // Delete soft-deletes challenge id on behalf of actorID: deleted_at is set on

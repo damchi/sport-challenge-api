@@ -110,7 +110,7 @@ func TestServiceRefusesAnAnonymizedAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := NewService(repo).GetOrCreateBySubject(t.Context(), "email|gone")
+	_, err := NewService(repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|gone")
 	if !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
 		t.Fatalf("error = %v, want account_deleted", err)
 	}

@@ -1,10 +1,14 @@
 package user
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +21,55 @@ type fakeRepository struct {
 	// changes records the last UpdateProfile call, when set.
 	changes *ProfileChanges
 	pseudos map[string]string
+	// deleted records the user Delete anonymized, when set; deleteErr fails
+	// Delete, pending records AddPendingAuth0Deletion and pendingErr fails it.
+	deleted    *string
+	deleteErr  error
+	pending    *[]string
+	pendingErr error
+}
+
+func (f fakeRepository) Delete(ctx context.Context, id string, abandon func(context.Context) error) (string, error) {
+	if f.deleteErr != nil {
+		return "", f.deleteErr
+	}
+	if err := abandon(ctx); err != nil {
+		return "", err
+	}
+	if f.deleted != nil {
+		*f.deleted = id
+	}
+	return f.user.AuthSubject, nil
+}
+
+func (f fakeRepository) AddPendingAuth0Deletion(_ context.Context, subject string) error {
+	if f.pendingErr != nil {
+		return f.pendingErr
+	}
+	if f.pending != nil {
+		*f.pending = append(*f.pending, subject)
+	}
+	return nil
+}
+
+type fakeParticipations struct {
+	abandoned string
+	err       error
+}
+
+func (f *fakeParticipations) AbandonAll(_ context.Context, userID string) error {
+	f.abandoned = userID
+	return f.err
+}
+
+type fakeIdentities struct {
+	deleted string
+	err     error
+}
+
+func (f *fakeIdentities) DeleteUser(_ context.Context, subject string) error {
+	f.deleted = subject
+	return f.err
 }
 
 func (f fakeRepository) GetOrCreateBySubject(context.Context, string) (User, error) {
@@ -55,7 +108,7 @@ func TestServicePseudos(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo).Pseudos(t.Context(), tt.ids)
+			got, err := NewService(tt.repo, nil, nil, discard).Pseudos(t.Context(), tt.ids)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
@@ -79,11 +132,12 @@ func TestServiceGetOrCreateBySubject(t *testing.T) {
 	}{
 		{name: "active user", repo: fakeRepository{user: User{ID: "u-1", AuthSubject: "email|1"}}, wantID: "u-1"},
 		{name: "anonymized account", repo: fakeRepository{user: User{ID: "u-2", AnonymizedAt: &deletedAt}}, wantCode: apperr.CodeAccountDeleted},
+		{name: "subject of a deleted account", repo: fakeRepository{err: fmt.Errorf("read user: %w", errAccountDeleted)}, wantCode: apperr.CodeAccountDeleted},
 		{name: "storage error", repo: fakeRepository{err: storageErr}, wantErr: storageErr},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo).GetOrCreateBySubject(t.Context(), "email|1")
+			got, err := NewService(tt.repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1")
 
 			switch {
 			case tt.wantCode != "":
@@ -108,6 +162,9 @@ func TestServiceGetOrCreateBySubject(t *testing.T) {
 
 func ptr(v string) *string { return &v }
 
+// discard is the logger of the tests that do not read the logs.
+var discard = slog.New(slog.NewJSONHandler(io.Discard, nil))
+
 func TestServiceProfile(t *testing.T) {
 	storageErr := errors.New("connection reset")
 	tests := []struct {
@@ -122,7 +179,7 @@ func TestServiceProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo).Profile(t.Context(), "u-1")
+			got, err := NewService(tt.repo, nil, nil, discard).Profile(t.Context(), "u-1")
 			var appErr *apperr.Error
 			switch {
 			case tt.wantStatus != 0:
@@ -166,7 +223,7 @@ func TestServiceUpdateProfile(t *testing.T) {
 			written = sentinel
 			repo := fakeRepository{user: stored, err: tt.repoErr, changes: &written}
 
-			got, err := NewService(repo).UpdateProfile(t.Context(), "u-1", tt.changes)
+			got, err := NewService(repo, nil, nil, discard).UpdateProfile(t.Context(), "u-1", tt.changes)
 
 			if wrote := written != sentinel; wrote != tt.wantWritten {
 				t.Fatalf("repository called = %v, want %v", wrote, tt.wantWritten)
@@ -199,10 +256,99 @@ func TestServiceProfileComplete(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo).ProfileComplete(t.Context(), "u-1")
+			got, err := NewService(tt.repo, nil, nil, discard).ProfileComplete(t.Context(), "u-1")
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("ProfileComplete() = %v, %v, want %v (error %v)", got, err, tt.want, tt.wantErr)
 			}
 		})
 	}
+}
+
+func TestServiceDelete(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	auth0Err := errors.New("auth0: status 503")
+	tests := []struct {
+		name           string
+		deleteErr      error
+		abandonErr     error
+		auth0Err       error
+		pendingErr     error
+		wantCode       apperr.Code
+		wantErr        error
+		wantAuth0      bool
+		wantPending    bool
+		wantAnonymized bool
+	}{
+		{name: "deleted, then at Auth0", wantAuth0: true, wantAnonymized: true},
+		{name: "Auth0 fails: recorded for the worker", auth0Err: auth0Err, wantAuth0: true, wantPending: true, wantAnonymized: true},
+		{name: "Auth0 fails and the record too", auth0Err: auth0Err, pendingErr: storageErr, wantErr: storageErr, wantAuth0: true, wantAnonymized: true},
+		// The abandons fail: everything rolls back, nothing is deleted at Auth0.
+		{name: "abandon failure", abandonErr: storageErr, wantErr: storageErr},
+		{name: "deleted meanwhile", deleteErr: fmt.Errorf("delete user: %w", errUserNotFound), wantCode: apperr.CodeAccountDeleted},
+		{name: "storage failure", deleteErr: storageErr, wantErr: storageErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var pending []string
+			repo := fakeRepository{
+				user: User{ID: "u-1", AuthSubject: "email|1"}, deleted: new(string),
+				deleteErr: tt.deleteErr, pending: &pending, pendingErr: tt.pendingErr,
+			}
+			participations := &fakeParticipations{err: tt.abandonErr}
+			identities := &fakeIdentities{err: tt.auth0Err}
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			err := NewService(repo, participations, identities, logger).Delete(t.Context(), "u-1")
+			switch {
+			case tt.wantCode != "":
+				if !errors.Is(err, apperr.New(tt.wantCode, nil)) {
+					t.Fatalf("error = %v, want %s", err, tt.wantCode)
+				}
+			case !errors.Is(err, tt.wantErr):
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantAnonymized && (*repo.deleted != "u-1" || participations.abandoned != "u-1") {
+				t.Fatalf("anonymized %q, abandoned %q, want both for u-1", *repo.deleted, participations.abandoned)
+			}
+			if got := identities.deleted == "email|1"; got != tt.wantAuth0 {
+				t.Fatalf("deleted at Auth0: %v, want %v", got, tt.wantAuth0)
+			}
+			if got := len(pending) == 1 && pending[0] == "email|1"; got != tt.wantPending {
+				t.Fatalf("pending %v, want recorded: %v", pending, tt.wantPending)
+			}
+			// A failure at Auth0 leaves a trace, never the subject.
+			if got := strings.Contains(logs.String(), "recorded for retry"); got != tt.wantPending {
+				t.Fatalf("logs %q, want the warning: %v", logs.String(), tt.wantPending)
+			}
+			if strings.Contains(logs.String(), "email|1") {
+				t.Fatalf("logs %q carry the subject", logs.String())
+			}
+		})
+	}
+}
+
+func TestServiceDeleteSurvivesTheClientLeaving(t *testing.T) {
+	// The request is cancelled once the account is deleted: Auth0 is still called.
+	ctx, cancel := context.WithCancel(t.Context())
+	identities := &ctxIdentities{}
+	repo := fakeRepository{user: User{ID: "u-1", AuthSubject: "email|1"}}
+	err := NewService(repo, abandonThen(cancel), identities, discard).Delete(ctx, "u-1")
+	if err != nil || identities.ctxErr != nil {
+		t.Fatalf("error %v, Auth0 called with a context error %v, want neither", err, identities.ctxErr)
+	}
+}
+
+type ctxIdentities struct{ ctxErr error }
+
+func (c *ctxIdentities) DeleteUser(ctx context.Context, _ string) error {
+	c.ctxErr = ctx.Err()
+	return nil
+}
+
+// abandonThen is a Participations whose AbandonAll runs fn.
+type abandonThen func()
+
+func (f abandonThen) AbandonAll(context.Context, string) error {
+	f()
+	return nil
 }

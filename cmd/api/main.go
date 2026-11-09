@@ -73,11 +73,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	users := user.NewService(user.NewRepository(gdb))
+	// Each needs the other: deleting an account abandons its challenges, a
+	// challenge reads the profiles. The closure resolves challenges once set.
+	var challenges *challenge.Service
+	abandonAll := abandonAllFunc(func(ctx context.Context, userID string) error {
+		return challenges.AbandonAll(ctx, userID)
+	})
+	management := auth.NewAuth0Management(cfg.Auth0Domain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
+	users := user.NewService(user.NewRepository(gdb), abandonAll, management, logger)
 
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
-	challenges := challenge.NewService(challenge.NewRepository(gdb), users, sports, clock.Real{})
+	challenges = challenge.NewService(challenge.NewRepository(gdb), users, sports, clock.Real{})
 	handlers := server{
 		Handler:          health.NewHandler(pool, logger),
 		userHandler:      user.NewHandler(users),
@@ -122,6 +129,13 @@ func run() error {
 	}
 	logger.Info("server stopped")
 	return nil
+}
+
+// abandonAllFunc is a function as a user.Participations.
+type abandonAllFunc func(ctx context.Context, userID string) error
+
+func (f abandonAllFunc) AbandonAll(ctx context.Context, userID string) error {
+	return f(ctx, userID)
 }
 
 // server gathers the handlers of every operation of the contract.

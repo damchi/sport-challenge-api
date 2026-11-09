@@ -31,6 +31,11 @@ type Config struct {
 	// (sport-challenge-dev.ca.auth0.com); Auth0Audience is the API identifier.
 	Auth0Domain   string
 	Auth0Audience string
+	// Auth0MgmtClientID and Auth0MgmtClientSecret identify the machine to
+	// machine application that deletes users at Auth0 (Management API,
+	// delete:users only). Secrets: never log them.
+	Auth0MgmtClientID     string
+	Auth0MgmtClientSecret string
 	// CORSAllowedOrigins are the web origins allowed to call the API from a
 	// browser (scheme://host[:port], lowercase). Empty: no browser origin.
 	CORSAllowedOrigins []string
@@ -83,6 +88,13 @@ func Load(getenv func(string) string) (Config, error) {
 
 	if cfg.Auth0Audience = get("AUTH0_AUDIENCE"); cfg.Auth0Audience == "" {
 		problems = append(problems, "AUTH0_AUDIENCE is required")
+	}
+
+	if cfg.Auth0MgmtClientID = get("AUTH0_MGMT_CLIENT_ID"); cfg.Auth0MgmtClientID == "" {
+		problems = append(problems, "AUTH0_MGMT_CLIENT_ID is required")
+	}
+	if cfg.Auth0MgmtClientSecret = get("AUTH0_MGMT_CLIENT_SECRET"); cfg.Auth0MgmtClientSecret == "" {
+		problems = append(problems, "AUTH0_MGMT_CLIENT_SECRET is required")
 	}
 
 	if origins, ok := parseOrigins(get("CORS_ALLOWED_ORIGINS")); !ok {

@@ -38,6 +38,18 @@ func (h *Handler) GetMe(ctx context.Context, _ api.GetMeRequestObject) (api.GetM
 	return api.GetMe200JSONResponse(me), nil
 }
 
+// DeleteMe deletes the account of the authenticated user.
+func (h *Handler) DeleteMe(ctx context.Context, _ api.DeleteMeRequestObject) (api.DeleteMeResponseObject, error) {
+	actorID, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.service.Delete(ctx, actorID); err != nil {
+		return nil, err
+	}
+	return api.DeleteMe204Response{}, nil
+}
+
 // PatchMe changes the profile of the authenticated user.
 func (h *Handler) PatchMe(ctx context.Context, req api.PatchMeRequestObject) (api.PatchMeResponseObject, error) {
 	actorID, err := actor(ctx)

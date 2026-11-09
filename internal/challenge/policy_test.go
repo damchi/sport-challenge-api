@@ -442,3 +442,26 @@ func TestParticipantsRefusal(t *testing.T) {
 		})
 	}
 }
+
+func TestDeletionAbandons(t *testing.T) {
+	endsAt := time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		m    Membership
+		now  time.Time
+		want bool
+	}{
+		{name: "active, before the end", m: active, now: endsAt.Add(-time.Second), want: true},
+		{name: "active creator, before the end", m: creatorActive, now: endsAt.Add(-time.Second), want: true},
+		{name: "active, at the end: results kept", m: active, now: endsAt},
+		{name: "already abandoned", m: abandoned, now: endsAt.Add(-time.Second)},
+		{name: "never joined", m: outsider, now: endsAt.Add(-time.Second)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DeletionAbandons(tt.m, tt.now, endsAt); got != tt.want {
+				t.Fatalf("DeletionAbandons() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
