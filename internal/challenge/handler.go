@@ -172,3 +172,58 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 	}
 	return api.ListChallenges200JSONResponse(out), nil
 }
+
+// GetChallenge answers a challenge as the authenticated user sees it.
+func (h *Handler) GetChallenge(ctx context.Context, req api.GetChallengeRequestObject) (api.GetChallengeResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	d, err := h.service.Get(ctx, actorID, req.ChallengeId.String())
+	if err != nil {
+		return nil, err
+	}
+	base, err := toAPI(d.Challenge)
+	if err != nil {
+		return nil, err
+	}
+	out := api.ChallengeDetail{
+		Id:                   base.Id,
+		Title:                base.Title,
+		Description:          base.Description,
+		Visibility:           api.ChallengeDetailVisibility(base.Visibility),
+		MembersCanInvite:     base.MembersCanInvite,
+		Timezone:             base.Timezone,
+		StartsAt:             base.StartsAt,
+		EndsAt:               base.EndsAt,
+		Categories:           base.Categories,
+		MyRole:               roleName(d.Role),
+		Status:               api.ChallengeDetailStatus(d.Status),
+		CanJoin:              d.CanJoin,
+		RegistrationDeadline: d.RegistrationDeadline.UTC(),
+	}
+	if d.Participant != "" {
+		status := api.ChallengeDetailMyStatus(d.Participant)
+		out.MyStatus = &status
+	}
+	if d.CurrentWeek > 0 {
+		week, ends := d.CurrentWeek, d.WeekEndsAt.UTC()
+		out.CurrentWeek, out.WeekEndsAt = &week, &ends
+	}
+	return api.GetChallenge200JSONResponse(out), nil
+}
+
+func roleName(r Role) api.ChallengeDetailMyRole {
+	switch r {
+	case RoleCreator:
+		return api.ChallengeDetailMyRoleCreator
+	case RoleParticipant:
+		return api.ChallengeDetailMyRoleParticipant
+	case RoleAbandoned:
+		return api.ChallengeDetailMyRoleAbandoned
+	case RoleInvited:
+		return api.ChallengeDetailMyRoleInvited
+	default:
+		return api.ChallengeDetailMyRoleOutsider
+	}
+}

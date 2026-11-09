@@ -22,6 +22,28 @@ type fakeRepository struct {
 	// summaries and listed serve List.
 	summaries []Summary
 	listed    ListQuery
+	// challenge and membership serve Get; a nil challenge is not found.
+	challenge      *Challenge
+	membership     Membership
+	categoriesRead bool
+}
+
+func (f *fakeRepository) Get(context.Context, string, string) (Challenge, Membership, error) {
+	if f.err != nil {
+		return Challenge{}, Membership{}, f.err
+	}
+	if f.challenge == nil {
+		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", errChallengeNotFound)
+	}
+	return *f.challenge, f.membership, nil
+}
+
+func (f *fakeRepository) Categories(context.Context, string) ([]Category, error) {
+	if f.challenge == nil {
+		return nil, nil
+	}
+	f.categoriesRead = true
+	return f.challenge.Categories, nil
 }
 
 func (f *fakeRepository) List(_ context.Context, q ListQuery) ([]Summary, error) {
@@ -263,5 +285,85 @@ func TestServiceListStorageFailure(t *testing.T) {
 	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
 	if !errors.Is(err, storage) {
 		t.Fatalf("error = %v, want it to wrap %v", err, storage)
+	}
+}
+
+// stored is a 3-week public challenge in Toronto from 2026-03-02.
+func stored(visibility string) *Challenge {
+	return &Challenge{
+		ID: "11111111-1111-1111-1111-111111111111", Title: "Spring run", Visibility: visibility,
+		Timezone: "America/Toronto",
+		StartsAt: time.Date(2026, 3, 2, 5, 0, 0, 0, time.UTC),
+		EndsAt:   time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC),
+	}
+}
+
+func TestServiceGet(t *testing.T) {
+	deadline := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC) // local midnight, after the time change
+	tests := []struct {
+		name         string
+		visibility   string
+		membership   Membership
+		now          time.Time
+		wantRole     Role
+		wantStatus   string
+		wantCanJoin  bool
+		wantWeek     int
+		wantWeekEnds time.Time
+	}{
+		{name: "upcoming, outsider of a public challenge", visibility: VisibilityPublic, now: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC), wantRole: RoleOutsider, wantStatus: StatusUpcoming, wantCanJoin: true},
+		{name: "last second of week 1: can still join", visibility: VisibilityPublic, now: deadline.Add(-time.Second), wantRole: RoleOutsider, wantStatus: StatusOngoing, wantCanJoin: true, wantWeek: 1, wantWeekEnds: deadline},
+		{name: "end of week 1: registration closed", visibility: VisibilityPublic, now: deadline, wantRole: RoleOutsider, wantStatus: StatusOngoing, wantWeek: 2, wantWeekEnds: time.Date(2026, 3, 16, 4, 0, 0, 0, time.UTC)},
+		{name: "participant", visibility: VisibilityPrivate, membership: Membership{Participant: ParticipantActive}, now: deadline.Add(-time.Hour), wantRole: RoleParticipant, wantStatus: StatusOngoing, wantWeek: 1, wantWeekEnds: deadline},
+		{name: "finished, creator", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantActive}, now: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), wantRole: RoleCreator, wantStatus: StatusFinished},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
+			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).Get(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.Role != tt.wantRole || d.Status != tt.wantStatus || d.CanJoin != tt.wantCanJoin || d.CurrentWeek != tt.wantWeek || !d.WeekEndsAt.Equal(tt.wantWeekEnds) {
+				t.Fatalf("got role %v, %s, can join %v, week %d ending %s; want %v, %s, %v, %d ending %s",
+					d.Role, d.Status, d.CanJoin, d.CurrentWeek, d.WeekEndsAt, tt.wantRole, tt.wantStatus, tt.wantCanJoin, tt.wantWeek, tt.wantWeekEnds)
+			}
+			if !d.RegistrationDeadline.Equal(deadline) {
+				t.Fatalf("deadline %s, want %s", d.RegistrationDeadline, deadline)
+			}
+		})
+	}
+}
+
+// TestServiceGetHidesPrivateChallenges: a missing challenge and a private
+// one the actor may not see give the very same error.
+func TestServiceGetHidesPrivateChallenges(t *testing.T) {
+	missing := &fakeRepository{}
+	private := &fakeRepository{challenge: stored(VisibilityPrivate)}
+	var errs []*apperr.Error
+	for _, repo := range []*fakeRepository{missing, private} {
+		_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Get(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+		if repo.categoriesRead {
+			t.Fatal("categories read before the visibility check")
+		}
+		var appErr *apperr.Error
+		if !errors.As(err, &appErr) {
+			t.Fatalf("error = %v, want an apperr", err)
+		}
+		errs = append(errs, appErr)
+	}
+	for _, e := range errs {
+		if e.Code != apperr.CodeChallengeNotFound || e.Status != http.StatusNotFound || e.Message != errs[0].Message || e.Params != nil {
+			t.Fatalf("errors %+v and %+v, want the same 404 challenge_not_found", errs[0], errs[1])
+		}
+	}
+}
+
+func TestServiceGetStorageFailure(t *testing.T) {
+	storage := errors.New("connection refused")
+	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Get(t.Context(), actor, "x")
+	var appErr *apperr.Error
+	if !errors.Is(err, storage) || errors.As(err, &appErr) {
+		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
 	}
 }

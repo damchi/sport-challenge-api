@@ -538,7 +538,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Renvoie le challenge, ses catégories, mon rôle et mon statut.
-- [ ] Champs calculés par le serveur : `can_join`, `registration_deadline` (fin de la semaine 1), numéro de la semaine courante, `week_ends_at`, statut du challenge.
+- [ ] Champs calculés par le serveur : `can_join`, `registration_deadline` (fin de la semaine 1), numéro de la semaine courante, `week_ends_at`, statut du challenge. `can_join` ne tient pas compte du profil (décision du ticket 031 : l'app le lit dans `GET /me`). Introduit `CanJoin` dans `policy.go`, avec ses tests « autorisé » et « interdit ».
 - [ ] Challenge privé sans accès, inexistant ou supprimé : 404 `challenge_not_found` (`challenge.RequireView` pour le premier cas), avec exactement le même corps de réponse dans les trois cas : rien ne révèle qu'un challenge privé existe.
 
 **Tests** : intégration ; bornes (juste avant et juste après la fin de la semaine 1) ; corps de réponse identique pour un challenge inexistant, supprimé et privé sans accès.
@@ -568,10 +568,10 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Profil complet exigé.
 - [ ] Possible **jusqu'à la fin de la semaine 1** (instant exact calculé avec le fuseau) ; ensuite 422 `registration_closed`, pour tout le challenge.
 - [ ] Déjà actif : 409 `already_participant` ; a déjà abandonné : 409 `participation_abandoned` (définitif).
-- [ ] Challenge public : tout utilisateur connecté. Challenge privé : en attendant les invitations (ticket 066), 403 `forbidden`.
+- [ ] Challenge public : tout utilisateur connecté. Challenge privé sans invitation : 404 `challenge_not_found`, comme le détail (décision du ticket 031 : ne pas révéler qu'il existe). Les refus distincts (422 `registration_closed`, 409 `already_participant`, 409 `participation_abandoned`) se déduisent de la même lecture que `CanJoin`, qui ne donne pas la raison : ne pas dupliquer la règle.
 - [ ] Contrôle et écriture dans la même transaction, avec verrou sur le challenge (pas de course avec la suppression ou la limite de la semaine 1).
 
-- [ ] Ajoute à `policy.go` la règle `CanJoin` (public : tout utilisateur connecté ; privé : invité seulement), avec ses tests « autorisé » et « interdit ».
+- [ ] Applique la règle `CanJoin` de `policy.go` (introduite au ticket 031 : public, tout utilisateur connecté ; privé, invité seulement ; avant la fin de la semaine 1 ; jamais deux fois), puis vérifie le profil complet.
 **Tests** : une seconde avant la limite (accepté), à l'instant exact (refusé), course entre deux demandes, abandon puis nouvelle tentative.
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
 **Commit** : `feat(challenge): add join endpoint with week-1 registration deadline`
@@ -789,6 +789,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Package en bibliothèque standard uniquement : `Activity`, `Participant`, `Window` (début, fin, fuseau, instant courant), `Entry`, interface `Scorer`.
 - [ ] `Window.Weeks()`, `WeekBounds(n)` (en heure locale via `AddDate`), `WeekOf(t)`.
+- [ ] Un seul calcul des semaines (décision du ticket 031) : `RegistrationDeadline` et `CurrentWeek` de `internal/challenge/weeks.go` passent dans `scoring/window`, que `challenge` utilise ensuite ; leurs tests suivent.
 - [ ] Une activité compte si `startedAt ∈ [début, fin)`.
 - [ ] Les participants abandonnés sont **listés mais non classés**.
 

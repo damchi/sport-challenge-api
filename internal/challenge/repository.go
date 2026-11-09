@@ -2,6 +2,7 @@ package challenge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -108,4 +109,45 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Summary, error) {
 		return nil, fmt.Errorf("list challenges: %w", err)
 	}
 	return items, nil
+}
+
+// errChallengeNotFound means no challenge, or a deleted one.
+var errChallengeNotFound = errors.New("challenge not found")
+
+// Get returns the challenge id unless deleted, without its categories, and
+// the membership of actorID in it, in one query: a missing, deleted or
+// private challenge costs the same before the service decides what the
+// actor may see. A missing or deleted challenge gives errChallengeNotFound.
+func (r *Repository) Get(ctx context.Context, id, actorID string) (Challenge, Membership, error) {
+	var row struct {
+		Challenge
+		Creator     bool
+		Participant *string
+	}
+	err := r.db.WithContext(ctx).Raw(`SELECT c.*,
+		EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
+		(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant
+		FROM challenges c WHERE c.id = @id AND c.deleted_at IS NULL`,
+		map[string]any{"id": id, "actor": actorID}).Scan(&row).Error
+	if err != nil {
+		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", err)
+	}
+	if row.ID == "" {
+		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", errChallengeNotFound)
+	}
+	m := Membership{Creator: row.Creator}
+	if row.Participant != nil {
+		m.Participant = ParticipantStatus(*row.Participant)
+	}
+	// Invitations come with tickets 065 and 066: nobody is invited yet.
+	return row.Challenge, m, nil
+}
+
+// Categories returns the categories of challenge id, in position order.
+func (r *Repository) Categories(ctx context.Context, id string) ([]Category, error) {
+	var cats []Category
+	if err := r.db.WithContext(ctx).Where("challenge_id = ?", id).Order("position").Find(&cats).Error; err != nil {
+		return nil, fmt.Errorf("read categories: %w", err)
+	}
+	return cats, nil
 }

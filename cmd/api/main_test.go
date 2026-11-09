@@ -176,7 +176,7 @@ func TestEveryRouteIsProtectedByDefault(t *testing.T) {
 		t.Error("user resolved for a request without a token")
 		return "", nil
 	})
-	r.GET("/api/v1/challenges/:challengeId", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	r.GET("/api/v1/test-only/:itemId", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	var protected int
 	for _, route := range r.Routes() {
@@ -200,7 +200,7 @@ func TestEveryRouteIsProtectedByDefault(t *testing.T) {
 		t.Fatal("no protected route checked")
 	}
 	// A trailing slash is not redirected before the middlewares.
-	if status, code := serve(t, r, httptest.NewRequest(http.MethodGet, "/api/v1/challenges/x/", nil)); status != http.StatusUnauthorized || code != "unauthenticated" {
+	if status, code := serve(t, r, httptest.NewRequest(http.MethodGet, "/api/v1/test-only/x/", nil)); status != http.StatusUnauthorized || code != "unauthenticated" {
 		t.Errorf("trailing slash got %d %q without a token, want 401 unauthenticated", status, code)
 	}
 	for name := range public {
