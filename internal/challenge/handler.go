@@ -303,3 +303,15 @@ func (h *Handler) AbandonChallenge(ctx context.Context, req api.AbandonChallenge
 	}
 	return api.AbandonChallenge200JSONResponse(out), nil
 }
+
+// ExcludeParticipant excludes a participant on behalf of a creator.
+func (h *Handler) ExcludeParticipant(ctx context.Context, req api.ExcludeParticipantRequestObject) (api.ExcludeParticipantResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	if err := h.service.Exclude(ctx, actorID, req.ChallengeId.String(), req.UserId.String()); err != nil {
+		return nil, err
+	}
+	return api.ExcludeParticipant204Response{}, nil
+}

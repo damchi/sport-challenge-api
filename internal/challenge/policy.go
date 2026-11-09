@@ -164,3 +164,40 @@ func AbandonRefusal(m Membership, visibility string, now, endsAt time.Time) (noo
 		return false, apperr.New(apperr.CodeNotFound, nil)
 	}
 }
+
+// CanExclude reports whether role may exclude a participant (README §5.7):
+// creators only, even after abandoning.
+func CanExclude(role Role) bool {
+	return role == RoleCreator
+}
+
+// ExcludeRefusal is the exclusion rule. On the actor: a challenge the actor
+// may not see is not found (404 challenge_not_found), and only creators may
+// exclude (403 forbidden). On the target: creators cannot be excluded (422
+// cannot_exclude_creator), someone who never joined has nothing to lose
+// (404 not_found), someone already out changes nothing (noop), and a
+// finished challenge is frozen (422 challenge_ended from the exact endsAt).
+// An excluded participant is abandoned, shown like any abandon.
+func ExcludeRefusal(actor, target Membership, visibility string, now, endsAt time.Time) (noop bool, err error) {
+	role := RoleOf(actor)
+	if err := RequireView(role, visibility); err != nil {
+		return false, err
+	}
+	if !CanExclude(role) {
+		return false, apperr.New(apperr.CodeForbidden, nil)
+	}
+	if target.Creator {
+		return false, apperr.New(apperr.CodeCannotExcludeCreator, nil)
+	}
+	switch target.Participant {
+	case ParticipantAbandoned:
+		return true, nil
+	case ParticipantActive:
+		if !now.Before(endsAt) {
+			return false, apperr.New(apperr.CodeChallengeEnded, nil)
+		}
+		return false, nil
+	default:
+		return false, apperr.New(apperr.CodeNotFound, nil)
+	}
+}

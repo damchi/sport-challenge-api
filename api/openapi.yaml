@@ -409,6 +409,56 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/participants/{userId}:
+    delete:
+      operationId: excludeParticipant
+      summary: Exclude a participant
+      description: |
+        Creators only (403 `forbidden`). The participant is eliminated from
+        every category for good and shown as abandoned, with no mention of
+        the exclusion. A creator cannot be excluded, even one who abandoned
+        (422 `cannot_exclude_creator`); a finished challenge answers 422
+        `challenge_ended`; excluding a participant already out answers 204
+        and changes nothing; a user who never joined answers 404 `not_found`.
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Excluded (or already out).
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: |
+            No such participant (`not_found`), or a missing, deleted or hidden
+            challenge (`challenge_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The target is a creator (`cannot_exclude_creator`), or the challenge is finished (`challenge_ended`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -503,6 +553,7 @@ components:
         - already_participant
         - participation_abandoned
         - challenge_ended
+        - cannot_exclude_creator
         - not_found
         - validation_failed
         - internal_error

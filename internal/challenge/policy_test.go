@@ -245,3 +245,67 @@ func TestAbandonRefusal(t *testing.T) {
 		})
 	}
 }
+
+// TestCanExclude: creators only (README §5.7), every other role forbidden.
+func TestCanExclude(t *testing.T) {
+	for role, want := range map[Role]bool{
+		RoleCreator: true, RoleParticipant: false, RoleAbandoned: false,
+		RoleInvited: false, RoleOutsider: false, Role(99): false,
+	} {
+		if got := CanExclude(role); got != want {
+			t.Errorf("CanExclude(%d) = %v, want %v", role, got, want)
+		}
+	}
+}
+
+// TestExcludeRefusal checks the actor, then the target: hidden challenge
+// (404), not a creator (403), creator target (422), no participation (404),
+// already out (nothing to do), finished (422).
+func TestExcludeRefusal(t *testing.T) {
+	endsAt := time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)
+	before, at := endsAt.Add(-time.Second), endsAt
+	tests := []struct {
+		name       string
+		actor      Membership
+		target     Membership
+		visibility string
+		now        time.Time
+		wantNoop   bool
+		want       apperr.Code // empty: exclude
+	}{
+		{name: "creator excludes an active participant", actor: creatorActive, target: active, visibility: VisibilityPublic, now: before},
+		{name: "creator who abandoned keeps the right", actor: creatorAbandoned, target: active, visibility: VisibilityPrivate, now: before},
+		{name: "target already abandoned: nothing to do", actor: creatorActive, target: abandoned, visibility: VisibilityPublic, now: before, wantNoop: true},
+		{name: "target already abandoned, after the end", actor: creatorActive, target: abandoned, visibility: VisibilityPublic, now: at, wantNoop: true},
+		{name: "at the exact end", actor: creatorActive, target: active, visibility: VisibilityPublic, now: at, want: apperr.CodeChallengeEnded},
+		{name: "target is a creator", actor: creatorActive, target: creatorActive, visibility: VisibilityPublic, now: before, want: apperr.CodeCannotExcludeCreator},
+		{name: "target is a creator who abandoned", actor: creatorActive, target: creatorAbandoned, visibility: VisibilityPublic, now: before, want: apperr.CodeCannotExcludeCreator},
+		{name: "target never joined", actor: creatorActive, target: outsider, visibility: VisibilityPublic, now: before, want: apperr.CodeNotFound},
+		{name: "participant: forbidden", actor: active, target: active, visibility: VisibilityPublic, now: before, want: apperr.CodeForbidden},
+		{name: "outsider of a public challenge: forbidden", actor: outsider, target: active, visibility: VisibilityPublic, now: before, want: apperr.CodeForbidden},
+		{name: "outsider of a private challenge: hidden", actor: outsider, target: active, visibility: VisibilityPrivate, now: before, want: apperr.CodeChallengeNotFound},
+		{name: "abandoned participant: forbidden", actor: abandoned, target: active, visibility: VisibilityPublic, now: before, want: apperr.CodeForbidden},
+		{name: "invited, private: forbidden", actor: invited, target: active, visibility: VisibilityPrivate, now: before, want: apperr.CodeForbidden},
+		{name: "participant, private: forbidden", actor: active, target: active, visibility: VisibilityPrivate, now: before, want: apperr.CodeForbidden},
+		{name: "target only invited", actor: creatorActive, target: invited, visibility: VisibilityPrivate, now: before, want: apperr.CodeNotFound},
+		{name: "target with an unknown status", actor: creatorActive, target: unknownStatus, visibility: VisibilityPublic, now: before, want: apperr.CodeNotFound},
+		{name: "unknown visibility: hidden", actor: creatorActive, target: active, visibility: "unlisted", now: before, want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			noop, err := ExcludeRefusal(tt.actor, tt.target, tt.visibility, tt.now, endsAt)
+			if noop != tt.wantNoop {
+				t.Fatalf("noop = %v, want %v", noop, tt.wantNoop)
+			}
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("ExcludeRefusal() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("ExcludeRefusal() = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
