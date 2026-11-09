@@ -59,6 +59,18 @@ func TestFieldsOf(t *testing.T) {
 			want: []string{"distance_factors", "pseudo"},
 		},
 		{
+			name: "parameter with several broken bounds",
+			err:  openapi3.MultiError{&openapi3filter.RequestError{Parameter: &openapi3.Parameter{Name: "limit", In: "query"}, Err: openapi3.MultiError{pseudoErr}}},
+			body: pseudo,
+			want: []string{"limit"},
+		},
+		{
+			name: "body error wrapped in a request error",
+			err:  &openapi3filter.RequestError{Err: openapi3.MultiError{pseudoErr}},
+			body: pseudo,
+			want: []string{"pseudo"},
+		},
+		{
 			name: "parameter",
 			err:  &openapi3filter.RequestError{Parameter: &openapi3.Parameter{Name: "cursor", In: "query"}, Err: errors.New("invalid")},
 			want: []string{"cursor"},

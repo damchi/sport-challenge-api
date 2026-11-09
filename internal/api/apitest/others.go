@@ -51,3 +51,7 @@ func (unimplemented) GetSports(context.Context, api.GetSportsRequestObject) (api
 func (unimplemented) CreateChallenge(context.Context, api.CreateChallengeRequestObject) (api.CreateChallengeResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) ListChallenges(context.Context, api.ListChallengesRequestObject) (api.ListChallengesResponseObject, error) {
+	return nil, errNotImplemented
+}

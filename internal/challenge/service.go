@@ -14,6 +14,7 @@ import (
 // repository is what the service needs from the storage.
 type repository interface {
 	Create(ctx context.Context, c Challenge, joinedAt time.Time) (Challenge, error)
+	List(ctx context.Context, q ListQuery) ([]Summary, error)
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -93,4 +94,29 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		return Challenge{}, fmt.Errorf("store challenge: %w", err)
 	}
 	return c, nil
+}
+
+// List returns a page of challenges for actorID: public ones, or those the
+// actor created or joined. The status filter uses the clock. The
+// visibility rules are applied by the query itself, never by filtering a
+// loaded list.
+func (s *Service) List(ctx context.Context, actorID, scope, status string, limit int, after *Position) (Page, error) {
+	if limit < 1 {
+		return Page{}, apperr.InvalidFields(nil, "limit")
+	}
+	// One more than asked tells whether a next page exists.
+	items, err := s.repo.List(ctx, ListQuery{
+		ActorID: actorID, Scope: scope, Status: status,
+		Now: s.clock.Now(), Limit: limit + 1, After: after,
+	})
+	if err != nil {
+		return Page{}, fmt.Errorf("list challenges: %w", err)
+	}
+	page := Page{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		last := page.Items[limit-1]
+		page.Next = &Position{StartsAt: last.StartsAt, ID: last.ID}
+	}
+	return page, nil
 }
