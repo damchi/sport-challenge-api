@@ -78,3 +78,13 @@ func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes Pro
 	}
 	return u, nil
 }
+
+// ProfileComplete reports whether the profile of user id is complete (pseudo
+// set): creating or joining a challenge requires it.
+func (s *Service) ProfileComplete(ctx context.Context, id string) (bool, error) {
+	u, err := s.Profile(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return u.ProfileComplete(), nil
+}

@@ -151,3 +151,25 @@ func TestServiceUpdateProfile(t *testing.T) {
 		})
 	}
 }
+
+func TestServiceProfileComplete(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	tests := []struct {
+		name    string
+		repo    fakeRepository
+		want    bool
+		wantErr bool
+	}{
+		{name: "pseudo set", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie")}}, want: true},
+		{name: "no pseudo", repo: fakeRepository{user: User{ID: "u-1"}}},
+		{name: "storage error", repo: fakeRepository{err: storageErr}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NewService(tt.repo).ProfileComplete(t.Context(), "u-1")
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("ProfileComplete() = %v, %v, want %v (error %v)", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}

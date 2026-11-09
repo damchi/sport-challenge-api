@@ -25,6 +25,8 @@ tags:
     description: Profile of the authenticated user.
   - name: sports
     description: Catalogue of sports.
+  - name: challenges
+    description: Challenges, their categories and participants.
 paths:
   /healthz:
     get:
@@ -143,6 +145,42 @@ paths:
                 $ref: "#/components/schemas/SportList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/challenges:
+    post:
+      operationId: createChallenge
+      summary: Create a challenge
+      description: |
+        Creates a challenge with its 3 categories; the creator becomes its
+        first participant. Requires a complete profile (`profile_incomplete`).
+        The window starts at local midnight of `start_date` in `timezone` and
+        lasts `weeks` local weeks. Distance factors not given keep the
+        catalogue's suggested factor; all are frozen at creation.
+      tags: [challenges]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChallengeCreate"
+      responses:
+        "201":
+          description: The created challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Challenge"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: The profile is incomplete (`profile_incomplete`); choose a pseudo first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
 components:
@@ -311,3 +349,121 @@ components:
           maximum: 2
           description: Suggested distance factor (0.1 to 2, two decimals); null for sports without distance.
           example: 0.3
+    ChallengeCreate:
+      type: object
+      required: [title, visibility, timezone, start_date, weeks, elimination_step_meters]
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          description: |
+            3 to 80 characters once surrounding spaces are removed; checked by
+            the service, not by the schema, which would count those spaces.
+          example: Spring run
+        description:
+          type: string
+          maxLength: 2000
+          description: 2000 characters at most.
+        visibility:
+          type: string
+          enum: [public, private]
+        members_can_invite:
+          type: boolean
+          default: false
+          description: Whether participants may invite people, not only creators.
+        timezone:
+          type: string
+          description: IANA time zone of the place the challenge is run from; the weeks are cut in it.
+          example: America/Toronto
+        start_date:
+          type: string
+          format: date
+          description: First local day, between today and the same day next year in `timezone`.
+          example: "2026-12-07"
+        weeks:
+          type: integer
+          minimum: 2
+          maximum: 52
+          description: Duration in whole weeks.
+        elimination_step_meters:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: Increment X of the run elimination category, in meters.
+        distance_factors:
+          type: object
+          description: |
+            Factors chosen by the creator, by sport code (distance sports only,
+            0.1 to 2, two decimals at most). Send only the factors the creator
+            changed: sports not given keep their suggested factor. `run` is
+            refused, even at 1: it is the reference and always counts x1.
+          additionalProperties:
+            type: number
+            format: double
+            minimum: 0.1
+            maximum: 2
+          example:
+            ride: 0.25
+    Challenge:
+      type: object
+      required: [id, title, description, visibility, members_can_invite, timezone, starts_at, ends_at, categories]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        visibility:
+          type: string
+          enum: [public, private]
+        members_can_invite:
+          type: boolean
+        timezone:
+          type: string
+        starts_at:
+          type: string
+          format: date-time
+          description: Local midnight of the first day, in UTC.
+        ends_at:
+          type: string
+          format: date-time
+          description: End of the window (excluded), in UTC.
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+    Category:
+      type: object
+      required: [type, position, params]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [cumulative_time, cumulative_distance, run_elimination]
+        position:
+          type: integer
+          minimum: 1
+          maximum: 3
+        params:
+          $ref: "#/components/schemas/CategoryParams"
+    CategoryParams:
+      type: object
+      additionalProperties: false
+      description: Frozen settings of the category.
+      properties:
+        factors:
+          type: object
+          description: cumulative_distance only, distance factor by sport code.
+          additionalProperties:
+            type: number
+            format: double
+        sport:
+          type: string
+          description: run_elimination only, always `run`.
+        step_meters:
+          type: integer
+          description: run_elimination only, increment X in meters.

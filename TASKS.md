@@ -1096,7 +1096,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Image de build Go puis image minimale (binaire statique, utilisateur non root).
-- [ ] Base des fuseaux horaires incluse dans le binaire (`import _ "time/tzdata"` dans `cmd/api` et `cmd/worker`, ou `-tags timetzdata`) : sans elle, `time.LoadLocation` échoue dans une image minimale et tout fuseau serait refusé (`challenge/rules.go`).
+- [ ] Base des fuseaux horaires incluse dans le binaire : déjà faite dans `cmd/api` (ticket 029, `import _ "time/tzdata"`), à faire dans `cmd/worker` ; sans elle, `time.LoadLocation` échoue dans une image minimale et tout fuseau serait refusé (`challenge/rules.go`).
 - [ ] Une seule image, deux commandes : `api` et `worker`.
 - [ ] Aucun secret dans l'image ; taille raisonnable.
 - [ ] La CI (ticket 068) construit l'image à chaque pull request.

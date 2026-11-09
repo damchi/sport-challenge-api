@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/health"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
@@ -136,9 +137,10 @@ func newTestRouter(t *testing.T, verifier auth.TokenVerifier, resolve auth.UserI
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	// No request in these tests reaches a business handler: their services stay nil.
 	handlers := server{
-		Handler:      health.NewHandler(pingerFunc(func(context.Context) error { return nil }), logger),
-		userHandler:  user.NewHandler(nil),
-		sportHandler: sport.NewHandler(nil),
+		Handler:          health.NewHandler(pingerFunc(func(context.Context) error { return nil }), logger),
+		userHandler:      user.NewHandler(nil),
+		sportHandler:     sport.NewHandler(nil),
+		challengeHandler: challenge.NewHandler(nil),
 	}
 	r, err := newRouter(logger, []string{webOrigin}, handlers, verifier, resolve)
 	if err != nil {

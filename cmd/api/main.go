@@ -12,12 +12,17 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	// The time zone database, embedded: challenges are cut in their own time
+	// zone, and a minimal image may have no zoneinfo.
+	_ "time/tzdata"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/damchi/sport-challenge-api/internal/api"
+	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/health"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
@@ -72,10 +77,12 @@ func run() error {
 
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
+	challenges := challenge.NewService(challenge.NewRepository(gdb), users, sports, clock.Real{})
 	handlers := server{
-		Handler:      health.NewHandler(pool, logger),
-		userHandler:  user.NewHandler(users),
-		sportHandler: sport.NewHandler(sports),
+		Handler:          health.NewHandler(pool, logger),
+		userHandler:      user.NewHandler(users),
+		sportHandler:     sport.NewHandler(sports),
+		challengeHandler: challenge.NewHandler(challenges),
 	}
 	router, err := newRouter(logger, cfg.CORSAllowedOrigins, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
 		u, err := users.GetOrCreateBySubject(ctx, subject)
@@ -122,14 +129,16 @@ type server struct {
 	health.Handler
 	userHandler
 	sportHandler
+	challengeHandler
 }
 
-// These aliases name the embedded handlers: embedding *user.Handler and
-// *sport.Handler directly would clash with health.Handler, as every field
-// would be called Handler.
+// These aliases name the embedded handlers: embedding the *Handler of each
+// module directly would clash with health.Handler, as every field would be
+// called Handler.
 type (
-	userHandler  = *user.Handler
-	sportHandler = *sport.Handler
+	userHandler      = *user.Handler
+	sportHandler     = *sport.Handler
+	challengeHandler = *challenge.Handler
 )
 
 // newRouter registers the routes of the contract behind the protection:

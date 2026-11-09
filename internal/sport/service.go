@@ -29,3 +29,20 @@ func (s *Service) List(ctx context.Context) ([]Sport, error) {
 	}
 	return sports, nil
 }
+
+// SuggestedFactors returns the suggested distance factor of every sport with
+// a distance (required or optional), by code: the defaults of a new
+// challenge.
+func (s *Service) SuggestedFactors(ctx context.Context) (map[string]float64, error) {
+	sports, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	factors := make(map[string]float64, len(sports))
+	for _, sp := range sports {
+		if sp.SuggestedFactor != nil {
+			factors[sp.Code] = *sp.SuggestedFactor
+		}
+	}
+	return factors, nil
+}
