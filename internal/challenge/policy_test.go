@@ -151,7 +151,7 @@ var (
 )
 
 // TestJoinRefusal gives the reason of every refusal, in order: not visible
-// (404), already in (409), abandoned for good (409), closed from the exact
+// (404), already in (409), abandoned for good (422), closed from the exact
 // end of week 1 (422). CanJoin is the same rule without the reason.
 func TestJoinRefusal(t *testing.T) {
 	deadline := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
