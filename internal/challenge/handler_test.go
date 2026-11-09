@@ -461,3 +461,63 @@ func TestJoinChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 		t.Fatalf("bodies %v and %v, want the same challenge_not_found", bodies[0], bodies[1])
 	}
 }
+
+func TestAbandonChallenge(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/abandon"
+	during := clock.NewFake(time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC))
+	tests := []struct {
+		name       string
+		repo       *fakeRepository
+		clk        *clock.FakeClock
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "active", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantActive}}, clk: during, wantStatus: 200},
+		{name: "again", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantAbandoned}}, clk: during, wantStatus: 200},
+		{name: "at the exact end", repo: &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantActive}}, clk: clock.NewFake(time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)), wantStatus: 422, wantCode: "challenge_ended"},
+		{name: "never joined", repo: &fakeRepository{challenge: stored(VisibilityPublic)}, clk: during, wantStatus: 404, wantCode: "not_found"},
+		{name: "hidden", repo: &fakeRepository{challenge: stored(VisibilityPrivate)}, clk: during, wantStatus: 404, wantCode: "challenge_not_found"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, tt.clk), http.MethodPost, target, "")
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if tt.wantStatus == 200 {
+				if out["my_status"] != "abandoned" || out["my_role"] != "abandoned" {
+					t.Fatalf("body %v, want the actor abandoned", out)
+				}
+				return
+			}
+			if e, _ := out["error"].(map[string]any); e["code"] != tt.wantCode {
+				t.Fatalf("code %v, want %s", e["code"], tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestAbandonChallengeByTheCreator(t *testing.T) {
+	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Creator: true, Participant: ParticipantActive}}
+	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC))), http.MethodPost, "/api/v1/challenges/11111111-1111-1111-1111-111111111111/abandon", "")
+	if rec.Code != http.StatusOK || out["my_role"] != "creator" || out["my_status"] != "abandoned" {
+		t.Fatalf("got %d %v, want 200, still creator, abandoned", rec.Code, out)
+	}
+}
+
+func TestAbandonChallengeNotFoundIsTheSameAnswer(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/abandon"
+	var bodies []map[string]any
+	for _, repo := range []*fakeRepository{{}, {challenge: stored(VisibilityPrivate)}} {
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPost, target, "")
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status %d, want 404", rec.Code)
+		}
+		e, _ := out["error"].(map[string]any)
+		delete(e, "request_id")
+		bodies = append(bodies, out)
+	}
+	if !reflect.DeepEqual(bodies[0], bodies[1]) {
+		t.Fatalf("bodies %v and %v, want the same challenge_not_found", bodies[0], bodies[1])
+	}
+}

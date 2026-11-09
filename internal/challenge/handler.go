@@ -286,3 +286,20 @@ func (h *Handler) JoinChallenge(ctx context.Context, req api.JoinChallengeReques
 	}
 	return api.JoinChallenge201JSONResponse(out), nil
 }
+
+// AbandonChallenge ends the authenticated user's participation for good.
+func (h *Handler) AbandonChallenge(ctx context.Context, req api.AbandonChallengeRequestObject) (api.AbandonChallengeResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	d, err := h.service.Abandon(ctx, actorID, req.ChallengeId.String())
+	if err != nil {
+		return nil, err
+	}
+	out, err := toDetail(d)
+	if err != nil {
+		return nil, err
+	}
+	return api.AbandonChallenge200JSONResponse(out), nil
+}

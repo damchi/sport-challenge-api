@@ -362,6 +362,53 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/abandon:
+    post:
+      operationId: abandonChallenge
+      summary: Abandon a challenge
+      description: |
+        Ends the user's participation for good: eliminated from every
+        category, shown as abandoned, never able to join again. A creator
+        keeps the creator rights but no longer competes. Abandoning again
+        answers 200 and changes nothing. A finished challenge answers 422
+        `challenge_ended`; a visible challenge the user never joined answers
+        404 `not_found`, a hidden one the same 404 `challenge_not_found` as a
+        missing challenge.
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Abandoned; the challenge as the user now sees it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeDetail"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            No participation to abandon (`not_found`), or a missing, deleted or
+            hidden challenge (`challenge_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The challenge is finished (`challenge_ended`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -455,6 +502,7 @@ components:
         - registration_closed
         - already_participant
         - participation_abandoned
+        - challenge_ended
         - not_found
         - validation_failed
         - internal_error

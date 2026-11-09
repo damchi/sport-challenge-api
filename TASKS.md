@@ -584,7 +584,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Le participant actif passe au statut `abandoned` (avec `abandoned_at`), éliminé de toutes les catégories, **définitivement**.
 - [ ] Un créateur peut abandonner : il reste créateur, avec tous ses droits de créateur (décision du ticket 028), mais ne saisit plus d'activité.
 - [ ] Déjà abandonné : réponse idempotente 200 ; challenge terminé : 422 `challenge_ended`.
-- [ ] Non participant : 404.
+- [ ] Non participant : 404 (`not_found` si le challenge est visible : rien à abandonner ; `challenge_not_found` s'il est caché, comme un challenge inexistant). Contrôle et écriture sous le même verrou que « rejoindre » (ticket 033), à l'instant de l'horloge lu après le verrou ; la fin est exclue (`challenge_ended` dès l'instant exact de `ends_at`).
 
 **Tests** : abandon, répétition, après la fin, créateur.
 **Revue** : `go-reviewer`, `spec-guardian`.

@@ -67,3 +67,7 @@ func (unimplemented) UpdateChallenge(context.Context, api.UpdateChallengeRequest
 func (unimplemented) JoinChallenge(context.Context, api.JoinChallengeRequestObject) (api.JoinChallengeResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) AbandonChallenge(context.Context, api.AbandonChallengeRequestObject) (api.AbandonChallengeResponseObject, error) {
+	return nil, errNotImplemented
+}

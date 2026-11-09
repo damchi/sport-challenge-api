@@ -281,3 +281,85 @@ func TestJoinRace(t *testing.T) {
 		t.Fatalf("%d participations stored, want 1", c)
 	}
 }
+
+func TestAbandonIsStoredAndFinal(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	user := insertProfile(t, pool, "abandon_me")
+	if _, err := svc.Join(t.Context(), user, id); err != nil {
+		t.Fatal(err)
+	}
+
+	clk.Advance(48 * time.Hour)
+	d, err := svc.Abandon(t.Context(), user, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	var abandonedAt time.Time
+	if err := pool.QueryRow(t.Context(), "SELECT status, abandoned_at FROM participants WHERE challenge_id = $1 AND user_id = $2", id, user).Scan(&status, &abandonedAt); err != nil {
+		t.Fatal(err)
+	}
+	if status != "abandoned" || !abandonedAt.Equal(clk.Now()) || d.Role != RoleAbandoned {
+		t.Fatalf("stored %s at %s, role %v, want abandoned at the clock's now", status, abandonedAt, d.Role)
+	}
+
+	// Again: idempotent, the first instant stays.
+	clk.Advance(time.Hour)
+	if _, err := svc.Abandon(t.Context(), user, id); err != nil {
+		t.Fatal(err)
+	}
+	var again time.Time
+	if err := pool.QueryRow(t.Context(), "SELECT abandoned_at FROM participants WHERE challenge_id = $1 AND user_id = $2", id, user).Scan(&again); err != nil || !again.Equal(abandonedAt) {
+		t.Fatalf("abandoned_at %s (%v), want the first abandon kept", again, err)
+	}
+	// Final: joining again is refused.
+	if _, err := svc.Join(t.Context(), user, id); !errors.Is(err, apperr.New(apperr.CodeParticipationAbandoned, nil)) {
+		t.Fatalf("join after abandon: %v, want participation_abandoned", err)
+	}
+}
+
+func TestAbandonByTheCreatorAndAfterTheEnd(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	d, err := svc.Abandon(t.Context(), creatorID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Role != RoleCreator || d.Participant != ParticipantAbandoned {
+		t.Fatalf("role %v, participation %s, want still creator, abandoned", d.Role, d.Participant)
+	}
+
+	user := insertProfile(t, pool, "abandon_late")
+	if _, err := svc.Join(t.Context(), user, id); err != nil {
+		t.Fatal(err)
+	}
+	clk.Set(time.Date(2026, 4, 15, 4, 0, 0, 0, time.UTC)) // the exact end of the 6 weeks
+	if _, err := svc.Abandon(t.Context(), user, id); !errors.Is(err, apperr.New(apperr.CodeChallengeEnded, nil)) {
+		t.Fatalf("abandon at the end: %v, want challenge_ended", err)
+	}
+	var status string
+	if err := pool.QueryRow(t.Context(), "SELECT status FROM participants WHERE challenge_id = $1 AND user_id = $2", id, user).Scan(&status); err != nil || status != "active" {
+		t.Fatalf("status %s (%v), want still active", status, err)
+	}
+}
+
+func TestAbandonDeletedChallenge(t *testing.T) {
+	svc, _, pool, id := joinFixture(t)
+	user := insertProfile(t, pool, "abandon_deleted")
+	if _, err := svc.Join(t.Context(), user, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET deleted_at = now() WHERE id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Abandon(t.Context(), user, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("error = %v, want challenge_not_found", err)
+	}
+	var status string
+	if err := pool.QueryRow(t.Context(), "SELECT status FROM participants WHERE challenge_id = $1 AND user_id = $2", id, user).Scan(&status); err != nil || status != "active" {
+		t.Fatalf("status %s (%v), want nothing written", status, err)
+	}
+}

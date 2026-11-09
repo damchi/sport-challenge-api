@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
 
@@ -156,16 +155,17 @@ func (r *Repository) Get(ctx context.Context, id, actorID string) (Challenge, Me
 	return readWithMembership(r.db.WithContext(ctx), id, actorID)
 }
 
-// Join adds actorID to challenge id as an active participant, in one
-// transaction: the challenge row is locked first (FOR UPDATE), so two joins,
-// or a join and a deletion, never interleave. The membership is read after
-// the lock, in a new statement, so it sees a participation committed by a
-// join that held the lock before. decide gets the challenge and that
-// membership and refuses with an error, nothing being written then;
-// otherwise it returns the instant of the join. A missing or deleted
-// challenge gives errChallengeNotFound.
-func (r *Repository) Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error {
-	err := db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+// errAlreadyParticipant means the participation to insert already exists.
+var errAlreadyParticipant = errors.New("already a participant")
+
+// withLockedMembership runs fn in a transaction on challenge id, locked
+// first (FOR UPDATE) so that writes on its participations, and its deletion,
+// never interleave. The membership is read after the lock, in a new
+// statement, so it sees a change committed by a transaction that held the
+// lock before (see membershipQuery). A missing or deleted challenge gives
+// errChallengeNotFound; an error of fn rolls everything back.
+func (r *Repository) withLockedMembership(ctx context.Context, id, actorID string, fn func(tx *gorm.DB, c Challenge, m Membership) error) error {
+	return db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
 		var locked []string
 		if err := tx.Raw("SELECT id FROM challenges WHERE id = ? AND deleted_at IS NULL FOR UPDATE", id).Scan(&locked).Error; err != nil {
 			return fmt.Errorf("lock challenge: %w", err)
@@ -177,24 +177,63 @@ func (r *Repository) Join(ctx context.Context, id, actorID string, decide func(C
 		if err != nil {
 			return err
 		}
+		return fn(tx, c, m)
+	})
+}
+
+// Join adds actorID to challenge id as an active participant, under the
+// lock of withLockedMembership. decide gets the challenge and the membership
+// and refuses with an error, nothing being written then; otherwise it
+// returns the instant of the join. An existing participation gives
+// errAlreadyParticipant (the lock makes it impossible, the insert stays
+// safe).
+func (r *Repository) Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error {
+	err := r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, m Membership) error {
 		joinedAt, err := decide(c, m)
 		if err != nil {
 			return err
 		}
-		// The lock makes a duplicate impossible; DO NOTHING keeps a 409 rather
-		// than a 500 should it ever happen.
 		p := participant{ChallengeID: id, UserID: actorID, Status: ParticipantActive, JoinedAt: joinedAt}
 		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&p)
 		if res.Error != nil {
 			return fmt.Errorf("insert participant: %w", res.Error)
 		}
 		if res.RowsAffected == 0 {
-			return apperr.New(apperr.CodeAlreadyParticipant, nil)
+			return errAlreadyParticipant
 		}
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("join challenge: %w", err)
+	}
+	return nil
+}
+
+// Abandon marks the active participation of actorID in challenge id as
+// abandoned, under the lock of withLockedMembership. decide gets the
+// challenge and the membership and refuses with an error, or answers that
+// nothing is to write (already abandoned), or gives the instant of the
+// abandon.
+func (r *Repository) Abandon(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (noop bool, at time.Time, err error)) error {
+	err := r.withLockedMembership(ctx, id, actorID, func(tx *gorm.DB, c Challenge, m Membership) error {
+		noop, at, err := decide(c, m)
+		if err != nil || noop {
+			return err
+		}
+		res := tx.Model(&participant{}).
+			Where("challenge_id = ? AND user_id = ? AND status = ?", id, actorID, ParticipantActive).
+			Updates(map[string]any{"status": ParticipantAbandoned, "abandoned_at": at})
+		if res.Error != nil {
+			return fmt.Errorf("update participant: %w", res.Error)
+		}
+		// The lock makes it impossible: a silent success would hide a bug.
+		if res.RowsAffected == 0 {
+			return errors.New("update participant: no active participation")
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("abandon challenge: %w", err)
 	}
 	return nil
 }
