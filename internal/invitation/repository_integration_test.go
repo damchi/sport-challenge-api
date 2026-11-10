@@ -17,7 +17,8 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
 )
 
-// setup gives a repository, its pool, a creator and their private challenge.
+// setup gives a repository, its pool, a creator and their private challenge,
+// where members may invite.
 func setup(t *testing.T) (*Repository, *pgxpool.Pool, string, string) {
 	t.Helper()
 	pool := testdb.New(t)
@@ -31,6 +32,13 @@ func setup(t *testing.T) (*Repository, *pgxpool.Pool, string, string) {
 		VALUES ('Spring', 'private', 'America/Toronto', '2026-03-02 05:00Z', '2026-03-23 04:00Z', $1) RETURNING id`, creator).Scan(&challenge); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET members_can_invite = true WHERE id = $1", challenge); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", challenge, creator); err != nil {
+		t.Fatal(err)
+	}
+	join(t, pool, challenge, creator, "active")
 	return NewRepository(gdb), pool, creator, challenge
 }
 
@@ -41,6 +49,18 @@ func insertUser(t *testing.T, pool *pgxpool.Pool, subject string) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// join makes user a participant of challenge with status, joined before now.
+func join(t *testing.T, pool *pgxpool.Pool, challenge, user, status string) {
+	t.Helper()
+	var abandonedAt *time.Time
+	if status == "abandoned" {
+		abandonedAt = &now
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, $3, $4, $5)", challenge, user, status, now.Add(-time.Hour), abandonedAt); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func hashOf(token string) []byte {
@@ -124,6 +144,55 @@ func TestRepositoryLink(t *testing.T) {
 	other := insertUser(t, pool, "email|other")
 	if _, err := repo.Link(t.Context(), hashOf("valid"), other, now); !errors.Is(err, errInvalid) {
 		t.Fatalf("deleted challenge: error = %v, want errInvalid", err)
+	}
+}
+
+// TestRepositoryLinkAuthorMayStillInvite: an invitation is valid only while
+// its author may still invite (README §5.7): a creator, even after
+// abandoning; an active participant while members may invite. The links of
+// an excluded or abandoned participant give nothing.
+func TestRepositoryLinkAuthorMayStillInvite(t *testing.T) {
+	tests := []struct {
+		name             string
+		creator          bool
+		status           string // empty: never joined
+		membersCanInvite bool
+		valid            bool
+	}{
+		{name: "creator", creator: true, status: "active", valid: true},
+		{name: "creator who abandoned", creator: true, status: "abandoned", valid: true},
+		{name: "active participant, members may invite", status: "active", membersCanInvite: true, valid: true},
+		{name: "active participant, members may not invite", status: "active"},
+		{name: "abandoned or excluded participant", status: "abandoned", membersCanInvite: true},
+		{name: "never joined", membersCanInvite: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, pool, _, challenge := setup(t)
+			author := insertUser(t, pool, "email|author")
+			if tt.creator {
+				if _, err := pool.Exec(t.Context(), "INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", challenge, author); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.status != "" {
+				join(t, pool, challenge, author, tt.status)
+			}
+			if _, err := pool.Exec(t.Context(), "UPDATE challenges SET members_can_invite = $1 WHERE id = $2", tt.membersCanInvite, challenge); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.Create(t.Context(), Invitation{ChallengeID: challenge, InvitedBy: author, TokenHash: hashOf("t"), ExpiresAt: deadline, CreatedAt: now.Add(-time.Hour)}); err != nil {
+				t.Fatal(err)
+			}
+			guest := insertUser(t, pool, "email|guest")
+			_, err := repo.Link(t.Context(), hashOf("t"), guest, now)
+			if tt.valid && err != nil {
+				t.Fatalf("Link() = %v, want linked", err)
+			}
+			if !tt.valid && !errors.Is(err, errInvalid) {
+				t.Fatalf("Link() = %v, want errInvalid", err)
+			}
+		})
 	}
 }
 

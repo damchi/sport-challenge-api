@@ -121,9 +121,11 @@ var errChallengeNotFound = errors.New("challenge not found")
 
 // membershipQuery reads challenge @id unless deleted, with the membership of
 // @actor, invited when an invitation of the challenge linked to @actor is
-// valid at @now: not expired, not revoked. The token never reaches this
-// query: only the link, recorded when the user opened the invitation,
-// counts. It never takes a lock: under READ COMMITTED, a statement that
+// valid at @now: not expired, not revoked, and its author may still invite
+// (CanInvite: a creator, or an active participant when members may invite),
+// so the links of an excluded or abandoned participant give nothing. The
+// token never reaches this query: only the link, recorded when the user
+// opened the invitation, counts. It never takes a lock: under READ COMMITTED, a statement that
 // waits for a lock keeps the snapshot taken before the wait, so its
 // membership subqueries would miss a participation committed meanwhile.
 // Join locks the challenge in a statement of its own, then runs this query.
@@ -131,7 +133,10 @@ const membershipQuery = `SELECT c.*,
 	EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
 	(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant,
 	EXISTS (SELECT 1 FROM invitation_recipients r JOIN invitations i ON i.id = r.invitation_id
-		WHERE r.user_id = @actor AND i.challenge_id = c.id AND i.revoked_at IS NULL AND i.expires_at > @now) AS invited
+		WHERE r.user_id = @actor AND i.challenge_id = c.id AND i.revoked_at IS NULL AND i.expires_at > @now
+		AND (EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = i.invited_by)
+			OR (c.members_can_invite AND EXISTS (SELECT 1 FROM participants
+				WHERE challenge_id = c.id AND user_id = i.invited_by AND status = 'active')))) AS invited
 	FROM challenges c WHERE c.id = @id AND c.deleted_at IS NULL`
 
 // readWithMembership runs membershipQuery on gdb, the invitations judged at

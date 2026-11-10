@@ -206,6 +206,32 @@ func TestGetInvited(t *testing.T) {
 	if _, err := svc.Get(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("revoked after the link: error = %v, want challenge_not_found", err)
 	}
+
+	// Invited by a participant while members may invite: the access lasts
+	// as long as the author may invite, not after their exclusion.
+	member := insertTestUser(t, pool, "email|member")
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET members_can_invite = true WHERE id = $1", c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, 'active', $3, NULL)", c.ID, member, now); err != nil {
+		t.Fatal(err)
+	}
+	var byMember string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at)
+		VALUES ($1, $2, sha256('member'::bytea), $3, $4) RETURNING id`, c.ID, member, deadline, now).Scan(&byMember); err != nil {
+		t.Fatal(err)
+	}
+	friend := insertTestUser(t, pool, "email|friend")
+	link(byMember, friend)
+	if d, err := svc.Get(t.Context(), friend, c.ID); err != nil || d.Role != RoleInvited {
+		t.Fatalf("invited by an active participant: %+v, %v, want invited", d.Role, err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, c.ID, member); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Get(t.Context(), friend, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("author excluded: error = %v, want challenge_not_found", err)
+	}
 }
 
 // TestJoinWithAValidInvitation: a user linked to a valid invitation joins

@@ -10,7 +10,7 @@ Le **frontend** (web et mobile) est un projet séparé, avec son propre README. 
 
 ## 1. Concept
 
-Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la visibilité (privé ou public) et si les personnes invitées peuvent inviter à leur tour. Le classement est mis à jour pour chaque catégorie. Les activités sont saisies à la main en V1, puis synchronisées depuis Strava, Garmin, Polar et Coros dans une version ultérieure.
+Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la visibilité (privé ou public) et si les participants peuvent inviter à leur tour. Le classement est mis à jour pour chaque catégorie. Les activités sont saisies à la main en V1, puis synchronisées depuis Strava, Garmin, Polar et Coros dans une version ultérieure.
 
 ---
 
@@ -26,7 +26,7 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Visibilité :
   - **Public** : accès libre, listé sur la page d'accueil de l'app.
   - **Privé** : sur invitation d'un créateur ou d'un participant.
-- ✅ Le créateur choisit si les personnes invitées peuvent aussi inviter du monde.
+- ✅ Le créateur choisit si les participants peuvent aussi inviter du monde (une personne seulement invitée, qui n'a pas rejoint, ne peut pas inviter).
 - ✅ **Fuseau horaire** : début et fin sont définis selon le fuseau du lieu de lancement du challenge (ex. Montréal). Les semaines sont découpées dans ce même fuseau.
 - ✅ Après le début, on peut modifier le **titre** et la **description**, mais **pas les catégories**.
 - ✅ Personne ne « quitte » vraiment un challenge : l'action « quitter » (ou la suppression de son compte, pour les challenges à venir ou en cours) équivaut à un **abandon**. Les créateurs peuvent **supprimer le challenge**.
@@ -485,7 +485,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Voir un challenge public et son classement | tout utilisateur connecté (✅) |
 | Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅) |
 | Rejoindre un challenge public | tout utilisateur connecté, jusqu'à la fin de la semaine 1 (✅) |
-| Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) |
+| Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) ; une invitation n'est valide que tant que son auteur est encore créateur ou participant actif : un lien diffusé par un participant exclu ou qui a abandonné ne donne plus rien (✅) |
 | Inviter | créateurs ; participants seulement si le créateur l'a autorisé à la création (✅) |
 | Modifier titre et description | créateurs (✅) |
 | Modifier les catégories | personne, après la création (✅) |
