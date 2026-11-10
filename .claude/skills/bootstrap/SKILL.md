@@ -9,7 +9,7 @@ description: Démarre le projet backend Sport Challenge ou indique la prochaine 
 
 **Pas de code d'avance** : une phase ne crée que ce que ses tickets utilisent ; le socle (`config`, erreurs, horloge, transactions, tests d'intégration, pagination…) arrive avec la première fonctionnalité qui en a besoin.
 
-Avance **une phase à la fois**. À la fin de chaque phase : `make fmt && make lint && make test` passent, puis **propose** (sans l'exécuter) la liste des fichiers et un message de commit, et attends la validation de l'utilisateur avant de commiter et de passer à la suivante. Ne commit et ne push jamais de toi-même. Avant de commencer, lis le `README.md` (§2 et §5) et `CLAUDE.md`, et regarde l'état du dépôt pour trouver la première phase non terminée.
+Avance **une phase à la fois**. À la fin de chaque phase : `make fmt && make lint && make test` passent, puis commite et pousse la phase (un commit cohérent, sans demander l'accord) et vérifie les commentaires de sa pull request avant de passer à la suivante. Avant de commencer, lis le `README.md` (§2 et §5) et `CLAUDE.md`, et regarde l'état du dépôt pour trouver la première phase non terminée.
 
 ## Phase 0 — Fondations minimales et CI
 
@@ -64,4 +64,4 @@ Limitation de débit par IP et par utilisateur, `Dockerfile` multi-stage, compl�
 
 ## Fin de chaque phase
 
-Lance les agents `go-reviewer` (toujours), `migration-reviewer` (si migration), `spec-guardian` (si métier) et `security-reviewer` (si routes ou authentification), puis résume les points à décider et propose le commit (fichiers + message), sans le faire.
+Lance les agents `go-reviewer` (toujours), `migration-reviewer` (si migration), `spec-guardian` (si métier) et `security-reviewer` (si routes ou authentification), puis résume les points à décider, commite et pousse, et relis les commentaires de la pull request.
