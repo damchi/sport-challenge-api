@@ -141,6 +141,15 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 		}
 	}
 
+	// A request read once the account is deleted: deleted, not an
+	// incomplete profile (anonymization clears the pseudo).
+	if _, err := svc.Create(t.Context(), member, valid()); !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
+		t.Fatalf("create after deletion: %v, want account_deleted", err)
+	}
+	if _, err := svc.Join(t.Context(), member, ongoing); !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
+		t.Fatalf("join after deletion: %v, want account_deleted", err)
+	}
+
 	// A login with the former subject (insertProfile uses the pseudo).
 	if _, err := users.GetOrCreateBySubject(t.Context(), "del_member"); !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
 		t.Fatalf("login after deletion: %v, want account_deleted", err)
