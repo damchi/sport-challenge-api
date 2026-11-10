@@ -52,9 +52,11 @@ func NewService(repo repository, data Activities, c clock.Clock, logger *slog.Lo
 // CloseWeeks closes every week that has ended, in every open challenge, and
 // has no closure yet: the eliminations of the week are those of the scorer,
 // recorded with the closure in one transaction. It can be run again and
-// again, and as late as you like: a week is judged by its activities, and a
-// week that ended is locked, so the result does not depend on when it runs.
-// A challenge in error does not stop the others; the errors are joined.
+// again: a week is judged by its activities, and a week that ended is locked,
+// so when it runs does not change them. Two things are read as of the run:
+// who is abandoned (see closeChallenge), and which challenges are open, so a
+// challenge that is over is left to its finalization. A challenge in error
+// does not stop the others; the errors are joined.
 func (s *Service) CloseWeeks(ctx context.Context) (Result, error) {
 	now := s.clock.Now()
 	challenges, err := s.repo.OpenChallenges(ctx, now)

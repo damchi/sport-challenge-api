@@ -197,8 +197,9 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 		}
 	})
 
-	t.Run("a closure that fails records nothing", func(t *testing.T) {
-		// Week 4 ends with the challenge, which is no longer open: no closure.
+	t.Run("a challenge that is over is not processed", func(t *testing.T) {
+		// Week 4 ends with the challenge, which is no longer open: it is left
+		// to its finalization.
 		got, err := service(start.AddDate(0, 0, 28)).CloseWeeks(t.Context())
 		if err != nil || got != (Result{}) {
 			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
@@ -220,4 +221,40 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 			t.Fatalf("closed weeks = %v: the closure of week 4 stayed without its eliminations", weeks)
 		}
 	})
+}
+
+// TestCloseWeeksOfAParticipantWhoAbandonedSinceTheWeekEnded pins the choice
+// documented on CloseWeeks: who is abandoned is read when the task runs.
+func TestCloseWeeksOfAParticipantWhoAbandonedSinceTheWeekEnded(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	week2End := start.AddDate(0, 0, 14).UTC()
+
+	runner := s.user("runner")
+	challengeID, _ := s.challenge(runner, start, false)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $4)`,
+		challengeID, runner, start, week2End.Add(time.Minute))
+	// Under the minimum of week 2, but abandoned after the week ended.
+	s.run(runner, start.Add(time.Hour), 5000)
+
+	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(week2End.Add(time.Hour)), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	got, err := service.CloseWeeks(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Result{Challenges: 1, Weeks: 2}); got != want {
+		t.Fatalf("result = %+v, want %+v", got, want)
+	}
+	if elims := s.eliminations(challengeID); len(elims) != 0 {
+		t.Fatalf("eliminations = %+v, want none: the participant is shown as abandoned", elims)
+	}
 }
