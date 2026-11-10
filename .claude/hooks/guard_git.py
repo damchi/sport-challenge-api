@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Hook PreToolUse (outil Bash) : aucune écriture git ni action de dépôt distant sans validation.
+"""Hook PreToolUse (outil Bash) : garde-fous sur les écritures git et les actions de dépôt distant.
 
-- commit, push, merge, rebase, tag, cherry-pick, revert, am, reset, gh pr create/merge… -> demande de validation
+- commit et push d'une branche de travail -> autorisés (règles de permissions)
+- push vers main/master ou suppression de branche distante, merge, rebase, tag, cherry-pick, revert, am, reset, gh pr create/merge… -> demande de validation
 - push forcé, reset --hard, clean, --no-verify -> refusé
 Détecte aussi les variantes : `git -C dir commit`, `git -c k=v push`, commandes chaînées (&&, ;, |), sous-shell.
 Sans sortie = on laisse les règles de permissions décider.
@@ -22,7 +23,7 @@ cmd = (data.get("tool_input") or {}).get("command", "") or ""
 
 # `git` suivi d'options globales éventuelles, puis d'un sous-commande
 GIT = r"\bgit(?:\s+(?:-C\s+\S+|-c\s+\S+|--[\w-]+(?:=\S+)?|-[A-Za-z]))*\s+"
-WRITE_SUBCOMMANDS = r"(commit|push|merge|rebase|tag|cherry-pick|revert|am|reset|stash\s+(?:drop|clear)|branch\s+-[dD]|worktree\s+remove)\b"
+WRITE_SUBCOMMANDS = r"(merge|rebase|tag|cherry-pick|revert|am|reset|stash\s+(?:drop|clear)|branch\s+-[dD]|worktree\s+remove)\b"
 GH = r"\bgh\s+(?:pr\s+(?:create|merge|close|ready)|release\s+(?:create|delete)|repo\s+(?:delete|create)|workflow\s+run)\b"
 
 
@@ -44,6 +45,10 @@ if re.search(GIT + r"reset\b.*--hard", cmd) or re.search(GIT + r"clean\b", cmd):
     emit("deny", "git reset --hard et git clean sont interdits : ils détruisent du travail non commité.")
 if re.search(GIT + r"(?:commit|push|merge|rebase|am|cherry-pick)\b.*--no-verify", cmd):
     emit("deny", "Contourner les vérifications avec --no-verify est interdit.")
+
+# --- Push sensible : branche principale ou suppression de branche distante ---
+if re.search(GIT + r"push\b.*(?:\b(?:main|master)\b|\s--delete\b|\s-d\b|\s:\S+)", cmd):
+    emit("ask", "Push vers main/master ou suppression d'une branche distante : validation de l'utilisateur requise.")
 
 # --- Validation obligatoire ---
 if re.search(GIT + WRITE_SUBCOMMANDS, cmd) or re.search(GH, cmd):

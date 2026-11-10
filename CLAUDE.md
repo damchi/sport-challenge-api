@@ -106,15 +106,16 @@ Règles de dépendance :
 2. Fais un court plan avant les changements importants (plusieurs fichiers, migration, nouveau module).
 3. Pour `scoring` et les règles de temps : écris d'abord les tests.
 4. Implémente, puis lance format, lint et tests.
-5. Fais relire par les agents adaptés (voir ci-dessous) avant de proposer un commit.
-6. **Git : tu ne commits et ne pushes jamais de ta propre initiative.** À la fin d'un changement, présente la liste des fichiers modifiés, le résumé du diff et un **message de commit proposé** (en anglais, un changement cohérent par commit), puis attends l'accord explicite de l'utilisateur dans la conversation. Même après cet accord, la commande demande une confirmation à l'écran : c'est voulu.
-   - Tu peux utiliser `git status`, `git diff`, `git log` et `git add` librement.
-   - Commit, push, merge, rebase, tag, reset, `gh pr create/merge` : uniquement sur demande explicite de l'utilisateur, une action à la fois.
+5. Fais relire par les agents adaptés (voir ci-dessous) avant de committer.
+6. **Git** : une fois format, lint, tests et relectures passés, tu **commits et pushes sans demander l'accord** (en anglais, un changement cohérent par commit, sur la branche du ticket). Tu présentes ensuite les fichiers modifiés, le résumé du diff et les commits poussés.
+   - Tu peux utiliser `git status`, `git diff`, `git log`, `git add`, `git commit` et `git push` (branche de travail) librement.
+   - **Pull request** : lis tous ses commentaires et ses vérifications (`gh pr view --comments`, commentaires en ligne, `gh pr checks`) avant de dire qu'un ticket est terminé et après chaque push ; corrige chaque point ou explique pourquoi tu ne le suis pas.
+   - Push vers `main`, suppression de branche distante, merge, rebase, tag, reset, `gh pr create/merge` : uniquement sur demande explicite de l'utilisateur, une action à la fois.
    - Push forcé, `git reset --hard`, `git clean`, `--no-verify` : interdits (bloqués par la configuration).
 
 ## Ne jamais
 
-- Faire un commit ou un push sans validation explicite de l'utilisateur, enchaîner plusieurs commits d'un coup, ou contourner la confirmation (autre commande git équivalente, script, `git -C`, etc.).
+- Pousser sur `main`, fusionner une pull request, ou contourner une confirmation ou un refus de la configuration (autre commande git équivalente, script, `git -C`, etc.).
 - Lancer `terraform apply`, `terraform destroy` ou un déploiement sans demande explicite.
 - Modifier une migration déjà appliquée, ou utiliser `AutoMigrate`.
 - Appeler `time.Now()` dans la logique métier.
@@ -126,7 +127,7 @@ Règles de dépendance :
 
 | Nom | Type | Quand l'utiliser |
 |---|---|---|
-| `next-task` | skill | Prendre la prochaine issue GitHub du backlog, l'implémenter, proposer le commit |
+| `next-task` | skill | Prendre la prochaine issue GitHub du backlog, l'implémenter, committer, pousser, relire les commentaires de la PR |
 | `bootstrap` | skill | Aperçu des phases du projet (le détail est dans `TASKS.md`) |
 | `new-module` | skill | Créer un module `internal/<nom>` |
 | `new-migration` | skill | Ajouter ou modifier le schéma de la base |
