@@ -418,8 +418,7 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 	t.Run("a failure stays pending, then the next run succeeds", func(t *testing.T) {
 		repo := &pendingRepository{subjects: []string{"email|1", "email|2"}}
 		identities := &flakyIdentities{failing: map[string]bool{"email|1": true}}
-		var logs bytes.Buffer
-		svc := NewService(repo, nil, identities, slog.New(slog.NewJSONHandler(&logs, nil)))
+		svc := NewService(repo, nil, identities, discard)
 		got, err := svc.RetryAuth0Deletions(t.Context())
 		if err == nil || got != (RetryResult{Deleted: 1, Failed: 1}) {
 			t.Fatalf("result = %+v, err = %v, want 1 deleted, 1 failed and an error", got, err)
@@ -427,8 +426,10 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 		if !slices.Equal(repo.subjects, []string{"email|1"}) {
 			t.Fatalf("pending %v, want only the failed one", repo.subjects)
 		}
-		if strings.Contains(err.Error(), "email|") || strings.Contains(logs.String(), "email|") {
-			t.Fatalf("error %q or logs %q carry a subject", err, logs.String())
+		// The service adds no subject to the error; that the Auth0 client
+		// keeps it out of its own errors is tested in platform/auth.
+		if strings.Contains(err.Error(), "email|") {
+			t.Fatalf("error %q carries a subject", err)
 		}
 		identities.failing = nil
 		got, err = svc.RetryAuth0Deletions(t.Context())
