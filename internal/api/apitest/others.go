@@ -91,3 +91,7 @@ func (unimplemented) ListParticipants(context.Context, api.ListParticipantsReque
 func (unimplemented) DeleteMe(context.Context, api.DeleteMeRequestObject) (api.DeleteMeResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) CreateActivity(context.Context, api.CreateActivityRequestObject) (api.CreateActivityResponseObject, error) {
+	return nil, errNotImplemented
+}

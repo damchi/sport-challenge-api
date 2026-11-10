@@ -46,3 +46,18 @@ func (s *Service) SuggestedFactors(ctx context.Context) (map[string]float64, err
 	}
 	return factors, nil
 }
+
+// DistanceMode returns the distance mode of sport code (required, none or
+// optional), and false when the catalogue has no such sport.
+func (s *Service) DistanceMode(ctx context.Context, code string) (string, bool, error) {
+	sports, err := s.List(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	for _, sp := range sports {
+		if sp.Code == code {
+			return sp.DistanceMode, true, nil
+		}
+	}
+	return "", false, nil
+}

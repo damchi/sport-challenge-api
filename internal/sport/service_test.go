@@ -25,3 +25,32 @@ func TestServiceSuggestedFactors(t *testing.T) {
 		t.Fatalf("error = %v, want it to wrap %v", err, storage)
 	}
 }
+
+func TestServiceDistanceMode(t *testing.T) {
+	svc := NewService(fakeRepository{sports: []Sport{
+		{Code: "run", DistanceMode: "required", SuggestedFactor: factor(1)},
+		{Code: "yoga", DistanceMode: "none"},
+	}})
+	tests := []struct {
+		code  string
+		mode  string
+		found bool
+	}{
+		{code: "run", mode: "required", found: true},
+		{code: "yoga", mode: "none", found: true},
+		{code: "chess"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			mode, found, err := svc.DistanceMode(t.Context(), tt.code)
+			if err != nil || mode != tt.mode || found != tt.found {
+				t.Fatalf("DistanceMode(%q) = %q, %v, %v, want %q, %v", tt.code, mode, found, err, tt.mode, tt.found)
+			}
+		})
+	}
+
+	storage := errors.New("connection refused")
+	if _, _, err := NewService(fakeRepository{err: storage}).DistanceMode(t.Context(), "run"); !errors.Is(err, storage) {
+		t.Fatalf("error = %v, want it to wrap %v", err, storage)
+	}
+}

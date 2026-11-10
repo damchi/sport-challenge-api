@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/health"
@@ -85,11 +86,13 @@ func run() error {
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), users, sports, clock.Real{})
+	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, clock.Real{})
 	handlers := server{
 		Handler:          health.NewHandler(pool, logger),
 		userHandler:      user.NewHandler(users),
 		sportHandler:     sport.NewHandler(sports),
 		challengeHandler: challenge.NewHandler(challenges),
+		activityHandler:  activity.NewHandler(activities),
 	}
 	router, err := newRouter(logger, cfg.CORSAllowedOrigins, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
 		u, err := users.GetOrCreateBySubject(ctx, subject)
@@ -138,12 +141,47 @@ func (f abandonAllFunc) AbandonAll(ctx context.Context, userID string) error {
 	return f(ctx, userID)
 }
 
+// memberships is what participations reads from module challenge.
+type memberships interface {
+	Memberships(ctx context.Context, userID string) ([]challenge.UserChallenge, error)
+}
+
+// participations gives module activity the challenges of a user, as
+// activity.Participations: Active comes from the status of the
+// participation, never the role (a creator who abandoned no longer
+// competes, ADR 0001).
+type participations struct{ challenges memberships }
+
+func (p participations) Participations(ctx context.Context, userID string) ([]activity.Participation, error) {
+	ms, err := p.challenges.Memberships(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]activity.Participation, 0, len(ms))
+	for _, m := range ms {
+		// Validated at creation: an unknown time zone is broken data.
+		loc, err := time.LoadLocation(m.Timezone)
+		if err != nil {
+			return nil, fmt.Errorf("time zone of challenge %s: %w", m.ID, err)
+		}
+		out = append(out, activity.Participation{
+			ChallengeID: m.ID,
+			StartsAt:    m.StartsAt,
+			EndsAt:      m.EndsAt,
+			Location:    loc,
+			Active:      m.Participant == challenge.ParticipantActive,
+		})
+	}
+	return out, nil
+}
+
 // server gathers the handlers of every operation of the contract.
 type server struct {
 	health.Handler
 	userHandler
 	sportHandler
 	challengeHandler
+	activityHandler
 }
 
 // These aliases name the embedded handlers: embedding the *Handler of each
@@ -153,6 +191,7 @@ type (
 	userHandler      = *user.Handler
 	sportHandler     = *sport.Handler
 	challengeHandler = *challenge.Handler
+	activityHandler  = *activity.Handler
 )
 
 // newRouter registers the routes of the contract behind the protection:

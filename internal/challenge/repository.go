@@ -174,6 +174,40 @@ func (r *Repository) ActiveParticipations(ctx context.Context, userID string, no
 	return ids, nil
 }
 
+// Memberships returns the challenges, not deleted, finished ones included,
+// that userID joined, whatever the status of the participation, with their
+// membership, by start then id. It reads in the transaction of ctx, if any
+// (recording an activity).
+func (r *Repository) Memberships(ctx context.Context, userID string) ([]UserChallenge, error) {
+	var rows []struct {
+		ID          string
+		Timezone    string
+		StartsAt    time.Time
+		EndsAt      time.Time
+		Creator     bool
+		Participant string
+	}
+	err := db.Conn(ctx, r.db).Raw(`SELECT c.id, c.timezone, c.starts_at, c.ends_at, p.status AS participant,
+		EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = p.user_id) AS creator
+		FROM participants p JOIN challenges c ON c.id = p.challenge_id
+		WHERE p.user_id = ? AND c.deleted_at IS NULL
+		ORDER BY c.starts_at, c.id`, userID).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list memberships: %w", err)
+	}
+	out := make([]UserChallenge, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, UserChallenge{
+			ID:         row.ID,
+			Timezone:   row.Timezone,
+			StartsAt:   row.StartsAt,
+			EndsAt:     row.EndsAt,
+			Membership: Membership{Creator: row.Creator, Participant: ParticipantStatus(row.Participant)},
+		})
+	}
+	return out, nil
+}
+
 // Participants returns up to limit participations of challenge id, abandoned
 // ones included, in order of registration (joined_at, user_id), after the
 // position after when set. Pseudos are not read: they belong to module user.

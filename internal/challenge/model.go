@@ -170,6 +170,16 @@ type ParticipantPage struct {
 	Next  *ParticipantPosition
 }
 
+// UserChallenge is a challenge a user joined, with their membership in it:
+// what an activity of theirs needs to know where it counts.
+type UserChallenge struct {
+	ID       string
+	Timezone string
+	StartsAt time.Time
+	EndsAt   time.Time
+	Membership
+}
+
 // Detail is a challenge as one user sees it, with the fields the server
 // computes from the current instant.
 type Detail struct {

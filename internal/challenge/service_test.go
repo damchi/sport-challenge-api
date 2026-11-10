@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -38,10 +39,17 @@ type fakeRepository struct {
 	// active serves ActiveParticipations; activeErr fails it.
 	active    []string
 	activeErr error
+	// memberships serve Memberships; membershipsErr fails it.
+	memberships    []UserChallenge
+	membershipsErr error
 }
 
 func (f *fakeRepository) ActiveParticipations(context.Context, string, time.Time) ([]string, error) {
 	return f.active, f.activeErr
+}
+
+func (f *fakeRepository) Memberships(context.Context, string) ([]UserChallenge, error) {
+	return f.memberships, f.membershipsErr
 }
 
 type participantsCall struct {
@@ -1060,5 +1068,18 @@ func TestServiceAbandonAllFailures(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestServiceMemberships(t *testing.T) {
+	want := []UserChallenge{{ID: "c1", Timezone: "America/Toronto", Membership: Membership{Creator: true, Participant: ParticipantAbandoned}}}
+	got, err := NewService(&fakeRepository{memberships: want}, nil, nil, clock.NewFake(now)).Memberships(t.Context(), actor)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("Memberships() = %+v, %v, want %+v", got, err, want)
+	}
+
+	storage := errors.New("connection refused")
+	if _, err := NewService(&fakeRepository{membershipsErr: storage}, nil, nil, clock.NewFake(now)).Memberships(t.Context(), actor); !errors.Is(err, storage) {
+		t.Fatalf("error = %v, want it to wrap %v", err, storage)
 	}
 }

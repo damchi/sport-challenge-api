@@ -13,9 +13,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/health"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -141,6 +143,7 @@ func newTestRouter(t *testing.T, verifier auth.TokenVerifier, resolve auth.UserI
 		userHandler:      user.NewHandler(nil),
 		sportHandler:     sport.NewHandler(nil),
 		challengeHandler: challenge.NewHandler(nil),
+		activityHandler:  activity.NewHandler(nil),
 	}
 	r, err := newRouter(logger, []string{webOrigin}, handlers, verifier, resolve)
 	if err != nil {
@@ -267,4 +270,61 @@ type acceptingVerifier struct{}
 
 func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
 	return auth.Claims{Subject: "email|123"}, nil
+}
+
+type membershipsFunc func(ctx context.Context, userID string) ([]challenge.UserChallenge, error)
+
+func (f membershipsFunc) Memberships(ctx context.Context, userID string) ([]challenge.UserChallenge, error) {
+	return f(ctx, userID)
+}
+
+// TestParticipationsActiveComesFromTheStatus: only an active participation
+// competes, whatever the role.
+func TestParticipationsActiveComesFromTheStatus(t *testing.T) {
+	start := time.Date(2026, 6, 1, 4, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 21)
+	tests := []struct {
+		name       string
+		membership challenge.Membership
+		want       bool
+	}{
+		{name: "active participant", membership: challenge.Membership{Participant: challenge.ParticipantActive}, want: true},
+		{name: "active creator", membership: challenge.Membership{Creator: true, Participant: challenge.ParticipantActive}, want: true},
+		{name: "creator who abandoned", membership: challenge.Membership{Creator: true, Participant: challenge.ParticipantAbandoned}},
+		{name: "abandoned participant", membership: challenge.Membership{Participant: challenge.ParticipantAbandoned}},
+		{name: "invited", membership: challenge.Membership{Invited: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := participations{membershipsFunc(func(_ context.Context, userID string) ([]challenge.UserChallenge, error) {
+				if userID != "u1" {
+					t.Errorf("memberships of %q, want u1", userID)
+				}
+				return []challenge.UserChallenge{{ID: "c1", Timezone: "America/Toronto", StartsAt: start, EndsAt: end, Membership: tt.membership}}, nil
+			})}
+			got, err := p.Participations(t.Context(), "u1")
+			if err != nil || len(got) != 1 {
+				t.Fatalf("Participations() = %+v, %v", got, err)
+			}
+			g := got[0]
+			if g.Active != tt.want || g.ChallengeID != "c1" || !g.StartsAt.Equal(start) || !g.EndsAt.Equal(end) || g.Location == nil || g.Location.String() != "America/Toronto" || g.Deleted {
+				t.Fatalf("participation %+v, want active %v on c1 in Toronto", g, tt.want)
+			}
+		})
+	}
+}
+
+func TestParticipationsUnknownZoneAndFailure(t *testing.T) {
+	p := participations{membershipsFunc(func(context.Context, string) ([]challenge.UserChallenge, error) {
+		return []challenge.UserChallenge{{ID: "c1", Timezone: "Mars/Olympus"}}, nil
+	})}
+	if got, err := p.Participations(t.Context(), "u1"); err == nil {
+		t.Fatalf("Participations() = %+v, want an error for an unknown time zone", got)
+	}
+
+	storage := errors.New("connection refused")
+	p = participations{membershipsFunc(func(context.Context, string) ([]challenge.UserChallenge, error) { return nil, storage })}
+	if _, err := p.Participations(t.Context(), "u1"); !errors.Is(err, storage) {
+		t.Fatalf("error = %v, want %v", err, storage)
+	}
 }
