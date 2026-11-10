@@ -140,3 +140,59 @@ func TestGetFromTheDatabase(t *testing.T) {
 		t.Fatalf("Get() = %+v, want %+v", plain, want)
 	}
 }
+
+// TestGetServesTheSnapshotsOfAnEndedChallenge: once the challenge is over and
+// its results are frozen, the ranking is the snapshot: an activity added to
+// the table afterwards (the weeks are locked by the API, not by the table)
+// changes nothing.
+func TestGetServesTheSnapshotsOfAnEndedChallenge(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, toronto(t))
+	end := start.AddDate(0, 0, 14)
+	runner := s.user("runner")
+	var challengeID, timeCategory string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Summer', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, end, runner).Scan(&challengeID); err != nil {
+		t.Fatal(err)
+	}
+	s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", challengeID, runner, start)
+	if err := pool.QueryRow(t.Context(), "INSERT INTO categories (challenge_id, type, position) VALUES ($1, 'cumulative_time', 1) RETURNING id", challengeID).Scan(&timeCategory); err != nil {
+		t.Fatal(err)
+	}
+	s.activity(runner, "run", start.Add(time.Hour), 3600, nil, false)
+
+	c := Challenge{
+		ID: challengeID, Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end.UTC(),
+		Categories: []Category{{Type: CategoryCumulativeTime}},
+	}
+	fake := clock.NewFake(end)
+	svc := NewService(staticChallenge(c), fakeProfiles{}, NewRepository(gdb), fake, 24*time.Hour)
+	valueOf := func() (int, time.Time) {
+		t.Helper()
+		got, err := svc.Get(t.Context(), runner, challengeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Categories[0].Entries[0].Value, got.ComputedAt
+	}
+
+	// The worker has not run: computed from the activities.
+	if v, _ := valueOf(); v != 3600 {
+		t.Fatalf("value = %d, want 3600 computed", v)
+	}
+
+	frozenAt := end.Add(time.Hour).UTC()
+	s.exec(`INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at) VALUES ($1, $2, 'cumulative_time', $3, $4)`,
+		timeCategory, challengeID, `{"entries":[{"user_id":"`+runner+`","rank":1,"value":3600,"abandoned":false}]}`, frozenAt)
+	s.activity(runner, "run", start.Add(2*time.Hour), 7200, nil, false)
+	fake.Set(end.AddDate(0, 1, 0))
+
+	if v, at := valueOf(); v != 3600 || !at.Equal(frozenAt) {
+		t.Fatalf("value = %d at %s, want the snapshot 3600 at %s", v, at, frozenAt)
+	}
+}

@@ -2,6 +2,7 @@ package leaderboard
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -26,6 +27,12 @@ func (f *fakeChallenges) Challenge(_ context.Context, actorID, id string) (Chall
 type fakeRepo struct {
 	participants []scoring.Participant
 	activities   []scoring.Activity
+	// snapshots and frozenAt are what Snapshots gives; it is not counted in
+	// calls, which count what a ranking is computed from.
+	snapshots map[string]json.RawMessage
+	frozenAt  time.Time
+	// snapshotsErr is what Snapshots fails with.
+	snapshotsErr error
 	err          error
 	calls        int
 	// from and to are the window the activities were asked for.
@@ -41,6 +48,10 @@ func (f *fakeRepo) Activities(_ context.Context, _ string, from, to time.Time) (
 	f.calls++
 	f.from, f.to = from, to
 	return f.activities, f.err
+}
+
+func (f *fakeRepo) Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error) {
+	return f.snapshots, f.frozenAt, f.snapshotsErr
 }
 
 type fakeProfiles struct {
@@ -257,4 +268,138 @@ func TestGetAsksForTheActorAndTheChallenge(t *testing.T) {
 	if challenges.asked != [2]string{"actor", "c1"} {
 		t.Fatalf("challenge asked as %v, want [actor c1]", challenges.asked)
 	}
+}
+
+func TestGetServesTheFrozenResults(t *testing.T) {
+	c := twoWeeks(t)
+	frozenAt := c.EndsAt.Add(time.Hour)
+	// Activities that would change the ranking if it were computed.
+	repo := &fakeRepo{
+		participants: []scoring.Participant{{UserID: "a"}},
+		activities:   []scoring.Activity{{UserID: "a", SportCode: "run", StartedAt: c.StartsAt, DurationSeconds: 1, DistanceMeters: meters(1)}},
+		snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime:     json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":9000,"abandoned":false},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
+			CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":28000,"abandoned":false},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
+			CategoryRunElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000,"abandoned":false},` +
+				`{"user_id":"b","rank":2,"value":5000,"abandoned":false,"eliminated_week":2},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
+		},
+		frozenAt: frozenAt,
+	}
+	// Long after the end, and the pseudo of c is gone.
+	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
+
+	got, err := svc.Get(t.Context(), "actor", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{
+		{Type: CategoryCumulativeTime, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+		}},
+		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+		}},
+		{Type: CategoryRunElimination, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+		}},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Get() = %+v, want %+v", got, want)
+	}
+	if repo.calls != 0 {
+		t.Fatalf("activities read %d times, want the snapshots alone", repo.calls)
+	}
+}
+
+func TestGetComputesWhatIsNotFrozenYet(t *testing.T) {
+	c := twoWeeks(t)
+	tests := []struct {
+		name      string
+		now       time.Time
+		snapshots map[string]json.RawMessage
+	}{
+		{name: "over, the worker has not run", now: c.EndsAt},
+		{name: "over, a category is missing", now: c.EndsAt, snapshots: map[string]json.RawMessage{CategoryCumulativeTime: json.RawMessage(`{"entries":[]}`)}},
+		{name: "still running, snapshots are not read", now: c.EndsAt.Add(-time.Second), snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime:     json.RawMessage(`{"entries":[]}`),
+			CategoryCumulativeDistance: json.RawMessage(`{"entries":[]}`),
+			CategoryRunElimination:     json.RawMessage(`{"entries":[]}`),
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepo{participants: []scoring.Participant{{UserID: "a"}}, snapshots: tt.snapshots}
+			svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(tt.now), 24*time.Hour)
+			if _, err := svc.Get(t.Context(), "actor", "c1"); err != nil {
+				t.Fatal(err)
+			}
+			if repo.calls != 2 {
+				t.Fatalf("storage called %d times, want the ranking computed (2)", repo.calls)
+			}
+		})
+	}
+}
+
+func TestGetFrozenFailures(t *testing.T) {
+	boom := errors.New("boom")
+	c := twoWeeks(t)
+	bad := json.RawMessage(`not json`)
+	tests := []struct {
+		name string
+		repo *fakeRepo
+	}{
+		{name: "storage failure", repo: &fakeRepo{snapshotsErr: boom}},
+		{name: "invalid payload: an error, not a computed ranking", repo: &fakeRepo{snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime: bad, CategoryCumulativeDistance: bad, CategoryRunElimination: bad,
+		}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(&fakeChallenges{c: c}, pseudos, tt.repo, clock.NewFake(c.EndsAt), time.Hour)
+			if _, err := svc.Get(t.Context(), "actor", "c1"); err == nil {
+				t.Fatal("Get() succeeded, want an error")
+			}
+			if tt.repo.calls != 0 {
+				t.Fatalf("activities read %d times, want no fallback on a failure", tt.repo.calls)
+			}
+		})
+	}
+}
+
+// TestGetFrozenNamesEveryCategory: the pseudos are asked for the participants
+// of all the categories, each once.
+func TestGetFrozenNamesEveryCategory(t *testing.T) {
+	c := twoWeeks(t)
+	repo := &fakeRepo{snapshots: map[string]json.RawMessage{
+		CategoryCumulativeTime:     json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":1}]}`),
+		CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":1},{"user_id":"b","rank":2,"value":0}]}`),
+		CategoryRunElimination:     json.RawMessage(`{"entries":[{"user_id":"b","rank":1,"value":1}]}`),
+	}}
+	profiles := &recordingProfiles{fakeProfiles: pseudos}
+	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt), time.Hour)
+	got, err := svc.Get(t.Context(), "actor", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(profiles.asked, want) {
+		t.Fatalf("pseudos asked for %v, want %v", profiles.asked, want)
+	}
+	if p := got.Categories[2].Entries[0].Pseudo; p == nil || *p != "Bob" {
+		t.Fatalf("pseudo in the third category = %v, want Bob", p)
+	}
+}
+
+// recordingProfiles remembers the ids it was asked for.
+type recordingProfiles struct {
+	fakeProfiles
+	asked []string
+}
+
+func (r *recordingProfiles) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {
+	r.asked = ids
+	return r.fakeProfiles.Pseudos(ctx, ids)
 }

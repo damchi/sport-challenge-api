@@ -2,6 +2,7 @@ package leaderboard
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -76,4 +77,29 @@ func (r *Repository) Activities(ctx context.Context, challengeID string, from, t
 		}
 	}
 	return out, nil
+}
+
+// Snapshots returns the frozen ranking of each category of challenge
+// challengeID by category type, and when they were frozen; none until the
+// worker has finalized the challenge. The time is the latest of the rows.
+func (r *Repository) Snapshots(ctx context.Context, challengeID string) (map[string]json.RawMessage, time.Time, error) {
+	var rows []struct {
+		CategoryType string
+		Payload      []byte
+		CreatedAt    time.Time
+	}
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT category_type, payload, created_at FROM result_snapshot WHERE challenge_id = @id ORDER BY created_at`,
+		map[string]any{"id": challengeID},
+	).Scan(&rows).Error
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("read result snapshots: %w", err)
+	}
+	out := make(map[string]json.RawMessage, len(rows))
+	var createdAt time.Time
+	for _, row := range rows {
+		out[row.CategoryType] = row.Payload
+		createdAt = row.CreatedAt.UTC()
+	}
+	return out, createdAt, nil
 }
