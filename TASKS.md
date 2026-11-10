@@ -61,13 +61,13 @@ L'architecture du README §5 est la **cible**, pas un échafaudage à créer d'u
 
 Chaque code est ajouté à `apperr` par le premier ticket qui le renvoie.
 
-`unauthenticated`, `invalid_token`, `token_expired`, `forbidden`, `not_found`, `validation_failed`, `rate_limited`, `internal_error`, `profile_incomplete`, `account_deleted`, `challenge_not_found`, `field_not_editable`, `registration_closed`, `already_participant`, `participation_abandoned`, `challenge_ended`, `cannot_exclude_creator`, `activity_not_found`, `activity_outside_window`, `week_locked`, `distance_not_allowed`, `distance_required`, `badge_limit_reached`, `badge_already_awarded`, `invalid_badge_rule`, `invitation_invalid`.
+`unauthenticated`, `invalid_token`, `token_expired`, `forbidden`, `not_found`, `validation_failed`, `rate_limited`, `internal_error`, `profile_incomplete`, `account_deleted`, `challenge_not_found`, `field_not_editable`, `registration_closed`, `already_participant`, `participation_abandoned`, `challenge_ended`, `cannot_exclude_creator`, `activity_not_found`, `week_locked`, `distance_not_allowed`, `distance_required`, `badge_limit_reached`, `badge_already_awarded`, `invalid_badge_rule`, `invitation_invalid`.
 
 ## Décisions prises
 
 | # | Décision | Tickets |
 |---|---|---|
-| D1 ✅ | Une activité est saisie **une seule fois** pour tous les challenges de l'utilisateur ; elle compte dans chaque challenge dont la fenêtre la contient. Elle est non modifiable dès que sa semaine est terminée dans **l'un** d'eux | 040, 043, 044 |
+| D1 ✅ | Une activité est saisie **une seule fois** pour tous les challenges de l'utilisateur ; elle compte dans chaque challenge où il est participant actif et dont la fenêtre la contient. Elle est non modifiable dès que sa semaine est terminée dans **l'un** d'eux. Une activité hors de toute fenêtre est acceptée. Voir `docs/adr/0001-activity-scope.md` | 040, 043, 044, 045 |
 | D2 ✅ | Tout challenge a **toujours les 3 catégories** ; le créateur règle seulement l'incrément X | 027, 029 |
 | D3 ✅ | Durée = nombre **entier de semaines, de 2 à 52** | 027 |
 | D4 ✅ | Statut de la catégorie 3 : « objectif atteint » ; « à risque » s'il reste 24 h ou moins ; « en cours » avant | 053 |
@@ -685,7 +685,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] `docs/adr/0001-activity-scope.md` écrit (contexte, décision, conséquences).
 - [ ] Décision : une activité est saisie **une seule fois**, appartient à l'utilisateur, et compte dans **chaque challenge** dont il est participant **actif** et dont la fenêtre contient sa date de début.
 - [ ] Règle de verrouillage : une activité ne peut être créée, modifiée ni supprimée si sa date de début tombe dans une **semaine terminée** d'au moins un des challenges où elle compte (challenges supprimés ignorés).
-- [ ] Règle de création : une activité qui ne tombe dans la fenêtre d'aucun challenge de l'utilisateur est refusée (`activity_outside_window`). 🟡
+- [ ] Règle de création : une activité qui ne tombe dans la fenêtre d'aucun challenge de l'utilisateur est acceptée ; elle comptera s'il rejoint un challenge dont la fenêtre la contient. ✅
 - [ ] Conséquence documentée : les semaines diffèrent d'un challenge à l'autre ; une activité peut donc être verrouillée par un challenge et pas par un autre.
 
 **Revue** : `spec-guardian`.
@@ -726,7 +726,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Seul l'auteur peut créer, modifier ou supprimer une activité.
-- [ ] Fonction pure `IsLocked(now, startedAt, challenges)` : verrouillée si, pour au moins un challenge actif où elle compte, la semaine qui contient `startedAt` est terminée (`now >= fin de semaine`).
+- [ ] Fonction pure `IsLocked(now, startedAt, challenges)` : verrouillée si, pour au moins un challenge non supprimé où l'auteur est participant actif et où elle compte (terminé compris), la semaine qui contient `startedAt` est terminée (`now >= fin de semaine`).
 - [ ] Le calcul des semaines passe par `scoring/window` (heure locale du challenge).
 - [ ] L'**horloge** fait foi : le verrouillage ne dépend pas du passage du worker.
 - [ ] Une activité ne compte (et ne se verrouille) que dans les challenges où l'auteur est **participant actif** : la règle lit le statut de participation (`challenge.Membership.Participant`), jamais le rôle. Un créateur qui a abandonné reste `RoleCreator` (ticket 028) mais ne concourt plus.
@@ -742,13 +742,13 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Description** : **point d'entrée unique** de création d'activité. La V2 réutilisera ce service.
 
 **Critères d'acceptation**
-- [ ] `activity.Service.Record(...)` : profil complet ; validation (ticket 042) ; fenêtre ; verrouillage (`week_locked`) ; activité hors de toute fenêtre refusée (`activity_outside_window`).
+- [ ] `activity.Service.Record(...)` : profil complet ; validation (ticket 042) ; challenges où elle compte (calculés, jamais un motif de refus) ; verrouillage (`week_locked`) ; activité hors de toute fenêtre acceptée, sans challenge (ADR 0001).
 - [ ] En-tête `Idempotency-Key` : le même envoi répété renvoie la même activité sans doublon.
 - [ ] Source `manual` ; la réponse contient la vitesse calculée et la liste des challenges où l'activité compte.
 - [ ] Une transaction couvre l'écriture. Aucun point d'extension pour les badges : le ticket 062 (V1.1) l'ajoutera quand il en aura besoin.
 - [ ] Aucune donnée personnelle dans les logs.
 
-**Tests** : intégration (création, répétition avec clé, semaine verrouillée, hors fenêtre, deux challenges, sport « autre »).
+**Tests** : intégration (création, répétition avec clé, semaine verrouillée, activité datée de la fenêtre d'un challenge terminé refusée, hors de toute fenêtre acceptée, deux challenges, sport « autre »).
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
 **Commit** : `feat(activity): add single-entry activity recording endpoint`
 **Statut** : À faire

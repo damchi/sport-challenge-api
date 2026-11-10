@@ -96,7 +96,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ❓ Aucun plafond de vitesse en V1 par défaut (seulement des bornes techniques : durée et distance positives, valeurs maximales raisonnables). À revoir si des abus apparaissent.
 - ✅ Un **catalogue de sports** définit, pour chaque sport : si la distance est obligatoire, interdite ou facultative (« autre »), et son coefficient suggéré (§2.4).
 - ✅ Un utilisateur peut **saisir un sport à la main** s'il n'est pas proposé : il choisit « autre » et écrit un libellé libre (2 à 40 caractères). ✅ Un sport saisi à la main compte toujours pour le **temps** (catégorie 1) ; la distance est **facultative** : s'il y en a une, il compte aussi pour la catégorie 2 (✅ coefficient suggéré ×1, modifiable par le créateur comme les autres), sinon non.
-- ✅ **Une activité est saisie une seule fois** et compte dans **tous** les challenges de l'utilisateur dont la fenêtre la contient. Conséquence : une activité est non modifiable dès que sa semaine est terminée dans **l'un** de ces challenges.
+- ✅ **Une activité est saisie une seule fois** et compte dans **tous** les challenges où l'utilisateur est participant actif et dont la fenêtre la contient ; ✅ une activité hors de toute fenêtre est acceptée et comptera si l'utilisateur rejoint un challenge dont la fenêtre la contient (voir `docs/adr/0001-activity-scope.md`). Conséquence : une activité est non modifiable dès que sa semaine est terminée dans **l'un** de ces challenges.
 
 ### 2.6 Classement et équité
 
@@ -294,7 +294,7 @@ sportchallenge-api/
 │   ├── activity/
 │   │   ├── model.go                 Activity (source, identifiant externe, sport, durée, distance)
 │   │   ├── limits.go                bornes techniques (durée et distance positives, valeurs maximales raisonnables) ; vitesse calculée
-│   │   ├── policy.go                qui peut saisir, modifier, supprimer (auteur, semaine en cours)
+│   │   ├── policy.go                qui peut saisir, modifier, supprimer (auteur, semaine terminée verrouillée)
 │   │   ├── service.go               validation, fenêtre du challenge, idempotence
 │   │   ├── repository.go
 │   │   ├── handler.go
@@ -399,7 +399,7 @@ flowchart TD
 | `challenge` | Création, modification limitée (titre, description), fuseau, durée, visibilité, règle d'invitation, co-créateurs |
 | `invitation` | Liens et invitations pour les challenges privés, selon la règle « les invités peuvent inviter » |
 | `sport` | Catalogue des sports et coefficients de distance, figés par challenge à sa création |
-| `activity` | Saisie manuelle, validation (durée obligatoire, distance selon le sport, vitesse calculée et jamais saisie), marquage « manuelle », ignore les activités hors fenêtre |
+| `activity` | Saisie manuelle, validation (durée obligatoire, distance selon le sport, vitesse calculée et jamais saisie), marquage « manuelle » ; une activité hors de toute fenêtre est enregistrée et ne compte nulle part (ADR 0001) |
 | `scoring` | Calcule un classement à partir d'activités et de règles, sans dépendance à la base ni à Gin |
 | `leaderboard` | Charge participants et activités, appelle les scorers, renvoie un classement par catégorie |
 | `closure` | À chaque fin de semaine : éliminations, badges « semaines de suite » ; à la fin du challenge : gel des résultats |
@@ -429,10 +429,10 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 ### 5.5 Flux principaux
 
 1. **Création d'un challenge** : validation (fuseau, dates, catégories) → challenge, catégories et premier créateur enregistrés → le créateur devient participant.
-2. **Saisie d'une activité** (point d'entrée unique) : validation (challenge en cours, date dans la semaine en cours : une semaine terminée est verrouillée) → stockage avec source « manuelle » → aucun recalcul stocké.
+2. **Saisie d'une activité** (point d'entrée unique) : validation (aucune semaine terminée dans les challenges où l'activité compte : une semaine terminée est verrouillée, ADR 0001) → stockage avec source « manuelle » → aucun recalcul stocké.
 3. **Lecture du classement** (au rafraîchissement) : chargement des participants et des activités de la fenêtre → un scorer par catégorie → classement ex aequo renvoyé au client. Le calcul se fait toujours depuis les activités brutes.
 4. **Clôture hebdomadaire** : Cloud Scheduler lance le worker → pour chaque challenge actif dont une semaine est terminée → éliminations (catégorie à élimination) enregistrées → badges « semaines de suite » évalués.
-5. **Fin de challenge** : à l'instant de fin → statut « terminé », `result_snapshot` enregistré. Plus aucune activité ne peut être ajoutée.
+5. **Fin de challenge** : à l'instant de fin → statut « terminé », `result_snapshot` enregistré. Plus aucune activité datée de sa fenêtre ne peut être ajoutée (sa dernière semaine est terminée, donc verrouillée).
 6. **Abandon d'un participant** : statut « abandonné » (volontairement, ou après l'exclusion par un créateur), éliminé de toutes les catégories, apparaît comme « a abandonné ».
 7. **Badges** : après l'enregistrement d'une activité, évaluation des badges du challenge pour son auteur ; attribution immédiate et idempotente (unique par badge et utilisateur). Les conditions « plusieurs semaines de suite » sont évaluées à la fin de chaque semaine par le worker.
 
@@ -471,7 +471,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 
 **Autorisation** (pas dans un middleware)
 - Chaque service vérifie le rôle : créateur, participant ou public. Un utilisateur ne peut jamais agir sur une ressource d'un autre en changeant un identifiant.
-- ✅ Un challenge privé n'est lisible que par ses créateurs, participants et invités ; un participant qui a abandonné (ou a été exclu) le voit encore, avec le détail des activités, sans pouvoir agir. Un **créateur** qui abandonne garde tous ses droits de créateur (modifier, inviter, exclure, ajouter un créateur, supprimer), mais ne concourt plus : il ne saisit plus d'activité. Une ressource privée inconnue renvoie 404 plutôt que 403 pour ne pas révéler son existence.
+- ✅ Un challenge privé n'est lisible que par ses créateurs, participants et invités ; un participant qui a abandonné (ou a été exclu) le voit encore, avec le détail des activités, sans pouvoir agir. Un **créateur** qui abandonne garde tous ses droits de créateur (modifier, inviter, exclure, ajouter un créateur, supprimer), mais ne concourt plus : ses activités n'y comptent plus. Une ressource privée inconnue renvoie 404 plutôt que 403 pour ne pas révéler son existence.
 
 **Comment l'autorisation est vérifiée** : chaque cas d'usage du service reçoit explicitement **qui agit** (`actorID`), charge la ressource, puis appelle une fonction de politique pure (`policy.go`) avant toute écriture. Le handler ne peut pas contourner le service, et le repository n'est jamais appelé directement par un handler. Les listes filtrent dans la requête SQL (jamais « tout charger puis retirer »).
 
@@ -490,8 +490,8 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Exclure un participant | créateurs (✅) |
 | Créer un badge | créateurs (✅) |
 | Modifier ou supprimer un badge | créateurs, tant que personne ne l'a gagné (🟡) |
-| Saisir une activité | le participant, pour lui-même, sur la semaine en cours d'un challenge en cours (✅) |
-| Modifier ou supprimer une activité | son auteur, tant que sa semaine n'est pas terminée (✅) |
+| Saisir une activité | l'utilisateur, pour lui-même, hors des semaines terminées des challenges où elle compte (✅, ADR 0001) |
+| Modifier ou supprimer une activité | son auteur, tant que sa semaine n'est terminée dans aucun challenge où elle compte (✅, ADR 0001) |
 | Abandonner (« quitter ») un challenge | le participant, pour lui-même ; équivaut à un abandon définitif (✅) |
 | Supprimer le challenge | créateurs, à tout moment (✅) |
 | Voir le détail des activités (date, sport, durée, distance) d'un participant | les participants du même challenge (y compris ceux qui ont abandonné) et les créateurs (✅) ; un non-participant d'un challenge public ne voit que le classement (✅) |
@@ -561,7 +561,7 @@ Le détail ticket par ticket (67 tickets, critères d'acceptation, commits propo
 | 2 | Utilisateur et **Auth0** | Middlewares `Authenticate`, `CORS`, `CurrentUser` (la limitation de débit par IP et par utilisateur vient en phase 9, avant l'exposition publique) ; interface `TokenVerifier` ; **access token** de l'API (pas l'ID token) ; tenant Auth0 par environnement (région Canada, code à usage unique par e-mail) ; création de l'utilisateur au premier login, idempotente ; connexion **obligatoire** partout sauf `/healthz` et `/readyz` |
 | 3 | Catalogue de sports | Données de référence idempotentes ; coefficients copiés dans le challenge à sa création |
 | 4 | Challenges et catégories | **`policy.go`** (matrice des droits §5.7) ; **aucune autorisation dans un middleware** ; 3 catégories figées ; inscription jusqu'à la fin de la semaine 1 ; plusieurs créateurs ; titre et description seuls modifiables ; test « interdit » pour chaque règle |
-| 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine terminée verrouillée** ; modification et suppression seulement dans la semaine en cours ; route de détail des activités des participants (visible des seuls participants du challenge) |
+| 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine terminée verrouillée** ; modification et suppression tant que sa semaine n'est terminée dans aucun challenge où elle compte ; route de détail des activités des participants (visible des seuls participants du challenge) |
 | 6 | Scoring et classement | Tests d'abord ; catégorie 3 : minimum = distance réelle de la semaine précédente + X, aucune élimination en semaine 1, sans délai de grâce ; classement des éliminés (dernier éliminé devant, puis km) ; ex aequo |
 | 7 | Clôtures et worker | `close-weeks` et `finalize-challenges` toutes les heures, **idempotents** ; résultat indépendant du moment où le worker passe ; horloge réglable en staging |
 | 8 | Invitations (badges reportés en V1.1) | Invitations avec la règle « les invités peuvent inviter » ; les badges (conditions structurées, évaluation après chaque activité) viennent en V1.1 |
