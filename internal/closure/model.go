@@ -1,6 +1,9 @@
 package closure
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Challenge is a challenge whose weeks can be closed: not deleted and
 // started, with its run elimination category and the settings frozen at
@@ -24,4 +27,38 @@ type Result struct {
 	Weeks int
 	// Eliminations is the number of eliminations recorded.
 	Eliminations int
+}
+
+// EndedChallenge is a challenge that is over, not deleted and without a
+// result snapshot yet, with the settings of its categories frozen at creation.
+type EndedChallenge struct {
+	ID         string
+	Timezone   string
+	StartsAt   time.Time
+	EndsAt     time.Time
+	Categories []Category
+}
+
+// Category is a category of a challenge, in position order.
+type Category struct {
+	ID   string
+	Type string
+	// Factors is the distance factor by sport code (cumulative_distance).
+	Factors map[string]float64
+	// Sport and StepMeters are the run elimination settings.
+	Sport      string
+	StepMeters int
+}
+
+// Snapshot is the final ranking of a category, as JSON.
+type Snapshot struct {
+	CategoryID string
+	Type       string
+	Payload    json.RawMessage
+}
+
+// FinalizeResult counts what a run of the finalization did, for the log.
+type FinalizeResult struct {
+	// Challenges is the number of challenges whose results were frozen.
+	Challenges int
 }
