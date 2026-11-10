@@ -11,6 +11,13 @@ import (
 // participants come last, unranked (rank 0) and at 0: their activities no
 // longer count.
 func Rank(participants []Participant, values map[string]int) []Entry {
+	return rankByTier(participants, values, nil)
+}
+
+// rankByTier is Rank with a tier that comes before the value: the higher
+// tier ranks first, and only the same tier and value share a rank. A
+// participant missing from tiers is in tier 0.
+func rankByTier(participants []Participant, values, tiers map[string]int) []Entry {
 	entries := make([]Entry, len(participants))
 	for i, p := range participants {
 		entries[i] = Entry{UserID: p.UserID, Abandoned: p.Abandoned}
@@ -25,12 +32,16 @@ func Rank(participants []Participant, values map[string]int) []Entry {
 			}
 			return -1
 		}
-		return cmp.Or(cmp.Compare(b.Value, a.Value), cmp.Compare(a.UserID, b.UserID))
+		return cmp.Or(
+			cmp.Compare(tiers[b.UserID], tiers[a.UserID]),
+			cmp.Compare(b.Value, a.Value),
+			cmp.Compare(a.UserID, b.UserID),
+		)
 	})
 	for i := range entries {
 		switch {
 		case entries[i].Abandoned:
-		case i > 0 && entries[i].Value == entries[i-1].Value:
+		case i > 0 && entries[i].Value == entries[i-1].Value && tiers[entries[i].UserID] == tiers[entries[i-1].UserID]:
 			entries[i].Rank = entries[i-1].Rank
 		default:
 			entries[i].Rank = i + 1

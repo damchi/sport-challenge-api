@@ -62,6 +62,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ La distance d'une semaine est le cumul de toutes les courses de la semaine (pas une seule sortie).
 - ✅ Les personnes qui terminent le challenge sans être éliminées sont classées par km cumulés, **quelle que soit leur base de départ** : celle qui a couru le plus de km gagne.
 - ✅ Viennent ensuite les éliminés : le dernier éliminé est classé devant, et en cas d'égalité sur la semaine d'élimination, la distance cumulée départage.
+- ✅ La distance cumulée d'un éliminé s'arrête à la **fin de sa semaine d'élimination** (cette semaine comprise) : ses courses suivantes ne comptent plus, son rang ne bouge plus.
 - ✅ L'élimination est jugée à l'instant exact de la fin de la semaine (fuseau du challenge), sans délai de grâce.
 - ✅ Une semaine terminée est **verrouillée** : aucune activité datée de cette semaine ne peut plus être ajoutée, modifiée ni supprimée (saisie manuelle comprise), puisque l'élimination est immédiate et définitive. C'est l'horloge qui fait foi, pas le passage du worker.
 - ✅ Le statut live affiche « objectif atteint » dès que la distance de la semaine atteint le minimum ; sinon « à risque » quand il reste **24 h ou moins** avant la fin de la semaine, et « en cours » avant. Aucun statut en semaine 1 (pas de minimum). Le seuil de 24 h est un paramètre de configuration.

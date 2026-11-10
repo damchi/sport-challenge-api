@@ -1,0 +1,239 @@
+package scoring
+
+import (
+	"reflect"
+	"slices"
+	"testing"
+	"time"
+)
+
+func TestEliminationScore(t *testing.T) {
+	// 4 weeks across the time change of March 8.
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 4)
+	const step = 2000
+	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
+	weekEnd := func(n int) time.Time { _, e := w.WeekBounds(n); return e }
+	act := func(user, sport string, week, distance int) Activity {
+		return Activity{
+			UserID: user, SportCode: sport, StartedAt: weekStart(week).Add(time.Hour),
+			DurationSeconds: 1800, DistanceMeters: meters(distance),
+		}
+	}
+	// runs is one run per week, none for 0.
+	runs := func(user string, distances ...int) []Activity {
+		var as []Activity
+		for i, d := range distances {
+			if d > 0 {
+				as = append(as, act(user, "run", i+1, d))
+			}
+		}
+		return as
+	}
+	users := func(ids ...string) []Participant {
+		ps := make([]Participant, len(ids))
+		for i, id := range ids {
+			ps[i] = Participant{UserID: id}
+		}
+		return ps
+	}
+
+	tests := []struct {
+		name         string
+		now          time.Time
+		participants []Participant
+		activities   []Activity
+		want         []Entry
+	}{
+		{
+			name:         "exactly the minimum is not eliminated",
+			now:          weekEnd(2),
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000, 7000), runs("b", 1000, 3000)),
+			want:         []Entry{{UserID: "a", Rank: 1, Value: 12000}, {UserID: "b", Rank: 2, Value: 4000}},
+		},
+		{
+			name:         "one meter below the minimum is eliminated, behind the survivors",
+			now:          weekEnd(2),
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000, 6999), runs("b", 1000, 3000)),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 4000}, {UserID: "a", Rank: 2, Value: 11999}},
+		},
+		{
+			name:         "running more than the minimum raises the base",
+			now:          weekEnd(3),
+			participants: users("a", "c"),
+			// Week 3 needs 10000 + 2000, not 5000 + 4000.
+			activities: slices.Concat(runs("a", 5000, 10000, 12000), runs("c", 5000, 10000, 11999)),
+			want:       []Entry{{UserID: "a", Rank: 1, Value: 27000}, {UserID: "c", Rank: 2, Value: 26999}},
+		},
+		{
+			name:         "no elimination in week 1",
+			now:          weekEnd(1),
+			participants: users("a", "b"),
+			activities:   runs("b", 3000),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 3000}, {UserID: "a", Rank: 2}},
+		},
+		{
+			name:         "a week without a run is eliminated",
+			now:          weekEnd(2),
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000), runs("b", 1000, 3000)),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 4000}, {UserID: "a", Rank: 2, Value: 5000}},
+		},
+		{
+			name:         "the runs of a week add up",
+			now:          weekEnd(2),
+			participants: users("a"),
+			activities: []Activity{
+				act("a", "run", 1, 2500), act("a", "run", 1, 2500), act("a", "run", 2, 3500), act("a", "run", 2, 3500),
+			},
+			want: []Entry{{UserID: "a", Rank: 1, Value: 12000}},
+		},
+		{
+			name:         "only running counts",
+			now:          weekEnd(2),
+			participants: users("a"),
+			activities:   []Activity{act("a", "run", 1, 5000), act("a", "ride", 2, 9000)},
+			want:         []Entry{{UserID: "a", Rank: 1, Value: 5000}},
+		},
+		{
+			name:         "survivors with different bases: the most km win",
+			now:          weekEnd(4),
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000, 7000, 9000, 11000), runs("b", 10000, 12000, 14000, 16000)),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 52000}, {UserID: "a", Rank: 2, Value: 32000}},
+		},
+		{
+			name:         "survivors, then the last eliminated first, then km",
+			now:          weekEnd(3),
+			participants: users("s", "c", "d", "f"),
+			activities: slices.Concat(
+				runs("s", 1000, 3000, 5000),
+				runs("c", 20000, 1000),     // eliminated in week 2, 21000 m
+				runs("d", 5000, 7000, 100), // eliminated in week 3, 12100 m
+				runs("f", 5000),            // eliminated in week 2, 5000 m
+			),
+			want: []Entry{
+				{UserID: "s", Rank: 1, Value: 9000},
+				{UserID: "d", Rank: 2, Value: 12100},
+				{UserID: "c", Rank: 3, Value: 21000},
+				{UserID: "f", Rank: 4, Value: 5000},
+			},
+		},
+		{
+			name:         "tie on the week of elimination and the km",
+			now:          weekEnd(2),
+			participants: users("g", "h", "j"),
+			activities:   slices.Concat(runs("g", 5000, 1000), runs("h", 3000, 3000), runs("j", 5000)),
+			want: []Entry{
+				{UserID: "g", Rank: 1, Value: 6000}, {UserID: "h", Rank: 1, Value: 6000}, {UserID: "j", Rank: 3, Value: 5000},
+			},
+		},
+		{
+			name:         "week judged at its last second: not yet",
+			now:          weekEnd(2).Add(-time.Second),
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000, 6999), runs("b", 1000, 3000)),
+			want:         []Entry{{UserID: "a", Rank: 1, Value: 11999}, {UserID: "b", Rank: 2, Value: 4000}},
+		},
+		{
+			name:         "week judged at its exact end: no grace",
+			now:          weekEnd(2),
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000, 6999), runs("b", 1000, 3000)),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 4000}, {UserID: "a", Rank: 2, Value: 11999}},
+		},
+		{
+			name:         "a week in progress is not judged",
+			now:          weekStart(2).Add(time.Hour),
+			participants: users("a"),
+			activities:   runs("a", 5000),
+			want:         []Entry{{UserID: "a", Rank: 1, Value: 5000}},
+		},
+		{
+			name:         "elimination is final: later runs do not count",
+			now:          weekEnd(3),
+			participants: users("a"),
+			activities:   runs("a", 5000, 1000, 20000),
+			want:         []Entry{{UserID: "a", Rank: 1, Value: 6000}},
+		},
+		{
+			name:         "activity outside the window ignored",
+			now:          weekEnd(2),
+			participants: users("a"),
+			activities: slices.Concat(runs("a", 5000, 7000), []Activity{
+				{UserID: "a", SportCode: "run", StartedAt: w.Start.Add(-time.Second), DurationSeconds: 60, DistanceMeters: meters(9000)},
+			}),
+			want: []Entry{{UserID: "a", Rank: 1, Value: 12000}},
+		},
+		{
+			name:         "abandoned listed last, unranked",
+			now:          weekEnd(2),
+			participants: []Participant{{UserID: "a", Abandoned: true}, {UserID: "b"}},
+			activities:   slices.Concat(runs("a", 5000, 7000), runs("b", 1000, 3000)),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 4000}, {UserID: "a", Abandoned: true}},
+		},
+		{
+			name:         "last week judged when the challenge is over",
+			now:          w.End,
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000, 7000, 9000, 8999), runs("b", 1000, 3000, 5000, 7000)),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 16000}, {UserID: "a", Rank: 2, Value: 29999}},
+		},
+		{
+			name:         "last week still judged long after the end",
+			now:          w.End.Add(30 * 24 * time.Hour),
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000, 7000, 9000, 8999), runs("b", 1000, 3000, 5000, 7000)),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 16000}, {UserID: "a", Rank: 2, Value: 29999}},
+		},
+		{
+			name:         "the end of a week belongs to the next one",
+			now:          weekEnd(2),
+			participants: users("a"),
+			activities: []Activity{
+				{UserID: "a", SportCode: "run", StartedAt: weekEnd(1).Add(-time.Nanosecond), DurationSeconds: 60, DistanceMeters: meters(5000)},
+				{UserID: "a", SportCode: "run", StartedAt: weekEnd(1), DurationSeconds: 60, DistanceMeters: meters(7000)},
+			},
+			want: []Entry{{UserID: "a", Rank: 1, Value: 12000}},
+		},
+		{
+			name:         "no activity at all is eliminated once week 2 is judged",
+			now:          weekEnd(2),
+			participants: users("a", "b"),
+			activities:   runs("b", 1000, 3000),
+			want:         []Entry{{UserID: "b", Rank: 1, Value: 4000}, {UserID: "a", Rank: 2}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := w
+			w.Now = tt.now
+			got := Elimination{Sport: "run", StepMeters: step}.Score(w, tt.participants, tt.activities)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Score() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsEliminated(t *testing.T) {
+	tests := []struct {
+		name              string
+		previous, current int
+		want              bool
+	}{
+		{name: "exactly the minimum", previous: 5000, current: 7000},
+		{name: "one meter below", previous: 5000, current: 6999, want: true},
+		{name: "above the minimum", previous: 5000, current: 10000},
+		{name: "no run after a run", previous: 5000, want: true},
+		{name: "no run after no run", previous: 0, current: 0, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isEliminated(tt.previous, tt.current, 2000); got != tt.want {
+				t.Fatalf("isEliminated(%d, %d) = %v, want %v", tt.previous, tt.current, got, tt.want)
+			}
+		})
+	}
+}

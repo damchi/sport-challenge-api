@@ -183,3 +183,23 @@ func TestCurrentWeek(t *testing.T) {
 		})
 	}
 }
+
+func TestWeeks(t *testing.T) {
+	tests := []struct {
+		name  string
+		zone  string
+		start [3]int
+		weeks int
+	}{
+		{name: "2 weeks", zone: "America/Toronto", start: [3]int{2026, 3, 2}, weeks: 2},
+		{name: "3 weeks across the fall back of November 1", zone: "America/Toronto", start: [3]int{2026, 10, 26}, weeks: 3},
+		{name: "52 weeks", zone: "America/Toronto", start: [3]int{2026, 3, 2}, weeks: 52},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := window(t, tt.zone, tt.start, tt.weeks).Weeks(); got != tt.weeks {
+				t.Fatalf("Weeks() = %d, want %d", got, tt.weeks)
+			}
+		})
+	}
+}
