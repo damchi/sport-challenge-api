@@ -27,7 +27,10 @@ const (
 type Membership struct {
 	Creator     bool
 	Participant ParticipantStatus
-	// Invited is true when the user holds a valid invitation (tickets 065, 066).
+	// Invited is true when an invitation of the challenge linked to the user
+	// (opened while logged in) is valid: not expired, not revoked. The link is
+	// a bearer token: anyone logged in who holds it may open it, and only the
+	// opening, recorded, makes them invited.
 	Invited bool
 }
 
@@ -166,6 +169,40 @@ func JoinRefusal(m Membership, visibility string, now, deadline time.Time) error
 		// Visible and not in: public for everyone, private for the invited.
 		return nil
 	}
+}
+
+// CanInvite reports whether role may invite people to a challenge (README
+// §5.7): its creators, even after abandoning; its active participants only
+// when the creator allowed it at creation (membersCanInvite).
+func CanInvite(role Role, membersCanInvite bool) bool {
+	// An allowlist: a role this switch does not know is never let in.
+	switch role {
+	case RoleCreator:
+		return true
+	case RoleParticipant:
+		return membersCanInvite
+	default:
+		return false
+	}
+}
+
+// InviteRefusal is the rule to create an invitation: a challenge the user
+// may not see is not found (404 challenge_not_found), only CanInvite may
+// invite (403 forbidden), and none from deadline, the end of week 1 (422
+// registration_closed): an invitation expires then, as nobody may join any
+// more.
+func InviteRefusal(m Membership, visibility string, membersCanInvite bool, now, deadline time.Time) error {
+	role := RoleOf(m)
+	if err := RequireView(role, visibility); err != nil {
+		return err
+	}
+	if !CanInvite(role, membersCanInvite) {
+		return apperr.New(apperr.CodeForbidden, nil)
+	}
+	if !now.Before(deadline) {
+		return apperr.New(apperr.CodeRegistrationClosed, nil)
+	}
+	return nil
 }
 
 // CanEdit reports whether role may edit the title and the description of a

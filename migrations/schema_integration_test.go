@@ -27,6 +27,9 @@ const (
 	otherUserID      = "00000000-0000-0000-0000-000000000002"
 	otherChallengeID = "00000000-0000-0000-0000-0000000000c2"
 	deadID           = "00000000-0000-0000-0000-00000000dead"
+	// Two invitations of the fixture challenge.
+	invitationID      = "00000000-0000-0000-0000-0000000000a1"
+	otherInvitationID = "00000000-0000-0000-0000-0000000000a2"
 )
 
 // fixture is a user and a two-week challenge the cases build on.
@@ -50,6 +53,18 @@ VALUES ('` + otherChallengeID + `', 'Autumn', 'public', 'UTC', '2026-12-01Z', '2
 // snapshotRow is the insertion of the snapshot of a category.
 func snapshotRow(category, challenge, categoryType string) string {
 	return `INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at) VALUES ('` + category + `', '` + challenge + `', '` + categoryType + `', '{"entries": []}', '2026-12-15Z');`
+}
+
+// invitationRow is the insertion of invitation id of the fixture challenge,
+// created at its start, with SQL expressions for its token hash, its expiry
+// and its revocation.
+func invitationRow(id, tokenHash, expiresAt, revokedAt string) string {
+	return `INSERT INTO invitations (id, challenge_id, invited_by, token_hash, expires_at, created_at, revoked_at) VALUES ('` + id + `', '` + challengeID + `', '` + userID + `', ` + tokenHash + `, ` + expiresAt + `, '2026-12-01Z', ` + revokedAt + `);`
+}
+
+// recipientRow is the link of user to the invitation of invitationRow.
+func recipientRow(user string) string {
+	return `INSERT INTO invitation_recipients VALUES ('` + invitationID + `', '` + user + `', '2026-12-02Z');`
 }
 
 // TestConstraints runs each statement on the fixture, in a transaction rolled
@@ -146,6 +161,21 @@ func TestConstraints(t *testing.T) {
 		{name: "snapshot with another challenge", sql: eliminationFixture + otherChallengeFixture + snapshotRow(categoryID, otherChallengeID, "run_elimination"), constraint: "result_snapshot_category_fkey"},
 		{name: "snapshot with another type", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "cumulative_time"), constraint: "result_snapshot_category_fkey"},
 		{name: "deleting a category with a snapshot", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "run_elimination") + `DELETE FROM categories WHERE id = '` + categoryID + `'`, constraint: "result_snapshot_category_fkey"},
+		// invitations and invitation_recipients (000009)
+		{name: "invitation", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL")},
+		{name: "revoked invitation", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "'2026-12-02Z'")},
+		{name: "token hash not a SHA-256", sql: invitationRow(invitationID, `'t1'::bytea`, "'2026-12-08 05:00Z'", "NULL"), constraint: "invitations_token_hash_check"},
+		{name: "same token twice", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + invitationRow(otherInvitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL"), constraint: "invitations_token_hash_key"},
+		{name: "expired at creation", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-01Z'", "NULL"), constraint: "invitations_expires_after_created_check"},
+		{name: "revoked before creation", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "'2026-11-30Z'"), constraint: "invitations_revoked_after_created_check"},
+		{name: "invitation to an unknown challenge", sql: `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at) VALUES ('` + deadID + `', '` + userID + `', sha256('t1'::bytea), '2026-12-08 05:00Z', '2026-12-01Z')`, constraint: "invitations_challenge_id_fkey"},
+		{name: "invitation by an unknown user", sql: `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at) VALUES ('` + challengeID + `', '` + deadID + `', sha256('t1'::bytea), '2026-12-08 05:00Z', '2026-12-01Z')`, constraint: "invitations_invited_by_fkey"},
+		{name: "recipient of an unknown invitation", sql: recipientRow(userID), constraint: "invitation_recipients_invitation_id_fkey"},
+		{name: "recipient", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(userID)},
+		{name: "recipient linked twice", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(userID) + recipientRow(userID), constraint: "invitation_recipients_pkey"},
+		{name: "unknown recipient", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(deadID), constraint: "invitation_recipients_user_id_fkey"},
+		{name: "deleting an invitation with recipients", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(userID) + `DELETE FROM invitations WHERE id = '` + invitationID + `'`, constraint: "invitation_recipients_invitation_id_fkey"},
+
 		// No cascade: results stay (anonymization, soft deletion).
 		{name: "deleting a challenge with participants", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL); DELETE FROM challenges WHERE id = '` + challengeID + `'`, constraint: "participants_challenge_id_fkey"},
 		{name: "deleting a user who created a challenge", sql: `DELETE FROM users WHERE id = '` + userID + `'`, constraint: "challenges_created_by_fkey"},
