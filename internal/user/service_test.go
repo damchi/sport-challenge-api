@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,10 @@ func (f fakeRepository) AddPendingAuth0Deletion(_ context.Context, subject strin
 	}
 	return nil
 }
+
+func (f fakeRepository) PendingAuth0Deletions(context.Context) ([]string, error) { return nil, f.err }
+
+func (f fakeRepository) RemovePendingAuth0Deletion(context.Context, string) error { return f.err }
 
 type fakeParticipations struct {
 	abandoned string
@@ -359,4 +364,102 @@ type abandonThen func()
 func (f abandonThen) AbandonAll(context.Context, string) error {
 	f()
 	return nil
+}
+
+// pendingRepository keeps the pending deletions in memory, as the database
+// does: removing a subject twice is not an error.
+type pendingRepository struct {
+	fakeRepository
+	subjects  []string
+	listErr   error
+	removeErr error
+}
+
+func (p *pendingRepository) PendingAuth0Deletions(context.Context) ([]string, error) {
+	return append([]string(nil), p.subjects...), p.listErr
+}
+
+func (p *pendingRepository) RemovePendingAuth0Deletion(_ context.Context, subject string) error {
+	if p.removeErr != nil {
+		return p.removeErr
+	}
+	p.subjects = slices.DeleteFunc(p.subjects, func(s string) bool { return s == subject })
+	return nil
+}
+
+// flakyIdentities fails for the subjects in failing, and records the calls.
+type flakyIdentities struct {
+	failing map[string]bool
+	calls   []string
+}
+
+func (f *flakyIdentities) DeleteUser(_ context.Context, subject string) error {
+	f.calls = append(f.calls, subject)
+	if f.failing[subject] {
+		return errors.New("auth0 delete user: status 503")
+	}
+	return nil
+}
+
+func TestServiceRetryAuth0Deletions(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	t.Run("success removes every pending deletion", func(t *testing.T) {
+		repo := &pendingRepository{subjects: []string{"email|1", "email|2"}}
+		identities := &flakyIdentities{}
+		got, err := NewService(repo, nil, identities, discard).RetryAuth0Deletions(t.Context())
+		if err != nil || got != (RetryResult{Deleted: 2}) {
+			t.Fatalf("result = %+v, err = %v, want 2 deleted", got, err)
+		}
+		if len(repo.subjects) != 0 || !slices.Equal(identities.calls, []string{"email|1", "email|2"}) {
+			t.Fatalf("pending %v, calls %v, want none pending and both replayed", repo.subjects, identities.calls)
+		}
+	})
+
+	t.Run("a failure stays pending, then the next run succeeds", func(t *testing.T) {
+		repo := &pendingRepository{subjects: []string{"email|1", "email|2"}}
+		identities := &flakyIdentities{failing: map[string]bool{"email|1": true}}
+		var logs bytes.Buffer
+		svc := NewService(repo, nil, identities, slog.New(slog.NewJSONHandler(&logs, nil)))
+		got, err := svc.RetryAuth0Deletions(t.Context())
+		if err == nil || got != (RetryResult{Deleted: 1, Failed: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 deleted, 1 failed and an error", got, err)
+		}
+		if !slices.Equal(repo.subjects, []string{"email|1"}) {
+			t.Fatalf("pending %v, want only the failed one", repo.subjects)
+		}
+		if strings.Contains(err.Error(), "email|") || strings.Contains(logs.String(), "email|") {
+			t.Fatalf("error %q or logs %q carry a subject", err, logs.String())
+		}
+		identities.failing = nil
+		got, err = svc.RetryAuth0Deletions(t.Context())
+		if err != nil || got != (RetryResult{Deleted: 1}) || len(repo.subjects) != 0 {
+			t.Fatalf("second run = %+v, err = %v, pending %v, want the last one done", got, err, repo.subjects)
+		}
+	})
+
+	t.Run("running again with nothing pending does nothing", func(t *testing.T) {
+		repo := &pendingRepository{}
+		identities := &flakyIdentities{}
+		got, err := NewService(repo, nil, identities, discard).RetryAuth0Deletions(t.Context())
+		if err != nil || got != (RetryResult{}) || len(identities.calls) != 0 {
+			t.Fatalf("result = %+v, err = %v, calls %v, want nothing", got, err, identities.calls)
+		}
+	})
+
+	t.Run("a record that cannot be removed is an error", func(t *testing.T) {
+		repo := &pendingRepository{subjects: []string{"email|1"}, removeErr: storageErr}
+		got, err := NewService(repo, nil, &flakyIdentities{}, discard).RetryAuth0Deletions(t.Context())
+		if !errors.Is(err, storageErr) || got != (RetryResult{Failed: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 failed with the storage error", got, err)
+		}
+	})
+
+	t.Run("storage failure when listing", func(t *testing.T) {
+		repo := &pendingRepository{listErr: storageErr}
+		identities := &flakyIdentities{}
+		_, err := NewService(repo, nil, identities, discard).RetryAuth0Deletions(t.Context())
+		if !errors.Is(err, storageErr) || len(identities.calls) != 0 {
+			t.Fatalf("err = %v, calls %v, want the storage error and no call", err, identities.calls)
+		}
+	})
 }

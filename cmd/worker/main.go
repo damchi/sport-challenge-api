@@ -3,6 +3,7 @@
 //
 //	worker close-weeks
 //	worker finalize-challenges
+//	worker retry-auth0-deletions
 package main
 
 import (
@@ -19,10 +20,12 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/closure"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/logging"
+	"github.com/damchi/sport-challenge-api/internal/user"
 )
 
 // taskCloseWeeks is the name of the task that closes the weeks that ended.
@@ -32,8 +35,12 @@ const taskCloseWeeks = "close-weeks"
 // the challenges that are over.
 const taskFinalizeChallenges = "finalize-challenges"
 
+// taskRetryAuth0Deletions is the name of the task that replays the deletions
+// at Auth0 that failed.
+const taskRetryAuth0Deletions = "retry-auth0-deletions"
+
 // errUsage is returned for a missing or unknown task.
-var errUsage = errors.New("usage: worker close-weeks|finalize-challenges")
+var errUsage = errors.New("usage: worker close-weeks|finalize-challenges|retry-auth0-deletions")
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -79,6 +86,12 @@ func run(args []string) error {
 		result, err := service.FinalizeChallenges(ctx)
 		logger.Info("task done", slog.String("task", task), slog.Int("challenges", result.Challenges))
 		return err
+	case taskRetryAuth0Deletions:
+		// Only the replay is used: no participations to abandon.
+		management := auth.NewAuth0Management(cfg.Auth0Domain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
+		result, err := user.NewService(user.NewRepository(gdb), nil, management, logger).RetryAuth0Deletions(ctx)
+		logger.Info("task done", slog.String("task", task), slog.Int("deleted", result.Deleted), slog.Int("failed", result.Failed))
+		return err
 	default:
 		return errUsage
 	}
@@ -86,7 +99,7 @@ func run(args []string) error {
 
 // parseTask reads the name of the task: exactly one known argument.
 func parseTask(args []string) (string, error) {
-	if len(args) != 1 || (args[0] != taskCloseWeeks && args[0] != taskFinalizeChallenges) {
+	if len(args) != 1 || (args[0] != taskCloseWeeks && args[0] != taskFinalizeChallenges && args[0] != taskRetryAuth0Deletions) {
 		return "", errUsage
 	}
 	return args[0], nil

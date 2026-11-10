@@ -178,3 +178,41 @@ func count(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int {
 	}
 	return n
 }
+
+func TestPendingAuth0DeletionsReplay(t *testing.T) {
+	repo, pool := newRepository(t)
+	ctx := t.Context()
+	for _, subject := range []string{"email|first", "email|second"} {
+		if err := repo.AddPendingAuth0Deletion(ctx, subject); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := repo.PendingAuth0Deletions(ctx)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("PendingAuth0Deletions() = %v, %v, want 2 subjects", got, err)
+	}
+
+	identities := &flakyIdentities{failing: map[string]bool{"email|first": true}}
+	svc := NewService(repo, nil, identities, discard)
+	if res, err := svc.RetryAuth0Deletions(ctx); err == nil || res != (RetryResult{Deleted: 1, Failed: 1}) {
+		t.Fatalf("first run = %+v, %v, want 1 deleted, 1 failed and an error", res, err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = 'email|first'"); n != 1 {
+		t.Fatalf("%d rows for the failed one, want it still pending", n)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions"); n != 1 {
+		t.Fatalf("%d pending rows, want 1", n)
+	}
+
+	identities.failing = nil
+	if res, err := svc.RetryAuth0Deletions(ctx); err != nil || res != (RetryResult{Deleted: 1}) {
+		t.Fatalf("second run = %+v, %v, want the last one done", res, err)
+	}
+	// Removing a record already removed is not an error (run at the same time).
+	if err := repo.RemovePendingAuth0Deletion(ctx, "email|first"); err != nil {
+		t.Fatalf("RemovePendingAuth0Deletion() = %v, want nil", err)
+	}
+	if res, err := svc.RetryAuth0Deletions(ctx); err != nil || res != (RetryResult{}) {
+		t.Fatalf("third run = %+v, %v, want nothing", res, err)
+	}
+}
