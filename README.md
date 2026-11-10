@@ -29,7 +29,7 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Le créateur choisit si les personnes invitées peuvent aussi inviter du monde.
 - ✅ **Fuseau horaire** : début et fin sont définis selon le fuseau du lieu de lancement du challenge (ex. Montréal). Les semaines sont découpées dans ce même fuseau.
 - ✅ Après le début, on peut modifier le **titre** et la **description**, mais **pas les catégories**.
-- ✅ Personne ne « quitte » vraiment un challenge : l'action « quitter » (ou la suppression de son compte) équivaut à un **abandon**. Les créateurs peuvent **supprimer le challenge**.
+- ✅ Personne ne « quitte » vraiment un challenge : l'action « quitter » (ou la suppression de son compte, pour les challenges à venir ou en cours) équivaut à un **abandon**. Les créateurs peuvent **supprimer le challenge**.
 - ✅ Un challenge est **supprimable à tout moment** par n'importe quel créateur, même en cours et avec des participants, après une confirmation qui avertit que tout disparaît pour tous.
 - ✅ Suppression **logique** immédiate : le challenge disparaît pour tous (`deleted_at`), ses lignes restent en base. La purge définitive suit la politique de conservation des données (❓, §8).
 
@@ -39,7 +39,7 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Un participant est **classé dans toutes les catégories** du challenge (pas d'inscription par catégorie).
 - ✅ Abandonner (« quitter ») un challenge = **éliminé de toutes les catégories**, définitivement.
 - ✅ Un participant qui abandonne apparaît comme « a abandonné » et sort du podium.
-- ✅ Un compte supprimé est traité comme un abandon (voir §6).
+- ✅ Un compte supprimé est traité comme un abandon dans les challenges à venir ou en cours ; un challenge terminé garde ses résultats, sous un nom neutre (voir §6).
 - ✅ Les activités faites avant l'inscription, mais dans la fenêtre du challenge, comptent.
 
 ### 2.3 Catégories et podiums
@@ -540,7 +540,7 @@ La V2 (synchronisations) a peu d'impact sur la V1 si ces choix, presque gratuits
 - **Loi 25 (Québec)** applicable aux utilisateurs québécois : politique de confidentialité claire en français et en anglais, consentement explicite, personne responsable de la protection des renseignements, registre des incidents, évaluation avant tout transfert hors Québec.
 - **LCAP (Canada)** pour les courriels promotionnels.
 - **RGPD** si des utilisateurs européens s'ajoutent.
-- ✅ **Suppression de compte** : anonymisation, traitée comme un abandon dans tous les challenges ; l'utilisateur est aussi **supprimé chez Auth0** (API de gestion, avec reprise en cas d'échec) pour que l'effacement soit réel.
+- ✅ **Suppression de compte** : anonymisation, traitée comme un abandon dans tous les challenges à venir ou en cours (un challenge terminé garde ses résultats, sous un nom neutre) ; l'utilisateur est aussi **supprimé chez Auth0** (API de gestion, avec reprise en cas d'échec) pour que l'effacement soit réel.
 - ✅ Les activités détaillées d'un participant sont visibles par les autres participants du challenge : l'app l'indique **avant** de rejoindre, et la politique de confidentialité le mentionne.
 - 🟡 Ne stocker que les **résumés d'activité** (distance, durée, type, date), pas les traces GPS.
 - Tenir un **inventaire des sous-traitants** (Auth, notifications, analytics, fournisseurs sportifs) avec la région de chacun.

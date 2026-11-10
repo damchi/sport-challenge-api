@@ -2,7 +2,11 @@
 // provider, created on first login.
 package user
 
-import "time"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"time"
+)
 
 // User is a row of the users table. id, created_at and updated_at are
 // read-only for GORM: the database fills them (default values and trigger),
@@ -28,4 +32,12 @@ type ProfileChanges struct {
 // create or join a challenge.
 func (u User) ProfileComplete() bool {
 	return u.Pseudo != nil
+}
+
+// subjectFingerprint is what is kept of the auth subject of a deleted
+// account (table deleted_subjects): its SHA-256, never the subject itself,
+// in hexadecimal (the queries decode it).
+func subjectFingerprint(subject string) string {
+	sum := sha256.Sum256([]byte(subject))
+	return hex.EncodeToString(sum[:])
 }

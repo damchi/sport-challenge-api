@@ -87,3 +87,7 @@ func (unimplemented) DeleteChallenge(context.Context, api.DeleteChallengeRequest
 func (unimplemented) ListParticipants(context.Context, api.ListParticipantsRequestObject) (api.ListParticipantsResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) DeleteMe(context.Context, api.DeleteMeRequestObject) (api.DeleteMeResponseObject, error) {
+	return nil, errNotImplemented
+}

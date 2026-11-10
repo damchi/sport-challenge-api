@@ -73,6 +73,12 @@ func TestConstraints(t *testing.T) {
 		{name: "unknown status", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'excluded', '2026-12-02Z', NULL)`, constraint: "participants_status_check"},
 		{name: "joined twice", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL), ('` + challengeID + `', '` + userID + `', 'active', '2026-12-04Z', NULL)`, constraint: "participants_pkey"},
 
+		// deleted_subjects and pending_auth0_deletions (000005)
+		{name: "fingerprint of a deleted subject", sql: `INSERT INTO deleted_subjects (fingerprint) VALUES (sha256('email|1'::bytea))`},
+		{name: "fingerprint not a SHA-256", sql: `INSERT INTO deleted_subjects (fingerprint) VALUES ('email|1'::bytea)`, constraint: "deleted_subjects_fingerprint_check"},
+		{name: "same fingerprint twice", sql: `INSERT INTO deleted_subjects (fingerprint) VALUES (sha256('email|1'::bytea)), (sha256('email|1'::bytea))`, constraint: "deleted_subjects_pkey"},
+		{name: "same pending deletion twice", sql: `INSERT INTO pending_auth0_deletions (auth_subject) VALUES ('email|1'), ('email|1')`, constraint: "pending_auth0_deletions_pkey"},
+
 		// No cascade: results stay (anonymization, soft deletion).
 		{name: "deleting a challenge with participants", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL); DELETE FROM challenges WHERE id = '` + challengeID + `'`, constraint: "participants_challenge_id_fkey"},
 		{name: "deleting a user who created a challenge", sql: `DELETE FROM users WHERE id = '` + userID + `'`, constraint: "challenges_created_by_fkey"},

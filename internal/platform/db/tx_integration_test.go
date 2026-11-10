@@ -3,6 +3,7 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -80,5 +81,65 @@ func TestWithTx(t *testing.T) {
 			}
 			panic("boom")
 		})
+	})
+}
+
+func TestInTx(t *testing.T) {
+	gdb, pool := newTxDB(t)
+	failure := errors.New("later write failed")
+
+	t.Run("Conn joins the transaction of the context", func(t *testing.T) {
+		err := InTx(t.Context(), gdb, func(ctx context.Context) error {
+			if err := insertUser(Conn(ctx, gdb), "intx|a"); err != nil {
+				return err
+			}
+			// Not visible outside before the commit: Conn wrote in the transaction.
+			if n := usersWith(t, pool, "intx|a"); n != 0 {
+				t.Fatalf("%d rows seen outside before the commit, want 0", n)
+			}
+			return nil
+		})
+		if err != nil || usersWith(t, pool, "intx|a") != 1 {
+			t.Fatalf("err = %v, want the row committed", err)
+		}
+	})
+
+	t.Run("a nested WithTx commits and rolls back with it", func(t *testing.T) {
+		err := InTx(t.Context(), gdb, func(ctx context.Context) error {
+			if err := WithTx(ctx, gdb, func(tx *gorm.DB) error { return insertUser(tx, "intx|b") }); err != nil {
+				return err
+			}
+			return failure
+		})
+		if !errors.Is(err, failure) || usersWith(t, pool, "intx|b") != 0 {
+			t.Fatalf("err = %v, want the failure and the nested write rolled back", err)
+		}
+	})
+
+	t.Run("a failed nested WithTx rolls back only its writes", func(t *testing.T) {
+		err := InTx(t.Context(), gdb, func(ctx context.Context) error {
+			if err := insertUser(Conn(ctx, gdb), "intx|c"); err != nil {
+				return err
+			}
+			nested := WithTx(ctx, gdb, func(tx *gorm.DB) error {
+				if err := insertUser(tx, "intx|d"); err != nil {
+					return err
+				}
+				return failure
+			})
+			if !errors.Is(nested, failure) {
+				t.Fatalf("nested err = %v, want the failure", nested)
+			}
+			return nil
+		})
+		if err != nil || usersWith(t, pool, "intx|c") != 1 || usersWith(t, pool, "intx|d") != 0 {
+			t.Fatalf("err = %v, want the outer row only", err)
+		}
+	})
+
+	t.Run("Conn outside of a transaction", func(t *testing.T) {
+		if err := insertUser(Conn(t.Context(), gdb), "intx|e"); err != nil || usersWith(t, pool, "intx|e") != 1 {
+			t.Fatalf("err = %v, want the row written directly", err)
+		}
 	})
 }

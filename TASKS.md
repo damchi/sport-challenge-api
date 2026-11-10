@@ -656,14 +656,14 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Anonymisation : pseudo effacé (et avatar, à partir de la V1.1 : le fichier est alors supprimé au mieux, en tâche de fond), `auth_subject` remplacé par une valeur de remplacement, `anonymized_at` renseigné.
-- [ ] Toutes ses participations actives passent à `abandoned` (comme un abandon).
+- [ ] Ses participations actives dans les challenges à venir ou en cours passent à `abandoned` (comme un abandon). ✅ Un challenge terminé garde ses résultats : la participation reste active, sous le nom neutre du compte anonymisé (comme un abandon après la fin, refusé par `challenge_ended`).
 - [ ] Ses activités restent, rattachées au compte anonymisé, pour ne pas fausser les résultats.
 - [ ] Les requêtes suivantes avec son jeton renvoient 401 `account_deleted`.
 - [ ] **Suppression définitive** : l'ancien `sub` est conservé sous forme d'empreinte (SHA-256, jamais en clair), par exemple dans une table `deleted_subjects` (migration incluse dans ce ticket). `user.GetOrCreateBySubject` (ticket 019) vérifie cette empreinte **avant** d'insérer et renvoie `account_deleted` sans créer de compte, même si l'ancien jeton est encore valide ou si la suppression chez Auth0 est en attente.
 - [ ] Une transaction couvre l'anonymisation, l'empreinte du `sub` et les abandons. Les participations passent à `abandoned` sous le verrou de chaque challenge (`withLockedMembership`, comme rejoindre, abandonner et exclure) : sinon une exclusion concurrente ne trouverait plus de participation active et répondrait 500.
 - [ ] Course avec « rejoindre » (ticket 033, qui lit l'utilisateur avant sa transaction) : une inscription validée pendant la suppression ne doit pas laisser de participation active au compte anonymisé ; la transaction de rejoindre vérifie que le compte n'est pas anonymisé (`anonymized_at IS NULL`), ou celle de 039 verrouille la ligne utilisateur. Test d'intégration de cette course.
 - [ ] La mise à jour du profil exclut déjà les comptes anonymisés (`anonymized_at IS NULL` dans `user.Repository.UpdateProfile`, ticket 021) : garder cette condition et vérifier qu'un `PATCH /me` concurrent d'une suppression ne réécrit pas de pseudo sur le compte anonymisé.
-- [ ] Après la validation de la transaction, l'utilisateur est **supprimé chez Auth0** (API de gestion). Si l'appel échoue, une ligne `pending_auth0_deletion` est créée (migration incluse dans ce ticket) et la tâche du worker `retry-auth0-deletions` (ticket 057) la rejoue jusqu'au succès.
+- [ ] Après la validation de la transaction, l'utilisateur est **supprimé chez Auth0** (API de gestion). Si l'appel échoue, une ligne `pending_auth0_deletions` est créée (migration incluse dans ce ticket) et la tâche du worker `retry-auth0-deletions` (ticket 057) la rejoue jusqu'au succès.
 - [ ] Ce ticket crée le client de l'API de gestion Auth0 et ses variables de configuration (ajoutées à `.env.example`).
 - [ ] Les identifiants de l'API de gestion viennent de Secret Manager ; ils n'apparaissent jamais dans les logs.
 
@@ -940,7 +940,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Description** : rejoue les suppressions Auth0 en échec (décision D7). Le binaire `cmd/worker` existe depuis le ticket 055.
 
 **Critères d'acceptation**
-- [ ] Sous-commande `retry-auth0-deletions` : rejoue chaque ligne `pending_auth0_deletion` jusqu'au succès, puis la supprime.
+- [ ] Sous-commande `retry-auth0-deletions` : rejoue chaque ligne `pending_auth0_deletions` jusqu'au succès, puis la supprime.
 - [ ] Idempotente ; journalise le nombre d'éléments traités ; code de sortie non nul en cas d'erreur.
 - [ ] Les identifiants de gestion Auth0 ne sont jamais journalisés.
 

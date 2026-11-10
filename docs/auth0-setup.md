@@ -93,7 +93,7 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
 1. **Applications → Applications → Create Application** → **Machine to Machine Applications**, nom `Sport Challenge API (management)`.
 2. API autorisée : **Auth0 Management API**, avec **une seule** permission : `delete:users`. Ne rien cocher d'autre.
 3. Onglet **Connections** : aucune connexion activée. **Advanced Settings → Grant Types** : seulement **Client Credentials**.
-4. Onglet **Credentials** : si le forfait le permet, préférer **Private Key JWT** à un secret partagé ; sinon *Client Secret (Post)*. Noter le **Client ID** et le **Client Secret**.
+4. Onglet **Credentials** : **Client Secret (Post)**, la seule méthode que l'API prend en charge (Private Key JWT serait un changement du client, `internal/platform/auth/management.go`). Noter le **Client ID** et le **Client Secret**.
 5. Ranger les deux dans Secret Manager (projet GCP de l'environnement), jamais dans un fichier du dépôt, un ticket ou un message :
 
    | Secret Manager | Contenu |
@@ -101,7 +101,7 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
    | `auth0-mgmt-client-id` | Client ID de l'application machine à machine |
    | `auth0-mgmt-client-secret` | Client Secret de l'application machine à machine |
 
-   Accès aux deux secrets réservé au compte de service Cloud Run de l'API : rôle `roles/secretmanager.secretAccessor` donné **sur chaque secret**, pas sur le projet. En développement local, ces valeurs vont seulement dans `.env` (ignoré par git), quand le ticket SC-API-039 ajoutera les variables correspondantes.
+   Accès aux deux secrets réservé au compte de service Cloud Run de l'API : rôle `roles/secretmanager.secretAccessor` donné **sur chaque secret**, pas sur le projet. L'API les lit dans `AUTH0_MGMT_CLIENT_ID` et `AUTH0_MGMT_CLIENT_SECRET`, obligatoires dans tous les environnements (le démarrage échoue sans elles) ; en développement local, elles vont seulement dans `.env` (ignoré par git), avec l'application machine à machine du tenant de développement.
 6. Si le secret a été exposé : **Credentials → Rotate** dans Auth0, nouvelle version dans Secret Manager, puis **désactivation** de l'ancienne version.
 
 ## 6. Protections du tenant
@@ -115,7 +115,7 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
 ## Points d'attention pour l'API (ticket SC-API-017)
 
 - **Jetons machine à machine** : refuser un access token dont `gty` vaut `client-credentials` ou dont `sub` se termine par `@clients`, en défense en profondeur de l'étape 2.5.
-- **Domaine personnalisé** : si un *Custom Domain* est ajouté plus tard, l'émetteur des jetons change (`https://<custom-domain>/`) : `AUTH0_DOMAIN` doit alors être ce domaine.
+- **Domaine personnalisé** : si un *Custom Domain* est ajouté plus tard, l'émetteur des jetons change (`https://<custom-domain>/`) : `AUTH0_DOMAIN` doit alors être ce domaine. L'API de gestion, elle, garde l'audience du domaine du tenant (`https://<tenant>.auth0.com/api/v2/`) : le client de suppression (ticket SC-API-039) construit son audience depuis `AUTH0_DOMAIN` et devra alors recevoir ce domaine à part.
 
 ## Valeurs à reporter
 
@@ -126,8 +126,8 @@ Par environnement, une fois la procédure terminée :
 | `AUTH0_DOMAIN` | non | configuration de l'API (Cloud Run) et du frontend |
 | `AUTH0_AUDIENCE` | non | configuration de l'API (Cloud Run) et du frontend |
 | Client ID de la SPA | non | configuration du frontend |
-| Client ID de l'application machine à machine | à traiter comme secret | Secret Manager : `auth0-mgmt-client-id` |
-| Client Secret de l'application machine à machine | **oui** | Secret Manager : `auth0-mgmt-client-secret` |
+| Client ID de l'application machine à machine | à traiter comme secret | Secret Manager : `auth0-mgmt-client-id`, lu par l'API dans `AUTH0_MGMT_CLIENT_ID` |
+| Client Secret de l'application machine à machine | **oui** | Secret Manager : `auth0-mgmt-client-secret`, lu par l'API dans `AUTH0_MGMT_CLIENT_SECRET` |
 
 `AUTH0_DOMAIN` et `AUTH0_AUDIENCE` seront ajoutées à la configuration de l'API et à `.env.example` par le ticket SC-API-017.
 

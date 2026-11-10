@@ -26,6 +26,7 @@ type repository interface {
 	AddCreator(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, error)) error
 	Delete(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
 	Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error)
+	ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error)
 }
 
 // Profiles tells whether a user's profile is complete, and gives the pseudos
@@ -108,6 +109,9 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 			{Type: CategoryRunElimination, Position: 3, Params: Params{Sport: referenceSport, StepMeters: draft.EliminationStepMeters}},
 		},
 	}, now)
+	if errors.Is(err, errAccountDeleted) {
+		return Challenge{}, apperr.New(apperr.CodeAccountDeleted, nil)
+	}
 	if err != nil {
 		return Challenge{}, fmt.Errorf("store challenge: %w", err)
 	}
@@ -300,6 +304,8 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
 	case errors.Is(err, errAlreadyParticipant):
 		return Detail{}, apperr.New(apperr.CodeAlreadyParticipant, nil)
+	case errors.Is(err, errAccountDeleted):
+		return Detail{}, apperr.New(apperr.CodeAccountDeleted, nil)
 	case err != nil:
 		return Detail{}, err
 	}
@@ -326,6 +332,30 @@ func (s *Service) Abandon(ctx context.Context, actorID, id string) (Detail, erro
 		return Detail{}, err
 	}
 	return s.Get(ctx, actorID, id)
+}
+
+// AbandonAll makes userID abandon every challenge not finished where they
+// are an active participant, for the deletion of their account
+// (DeletionAbandons): each under the lock of its challenge, like an abandon,
+// at the clock's now once locked. Called in the transaction of the account
+// deletion (ctx carries it), so everything commits or nothing does. It checks
+// no actor: never expose it on a route, only user.Service.Delete calls it.
+func (s *Service) AbandonAll(ctx context.Context, userID string) error {
+	ids, err := s.repo.ActiveParticipations(ctx, userID, s.clock.Now())
+	if err != nil {
+		return fmt.Errorf("abandon all: %w", err)
+	}
+	for _, id := range ids {
+		err := s.repo.Abandon(ctx, id, userID, func(c Challenge, m Membership) (bool, time.Time, error) {
+			now := s.clock.Now()
+			return !DeletionAbandons(m, now, c.EndsAt), now, nil
+		})
+		// Deleted meanwhile: nothing left to abandon there.
+		if err != nil && !errors.Is(err, errChallengeNotFound) {
+			return fmt.Errorf("abandon all: %w", err)
+		}
+	}
+	return nil
 }
 
 // Exclude makes targetID abandon challenge id on behalf of actorID, one of

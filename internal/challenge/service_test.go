@@ -35,6 +35,13 @@ type fakeRepository struct {
 	// participants serve Participants; participantsAsked records the call.
 	participants      []Participant
 	participantsAsked *participantsCall
+	// active serves ActiveParticipations; activeErr fails it.
+	active    []string
+	activeErr error
+}
+
+func (f *fakeRepository) ActiveParticipations(context.Context, string, time.Time) ([]string, error) {
+	return f.active, f.activeErr
 }
 
 type participantsCall struct {
@@ -998,6 +1005,59 @@ func TestServiceParticipantsFailures(t *testing.T) {
 			}
 			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want the cause kept", err)
+			}
+		})
+	}
+}
+
+func TestServiceAbandonAll(t *testing.T) {
+	ongoing := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name          string
+		participant   ParticipantStatus
+		now           time.Time
+		wantAbandoned bool
+	}{
+		{name: "active in an ongoing challenge: abandoned", participant: ParticipantActive, now: ongoing, wantAbandoned: true},
+		{name: "active in an upcoming challenge: abandoned", participant: ParticipantActive, now: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), wantAbandoned: true},
+		// Finished meanwhile (at the end instant exactly): the results stay.
+		{name: "active in a finished challenge: kept", participant: ParticipantActive, now: time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)},
+		{name: "already abandoned: unchanged", participant: ParticipantAbandoned, now: ongoing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPrivate), membership: Membership{Participant: tt.participant}, active: []string{"c"}}
+			if err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).AbandonAll(t.Context(), actor); err != nil {
+				t.Fatal(err)
+			}
+			if abandoned := !repo.abandonedAt.IsZero(); abandoned != tt.wantAbandoned {
+				t.Fatalf("abandoned %v (at %s), want %v", abandoned, repo.abandonedAt, tt.wantAbandoned)
+			}
+			if tt.wantAbandoned && !repo.abandonedAt.Equal(tt.now) {
+				t.Fatalf("abandoned at %s, want the clock's now", repo.abandonedAt)
+			}
+		})
+	}
+}
+
+func TestServiceAbandonAllFailures(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	tests := []struct {
+		name    string
+		repo    *fakeRepository
+		wantErr error
+	}{
+		{name: "nothing to abandon", repo: &fakeRepository{}},
+		// Deleted between the listing and its lock: skipped.
+		{name: "challenge deleted meanwhile", repo: &fakeRepository{active: []string{"c"}}},
+		{name: "listing failure", repo: &fakeRepository{activeErr: storageErr}, wantErr: storageErr},
+		{name: "abandon failure", repo: &fakeRepository{active: []string{"c"}, err: storageErr}, wantErr: storageErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).AbandonAll(t.Context(), actor)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}

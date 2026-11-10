@@ -172,6 +172,14 @@ func AbandonRefusal(m Membership, visibility string, now, endsAt time.Time) (noo
 	}
 }
 
+// DeletionAbandons reports whether deleting the account of a user with
+// membership m makes them abandon a challenge ending at endsAt: an active
+// participation in a challenge not finished at now. A finished challenge
+// keeps its results, under the neutral name of the anonymized account.
+func DeletionAbandons(m Membership, now, endsAt time.Time) bool {
+	return m.Participant == ParticipantActive && now.Before(endsAt)
+}
+
 // CanExclude reports whether role may exclude a participant (README §5.7):
 // creators only, even after abandoning.
 func CanExclude(role Role) bool {

@@ -30,6 +30,12 @@ func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
 // contract validation, then the handler on repo.
 func newMeRouter(t *testing.T, repo repository) *gin.Engine {
 	t.Helper()
+	return newMeRouterFor(t, NewService(repo, nil, nil, discard))
+}
+
+// newMeRouterFor serves the /me operations of svc.
+func newMeRouterFor(t *testing.T, svc *Service) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	spec, err := api.GetSpec()
@@ -45,7 +51,7 @@ func newMeRouter(t *testing.T, repo repository) *gin.Engine {
 		auth.Authenticate(acceptingVerifier{}, logger),
 		auth.CurrentUser(func(context.Context, string) (string, error) { return meID, nil }, logger),
 	))
-	strict := api.NewStrictHandlerWithOptions(meHandlers{Handler: NewHandler(NewService(repo))}, nil, api.StrictGinServerOptions{
+	strict := api.NewStrictHandlerWithOptions(meHandlers{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
@@ -93,6 +99,9 @@ func doWithType(t *testing.T, r *gin.Engine, method, body, contentType string) r
 	apitest.ValidateResponse(t, check, rec)
 
 	res := response{status: rec.Code}
+	if rec.Body.Len() == 0 { // 204
+		return res
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &res.body); err != nil {
 		t.Fatalf("body is not JSON: %s", rec.Body)
 	}
@@ -175,5 +184,22 @@ func TestPatchMeRequiresAJSONBody(t *testing.T) {
 				t.Fatalf("got %d %q, pseudo written %v, want 400 validation_failed and nothing written", res.status, res.code, written.Pseudo)
 			}
 		})
+	}
+}
+
+func TestDeleteMe(t *testing.T) {
+	repo := fakeRepository{user: User{ID: meID, AuthSubject: "email|123"}, deleted: new(string)}
+	identities := &fakeIdentities{}
+	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{}, identities, discard)), http.MethodDelete, "")
+	if res.status != http.StatusNoContent || *repo.deleted != meID {
+		t.Fatalf("got %d, deleted %q, want 204 for the user of the token", res.status, *repo.deleted)
+	}
+}
+
+func TestDeleteMeConcurrentlyDeleted(t *testing.T) {
+	repo := fakeRepository{deleteErr: errUserNotFound}
+	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{}, &fakeIdentities{}, discard)), http.MethodDelete, "")
+	if res.status != http.StatusUnauthorized || res.code != "account_deleted" {
+		t.Fatalf("got %d %s, want 401 account_deleted", res.status, res.code)
 	}
 }
