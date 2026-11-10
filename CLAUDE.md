@@ -20,7 +20,7 @@ Cibles du `Makefile`, ajoutées **au fur et à mesure** par les tickets qui s'en
 
 ```
 make run                  API en local
-make worker TASK=...      tâche du worker (close-weeks, finalize-challenges)
+make worker TASK=...      tâche du worker (close-weeks, finalize-challenges, retry-auth0-deletions)
 make test                 tests unitaires
 make test-integration     tests avec PostgreSQL en conteneur
 make lint                 golangci-lint

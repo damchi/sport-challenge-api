@@ -157,6 +157,27 @@ func (r *Repository) AddPendingAuth0Deletion(ctx context.Context, subject string
 	return nil
 }
 
+// PendingAuth0Deletions returns the subjects whose deletion at Auth0 is
+// still to do, oldest first.
+func (r *Repository) PendingAuth0Deletions(ctx context.Context) ([]string, error) {
+	var subjects []string
+	err := r.db.WithContext(ctx).Raw("SELECT auth_subject FROM pending_auth0_deletions ORDER BY created_at, auth_subject").Scan(&subjects).Error
+	if err != nil {
+		return nil, fmt.Errorf("read pending auth0 deletions: %w", err)
+	}
+	return subjects, nil
+}
+
+// RemovePendingAuth0Deletion removes the record of a deletion done at Auth0.
+// A record already removed (by a run at the same time) is not an error.
+func (r *Repository) RemovePendingAuth0Deletion(ctx context.Context, subject string) error {
+	err := r.db.WithContext(ctx).Exec("DELETE FROM pending_auth0_deletions WHERE auth_subject = ?", subject).Error
+	if err != nil {
+		return fmt.Errorf("delete pending auth0 deletion: %w", err)
+	}
+	return nil
+}
+
 // UpdateProfile writes the changed profile columns of user id and returns the
 // row as stored. An unknown or anonymized user gives errUserNotFound. A
 // pseudo already used by another user, in any case, gives

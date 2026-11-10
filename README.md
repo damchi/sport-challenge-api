@@ -249,7 +249,7 @@ sportchallenge-api/
 │   ├── api/
 │   │   └── main.go                  assemble config, base, services, routes et lance le serveur HTTP
 │   └── worker/
-│       └── main.go                  sous-commandes : close-weeks, finalize-challenges (V2 : sync, refresh-tokens)
+│       └── main.go                  sous-commandes : close-weeks, finalize-challenges, retry-auth0-deletions (V2 : sync, refresh-tokens)
 ├── internal/
 │   ├── platform/                    socle technique, importé par tous les modules
 │   │   ├── config/                  lecture et validation des variables d'environnement

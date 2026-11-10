@@ -14,6 +14,7 @@ func TestParseTask(t *testing.T) {
 	}{
 		{name: "close-weeks", args: []string{"close-weeks"}, want: "close-weeks"},
 		{name: "finalize-challenges", args: []string{"finalize-challenges"}, want: "finalize-challenges"},
+		{name: "retry-auth0-deletions", args: []string{"retry-auth0-deletions"}, want: "retry-auth0-deletions"},
 		{name: "no task", wantErr: errUsage},
 		{name: "unknown task", args: []string{"sync"}, wantErr: errUsage},
 		{name: "two tasks", args: []string{"close-weeks", "close-weeks"}, wantErr: errUsage},
