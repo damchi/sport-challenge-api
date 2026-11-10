@@ -62,23 +62,29 @@ func TestRank(t *testing.T) {
 			want:         []Entry{{UserID: "b", Rank: 1, Value: 5}, {UserID: "a", Rank: 2}},
 		},
 		{
-			name: "abandoned listed after the ranked, without rank",
+			name:         "tie at 0 at the bottom",
+			participants: active("a", "b", "c"),
+			values:       map[string]int{"c": 5},
+			want:         []Entry{{UserID: "c", Rank: 1, Value: 5}, {UserID: "a", Rank: 2}, {UserID: "b", Rank: 2}},
+		},
+		{
+			name: "abandoned listed after the ranked, without rank and at 0",
 			participants: []Participant{
-				{UserID: "a", Abandoned: true}, {UserID: "b"}, {UserID: "c", Abandoned: true}, {UserID: "d"},
+				{UserID: "c", Abandoned: true}, {UserID: "b"}, {UserID: "a", Abandoned: true}, {UserID: "d"},
 			},
-			values: map[string]int{"a": 100, "b": 10, "c": 50, "d": 20},
+			values: map[string]int{"a": 50, "b": 10, "c": 100, "d": 20},
 			want: []Entry{
 				{UserID: "d", Rank: 1, Value: 20},
 				{UserID: "b", Rank: 2, Value: 10},
-				{UserID: "a", Value: 100, Abandoned: true},
-				{UserID: "c", Value: 50, Abandoned: true},
+				{UserID: "a", Abandoned: true},
+				{UserID: "c", Abandoned: true},
 			},
 		},
 		{
 			name:         "only abandoned",
 			participants: []Participant{{UserID: "a", Abandoned: true}},
 			values:       map[string]int{"a": 10},
-			want:         []Entry{{UserID: "a", Value: 10, Abandoned: true}},
+			want:         []Entry{{UserID: "a", Abandoned: true}},
 		},
 	}
 	for _, tt := range tests {
