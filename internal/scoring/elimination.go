@@ -1,5 +1,7 @@
 package scoring
 
+import "time"
+
 // Elimination is category 3, run with elimination: the distance run in a
 // week must be at least the distance of the week before plus the step, or
 // the participant is eliminated from this category, for good.
@@ -13,6 +15,9 @@ package scoring
 type Elimination struct {
 	Sport      string
 	StepMeters int
+	// AtRisk is how long before the end of the week a participant under the
+	// minimum is at risk (a setting of the service, not of the challenge).
+	AtRisk time.Duration
 }
 
 var _ Scorer = Elimination{}
@@ -44,29 +49,68 @@ func (e Elimination) Score(w Window, participants []Participant, activities []Ac
 		}
 	}
 
+	week, weekEnd := w.CurrentWeek()
+	progress := make(map[string]*Progress, len(participants))
 	values := make(map[string]int, len(participants))
 	// A survivor is in the tier above every week of elimination.
 	tiers := make(map[string]int, len(participants))
 	for user, distances := range weekly {
-		last, tier := weeks, weeks+1
+		last, tier, eliminatedWeek := weeks, weeks+1, 0
 		for n := 2; n <= judged; n++ {
 			if isEliminated(distances[n-1], distances[n], e.StepMeters) {
-				last, tier = n, n
+				last, tier, eliminatedWeek = n, n, n
 				break
 			}
 		}
+		progress[user] = e.progress(distances, eliminatedWeek, week, weekEnd, w.Now)
 		for _, d := range distances[1 : last+1] {
 			values[user] += d
 		}
 		tiers[user] = tier
 	}
-	return rankByTier(participants, values, tiers)
+	entries := rankByTier(participants, values, tiers)
+	for i := range entries {
+		if !entries[i].Abandoned {
+			entries[i].Progress = progress[entries[i].UserID]
+		}
+	}
+	return entries
 }
 
-// isEliminated is the rule of the minimum, the only place it lives: the
+// progress is the live situation of a participant eliminated in
+// eliminatedWeek (0 if not) while week, ending at weekEnd, is running (0 if
+// none).
+func (e Elimination) progress(distances []int, eliminatedWeek, week int, weekEnd, now time.Time) *Progress {
+	switch {
+	case eliminatedWeek > 0:
+		return &Progress{Status: StatusEliminated, EliminatedWeek: eliminatedWeek}
+	case week == 0:
+		return &Progress{}
+	case week == 1:
+		return &Progress{RunMeters: distances[1], WeekEndsAt: weekEnd}
+	}
+	minimum := minimumMeters(distances[week-1], e.StepMeters)
+	p := &Progress{MinimumMeters: &minimum, RunMeters: distances[week], WeekEndsAt: weekEnd}
+	switch {
+	case p.RunMeters >= minimum:
+		p.Status = StatusReached
+	case weekEnd.Sub(now) <= e.AtRisk:
+		p.Status = StatusAtRisk
+	default:
+		p.Status = StatusInProgress
+	}
+	return p
+}
+
+// minimumMeters is the rule of the minimum, the only place it lives: the
 // minimum of a week is the distance really run the week before plus the
-// step, so running more than the minimum raises the next one. Exactly the
+// step, so running more than the minimum raises the next one.
+func minimumMeters(previous, step int) int {
+	return previous + step
+}
+
+// isEliminated reports whether current misses the minimum. Exactly the
 // minimum is enough.
 func isEliminated(previous, current, step int) bool {
-	return current < previous+step
+	return current < minimumMeters(previous, step)
 }

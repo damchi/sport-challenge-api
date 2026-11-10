@@ -555,6 +555,52 @@ paths:
           $ref: "#/components/responses/ChallengeNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/leaderboard:
+    get:
+      operationId: getLeaderboard
+      summary: Get the leaderboard
+      description: |
+        The ranking of each of the 3 categories, always computed from the
+        raw activities at `computed_at`. Visible to whoever sees the
+        challenge: every user for a public one (a non-participant sees the
+        ranking only); its creators, participants (abandoned included) and
+        invited users for a private one. Anyone else, like a missing or
+        deleted challenge, gets the same 404 `challenge_not_found`.
+
+        Equal values share a rank (1, 1, 3). Participants who abandoned
+        (also the excluded and the deleted accounts) are listed last in every
+        category, with `abandoned` true and no rank nor value.
+
+        In `run_elimination`, `elimination` gives the live situation: the
+        survivors first by distance, then the eliminated, the last
+        eliminated first. `status` is `reached` once the distance of the
+        week reaches the minimum, else `at_risk` when the end of the week is
+        at most the configured threshold (24 h by default) away, else
+        `in_progress`; `eliminated` once eliminated. There is no minimum and
+        no status in week 1, nor outside the weeks of the challenge.
+      tags: [challenges]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The leaderboard.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Leaderboard"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ChallengeNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/participants/{userId}:
     delete:
       operationId: excludeParticipant
@@ -1228,6 +1274,108 @@ components:
         joined_at:
           type: string
           format: date-time
+    Leaderboard:
+      type: object
+      required: [computed_at, categories]
+      additionalProperties: false
+      properties:
+        computed_at:
+          type: string
+          format: date-time
+          description: The instant the ranking was computed at; weeks are judged at it.
+        categories:
+          type: array
+          description: The 3 categories, in the order of the challenge.
+          items:
+            $ref: "#/components/schemas/CategoryRanking"
+    CategoryRanking:
+      type: object
+      required: [type, entries]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [cumulative_time, cumulative_distance, run_elimination]
+        entries:
+          type: array
+          description: |
+            Every participant. Ranked ones first, best first; abandoned ones
+            last. `value` is in seconds for `cumulative_time` and in meters
+            for the other two.
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
+    LeaderboardEntry:
+      type: object
+      required: [rank, user, value, abandoned, elimination]
+      additionalProperties: false
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Null for a participant who abandoned.
+        user:
+          $ref: "#/components/schemas/LeaderboardUser"
+        value:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Null for a participant who abandoned.
+        abandoned:
+          type: boolean
+        elimination:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/EliminationProgress"
+          description: Only in `run_elimination`, and null for a participant who abandoned.
+    LeaderboardUser:
+      type: object
+      required: [id, pseudo, avatar]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Pseudo"
+          description: Null for a deleted (anonymized) account; the apps show a neutral name.
+        avatar:
+          type: string
+          nullable: true
+          description: Avatar image; always null in V1, where the apps show the pseudo's initials.
+    EliminationProgress:
+      type: object
+      required: [status, eliminated_week, minimum_meters, run_meters, week_ends_at]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          nullable: true
+          enum: [reached, at_risk, in_progress, eliminated]
+          description: Null in week 1 and outside the weeks of the challenge.
+        eliminated_week:
+          type: integer
+          minimum: 2
+          nullable: true
+          description: The week the participant was eliminated at the end of; null if not eliminated.
+        minimum_meters:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: The distance the current week needs; null in week 1, when eliminated, or outside the weeks.
+        run_meters:
+          type: integer
+          minimum: 0
+          description: The distance already run in the current week; 0 when eliminated or outside the weeks.
+        week_ends_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: The end of the current week; null when eliminated or outside the weeks.
     ChallengeSummary:
       type: object
       required: [id, title, visibility, timezone, starts_at, ends_at, participant_count, my_status]

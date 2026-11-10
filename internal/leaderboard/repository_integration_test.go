@@ -104,13 +104,16 @@ func TestGetFromTheDatabase(t *testing.T) {
 			{Type: CategoryRunElimination, Sport: "run", StepMeters: 2000},
 		},
 	}
-	svc := NewService(staticChallenge(c), NewRepository(gdb), clock.NewFake(end))
+	svc := NewService(staticChallenge(c), fakeProfiles{}, NewRepository(gdb), clock.NewFake(end), 24*time.Hour)
 
 	got, err := svc.Get(t.Context(), runner, challengeID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []CategoryRanking{
+	want := []struct {
+		Type    string
+		Entries []scoring.Entry
+	}{
 		{Type: CategoryCumulativeTime, Entries: []scoring.Entry{
 			{UserID: walker, Rank: 1, Value: 11400}, {UserID: runner, Rank: 2, Value: 9000}, {UserID: quitter, Abandoned: true},
 		}},
@@ -121,7 +124,19 @@ func TestGetFromTheDatabase(t *testing.T) {
 			{UserID: runner, Rank: 1, Value: 22000}, {UserID: walker, Rank: 2}, {UserID: quitter, Abandoned: true},
 		}},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Get() = %+v, want %+v", got, want)
+	// The live progress of the elimination category has its own tests.
+	plain := make([]struct {
+		Type    string
+		Entries []scoring.Entry
+	}, len(got.Categories))
+	for i, category := range got.Categories {
+		plain[i].Type = category.Type
+		for _, r := range category.Entries {
+			r.Progress = nil
+			plain[i].Entries = append(plain[i].Entries, r.Entry)
+		}
+	}
+	if !reflect.DeepEqual(plain, want) {
+		t.Fatalf("Get() = %+v, want %+v", plain, want)
 	}
 }

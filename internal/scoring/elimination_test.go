@@ -210,6 +210,10 @@ func TestEliminationScore(t *testing.T) {
 			w := w
 			w.Now = tt.now
 			got := Elimination{Sport: "run", StepMeters: step}.Score(w, tt.participants, tt.activities)
+			// The live progress has its own test.
+			for i := range got {
+				got[i].Progress = nil
+			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Score() = %+v, want %+v", got, tt.want)
 			}
@@ -236,4 +240,110 @@ func TestIsEliminated(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEliminationProgress(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 4)
+	const step = 2000
+	atRisk := 24 * time.Hour
+	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
+	weekEnd := func(n int) time.Time { _, e := w.WeekBounds(n); return e }
+	run := func(user string, week, distance int) Activity {
+		return Activity{
+			UserID: user, SportCode: "run", StartedAt: weekStart(week).Add(time.Hour),
+			DurationSeconds: 1800, DistanceMeters: meters(distance),
+		}
+	}
+	progress := func(now time.Time, participants []Participant, activities ...Activity) map[string]*Progress {
+		t.Helper()
+		w := w
+		w.Now = now
+		out := map[string]*Progress{}
+		for _, e := range (Elimination{Sport: "run", StepMeters: step, AtRisk: atRisk}).Score(w, participants, activities) {
+			out[e.UserID] = e.Progress
+		}
+		return out
+	}
+	a := []Participant{{UserID: "a"}}
+
+	tests := []struct {
+		name string
+		got  *Progress
+		want *Progress
+	}{
+		{
+			name: "week 1: no minimum, no status",
+			got:  progress(weekEnd(1).Add(-time.Hour), a, run("a", 1, 3000))["a"],
+			want: &Progress{RunMeters: 3000, WeekEndsAt: weekEnd(1)},
+		},
+		{
+			name: "goal reached once the week reaches the minimum",
+			got:  progress(weekEnd(2).Add(-48*time.Hour), a, run("a", 1, 5000), run("a", 2, 7000))["a"],
+			want: &Progress{Status: StatusReached, MinimumMeters: meters(7000), RunMeters: 7000, WeekEndsAt: weekEnd(2)},
+		},
+		{
+			name: "goal reached even in the last hours",
+			got:  progress(weekEnd(2).Add(-time.Hour), a, run("a", 1, 5000), run("a", 2, 9000))["a"],
+			want: &Progress{Status: StatusReached, MinimumMeters: meters(7000), RunMeters: 9000, WeekEndsAt: weekEnd(2)},
+		},
+		{
+			name: "25 hours left: in progress",
+			got:  progress(weekEnd(2).Add(-25*time.Hour), a, run("a", 1, 5000), run("a", 2, 6000))["a"],
+			want: &Progress{Status: StatusInProgress, MinimumMeters: meters(7000), RunMeters: 6000, WeekEndsAt: weekEnd(2)},
+		},
+		{
+			name: "24 hours left: at risk",
+			got:  progress(weekEnd(2).Add(-24*time.Hour), a, run("a", 1, 5000), run("a", 2, 6000))["a"],
+			want: &Progress{Status: StatusAtRisk, MinimumMeters: meters(7000), RunMeters: 6000, WeekEndsAt: weekEnd(2)},
+		},
+		{
+			name: "23 hours left: at risk",
+			got:  progress(weekEnd(2).Add(-23*time.Hour), a, run("a", 1, 5000), run("a", 2, 6000))["a"],
+			want: &Progress{Status: StatusAtRisk, MinimumMeters: meters(7000), RunMeters: 6000, WeekEndsAt: weekEnd(2)},
+		},
+		{
+			name: "the minimum follows the distance really run the week before",
+			got:  progress(weekEnd(3).Add(-48*time.Hour), a, run("a", 1, 5000), run("a", 2, 10000), run("a", 3, 11000))["a"],
+			want: &Progress{Status: StatusInProgress, MinimumMeters: meters(12000), RunMeters: 11000, WeekEndsAt: weekEnd(3)},
+		},
+		{
+			name: "the exact end of a week is already the next week",
+			got:  progress(weekEnd(2), a, run("a", 1, 5000), run("a", 2, 7000))["a"],
+			want: &Progress{Status: StatusInProgress, MinimumMeters: meters(9000), WeekEndsAt: weekEnd(3)},
+		},
+		{
+			name: "week without a run yet",
+			got:  progress(weekStart(3).Add(time.Hour), a, run("a", 1, 5000), run("a", 2, 7000))["a"],
+			want: &Progress{Status: StatusInProgress, MinimumMeters: meters(9000), WeekEndsAt: weekEnd(3)},
+		},
+		{
+			name: "eliminated: the week of the elimination only",
+			got:  progress(weekStart(3).Add(time.Hour), a, run("a", 1, 5000), run("a", 2, 6999))["a"],
+			want: &Progress{Status: StatusEliminated, EliminatedWeek: 2},
+		},
+		{
+			name: "the challenge is over: no live status",
+			got:  progress(w.End, a, run("a", 1, 5000), run("a", 2, 7000), run("a", 3, 9000), run("a", 4, 11000))["a"],
+			want: &Progress{},
+		},
+		{
+			name: "the challenge has not started",
+			got:  progress(w.Start.Add(-time.Hour), a)["a"],
+			want: &Progress{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tt.got, tt.want) {
+				t.Fatalf("Progress = %+v, want %+v", tt.got, tt.want)
+			}
+		})
+	}
+
+	t.Run("abandoned participant has none", func(t *testing.T) {
+		got := progress(weekEnd(2).Add(-time.Hour), []Participant{{UserID: "a", Abandoned: true}}, run("a", 1, 5000))
+		if got["a"] != nil {
+			t.Fatalf("Progress = %+v, want none", got["a"])
+		}
+	})
 }

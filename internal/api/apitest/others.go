@@ -111,3 +111,7 @@ func (unimplemented) ListMyActivities(context.Context, api.ListMyActivitiesReque
 func (unimplemented) ListParticipantActivities(context.Context, api.ListParticipantActivitiesRequestObject) (api.ListParticipantActivitiesResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) GetLeaderboard(context.Context, api.GetLeaderboardRequestObject) (api.GetLeaderboardResponseObject, error) {
+	return nil, errNotImplemented
+}

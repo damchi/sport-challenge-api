@@ -1,0 +1,183 @@
+package leaderboard
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/damchi/sport-challenge-api/internal/api"
+	"github.com/damchi/sport-challenge-api/internal/api/apitest"
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/platform/clock"
+	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
+	"github.com/damchi/sport-challenge-api/internal/scoring"
+)
+
+const (
+	challengeID = "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b"
+	ann         = "11111111-1111-4111-8111-111111111111"
+	bob         = "22222222-2222-4222-8222-222222222222"
+	gone        = "33333333-3333-4333-8333-333333333333"
+)
+
+type acceptingVerifier struct{}
+
+func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
+	return auth.Claims{Subject: "email|123"}, nil
+}
+
+type leaderboardOnly struct {
+	*Handler
+	apitest.Others
+}
+
+// get serves GET target as cmd/api does (authentication, contract
+// validation, handler) and checks the response against the contract.
+func get(t *testing.T, svc *Service, target string, withToken bool) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	spec, err := api.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate, err := httpx.RequestValidator(spec, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httpx.NewRouter(logger)
+	r.Use(auth.Protect(nil,
+		auth.Authenticate(acceptingVerifier{}, logger),
+		auth.CurrentUser(func(context.Context, string) (string, error) { return ann, nil }, logger),
+	))
+	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(leaderboardOnly{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		HandlerErrorFunc:         httpx.ErrorHandler(logger),
+		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
+	}), api.GinServerOptions{
+		ErrorHandler: httpx.InvalidParamHandler(logger),
+		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	if withToken {
+		req.Header.Set("Authorization", "Bearer some.access.token")
+	}
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	apitest.ValidateResponse(t, httptest.NewRequest(http.MethodGet, target, nil), rec)
+
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q is not JSON: %v", rec.Body.String(), err)
+	}
+	return rec, got
+}
+
+func errorCode(body map[string]any) any {
+	e, _ := body["error"].(map[string]any)
+	return e["code"]
+}
+
+// handlerService ranks a challenge of 2 weeks, one week in: ann is on her
+// way, bob was eliminated, gone abandoned.
+func handlerService(t *testing.T, challenges *fakeChallenges) *Service {
+	t.Helper()
+	c := twoWeeks(t)
+	loc := toronto(t)
+	run := func(user string, day, distance int) scoring.Activity {
+		return scoring.Activity{
+			UserID: user, SportCode: "run", StartedAt: time.Date(2026, 6, day, 7, 0, 0, 0, loc).UTC(),
+			DurationSeconds: 1800, DistanceMeters: meters(distance),
+		}
+	}
+	repo := &fakeRepo{
+		participants: []scoring.Participant{{UserID: ann}, {UserID: bob}, {UserID: gone, Abandoned: true}},
+		activities:   []scoring.Activity{run(ann, 2, 5000), run(ann, 9, 4000), run(bob, 2, 5000), run(gone, 2, 9000)},
+	}
+	if challenges.c.ID == "" {
+		challenges.c = c
+	}
+	// Week 2 is running, a day and a half from its end.
+	now := c.EndsAt.Add(-36 * time.Hour)
+	profiles := fakeProfiles{pseudos: map[string]string{ann: "Ann", bob: "Bob"}}
+	return NewService(challenges, profiles, repo, clock.NewFake(now), 24*time.Hour)
+}
+
+func TestGetLeaderboardAnswersEveryCategory(t *testing.T) {
+	svc := handlerService(t, &fakeChallenges{})
+	rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/leaderboard", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d (%s), want 200", rec.Code, rec.Body)
+	}
+	if body["computed_at"] == nil {
+		t.Fatalf("body %v has no computed_at", body)
+	}
+	categories := body["categories"].([]any)
+	if len(categories) != 3 {
+		t.Fatalf("%d categories, want 3", len(categories))
+	}
+
+	timeCategory := categories[0].(map[string]any)
+	if timeCategory["type"] != "cumulative_time" {
+		t.Fatalf("first category %v, want cumulative_time", timeCategory["type"])
+	}
+	entries := timeCategory["entries"].([]any)
+	first := entries[0].(map[string]any)
+	if first["rank"] != 1.0 || first["value"] != 3600.0 || first["abandoned"] != false || first["elimination"] != nil {
+		t.Fatalf("first entry %v, want rank 1, 3600 s, not abandoned, no elimination", first)
+	}
+	user := first["user"].(map[string]any)
+	if user["id"] != ann || user["pseudo"] != "Ann" || user["avatar"] != nil {
+		t.Fatalf("user %v, want ann with her pseudo and no avatar", user)
+	}
+	// Abandoned: last, with no rank, no value.
+	last := entries[len(entries)-1].(map[string]any)
+	if last["abandoned"] != true || last["rank"] != nil || last["value"] != nil || last["user"].(map[string]any)["pseudo"] != nil {
+		t.Fatalf("last entry %v, want an abandoned one with no rank, no value, no pseudo", last)
+	}
+
+	elimination := categories[2].(map[string]any)["entries"].([]any)
+	annLine := elimination[0].(map[string]any)["elimination"].(map[string]any)
+	if annLine["status"] != "in_progress" || annLine["minimum_meters"] != 7000.0 || annLine["run_meters"] != 4000.0 || annLine["eliminated_week"] != nil || annLine["week_ends_at"] == nil {
+		t.Fatalf("ann's progress %v, want in progress, 4000 of 7000 m, no elimination", annLine)
+	}
+}
+
+func TestGetLeaderboardHidesAChallengeTheActorMayNotRead(t *testing.T) {
+	svc := handlerService(t, &fakeChallenges{err: apperr.New(apperr.CodeChallengeNotFound, nil)})
+	rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/leaderboard", true)
+	if rec.Code != http.StatusNotFound || errorCode(body) != "challenge_not_found" {
+		t.Fatalf("status %d (%s), want 404 challenge_not_found", rec.Code, rec.Body)
+	}
+}
+
+func TestGetLeaderboardRefusesBadRequests(t *testing.T) {
+	svc := handlerService(t, &fakeChallenges{})
+	tests := []struct {
+		name      string
+		target    string
+		withToken bool
+		wantCode  int
+		wantError string
+	}{
+		{name: "no token", target: "/api/v1/challenges/" + challengeID + "/leaderboard", wantCode: http.StatusUnauthorized, wantError: "unauthenticated"},
+		{name: "challenge id not a UUID", target: "/api/v1/challenges/nope/leaderboard", withToken: true, wantCode: http.StatusBadRequest, wantError: "validation_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, body := get(t, svc, tt.target, tt.withToken)
+			if rec.Code != tt.wantCode || errorCode(body) != tt.wantError {
+				t.Fatalf("status %d (%s), want %d %s", rec.Code, rec.Body, tt.wantCode, tt.wantError)
+			}
+		})
+	}
+}

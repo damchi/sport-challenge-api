@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Environment is the deployment environment the process runs in.
@@ -39,7 +40,14 @@ type Config struct {
 	// CORSAllowedOrigins are the web origins allowed to call the API from a
 	// browser (scheme://host[:port], lowercase). Empty: no browser origin.
 	CORSAllowedOrigins []string
+	// AtRiskThreshold is how long before the end of a week a participant
+	// under the minimum of the elimination category is "at risk". 24 hours
+	// unless AT_RISK_THRESHOLD says otherwise.
+	AtRiskThreshold time.Duration
 }
+
+// defaultAtRiskThreshold is the "at risk" threshold when none is configured.
+const defaultAtRiskThreshold = 24 * time.Hour
 
 // Load reads the configuration through getenv (os.Getenv in production).
 // Surrounding spaces are ignored. Every missing or invalid variable is
@@ -101,6 +109,15 @@ func Load(getenv func(string) string) (Config, error) {
 		problems = append(problems, "CORS_ALLOWED_ORIGINS must be a comma-separated list of origins (http or https scheme, host, optional port, nothing else), never *")
 	} else {
 		cfg.CORSAllowedOrigins = origins
+	}
+
+	cfg.AtRiskThreshold = defaultAtRiskThreshold
+	if raw := get("AT_RISK_THRESHOLD"); raw != "" {
+		if d, err := time.ParseDuration(raw); err != nil || d <= 0 {
+			problems = append(problems, "AT_RISK_THRESHOLD must be a positive duration such as 24h")
+		} else {
+			cfg.AtRiskThreshold = d
+		}
 	}
 
 	if len(problems) > 0 {

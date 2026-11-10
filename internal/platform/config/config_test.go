@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func envFrom(vars map[string]string) func(string) string {
@@ -21,17 +22,17 @@ func TestLoad(t *testing.T) {
 		{
 			name: "valid",
 			vars: map[string]string{"ENV": "staging", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
-			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret"},
+			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour},
 		},
 		{
 			name: "log level is case insensitive",
 			vars: map[string]string{"ENV": "local", "PORT": "1", "LOG_LEVEL": "DEBUG", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
-			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret"},
+			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour},
 		},
 		{
 			name: "surrounding spaces are ignored",
 			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   ", "DATABASE_URL": " postgres://localhost/x ", "AUTH0_DOMAIN": " tenant.ca.auth0.com ", "AUTH0_AUDIENCE": " https://api.test ", "AUTH0_MGMT_CLIENT_ID": " mgmt-id ", "AUTH0_MGMT_CLIENT_SECRET": " mgmt-secret "}, //nolint:gosec // test value, not a credential
-			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret"},
+			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour},
 		},
 		{
 			name:    "blank values count as missing",
@@ -107,7 +108,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x",
 				Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test",
-				Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret",
+				Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour,
 			},
 		},
 		{
@@ -207,5 +208,46 @@ func TestLoadNeverEchoesValues(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("error leaks the value: %q", err)
+	}
+}
+
+func TestLoadAtRiskThreshold(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "absent: 24 hours", raw: "", want: 24 * time.Hour},
+		{name: "blank: 24 hours", raw: "  ", want: 24 * time.Hour},
+		{name: "hours", raw: "12h", want: 12 * time.Hour},
+		{name: "spaces ignored", raw: " 90m ", want: 90 * time.Minute},
+		{name: "seconds, for a test environment", raw: "30s", want: 30 * time.Second},
+		{name: "zero", raw: "0s", wantErr: true},
+		{name: "negative", raw: "-1h", wantErr: true},
+		{name: "no unit", raw: "24", wantErr: true},
+		{name: "not a duration", raw: "a day", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Load(envFrom(map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
+				"AT_RISK_THRESHOLD": tt.raw,
+			}))
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "AT_RISK_THRESHOLD must be") {
+					t.Fatalf("Load() error = %v, want an AT_RISK_THRESHOLD error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if got.AtRiskThreshold != tt.want {
+				t.Fatalf("AtRiskThreshold = %v, want %v", got.AtRiskThreshold, tt.want)
+			}
+		})
 	}
 }
