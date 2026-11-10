@@ -82,6 +82,8 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 
 - ✅ Ce sont des **suggestions** : le catalogue propose un coefficient pour chaque sport à distance, et le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**. La course reste la référence : son coefficient est toujours ×1 et ne s'envoie pas à la création (refusé même à 1).
 - ✅ Les coefficients sont **figés à la création du challenge** : ni une modification ultérieure du catalogue ni les créateurs ne les changent pour un challenge en cours.
+- ✅ La distance équivalente est **sommée exactement**, puis **arrondie au mètre** (demi-mètre vers le haut) une seule fois, sur le total de chaque participant : deux totaux à moins d'un mètre l'un de l'autre peuvent être ex aequo.
+- ✅ Un sport à distance **ajouté au catalogue après la création** d'un challenge n'a pas de coefficient figé dans ce challenge : ses activités comptent pour le temps cumulé, mais pas pour la distance cumulée.
 - Conséquence assumée : la marche compte pleinement, donc un marcheur peut battre un coureur en distance pure.
 
 ### 2.5 Activités
