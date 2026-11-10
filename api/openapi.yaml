@@ -697,6 +697,8 @@ components:
         - challenge_ended
         - cannot_exclude_creator
         - not_active_participant
+        - distance_required
+        - distance_not_allowed
         - not_found
         - validation_failed
         - internal_error
