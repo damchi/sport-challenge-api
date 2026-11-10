@@ -6,6 +6,7 @@ package leaderboard
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -19,6 +20,9 @@ type repository interface {
 	// Activities gives, in one query, the activities of the active
 	// participants of the challenge started in [from, to).
 	Activities(ctx context.Context, challengeID string, from, to time.Time) ([]scoring.Activity, error)
+	// Snapshots gives the frozen results of the challenge by category type,
+	// and when they were frozen; none until the worker has finalized it.
+	Snapshots(ctx context.Context, challengeID string) (map[string]json.RawMessage, time.Time, error)
 }
 
 // Challenges gives challenge challengeID, with its categories, for actorID
@@ -54,7 +58,9 @@ func NewService(challenges Challenges, profiles Profiles, repo repository, c clo
 // order, as actorID may read it (the rule is the challenge module's, and
 // nothing is loaded before it passes). Abandoned participants are listed in
 // each category, unranked. The weeks are judged at the instant of the
-// clock.
+// clock. Once the challenge is over, the frozen results are served; until
+// the worker has frozen them, the ranking is computed, which gives the same
+// result: the weeks that ended are locked by the clock, not by the worker.
 func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, error) {
 	c, err := s.challenges.Challenge(ctx, actorID, id)
 	if err != nil {
@@ -68,6 +74,17 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 	for i, cat := range c.Categories {
 		if scorers[i], err = s.scorerOf(cat); err != nil {
 			return Leaderboard{}, err
+		}
+	}
+
+	now := s.clock.Now()
+	if !now.Before(c.EndsAt) {
+		board, ok, err := s.frozen(ctx, c)
+		if err != nil {
+			return Leaderboard{}, err
+		}
+		if ok {
+			return board, nil
 		}
 	}
 
@@ -88,7 +105,6 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 		return Leaderboard{}, fmt.Errorf("read pseudos: %w", err)
 	}
 
-	now := s.clock.Now()
 	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
 	board := Leaderboard{ComputedAt: now, Categories: make([]CategoryRanking, len(c.Categories))}
 	for i, cat := range c.Categories {
@@ -118,4 +134,67 @@ func (s *Service) scorerOf(cat Category) (scoring.Scorer, error) {
 	default:
 		return nil, fmt.Errorf("unknown category type %q", cat.Type)
 	}
+}
+
+// frozenRanking is the ranking of a category as the worker stored it.
+type frozenRanking struct {
+	Entries []struct {
+		UserID         string `json:"user_id"`
+		Rank           int    `json:"rank"`
+		Value          int    `json:"value"`
+		Abandoned      bool   `json:"abandoned"`
+		EliminatedWeek int    `json:"eliminated_week"`
+	} `json:"entries"`
+}
+
+// frozen builds the leaderboard of a challenge that is over from its result
+// snapshots, and reports false when they are not all there yet. The pseudos
+// are read now: an account anonymized since shows under a neutral name.
+func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, error) {
+	if len(c.Categories) == 0 {
+		return Leaderboard{}, false, nil
+	}
+	payloads, createdAt, err := s.repo.Snapshots(ctx, c.ID)
+	if err != nil {
+		return Leaderboard{}, false, err
+	}
+	rankings := make([]frozenRanking, len(c.Categories))
+	var ids []string
+	for i, cat := range c.Categories {
+		payload, ok := payloads[cat.Type]
+		if !ok {
+			return Leaderboard{}, false, nil
+		}
+		if err := json.Unmarshal(payload, &rankings[i]); err != nil {
+			return Leaderboard{}, false, fmt.Errorf("decode snapshot of category %s: %w", cat.Type, err)
+		}
+	}
+	for _, e := range rankings[0].Entries {
+		ids = append(ids, e.UserID)
+	}
+	pseudos, err := s.profiles.Pseudos(ctx, ids)
+	if err != nil {
+		return Leaderboard{}, false, fmt.Errorf("read pseudos: %w", err)
+	}
+
+	board := Leaderboard{ComputedAt: createdAt, Categories: make([]CategoryRanking, len(c.Categories))}
+	for i, cat := range c.Categories {
+		ranked := make([]Ranked, len(rankings[i].Entries))
+		for j, e := range rankings[i].Entries {
+			ranked[j] = Ranked{Entry: scoring.Entry{UserID: e.UserID, Rank: e.Rank, Value: e.Value, Abandoned: e.Abandoned}}
+			// As computed: a survivor of the elimination category has an empty
+			// progress once the challenge is over, an abandoned one has none.
+			if cat.Type == CategoryRunElimination && !e.Abandoned {
+				ranked[j].Progress = &scoring.Progress{}
+				if e.EliminatedWeek > 0 {
+					ranked[j].Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
+				}
+			}
+			if p, ok := pseudos[e.UserID]; ok {
+				ranked[j].Pseudo = &p
+			}
+		}
+		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
+	}
+	return board, true, nil
 }

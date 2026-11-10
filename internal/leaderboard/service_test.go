@@ -2,6 +2,7 @@ package leaderboard
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -26,8 +27,12 @@ func (f *fakeChallenges) Challenge(_ context.Context, actorID, id string) (Chall
 type fakeRepo struct {
 	participants []scoring.Participant
 	activities   []scoring.Activity
-	err          error
-	calls        int
+	// snapshots and frozenAt are what Snapshots gives; it is not counted in
+	// calls, which count what a ranking is computed from.
+	snapshots map[string]json.RawMessage
+	frozenAt  time.Time
+	err       error
+	calls     int
 	// from and to are the window the activities were asked for.
 	from, to time.Time
 }
@@ -41,6 +46,10 @@ func (f *fakeRepo) Activities(_ context.Context, _ string, from, to time.Time) (
 	f.calls++
 	f.from, f.to = from, to
 	return f.activities, f.err
+}
+
+func (f *fakeRepo) Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error) {
+	return f.snapshots, f.frozenAt, nil
 }
 
 type fakeProfiles struct {
@@ -256,5 +265,75 @@ func TestGetAsksForTheActorAndTheChallenge(t *testing.T) {
 	}
 	if challenges.asked != [2]string{"actor", "c1"} {
 		t.Fatalf("challenge asked as %v, want [actor c1]", challenges.asked)
+	}
+}
+
+func TestGetServesTheFrozenResults(t *testing.T) {
+	c := twoWeeks(t)
+	frozenAt := c.EndsAt.Add(time.Hour)
+	// Activities that would change the ranking if it were computed.
+	repo := &fakeRepo{
+		participants: []scoring.Participant{{UserID: "a"}},
+		activities:   []scoring.Activity{{UserID: "a", SportCode: "run", StartedAt: c.StartsAt, DurationSeconds: 1, DistanceMeters: meters(1)}},
+		snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime:     json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":9000,"abandoned":false},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
+			CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":28000,"abandoned":false},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
+			CategoryRunElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000,"abandoned":false},` +
+				`{"user_id":"b","rank":2,"value":5000,"abandoned":false,"eliminated_week":2},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
+		},
+		frozenAt: frozenAt,
+	}
+	// Long after the end, and the pseudo of c is gone.
+	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
+
+	got, err := svc.Get(t.Context(), "actor", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{
+		{Type: CategoryCumulativeTime, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+		}},
+		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+		}},
+		{Type: CategoryRunElimination, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+		}},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Get() = %+v, want %+v", got, want)
+	}
+	if repo.calls != 0 {
+		t.Fatalf("activities read %d times, want the snapshots alone", repo.calls)
+	}
+}
+
+func TestGetComputesWhatIsNotFrozenYet(t *testing.T) {
+	c := twoWeeks(t)
+	tests := []struct {
+		name      string
+		now       time.Time
+		snapshots map[string]json.RawMessage
+	}{
+		{name: "over, the worker has not run", now: c.EndsAt},
+		{name: "over, a category is missing", now: c.EndsAt, snapshots: map[string]json.RawMessage{CategoryCumulativeTime: json.RawMessage(`{"entries":[]}`)}},
+		{name: "still running", now: c.EndsAt.Add(-time.Second), snapshots: map[string]json.RawMessage{CategoryCumulativeTime: json.RawMessage(`{"entries":[]}`)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepo{participants: []scoring.Participant{{UserID: "a"}}, snapshots: tt.snapshots}
+			svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(tt.now), 24*time.Hour)
+			if _, err := svc.Get(t.Context(), "actor", "c1"); err != nil {
+				t.Fatal(err)
+			}
+			if repo.calls != 2 {
+				t.Fatalf("storage called %d times, want the ranking computed (2)", repo.calls)
+			}
+		})
 	}
 }

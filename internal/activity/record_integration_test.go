@@ -146,6 +146,19 @@ func TestRecordWeekLocked(t *testing.T) {
 	}
 }
 
+// TestRecordIntoEndedChallengeWithoutTheWorker: the clock locks the last week
+// of a challenge that is over; no worker has run (nothing is frozen), and
+// nothing is written.
+func TestRecordIntoEndedChallengeWithoutTheWorker(t *testing.T) {
+	f := setupRecord(t)
+	ended := NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations{challengeOf(t, "c1")}, nil, clock.NewFake(toronto(t, 2026, 6, 22, 0)))
+	_, err := ended.Record(t.Context(), f.user, nil, run(toronto(t, 2026, 6, 21, 23)))
+	wantCode(t, err, apperr.CodeWeekLocked)
+	if f.count() != 0 {
+		t.Fatalf("%d rows, want nothing written", f.count())
+	}
+}
+
 func TestRecordOtherSport(t *testing.T) {
 	f := setupRecord(t)
 	label := " Stand  up paddle "
