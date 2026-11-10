@@ -734,6 +734,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Tests** : une seconde avant et à l'instant de fin de semaine ; deux challenges aux semaines décalées ; changement d'heure ; challenge supprimé ignoré ; participant abandonné ignoré ; créateur qui a abandonné ignoré.
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
 **Commit** : `feat(activity): add authorization and week-lock policy`
+**Décision (revue)** : `activity` n'importe pas le package `challenge` (il tirerait gin et gorm, risque de cycle ; ADR 0001 : petite interface côté `activity`). `Participation.Active` porte le statut de participation ; `IsLocked` ignore les participations non actives. La lecture de `challenge.Membership.Participant` (jamais le rôle) et le test « créateur qui a abandonné → `Active = false` » passent à l'adaptateur de SC-API-044.
 **Statut** : À faire
 
 ### SC-API-044 · Enregistrer une activité : `POST /activities`
@@ -747,6 +748,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Source `manual` ; la réponse contient la vitesse calculée et la liste des challenges où l'activité compte.
 - [ ] Une transaction couvre l'écriture. Aucun point d'extension pour les badges : le ticket 062 (V1.1) l'ajoutera quand il en aura besoin.
 - [ ] Aucune donnée personnelle dans les logs.
+- [ ] Adaptateur des participations de l'auteur (repris de SC-API-043) : `Participation.Active` vient du statut de participation (`challenge.Membership.Participant == active`), jamais du rôle ; tests : créateur qui a abandonné, participant abandonné et invité donnent `Active = false`.
 
 **Tests** : intégration (création, répétition avec clé, semaine verrouillée, activité datée de la fenêtre d'un challenge terminé refusée, hors de toute fenêtre acceptée, deux challenges, sport « autre »).
 **Revue** : `go-reviewer`, `security-reviewer`, `spec-guardian`.
