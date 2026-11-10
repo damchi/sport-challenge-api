@@ -56,7 +56,7 @@ func setupRecord(t *testing.T) fixture {
 
 // service records at recordNow, the user taking part in challenges.
 func (f fixture) service(challenges ...Participation) *Service {
-	return NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations(challenges), clock.NewFake(recordNow))
+	return NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations(challenges), nil, clock.NewFake(recordNow))
 }
 
 func (f fixture) count() int {

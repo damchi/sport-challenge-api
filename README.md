@@ -499,6 +499,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 **Codes de réponse** :
 - ressource inexistante ou privée inaccessible → 404 (`challenge_not_found`…) ;
 - ressource visible mais action interdite → 403 `forbidden` ;
+- exception : le détail des activités d'un participant, demandé par quelqu'un qui voit le challenge sans y participer (non-participant d'un challenge public, invité), répond 404 `not_found` : pour lui, cette liste n'existe pas (✅) ;
 - entrée invalide (format, bornes, dates, champ inconnu) → 400 `validation_failed`, avec les champs fautifs dans `params.fields` ;
 - entrée valide mais action contraire à une règle métier → 422 avec un code stable (`profile_incomplete`, `registration_closed`, `challenge_ended`, `field_not_editable`, `cannot_exclude_creator`…) ;
 - conflit avec une autre donnée (pseudo déjà pris) → 409.

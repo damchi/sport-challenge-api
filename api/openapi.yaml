@@ -142,6 +142,54 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/me/activities:
+    get:
+      operationId: listMyActivities
+      summary: List my activities
+      description: |
+        The activities of the authenticated user, deleted ones left out,
+        most recent first (`started_at`, then `id`). `from` and `to` keep
+        those started in `[from, to)`; `to` must come after `from`. Each one
+        lists the challenges where it counts now and whether it is `locked`
+        (its week has ended in one of them).
+      tags: [activities]
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the previous page, as is.
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: A page of activities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/sports:
     get:
       operationId: getSports
@@ -551,6 +599,69 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: The target is a creator (`cannot_exclude_creator`), or the challenge is finished (`challenge_ended`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/participants/{userId}/activities:
+    get:
+      operationId: listParticipantActivities
+      summary: List the activities of a participant
+      description: |
+        The activities of participant `userId` started in the window of the
+        challenge, deleted ones left out, most recent first (`started_at`,
+        then `id`). Visible to the participants of the challenge (abandoned
+        or excluded ones included) and its creators. A challenge the user
+        may not see answers 404 `challenge_not_found`; a visible one the
+        user never joined (a public challenge shows them its leaderboard
+        only), or a `userId` who never joined it, answers 404 `not_found`.
+        `challenge_ids` holds this challenge only, when the activity counts
+        in it (never for a participant who abandoned: empty); `locked` tells
+        whether its author can still change it.
+      tags: [activities]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the previous page, as is.
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: A page of activities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            A missing, deleted or hidden challenge (`challenge_not_found`), or
+            an actor or a `userId` who never joined it (`not_found`).
           content:
             application/json:
               schema:
@@ -1279,7 +1390,7 @@ components:
           description: Required or refused according to the sport's `distance_mode`.
     Activity:
       type: object
-      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, speed_mps, pace_seconds_per_km, challenge_ids]
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, speed_mps, pace_seconds_per_km, challenge_ids, locked]
       additionalProperties: false
       properties:
         id:
@@ -1318,3 +1429,21 @@ components:
           items:
             type: string
             format: uuid
+        locked:
+          type: boolean
+          description: |
+            True once the week of the activity has ended in a challenge where
+            it counts: it can no longer be changed nor deleted.
+    ActivityPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Activity"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.

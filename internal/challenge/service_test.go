@@ -42,6 +42,8 @@ type fakeRepository struct {
 	// memberships serve Memberships; membershipsErr fails it.
 	memberships    []UserChallenge
 	membershipsErr error
+	// others are the memberships Get gives for users other than actor.
+	others map[string]Membership
 }
 
 func (f *fakeRepository) ActiveParticipations(context.Context, string, time.Time) ([]string, error) {
@@ -65,12 +67,15 @@ func (f *fakeRepository) Participants(_ context.Context, _ string, limit int, af
 	return f.participants, nil
 }
 
-func (f *fakeRepository) Get(context.Context, string, string) (Challenge, Membership, error) {
+func (f *fakeRepository) Get(_ context.Context, _, actorID string) (Challenge, Membership, error) {
 	if f.err != nil {
 		return Challenge{}, Membership{}, f.err
 	}
 	if f.challenge == nil {
 		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", errChallengeNotFound)
+	}
+	if f.others != nil && actorID != actor {
+		return *f.challenge, f.others[actorID], nil
 	}
 	return *f.challenge, f.membership, nil
 }
@@ -1081,5 +1086,52 @@ func TestServiceMemberships(t *testing.T) {
 	storage := errors.New("connection refused")
 	if _, err := NewService(&fakeRepository{membershipsErr: storage}, nil, nil, clock.NewFake(now)).Memberships(t.Context(), actor); !errors.Is(err, storage) {
 		t.Fatalf("error = %v, want it to wrap %v", err, storage)
+	}
+}
+
+func TestServiceActivitiesScope(t *testing.T) {
+	const target = "22222222-2222-2222-2222-222222222222"
+	tests := []struct {
+		name       string
+		visibility string
+		actor      Membership
+		others     map[string]Membership
+		userID     string
+		want       apperr.Code // empty: the scope
+		wantMember Membership
+	}{
+		{name: "participant reads another", visibility: VisibilityPrivate, actor: active, others: map[string]Membership{target: abandoned}, userID: target, wantMember: abandoned},
+		{name: "creator reads another", visibility: VisibilityPublic, actor: creatorActive, others: map[string]Membership{target: active}, userID: target, wantMember: active},
+		{name: "own activities", visibility: VisibilityPrivate, actor: abandoned, userID: actor, wantMember: abandoned},
+		{name: "outsider of a public challenge", visibility: VisibilityPublic, actor: outsider, others: map[string]Membership{target: active}, userID: target, want: apperr.CodeNotFound},
+		{name: "outsider of a private challenge", visibility: VisibilityPrivate, actor: outsider, others: map[string]Membership{target: active}, userID: target, want: apperr.CodeChallengeNotFound},
+		{name: "target never joined", visibility: VisibilityPublic, actor: active, others: map[string]Membership{}, userID: target, want: apperr.CodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.actor, others: tt.others}
+			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", tt.userID)
+			if tt.want != "" {
+				if !errors.Is(err, apperr.New(tt.want, nil)) {
+					t.Fatalf("error = %v, want %s", err, tt.want)
+				}
+				return
+			}
+			c := stored(tt.visibility)
+			want := UserChallenge{ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Membership: tt.wantMember}
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("ActivitiesScope() = %+v, %v, want %+v", got, err, want)
+			}
+		})
+	}
+}
+
+func TestServiceActivitiesScopeFailures(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	if _, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("missing challenge: error = %v, want challenge_not_found", err)
+	}
+	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, storageErr) {
+		t.Fatalf("storage failure: error = %v, want the cause kept", err)
 	}
 }

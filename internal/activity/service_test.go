@@ -28,6 +28,20 @@ type fakeRepository struct {
 	deleted   string
 	deletedAt time.Time
 	decided   bool
+	// listing serves List; listed records its query.
+	listing []Activity
+	listed  *ListQuery
+}
+
+func (f *fakeRepository) List(_ context.Context, q ListQuery) ([]Activity, error) {
+	f.listed = &q
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.listing) > q.Limit {
+		return f.listing[:q.Limit], nil
+	}
+	return f.listing, nil
 }
 
 func (f *fakeRepository) Update(ctx context.Context, _, id string, a Activity, decide func(context.Context, Activity) error) (Activity, error) {
@@ -101,17 +115,23 @@ func (f fakeCatalogue) DistanceMode(_ context.Context, code string) (string, boo
 
 var catalogue = fakeCatalogue{modes: map[string]string{"run": distanceRequired, "yoga": distanceNone, "other": distanceOptional}}
 
-// fakeParticipations gives challenges for actor only; calls counts them.
+// fakeParticipations gives challenges for user, the actor when empty, only;
+// calls counts them.
 type fakeParticipations struct {
 	t          *testing.T
+	user       string
 	challenges []Participation
 	err        error
 	calls      *int
 }
 
 func (f fakeParticipations) Participations(_ context.Context, userID string) ([]Participation, error) {
-	if userID != actor {
-		f.t.Errorf("participations of %q, want the actor's", userID)
+	want := f.user
+	if want == "" {
+		want = actor
+	}
+	if userID != want {
+		f.t.Errorf("participations of %q, want those of %q", userID, want)
 	}
 	if f.calls != nil {
 		*f.calls++
@@ -138,7 +158,7 @@ func run(startedAt time.Time) Draft {
 func newService(t *testing.T, repo *fakeRepository, ps fakeParticipations) *Service {
 	t.Helper()
 	ps.t = t
-	return NewService(repo, fakeProfiles{complete: true}, catalogue, ps, clock.NewFake(recordNow))
+	return NewService(repo, fakeProfiles{complete: true}, catalogue, ps, nil, clock.NewFake(recordNow))
 }
 
 func TestServiceRecord(t *testing.T) {
@@ -294,7 +314,7 @@ func TestServiceRecordRefusals(t *testing.T) {
 			}
 			ps := tt.ps
 			ps.t = t
-			_, err := NewService(repo, profiles, cat, ps, clock.NewFake(recordNow)).Record(t.Context(), actor, nil, tt.draft)
+			_, err := NewService(repo, profiles, cat, ps, nil, clock.NewFake(recordNow)).Record(t.Context(), actor, nil, tt.draft)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("error = %v, want it to wrap %v", err, tt.wantErr)
@@ -484,5 +504,227 @@ func checkError(t *testing.T, err error, code apperr.Code, wantErr error) {
 	var appErr *apperr.Error
 	if !errors.As(err, &appErr) || appErr.Code != code {
 		t.Fatalf("error = %v, want %s", err, code)
+	}
+}
+
+// fakeChallenges gives scope for any challenge, or fails with err; asked
+// records the last call.
+type fakeChallenges struct {
+	scope Participation
+	err   error
+	asked *[3]string
+}
+
+func (f fakeChallenges) ActivitiesScope(_ context.Context, actorID, challengeID, userID string) (Participation, error) {
+	if f.asked != nil {
+		*f.asked = [3]string{actorID, challengeID, userID}
+	}
+	return f.scope, f.err
+}
+
+// listing is n activities of userID, most recent first, one a day back from
+// Thursday 2026-06-11 (week 2 of challengeOf), 7:00 in Toronto.
+func listing(t *testing.T, userID string, n int) []Activity {
+	t.Helper()
+	out := make([]Activity, 0, n)
+	for i := range n {
+		out = append(out, Activity{
+			ID: fmt.Sprintf("5f1e7c1a-0000-4000-8000-%012d", i), UserID: userID, SportCode: "yoga",
+			StartedAt: toronto(t, 2026, 6, 11-i, 7), DurationSeconds: 3600, Source: SourceManual,
+		})
+	}
+	return out
+}
+
+func TestServiceMine(t *testing.T) {
+	c1 := challengeOf(t, "c1")
+	tests := []struct {
+		name      string
+		available int
+		limit     int
+		wantItems int
+		wantNext  bool
+	}{
+		{name: "more than a page", available: 5, limit: 2, wantItems: 2, wantNext: true},
+		{name: "exactly a page: no next page", available: 2, limit: 2, wantItems: 2},
+		{name: "less than a page", available: 1, limit: 20, wantItems: 1},
+		{name: "nothing", available: 0, limit: 20},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{listing: listing(t, actor, tt.available)}
+			from, to := toronto(t, 2026, 6, 1, 0), toronto(t, 2026, 6, 15, 0)
+			after := &Position{StartedAt: toronto(t, 2026, 6, 12, 0), ID: "5f1e7c1a-0000-4000-8000-000000000009"}
+			page, err := newService(t, repo, fakeParticipations{challenges: []Participation{c1}}).Mine(t.Context(), actor, Period{From: &from, To: &to}, tt.limit, after)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Items) != tt.wantItems || (page.Next != nil) != tt.wantNext {
+				t.Fatalf("%d items, next %v, want %d items, next %v", len(page.Items), page.Next, tt.wantItems, tt.wantNext)
+			}
+			if tt.wantNext {
+				last := page.Items[len(page.Items)-1]
+				if page.Next.ID != last.ID || !page.Next.StartedAt.Equal(last.StartedAt) {
+					t.Fatalf("next %+v, want the position of the last item %+v", page.Next, last.Activity)
+				}
+			}
+			// The query asks one more item, of the actor, in the period,
+			// after the given position.
+			want := ListQuery{UserID: actor, From: &from, To: &to, Limit: tt.limit + 1, After: after}
+			if q := repo.listed; q == nil || !reflect.DeepEqual(*q, want) {
+				t.Fatalf("query %+v, want %+v", q, want)
+			}
+		})
+	}
+}
+
+// TestServiceMineCountsAndLocks reads where each activity counts and whether
+// it is locked at the clock's now (Thursday of week 2).
+func TestServiceMineCountsAndLocks(t *testing.T) {
+	c1, c2 := challengeOf(t, "c1"), challengeOf(t, "c2")
+	c2.Active = false
+	week2 := Activity{ID: "a2", UserID: actor, StartedAt: toronto(t, 2026, 6, 10, 7), DurationSeconds: 60, Source: SourceManual}
+	week1 := Activity{ID: "a1", UserID: actor, StartedAt: toronto(t, 2026, 6, 3, 7), DurationSeconds: 60, Source: SourceManual}
+	before := Activity{ID: "a0", UserID: actor, StartedAt: toronto(t, 2026, 5, 20, 7), DurationSeconds: 60, Source: SourceManual}
+	repo := &fakeRepository{listing: []Activity{week2, week1, before}}
+	page, err := newService(t, repo, fakeParticipations{challenges: []Participation{c1, c2}}).Mine(t.Context(), actor, Period{}, 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		ids    []string
+		locked bool
+	}{
+		{ids: []string{"c1"}},
+		{ids: []string{"c1"}, locked: true},
+		// Outside every window: counts nowhere, never locked.
+		{},
+	}
+	for i, w := range want {
+		got := page.Items[i]
+		if !reflect.DeepEqual(got.ChallengeIDs, w.ids) || got.Locked != w.locked {
+			t.Errorf("item %d: challenges %v, locked %v, want %v, %v", i, got.ChallengeIDs, got.Locked, w.ids, w.locked)
+		}
+	}
+}
+
+func TestServiceMineRefusals(t *testing.T) {
+	from := toronto(t, 2026, 6, 8, 0)
+	before := from.Add(-time.Second)
+	tests := []struct {
+		name   string
+		period Period
+		limit  int
+		field  string
+	}{
+		{name: "empty page", limit: 0, field: "limit"},
+		{name: "to before from", period: Period{From: &from, To: &before}, limit: 20, field: "to"},
+		{name: "to equal to from: empty period", period: Period{From: &from, To: &from}, limit: 20, field: "to"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{}
+			_, err := newService(t, repo, fakeParticipations{}).Mine(t.Context(), actor, tt.period, tt.limit, nil)
+			var appErr *apperr.Error
+			if !errors.As(err, &appErr) || appErr.Code != apperr.CodeValidationFailed || appErr.Params[apperr.FieldsParam] != tt.field {
+				t.Fatalf("error = %v, want validation_failed on %s", err, tt.field)
+			}
+			if repo.listed != nil {
+				t.Fatal("activities read despite the refusal")
+			}
+		})
+	}
+}
+
+func TestServiceMineFailures(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	if _, err := newService(t, &fakeRepository{err: storageErr}, fakeParticipations{}).Mine(t.Context(), actor, Period{}, 20, nil); !errors.Is(err, storageErr) {
+		t.Fatalf("listing failure: error = %v, want the cause kept", err)
+	}
+	if _, err := newService(t, &fakeRepository{listing: listing(t, actor, 1)}, fakeParticipations{err: storageErr}).Mine(t.Context(), actor, Period{}, 20, nil); !errors.Is(err, storageErr) {
+		t.Fatalf("participations failure: error = %v, want the cause kept", err)
+	}
+}
+
+const participant = "7c6b5a49-3827-4165-9f0e-d1c2b3a4f5e6"
+
+func TestServiceOfParticipant(t *testing.T) {
+	c1 := challengeOf(t, "c1")
+	// other starts on Thursday 2026-06-04: its week 1 ended at midnight
+	// between Wednesday 2026-06-10 and Thursday 2026-06-11.
+	other := participation(t, [3]int{2026, 6, 4}, 3)
+	other.ChallengeID = "other"
+	repo := &fakeRepository{listing: listing(t, participant, 3)}
+	var asked [3]string
+	ps := fakeParticipations{t: t, user: participant, challenges: []Participation{c1, other}}
+	svc := NewService(repo, fakeProfiles{}, catalogue, ps, fakeChallenges{scope: c1, asked: &asked}, clock.NewFake(recordNow))
+	page, err := svc.OfParticipant(t.Context(), actor, "c1", participant, 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked != [3]string{actor, "c1", participant} {
+		t.Fatalf("scope asked for %v, want the actor, the challenge and the participant", asked)
+	}
+	// Activities of the participant, in the window of the challenge.
+	want := ListQuery{UserID: participant, From: &c1.StartsAt, To: &c1.EndsAt, Limit: 3}
+	if q := repo.listed; q == nil || !reflect.DeepEqual(*q, want) {
+		t.Fatalf("query %+v, want %+v", q, want)
+	}
+	if len(page.Items) != 2 || page.Next == nil {
+		t.Fatalf("%d items, next %v, want 2 items and a next page", len(page.Items), page.Next)
+	}
+	// Both count in c1 and other; only c1 is shown. Wednesday 2026-06-10 is
+	// locked by other alone.
+	for i, it := range page.Items {
+		if !reflect.DeepEqual(it.ChallengeIDs, []string{"c1"}) {
+			t.Errorf("item %d: challenges %v, want [c1] only", i, it.ChallengeIDs)
+		}
+	}
+	if page.Items[0].Locked || !page.Items[1].Locked {
+		t.Fatalf("locked %v, %v, want false, true", page.Items[0].Locked, page.Items[1].Locked)
+	}
+}
+
+// TestServiceOfParticipantAbandoned shows the activities of a participant
+// who abandoned: they count nowhere in the challenge.
+func TestServiceOfParticipantAbandoned(t *testing.T) {
+	c1 := challengeOf(t, "c1")
+	c1.Active = false
+	repo := &fakeRepository{listing: listing(t, participant, 1)}
+	ps := fakeParticipations{t: t, user: participant, challenges: []Participation{c1}}
+	page, err := NewService(repo, fakeProfiles{}, catalogue, ps, fakeChallenges{scope: c1}, clock.NewFake(recordNow)).OfParticipant(t.Context(), actor, "c1", participant, 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].ChallengeIDs) != 0 {
+		t.Fatalf("items %+v, want one activity counting nowhere", page.Items)
+	}
+}
+
+func TestServiceOfParticipantRefusals(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	tests := []struct {
+		name     string
+		scopeErr error
+		limit    int
+		wantErr  error
+	}{
+		{name: "empty page", limit: 0, wantErr: apperr.New(apperr.CodeValidationFailed, nil)},
+		{name: "leaderboard only", scopeErr: apperr.New(apperr.CodeNotFound, nil), limit: 20, wantErr: apperr.New(apperr.CodeNotFound, nil)},
+		{name: "hidden challenge", scopeErr: apperr.New(apperr.CodeChallengeNotFound, nil), limit: 20, wantErr: apperr.New(apperr.CodeChallengeNotFound, nil)},
+		{name: "scope failure", scopeErr: storageErr, limit: 20, wantErr: storageErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{listing: listing(t, participant, 1)}
+			svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{t: t, user: participant}, fakeChallenges{err: tt.scopeErr}, clock.NewFake(recordNow))
+			_, err := svc.OfParticipant(t.Context(), actor, "c1", participant, tt.limit, nil)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if repo.listed != nil {
+				t.Fatal("activities read despite the refusal")
+			}
+		})
 	}
 }
