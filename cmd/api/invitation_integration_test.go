@@ -24,24 +24,29 @@ import (
 // while its author may invite" is written twice in SQL, in the membership
 // query of module challenge and in the link query of module invitation.
 // For every situation of the author, opening the link and reading the
-// private challenge through an earlier link must agree.
+// private challenge through an earlier link must both follow
+// challenge.CanInvite, the rule in Go: changing it without both queries
+// fails here.
 func TestInvitationValidityAgreesAcrossModules(t *testing.T) {
 	tests := []struct {
 		name             string
 		creator          bool
-		status           string // empty: never joined
+		status           challenge.ParticipantStatus // empty: never joined
 		membersCanInvite bool
-		want             bool
 	}{
-		{name: "creator", creator: true, status: "active", want: true},
-		{name: "creator who abandoned", creator: true, status: "abandoned", want: true},
-		{name: "active participant, members may invite", status: "active", membersCanInvite: true, want: true},
-		{name: "active participant, members may not invite", status: "active"},
-		{name: "abandoned or excluded participant", status: "abandoned", membersCanInvite: true},
+		{name: "creator", creator: true, status: challenge.ParticipantActive},
+		{name: "creator who abandoned", creator: true, status: challenge.ParticipantAbandoned},
+		{name: "creator, members may invite", creator: true, status: challenge.ParticipantActive, membersCanInvite: true},
+		{name: "active participant, members may invite", status: challenge.ParticipantActive, membersCanInvite: true},
+		{name: "active participant, members may not invite", status: challenge.ParticipantActive},
+		{name: "abandoned or excluded participant", status: challenge.ParticipantAbandoned, membersCanInvite: true},
+		{name: "abandoned participant, members may not invite", status: challenge.ParticipantAbandoned},
 		{name: "never joined", membersCanInvite: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			role := challenge.RoleOf(challenge.Membership{Creator: tt.creator, Participant: tt.status})
+			want := challenge.CanInvite(role, tt.membersCanInvite)
 			pool := testdb.New(t)
 			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 			gdb, err := db.NewGorm(pool, logger)
@@ -82,9 +87,9 @@ func TestInvitationValidityAgreesAcrossModules(t *testing.T) {
 				exec("INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", id, author)
 			}
 			switch tt.status {
-			case "active":
+			case challenge.ParticipantActive:
 				exec("INSERT INTO participants VALUES ($1, $2, 'active', $3, NULL)", id, author, start)
-			case "abandoned":
+			case challenge.ParticipantAbandoned:
 				exec("INSERT INTO participants VALUES ($1, $2, 'abandoned', $3, $4)", id, author, start, recordNow)
 			}
 
@@ -99,8 +104,8 @@ func TestInvitationValidityAgreesAcrossModules(t *testing.T) {
 
 			_, linkErr := invitations.Link(t.Context(), opener, base64.RawURLEncoding.EncodeToString(raw))
 			_, readErr := challenges.Get(t.Context(), linked, id)
-			if opened, read := linkErr == nil, readErr == nil; opened != tt.want || read != tt.want {
-				t.Fatalf("link opened %v (%v), challenge read %v (%v), want both %v", opened, linkErr, read, readErr, tt.want)
+			if opened, read := linkErr == nil, readErr == nil; opened != want || read != want {
+				t.Fatalf("link opened %v (%v), challenge read %v (%v), want both %v (CanInvite)", opened, linkErr, read, readErr, want)
 			}
 		})
 	}
