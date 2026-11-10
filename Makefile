@@ -41,7 +41,7 @@ LOCAL_DB_HOSTS := localhost 127.0.0.1 postgres
 
 .DEFAULT_GOAL := help
 
-.PHONY: help run build tools fmt lint test test-integration check generate openapi-lint doc \
+.PHONY: help run worker build tools fmt lint test test-integration check generate openapi-lint doc \
 	migrate-new migrate-up migrate-down migrate-version \
 	docker-up docker-down guard-local-db
 
@@ -50,6 +50,10 @@ help: ## Show available targets
 
 run: ## Run the API locally
 	go run ./cmd/api
+
+worker: ## Run a worker task locally: make worker TASK=close-weeks
+	@test -n "$(TASK)" || { echo "usage: make worker TASK=close-weeks"; exit 2; }
+	go run ./cmd/worker $(TASK)
 
 build: ## Build the binaries into bin/
 	go build -o $(TOOLS_BIN)/ ./cmd/...

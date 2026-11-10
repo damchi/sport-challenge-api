@@ -347,3 +347,161 @@ func TestEliminationProgress(t *testing.T) {
 		}
 	})
 }
+
+func TestEliminations(t *testing.T) {
+	// 4 weeks across the time change of March 8.
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 4)
+	const step = 2000
+	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
+	weekEnd := func(n int) time.Time { _, e := w.WeekBounds(n); return e }
+	// runs is one run per week, none for 0.
+	runs := func(user string, distances ...int) []Activity {
+		var as []Activity
+		for i, d := range distances {
+			if d > 0 {
+				as = append(as, Activity{
+					UserID: user, SportCode: "run", StartedAt: weekStart(i + 1).Add(time.Hour),
+					DurationSeconds: 1800, DistanceMeters: meters(d),
+				})
+			}
+		}
+		return as
+	}
+	users := func(ids ...string) []Participant {
+		ps := make([]Participant, len(ids))
+		for i, id := range ids {
+			ps[i] = Participant{UserID: id}
+		}
+		return ps
+	}
+
+	tests := []struct {
+		name         string
+		now          time.Time
+		participants []Participant
+		activities   []Activity
+		want         []Eliminated
+	}{
+		{
+			name:         "the distance run and the minimum it missed",
+			now:          weekEnd(2),
+			participants: users("a", "b"),
+			activities:   slices.Concat(runs("a", 5000, 6999), runs("b", 1000, 3000)),
+			want:         []Eliminated{{UserID: "a", Week: 2, RunMeters: 6999, MinimumMeters: 7000}},
+		},
+		{
+			name:         "exactly the minimum is not eliminated",
+			now:          weekEnd(2),
+			participants: users("a"),
+			activities:   runs("a", 5000, 7000),
+		},
+		{
+			name:         "no run in the week is eliminated at zero",
+			now:          weekEnd(2),
+			participants: users("a"),
+			activities:   runs("a", 5000),
+			want:         []Eliminated{{UserID: "a", Week: 2, RunMeters: 0, MinimumMeters: 7000}},
+		},
+		{
+			name:         "week 2 is judged at its exact end, not before",
+			now:          weekEnd(2).Add(-time.Nanosecond),
+			participants: users("a"),
+			activities:   runs("a", 5000),
+		},
+		{
+			name:         "no elimination in week 1",
+			now:          weekEnd(1),
+			participants: users("a"),
+		},
+		{
+			name:         "the minimum follows the distance really run",
+			now:          weekEnd(3),
+			participants: users("a", "c"),
+			// Week 3 needs 10000 + 2000, not 5000 + 4000.
+			activities: slices.Concat(runs("a", 5000, 10000, 12000), runs("c", 5000, 10000, 11999)),
+			want:       []Eliminated{{UserID: "c", Week: 3, RunMeters: 11999, MinimumMeters: 12000}},
+		},
+		{
+			name:         "only the first elimination of a participant",
+			now:          weekEnd(4),
+			participants: users("a"),
+			activities:   runs("a", 5000, 1000, 9000, 20000),
+			want:         []Eliminated{{UserID: "a", Week: 2, RunMeters: 1000, MinimumMeters: 7000}},
+		},
+		{
+			name:         "ordered by week then participant",
+			now:          weekEnd(3),
+			participants: users("d", "c", "b", "a"),
+			activities:   slices.Concat(runs("a", 5000, 7000, 1), runs("b", 5000, 100, 100), runs("c", 5000, 7000, 1), runs("d", 5000, 7000, 9000)),
+			want: []Eliminated{
+				{UserID: "b", Week: 2, RunMeters: 100, MinimumMeters: 7000},
+				{UserID: "a", Week: 3, RunMeters: 1, MinimumMeters: 9000},
+				{UserID: "c", Week: 3, RunMeters: 1, MinimumMeters: 9000},
+			},
+		},
+		{
+			name:         "an abandoned participant is not eliminated",
+			now:          weekEnd(2),
+			participants: []Participant{{UserID: "a", Abandoned: true}, {UserID: "b"}},
+			activities:   runs("b", 5000, 7000),
+		},
+		{
+			name:         "a run of another sport does not count",
+			now:          weekEnd(2),
+			participants: users("a"),
+			activities: slices.Concat(runs("a", 5000), []Activity{{
+				UserID: "a", SportCode: "ride", StartedAt: weekStart(2).Add(time.Hour),
+				DurationSeconds: 1800, DistanceMeters: meters(20000),
+			}}),
+			want: []Eliminated{{UserID: "a", Week: 2, RunMeters: 0, MinimumMeters: 7000}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := w
+			w.Now = tt.now
+			got := Elimination{Sport: "run", StepMeters: step}.Eliminations(w, tt.participants, tt.activities)
+			if !reflect.DeepEqual(got, tt.want) && (len(got) != 0 || len(tt.want) != 0) {
+				t.Fatalf("Eliminations() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("the result does not depend on when it is computed", func(t *testing.T) {
+		participants := users("a", "b")
+		activities := slices.Concat(runs("a", 5000, 6999, 4000), runs("b", 5000, 7000, 8000))
+		scorer := Elimination{Sport: "run", StepMeters: step}
+		atEnd, later := w, w
+		atEnd.Now, later.Now = weekEnd(2), weekEnd(2).Add(30*24*time.Hour)
+		onTime := scorer.Eliminations(atEnd, participants, activities)
+		// Week 3 is judged later, but week 2 stays what it was.
+		var week2 []Eliminated
+		for _, e := range scorer.Eliminations(later, participants, activities) {
+			if e.Week == 2 {
+				week2 = append(week2, e)
+			}
+		}
+		if !reflect.DeepEqual(onTime, week2) {
+			t.Fatalf("week 2 judged on time = %+v, judged late = %+v", onTime, week2)
+		}
+	})
+
+	t.Run("the same eliminations as the ranking", func(t *testing.T) {
+		participants := users("a", "b", "c", "d")
+		activities := slices.Concat(runs("a", 5000, 6999, 4000), runs("b", 5000, 7000, 8999), runs("c", 5000, 7000, 9000), runs("d", 1000))
+		scorer := Elimination{Sport: "run", StepMeters: step}
+		for n := 1; n <= 4; n++ {
+			w := w
+			w.Now = weekEnd(n)
+			recorded := map[string]int{}
+			for _, e := range scorer.Eliminations(w, participants, activities) {
+				recorded[e.UserID] = e.Week
+			}
+			for _, entry := range scorer.Score(w, participants, activities) {
+				if got := recorded[entry.UserID]; got != entry.Progress.EliminatedWeek {
+					t.Errorf("end of week %d, %s: eliminated in week %d, ranking says %d", n, entry.UserID, got, entry.Progress.EliminatedWeek)
+				}
+			}
+		}
+	})
+}

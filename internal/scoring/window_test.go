@@ -203,3 +203,35 @@ func TestWeeks(t *testing.T) {
 		})
 	}
 }
+
+func TestEndedWeeks(t *testing.T) {
+	// 3 weeks across the time change of March 8: week 1 lasts 168 h, week 2 167 h.
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 3)
+	_, end1 := w.WeekBounds(1)
+	_, end2 := w.WeekBounds(2)
+	tests := []struct {
+		name string
+		now  time.Time
+		want int
+	}{
+		{name: "before the start", now: w.Start.Add(-time.Hour)},
+		{name: "at the start", now: w.Start},
+		{name: "last instant of week 1", now: end1.Add(-time.Nanosecond)},
+		{name: "exact end of week 1, no grace", now: end1, want: 1},
+		{name: "an hour after the end of week 1", now: end1.Add(time.Hour), want: 1},
+		{name: "last instant of week 2", now: end2.Add(-time.Nanosecond), want: 1},
+		{name: "exact end of week 2", now: end2, want: 2},
+		{name: "last instant of the challenge", now: w.End.Add(-time.Nanosecond), want: 2},
+		{name: "end of the challenge", now: w.End, want: 3},
+		{name: "long after the end", now: w.End.AddDate(1, 0, 0), want: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := w
+			w.Now = tt.now
+			if got := w.EndedWeeks(); got != tt.want {
+				t.Fatalf("EndedWeeks() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

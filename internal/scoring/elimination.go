@@ -1,6 +1,10 @@
 package scoring
 
-import "time"
+import (
+	"cmp"
+	"slices"
+	"time"
+)
 
 // Elimination is category 3, run with elimination: the distance run in a
 // week must be at least the distance of the week before plus the step, or
@@ -27,27 +31,8 @@ var _ Scorer = Elimination{}
 // cumulative distance up to their elimination.
 func (e Elimination) Score(w Window, participants []Participant, activities []Activity) []Entry {
 	weeks := w.Weeks()
-	// weekly[user][n] is the distance run in week n; index 0 is unused.
-	weekly := make(map[string][]int, len(participants))
-	for _, p := range participants {
-		weekly[p.UserID] = make([]int, weeks+1)
-	}
-	for _, a := range activities {
-		n := w.WeekOf(a.StartedAt)
-		if a.SportCode != e.Sport || a.DistanceMeters == nil || n == 0 {
-			continue
-		}
-		if distances, ok := weekly[a.UserID]; ok {
-			distances[n] += *a.DistanceMeters
-		}
-	}
-
-	judged := 0
-	for n := 1; n <= weeks; n++ {
-		if _, end := w.WeekBounds(n); !w.Now.Before(end) {
-			judged = n
-		}
-	}
+	weekly := e.weeklyDistances(w, participants, activities)
+	judged := w.EndedWeeks()
 
 	week, weekEnd := w.CurrentWeek()
 	progress := make(map[string]*Progress, len(participants))
@@ -56,11 +41,8 @@ func (e Elimination) Score(w Window, participants []Participant, activities []Ac
 	tiers := make(map[string]int, len(participants))
 	for user, distances := range weekly {
 		last, tier, eliminatedWeek := weeks, weeks+1, 0
-		for n := 2; n <= judged; n++ {
-			if isEliminated(distances[n-1], distances[n], e.StepMeters) {
-				last, tier, eliminatedWeek = n, n, n
-				break
-			}
+		if n := firstEliminatedWeek(distances, judged, e.StepMeters); n > 0 {
+			last, tier, eliminatedWeek = n, n, n
 		}
 		progress[user] = e.progress(distances, eliminatedWeek, week, weekEnd, w.Now)
 		for _, d := range distances[1 : last+1] {
@@ -75,6 +57,72 @@ func (e Elimination) Score(w Window, participants []Participant, activities []Ac
 		}
 	}
 	return entries
+}
+
+// Eliminated is a participant eliminated from the category: the first week
+// judged under the minimum, the distance run that week and the minimum.
+type Eliminated struct {
+	UserID        string
+	Week          int
+	RunMeters     int
+	MinimumMeters int
+}
+
+// Eliminations lists the participants eliminated in the weeks judged at the
+// instant of the window, by week then participant; an abandoned participant
+// is left out (shown as abandoned, not as eliminated). A week judged keeps
+// its eliminations whenever it is computed: running it later only adds the
+// weeks that ended since.
+func (e Elimination) Eliminations(w Window, participants []Participant, activities []Activity) []Eliminated {
+	weekly := e.weeklyDistances(w, participants, activities)
+	judged := w.EndedWeeks()
+	var out []Eliminated
+	for _, p := range participants {
+		if p.Abandoned {
+			continue
+		}
+		distances := weekly[p.UserID]
+		if n := firstEliminatedWeek(distances, judged, e.StepMeters); n > 0 {
+			out = append(out, Eliminated{
+				UserID: p.UserID, Week: n, RunMeters: distances[n], MinimumMeters: minimumMeters(distances[n-1], e.StepMeters),
+			})
+		}
+	}
+	slices.SortFunc(out, func(a, b Eliminated) int {
+		return cmp.Or(cmp.Compare(a.Week, b.Week), cmp.Compare(a.UserID, b.UserID))
+	})
+	return out
+}
+
+// weeklyDistances is the distance run by each participant in each week:
+// weekly[user][n] for week n, index 0 unused.
+func (e Elimination) weeklyDistances(w Window, participants []Participant, activities []Activity) map[string][]int {
+	weeks := w.Weeks()
+	weekly := make(map[string][]int, len(participants))
+	for _, p := range participants {
+		weekly[p.UserID] = make([]int, weeks+1)
+	}
+	for _, a := range activities {
+		n := w.WeekOf(a.StartedAt)
+		if a.SportCode != e.Sport || a.DistanceMeters == nil || n == 0 {
+			continue
+		}
+		if distances, ok := weekly[a.UserID]; ok {
+			distances[n] += *a.DistanceMeters
+		}
+	}
+	return weekly
+}
+
+// firstEliminatedWeek is the first of the judged weeks, from week 2 (week 1
+// has no reference), where the distance misses the minimum; 0 if none.
+func firstEliminatedWeek(distances []int, judged, step int) int {
+	for n := 2; n <= judged; n++ {
+		if isEliminated(distances[n-1], distances[n], step) {
+			return n
+		}
+	}
+	return 0
 }
 
 // progress is the live situation of a participant eliminated in

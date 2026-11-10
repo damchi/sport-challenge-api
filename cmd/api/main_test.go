@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -22,55 +21,16 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/health"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/platform/logging"
 	"github.com/damchi/sport-challenge-api/internal/sport"
 	"github.com/damchi/sport-challenge-api/internal/user"
 )
-
-func TestNewLoggerIsCloudLoggingCompatible(t *testing.T) {
-	tests := []struct {
-		level    slog.Level
-		severity string
-	}{
-		{slog.LevelDebug, "DEBUG"},
-		{slog.LevelInfo, "INFO"},
-		{slog.LevelWarn, "WARNING"},
-		{slog.LevelError, "ERROR"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.severity, func(t *testing.T) {
-			var out bytes.Buffer
-			newLogger(&out, slog.LevelDebug).Log(t.Context(), tt.level, "hello")
-
-			var line map[string]any
-			if err := json.Unmarshal(out.Bytes(), &line); err != nil {
-				t.Fatalf("not JSON: %q", out.String())
-			}
-			if line["severity"] != tt.severity || line["message"] != "hello" || line["time"] == nil {
-				t.Fatalf("line = %v, want severity %s, message and time", line, tt.severity)
-			}
-			if ts, _ := line["time"].(string); !strings.HasSuffix(ts, "Z") {
-				t.Fatalf("time = %v, want UTC", line["time"])
-			}
-			if _, ok := line["level"]; ok {
-				t.Fatalf("line still has level: %v", line)
-			}
-		})
-	}
-}
-
-func TestNewLoggerFiltersBelowLevel(t *testing.T) {
-	var out bytes.Buffer
-	newLogger(&out, slog.LevelWarn).Info("hidden")
-	if out.Len() != 0 {
-		t.Fatalf("info written at warn level: %q", out.String())
-	}
-}
 
 func TestLogRoutesAtDebugLevel(t *testing.T) {
 	routes := gin.RoutesInfo{{Method: "GET", Path: "/healthz"}}
 
 	var out bytes.Buffer
-	logRoutes(newLogger(&out, slog.LevelDebug), routes)
+	logRoutes(logging.New(&out, slog.LevelDebug), routes)
 	var line map[string]any
 	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
 		t.Fatalf("not JSON: %q", out.String())
@@ -81,7 +41,7 @@ func TestLogRoutesAtDebugLevel(t *testing.T) {
 	}
 
 	out.Reset()
-	logRoutes(newLogger(&out, slog.LevelInfo), routes)
+	logRoutes(logging.New(&out, slog.LevelInfo), routes)
 	if out.Len() != 0 {
 		t.Fatalf("routes logged at info level: %q", out.String())
 	}
@@ -100,7 +60,7 @@ func TestPingDatabase(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var out bytes.Buffer
-			pingDatabase(t.Context(), newLogger(&out, slog.LevelDebug), func(ctx context.Context) error {
+			pingDatabase(t.Context(), logging.New(&out, slog.LevelDebug), func(ctx context.Context) error {
 				if _, ok := ctx.Deadline(); !ok {
 					t.Error("ping context has no deadline")
 				}
