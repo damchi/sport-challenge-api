@@ -115,3 +115,15 @@ func (unimplemented) ListParticipantActivities(context.Context, api.ListParticip
 func (unimplemented) GetLeaderboard(context.Context, api.GetLeaderboardRequestObject) (api.GetLeaderboardResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) CreateInvitation(context.Context, api.CreateInvitationRequestObject) (api.CreateInvitationResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) GetInvitation(context.Context, api.GetInvitationRequestObject) (api.GetInvitationResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) AcceptInvitation(context.Context, api.AcceptInvitationRequestObject) (api.AcceptInvitationResponseObject, error) {
+	return nil, errNotImplemented
+}

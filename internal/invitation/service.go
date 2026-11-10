@@ -31,11 +31,28 @@ type repository interface {
 	Link(ctx context.Context, tokenHash []byte, userID string, now time.Time) (string, error)
 }
 
-// Challenges gives the end of week 1 of challenge challengeID once actorID
-// may invite to it, and refuses otherwise (module challenge, rule
-// challenge.InviteRefusal).
+// Challenge is what an invitation shows of its challenge: a limited
+// preview.
+type Challenge struct {
+	ID       string
+	Title    string
+	StartsAt time.Time
+	EndsAt   time.Time
+}
+
+// Challenges is what the service needs from module challenge, which applies
+// its own rules to actorID each time.
 type Challenges interface {
+	// InvitationDeadline gives the end of week 1 of challenge challengeID
+	// once actorID may invite to it, and refuses otherwise (rule
+	// challenge.InviteRefusal).
 	InvitationDeadline(ctx context.Context, actorID, challengeID string) (time.Time, error)
+	// Preview gives the preview of a challenge actorID may see; 404
+	// challenge_not_found otherwise.
+	Preview(ctx context.Context, actorID, challengeID string) (Challenge, error)
+	// Join makes actorID a participant of the challenge, under the join
+	// rule (challenge.JoinRefusal).
+	Join(ctx context.Context, actorID, challengeID string) error
 }
 
 // Service holds the use cases of the invitations.
@@ -98,4 +115,44 @@ func (s *Service) Link(ctx context.Context, actorID, token string) (string, erro
 		return "", fmt.Errorf("link invitation: %w", err)
 	}
 	return challengeID, nil
+}
+
+// Preview opens the link of token for actorID (Link) and returns the
+// preview of its challenge.
+func (s *Service) Preview(ctx context.Context, actorID, token string) (Challenge, error) {
+	challengeID, err := s.Link(ctx, actorID, token)
+	if err != nil {
+		return Challenge{}, err
+	}
+	c, err := s.challenges.Preview(ctx, actorID, challengeID)
+	if err != nil {
+		return Challenge{}, invalidIfHidden(err)
+	}
+	return c, nil
+}
+
+// Accept opens the link of token for actorID (Link), then joins its
+// challenge under the join rule of module challenge, and returns the
+// challenge joined. A refused join keeps the link: actorID stays invited
+// while the invitation is valid.
+func (s *Service) Accept(ctx context.Context, actorID, token string) (string, error) {
+	challengeID, err := s.Link(ctx, actorID, token)
+	if err != nil {
+		return "", err
+	}
+	if err := s.challenges.Join(ctx, actorID, challengeID); err != nil {
+		return "", invalidIfHidden(err)
+	}
+	return challengeID, nil
+}
+
+// invalidIfHidden turns a 404 challenge_not_found into a 404
+// invitation_invalid: the invitation stopped being valid, or its challenge
+// was deleted, between the link and the read of the challenge. The routes
+// of an invitation never answer about a challenge.
+func invalidIfHidden(err error) error {
+	if errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		return apperr.New(apperr.CodeInvitationInvalid, nil)
+	}
+	return err
 }
