@@ -8,11 +8,15 @@ import (
 // Rank ranks the participants by value, highest first; a participant
 // missing from values has 0. Equal values share the rank (1, 1, 3), with no
 // arbitrary tie-break: the user ID only fixes the display order. Abandoned
-// participants come last, unranked (rank 0).
+// participants come last, unranked (rank 0) and at 0: their activities no
+// longer count.
 func Rank(participants []Participant, values map[string]int) []Entry {
 	entries := make([]Entry, len(participants))
 	for i, p := range participants {
-		entries[i] = Entry{UserID: p.UserID, Value: values[p.UserID], Abandoned: p.Abandoned}
+		entries[i] = Entry{UserID: p.UserID, Abandoned: p.Abandoned}
+		if !p.Abandoned {
+			entries[i].Value = values[p.UserID]
+		}
 	}
 	slices.SortFunc(entries, func(a, b Entry) int {
 		if a.Abandoned != b.Abandoned {
