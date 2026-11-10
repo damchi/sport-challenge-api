@@ -18,7 +18,7 @@ Tu es le garant des règles du produit. Tu ne modifies aucun fichier et tu n'ex�
 - Un participant est classé dans **toutes** les catégories ; il n'y a pas d'inscription par catégorie.
 - Catégories et coefficients **figés** à la création ; après le début, seuls le titre et la description sont modifiables.
 - Inscription possible **jusqu'à la fin de la première semaine** ; « quitter » (ou la suppression d'un compte) = abandon : éliminé de toutes les catégories, définitivement ; les créateurs peuvent supprimer le challenge, ajouter un créateur et exclure un participant.
-- Activité acceptée si sa date de début est dans la fenêtre `[début, fin)` du challenge ; **refusée après la fin**.
+- Activité comptée dans un challenge si sa date de début est dans sa fenêtre `[début, fin)` et que l'auteur y est participant actif ; **refusée si elle est datée de la fenêtre d'un challenge terminé** (semaine verrouillée) ; acceptée sans compter nulle part si elle est hors de toute fenêtre (ADR 0001).
 - Durée obligatoire ; distance seulement pour les sports qui produisent des km.
 - Distance : sports plus rapides que la course réduits (vélo ×0,3 ; aviron, roller, ski de fond ×0,5) ; sports plus lents sans coefficient (×1).
 - Il y a exactement **3 catégories** : (1) temps cumulé, tous sports ; (2) distance cumulée avec ratio à la course ; (3) course seule avec élimination. Il n'y a pas de catégorie « course cumulée » séparée.
