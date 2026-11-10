@@ -26,7 +26,7 @@ CREATE TABLE week_closure (
 CREATE TABLE elimination (
     challenge_id    uuid     NOT NULL,
     category_id     uuid     NOT NULL,
-    user_id         uuid     NOT NULL REFERENCES users (id),
+    user_id         uuid     NOT NULL,
     -- Constant: with the composite key below, only the run elimination
     -- category of the challenge can be referenced.
     category_type   text     NOT NULL DEFAULT 'run_elimination',
@@ -36,7 +36,8 @@ CREATE TABLE elimination (
     PRIMARY KEY (category_id, user_id),
     CONSTRAINT elimination_category_fkey FOREIGN KEY (category_id, challenge_id, category_type)
         REFERENCES categories (id, challenge_id, type),
-    -- Only a participant of the challenge can be eliminated.
+    -- Only a participant of the challenge can be eliminated (which also
+    -- ties user_id to users).
     CONSTRAINT elimination_participant_fkey FOREIGN KEY (challenge_id, user_id)
         REFERENCES participants (challenge_id, user_id),
     CONSTRAINT elimination_category_type_check CHECK (category_type = 'run_elimination'),
