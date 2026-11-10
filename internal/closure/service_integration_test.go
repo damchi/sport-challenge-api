@@ -3,6 +3,8 @@
 package closure
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"reflect"
@@ -303,6 +305,23 @@ func (s seed) snapshots(challengeID string) []storedSnapshot {
 	return out
 }
 
+type staticChallenge struct{ c leaderboard.Challenge }
+
+func (s staticChallenge) Challenge(context.Context, string, string) (leaderboard.Challenge, error) {
+	return s.c, nil
+}
+
+type noProfiles struct{}
+
+func (noProfiles) Pseudos(context.Context, []string) (map[string]string, error) { return nil, nil }
+
+// withoutSnapshots makes the leaderboard compute its ranking.
+type withoutSnapshots struct{ *leaderboard.Repository }
+
+func (withoutSnapshots) Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error) {
+	return nil, time.Time{}, nil
+}
+
 func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 	pool := testdb.New(t)
 	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
@@ -373,6 +392,39 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		}
 		if got := s.snapshots(runningID); len(got) != 0 {
 			t.Fatalf("challenge not over has %d snapshots, want none", len(got))
+		}
+	})
+
+	// The contract between the two modules: the ranking served from the
+	// snapshots written here is the one computed from the activities.
+	t.Run("the leaderboard serves what was frozen", func(t *testing.T) {
+		c := leaderboard.Challenge{
+			ID: challengeID, Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end,
+			Categories: []leaderboard.Category{
+				{Type: leaderboard.CategoryCumulativeTime},
+				{Type: leaderboard.CategoryCumulativeDistance},
+				{Type: leaderboard.CategoryRunElimination, Sport: "run", StepMeters: 2000},
+			},
+		}
+		board := func(repo interface {
+			Participants(context.Context, string) ([]scoring.Participant, error)
+			Activities(context.Context, string, time.Time, time.Time) ([]scoring.Activity, error)
+			Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
+		},
+		) leaderboard.Leaderboard {
+			t.Helper()
+			svc := leaderboard.NewService(staticChallenge{c}, noProfiles{}, repo, clock.NewFake(end.Add(48*time.Hour)), time.Hour)
+			got, err := svc.Get(t.Context(), a, challengeID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got.ComputedAt = time.Time{}
+			return got
+		}
+		frozen := board(leaderboard.NewRepository(gdb))
+		computed := board(withoutSnapshots{leaderboard.NewRepository(gdb)})
+		if !reflect.DeepEqual(frozen, computed) {
+			t.Fatalf("served from the snapshots = %+v, want what is computed %+v", frozen, computed)
 		}
 	})
 

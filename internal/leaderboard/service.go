@@ -169,8 +169,14 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 			return Leaderboard{}, false, fmt.Errorf("decode snapshot of category %s: %w", cat.Type, err)
 		}
 	}
-	for _, e := range rankings[0].Entries {
-		ids = append(ids, e.UserID)
+	seen := make(map[string]bool)
+	for _, r := range rankings {
+		for _, e := range r.Entries {
+			if !seen[e.UserID] {
+				seen[e.UserID] = true
+				ids = append(ids, e.UserID)
+			}
+		}
 	}
 	pseudos, err := s.profiles.Pseudos(ctx, ids)
 	if err != nil {

@@ -369,3 +369,37 @@ func TestGetFrozenFailures(t *testing.T) {
 		})
 	}
 }
+
+// TestGetFrozenNamesEveryCategory: the pseudos are asked for the participants
+// of all the categories, each once.
+func TestGetFrozenNamesEveryCategory(t *testing.T) {
+	c := twoWeeks(t)
+	repo := &fakeRepo{snapshots: map[string]json.RawMessage{
+		CategoryCumulativeTime:     json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":1}]}`),
+		CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":1},{"user_id":"b","rank":2,"value":0}]}`),
+		CategoryRunElimination:     json.RawMessage(`{"entries":[{"user_id":"b","rank":1,"value":1}]}`),
+	}}
+	profiles := &recordingProfiles{fakeProfiles: pseudos}
+	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt), time.Hour)
+	got, err := svc.Get(t.Context(), "actor", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(profiles.asked, want) {
+		t.Fatalf("pseudos asked for %v, want %v", profiles.asked, want)
+	}
+	if p := got.Categories[2].Entries[0].Pseudo; p == nil || *p != "Bob" {
+		t.Fatalf("pseudo in the third category = %v, want Bob", p)
+	}
+}
+
+// recordingProfiles remembers the ids it was asked for.
+type recordingProfiles struct {
+	fakeProfiles
+	asked []string
+}
+
+func (r *recordingProfiles) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {
+	r.asked = ids
+	return r.fakeProfiles.Pseudos(ctx, ids)
+}
