@@ -3,11 +3,13 @@ package scoring
 import "time"
 
 // Activity is an activity as the scorers see it, its start in UTC.
+// DistanceMeters is nil without distance.
 type Activity struct {
 	UserID          string
 	SportCode       string
 	StartedAt       time.Time
 	DurationSeconds int
+	DistanceMeters  *int
 }
 
 // Scorer ranks the participants of a category from the raw activities.
