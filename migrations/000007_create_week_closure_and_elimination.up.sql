@@ -19,7 +19,8 @@ CREATE TABLE week_closure (
 );
 
 -- A participant eliminated from the run elimination category: at most once,
--- definitively. week_number is the week that was judged; distance_meters is
+-- definitively. week_number is the week that was judged (never week 1: no
+-- elimination there); distance_meters is
 -- the distance actually run that week and required_meters the minimum it had
 -- to reach: the record of the judgement, never read to rank (the leaderboard
 -- is computed from the activities).
@@ -41,7 +42,7 @@ CREATE TABLE elimination (
     CONSTRAINT elimination_participant_fkey FOREIGN KEY (challenge_id, user_id)
         REFERENCES participants (challenge_id, user_id),
     CONSTRAINT elimination_category_type_check CHECK (category_type = 'run_elimination'),
-    CONSTRAINT elimination_week_number_check CHECK (week_number >= 1),
+    CONSTRAINT elimination_week_number_check CHECK (week_number >= 2),
     CONSTRAINT elimination_distance_meters_check CHECK (distance_meters >= 0),
     CONSTRAINT elimination_required_meters_check CHECK (required_meters >= 0)
 );
