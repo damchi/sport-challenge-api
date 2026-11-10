@@ -22,10 +22,12 @@ func NewRepository(gdb *gorm.DB) *Repository {
 	return &Repository{db: gdb}
 }
 
-// OpenChallenges lists the challenges not deleted, started and not over at
-// now, each with its run elimination category (the frozen settings are in
-// categories.params).
-func (r *Repository) OpenChallenges(ctx context.Context, now time.Time) ([]Challenge, error) {
+// ClosableChallenges lists the challenges not deleted and started at now,
+// over or not, that still have a week to close before the last one (which is
+// left to the finalization of the challenge), each with its run elimination
+// category (the frozen settings are in categories.params). A window holds a
+// whole number of weeks; rounding the number of weeks absorbs a time change.
+func (r *Repository) ClosableChallenges(ctx context.Context, now time.Time) ([]Challenge, error) {
 	var rows []struct {
 		ID         string
 		Timezone   string
@@ -41,12 +43,14 @@ func (r *Repository) OpenChallenges(ctx context.Context, now time.Time) ([]Chall
 			COALESCE((cat.params->>'step_meters')::int, 0) AS step_meters
 		FROM challenges c
 		JOIN categories cat ON cat.challenge_id = c.id AND cat.type = 'run_elimination'
-		WHERE c.deleted_at IS NULL AND c.starts_at <= @now AND c.ends_at > @now
+		WHERE c.deleted_at IS NULL AND c.starts_at <= @now
+			AND (SELECT count(*) FROM week_closure wc WHERE wc.challenge_id = c.id)
+				< round(extract(epoch FROM c.ends_at - c.starts_at) / 604800) - 1
 		ORDER BY c.starts_at, c.id`,
 		map[string]any{"now": now},
 	).Scan(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("read open challenges: %w", err)
+		return nil, fmt.Errorf("read closable challenges: %w", err)
 	}
 	out := make([]Challenge, len(rows))
 	for i, row := range rows {

@@ -17,9 +17,9 @@ import (
 
 // repository is what the service needs from the storage.
 type repository interface {
-	// OpenChallenges lists the challenges not deleted, started and not over
-	// at now.
-	OpenChallenges(ctx context.Context, now time.Time) ([]Challenge, error)
+	// ClosableChallenges lists the challenges not deleted and started at now
+	// that still have a week to close before the last one.
+	ClosableChallenges(ctx context.Context, now time.Time) ([]Challenge, error)
 	// ClosedWeeks gives the numbers of the weeks of the challenge already closed.
 	ClosedWeeks(ctx context.Context, challengeID string) ([]int, error)
 	// CloseWeek records, in one transaction, the closure of a week and the
@@ -49,17 +49,17 @@ func NewService(repo repository, data Activities, c clock.Clock, logger *slog.Lo
 	return &Service{repo: repo, data: data, clock: c, logger: logger}
 }
 
-// CloseWeeks closes every week that has ended, in every open challenge, and
+// CloseWeeks closes every week that has ended, in every challenge, and
 // has no closure yet: the eliminations of the week are those of the scorer,
 // recorded with the closure in one transaction. It can be run again and
 // again: a week is judged by its activities, and a week that ended is locked,
-// so when it runs does not change them. Two things are read as of the run:
-// who is abandoned (see closeChallenge), and which challenges are open, so a
-// challenge that is over is left to its finalization. A challenge in error
+// so when it runs does not change them, even after the challenge is over.
+// The last week of a challenge is left to its finalization. One thing is read
+// as of the run: who is abandoned (see closeChallenge). A challenge in error
 // does not stop the others; the errors are joined.
 func (s *Service) CloseWeeks(ctx context.Context) (Result, error) {
 	now := s.clock.Now()
-	challenges, err := s.repo.OpenChallenges(ctx, now)
+	challenges, err := s.repo.ClosableChallenges(ctx, now)
 	if err != nil {
 		return Result{}, err
 	}
@@ -88,7 +88,8 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 		return 0, 0, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
 	}
 	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
-	ended := w.EndedWeeks()
+	// The last week ends with the challenge: its finalization judges it.
+	ended := min(w.EndedWeeks(), w.Weeks()-1)
 	closed, err := s.repo.ClosedWeeks(ctx, c.ID)
 	if err != nil {
 		return 0, 0, err

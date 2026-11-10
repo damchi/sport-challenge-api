@@ -2,8 +2,8 @@ package closure
 
 import "time"
 
-// Challenge is a challenge whose weeks can be closed: not deleted, started
-// and not over, with its run elimination category and the settings frozen at
+// Challenge is a challenge whose weeks can be closed: not deleted and
+// started, with its run elimination category and the settings frozen at
 // creation.
 type Challenge struct {
 	ID       string

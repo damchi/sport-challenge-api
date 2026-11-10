@@ -29,7 +29,7 @@ func newFakeRepo(cs ...Challenge) *fakeRepo {
 	return &fakeRepo{challenges: cs, closed: map[string][]int{}, recorded: map[string][]scoring.Eliminated{}, closedAt: map[string]time.Time{}}
 }
 
-func (f *fakeRepo) OpenChallenges(context.Context, time.Time) ([]Challenge, error) {
+func (f *fakeRepo) ClosableChallenges(context.Context, time.Time) ([]Challenge, error) {
 	f.loads++
 	return f.challenges, nil
 }
@@ -234,6 +234,23 @@ func TestCloseWeeks(t *testing.T) {
 		got, err := run(t, repo, &fakeData{participants: participants, activities: activities}, c.EndsAt.Add(-time.Nanosecond))
 		if err != nil || got != (Result{}) {
 			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
+		}
+	})
+
+	t.Run("a worker down until after the end catches up every week but the last", func(t *testing.T) {
+		repo, data := newFakeRepo(c), &fakeData{participants: participants, activities: activities}
+		got, err := run(t, repo, data, c.EndsAt.AddDate(0, 0, 30))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (Result{Challenges: 1, Weeks: 3, Eliminations: 2}); got != want {
+			t.Fatalf("result = %+v, want %+v", got, want)
+		}
+		if !reflect.DeepEqual(repo.closed["c1"], []int{1, 2, 3}) {
+			t.Fatalf("closed weeks = %v, want [1 2 3]: week 4 is for the finalization", repo.closed["c1"])
+		}
+		if want := []scoring.Eliminated{wantWeek2, wantWeek3}; !reflect.DeepEqual(repo.recorded["c1"], want) {
+			t.Fatalf("eliminations = %+v, want %+v", repo.recorded["c1"], want)
 		}
 	})
 

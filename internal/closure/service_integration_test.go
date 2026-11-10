@@ -197,15 +197,32 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 		}
 	})
 
-	t.Run("a challenge that is over is not processed", func(t *testing.T) {
-		// Week 4 ends with the challenge, which is no longer open: it is left
-		// to its finalization.
+	t.Run("the last week is left to the finalization", func(t *testing.T) {
 		got, err := service(start.AddDate(0, 0, 28)).CloseWeeks(t.Context())
 		if err != nil || got != (Result{}) {
 			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
 		}
 		if weeks := s.closedWeeks(challengeID); !reflect.DeepEqual(weeks, []int{1, 2, 3}) {
 			t.Fatalf("closed weeks = %v, want [1 2 3]", weeks)
+		}
+	})
+
+	t.Run("a challenge over before the worker came is caught up", func(t *testing.T) {
+		lateID, _ := s.challenge(a, start, false)
+		s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, lateID, a, start)
+		s.run(a, inWeek(1), 5000)
+		got, err := service(start.AddDate(0, 0, 60)).CloseWeeks(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (Result{Challenges: 1, Weeks: 3, Eliminations: 1}); got != want {
+			t.Fatalf("result = %+v, want %+v", got, want)
+		}
+		if weeks := s.closedWeeks(lateID); !reflect.DeepEqual(weeks, []int{1, 2, 3}) {
+			t.Fatalf("closed weeks = %v, want [1 2 3]", weeks)
+		}
+		if got := s.eliminations(lateID); len(got) != 1 || got[0].Week != 2 {
+			t.Fatalf("eliminations = %+v, want a in week 2", got)
 		}
 	})
 
