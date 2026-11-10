@@ -285,6 +285,14 @@ func TestListParticipantActivitiesVisibility(t *testing.T) {
 	if _, err := r.record(toronto(t, 2026, 5, 20, 7)); err != nil {
 		t.Fatal(err)
 	}
+	// Joined afterwards: another challenge of the creator, from Thursday
+	// 2026-06-04, whose week 1 (holding the activity) ended on 2026-06-11.
+	// It locks the activity for its author but never shows through here.
+	r.challenge([3]int{2026, 6, 4}, 3, "active", false)
+	mine, err := r.activities.Mine(t.Context(), r.user, activity.Period{}, 1, nil)
+	if err != nil || len(mine.Items) != 1 || mine.Items[0].ID != in.ID || !mine.Items[0].Locked {
+		t.Fatalf("Mine() = %+v, %v, want the activity locked for its author", mine, err)
+	}
 
 	tests := []struct {
 		name      string
@@ -322,9 +330,10 @@ func TestListParticipantActivitiesVisibility(t *testing.T) {
 				}
 				return
 			}
-			// The window only; this challenge only among those where it counts.
-			if len(page.Items) != 1 || page.Items[0].ID != in.ID || !slices.Equal(page.Items[0].ChallengeIDs, []string{tt.challenge}) {
-				t.Fatalf("items %+v, want the activity in the window, counting in %s only", page.Items, tt.challenge)
+			// The window only; this challenge only, for where it counts and
+			// whether it is locked.
+			if len(page.Items) != 1 || page.Items[0].ID != in.ID || !slices.Equal(page.Items[0].ChallengeIDs, []string{tt.challenge}) || page.Items[0].Locked {
+				t.Fatalf("items %+v, want the activity in the window, counting in %s only, unlocked there", page.Items, tt.challenge)
 			}
 		})
 	}

@@ -617,9 +617,12 @@ paths:
         may not see answers 404 `challenge_not_found`; a visible one the
         user never joined (a public challenge shows them its leaderboard
         only), or a `userId` who never joined it, answers 404 `not_found`.
-        `challenge_ids` holds this challenge only, when the activity counts
-        in it (never for a participant who abandoned: empty); `locked` tells
-        whether its author can still change it.
+        `challenge_ids` and `locked` are read from this challenge only, never
+        from the other challenges of the participant: `challenge_ids` holds
+        it when the activity counts in it (never for a participant who
+        abandoned: empty), and `locked` is true once its week has ended in
+        it, where it counts (never for a participant who abandoned). The author's own listing (`/me/activities`) may still show an
+        activity locked by another challenge.
       tags: [activities]
       parameters:
         - name: challengeId

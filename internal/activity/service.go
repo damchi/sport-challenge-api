@@ -197,17 +197,21 @@ func (s *Service) Mine(ctx context.Context, actorID string, period Period, limit
 		return Page{}, apperr.InvalidFields(nil, "to")
 	}
 	q := ListQuery{UserID: actorID, From: period.From, To: period.To, Limit: limit + 1, After: after}
-	return s.page(ctx, q, limit, func(ps []Participation, a Activity) []string {
-		return CountsIn(a.StartedAt, ps)
+	return s.page(ctx, q, limit, func(ctx context.Context) ([]Participation, error) {
+		ps, err := s.participations.Participations(ctx, actorID)
+		if err != nil {
+			return nil, fmt.Errorf("read participations: %w", err)
+		}
+		return ps, nil
 	})
 }
 
 // OfParticipant returns a page of the activities of userID started in the
 // window of challenge challengeID, most recent first, for actorID: the
 // participants of the challenge (abandoned ones included) and its creators
-// only, as module challenge decides (Challenges). Each one lists this
-// challenge only, when it counts there, never the other challenges of
-// userID; whether it is locked is read from all of them.
+// only, as module challenge decides (Challenges). Where each one counts and
+// whether it is locked are read from this challenge alone: the other
+// challenges of userID, private ones maybe, never show through.
 func (s *Service) OfParticipant(ctx context.Context, actorID, challengeID, userID string, limit int, after *Position) (Page, error) {
 	if limit < 1 {
 		return Page{}, apperr.InvalidFields(nil, "limit")
@@ -217,15 +221,16 @@ func (s *Service) OfParticipant(ctx context.Context, actorID, challengeID, userI
 		return Page{}, fmt.Errorf("activities scope: %w", err)
 	}
 	q := ListQuery{UserID: userID, From: &c.StartsAt, To: &c.EndsAt, Limit: limit + 1, After: after}
-	return s.page(ctx, q, limit, func(_ []Participation, a Activity) []string {
-		return CountsIn(a.StartedAt, []Participation{c})
+	return s.page(ctx, q, limit, func(context.Context) ([]Participation, error) {
+		return []Participation{c}, nil
 	})
 }
 
 // page reads the activities of q, limit asked plus one to tell whether a
-// next page exists, with where each counts as countsIn says and whether it
-// is locked, from the participations of q.UserID.
-func (s *Service) page(ctx context.Context, q ListQuery, limit int, countsIn func([]Participation, Activity) []string) (Page, error) {
+// next page exists, with where each counts and whether it is locked, among
+// the challenges that scope gives (read once, and only for a page with
+// activities).
+func (s *Service) page(ctx context.Context, q ListQuery, limit int, scope func(ctx context.Context) ([]Participation, error)) (Page, error) {
 	rows, err := s.repo.List(ctx, q)
 	if err != nil {
 		return Page{}, fmt.Errorf("list activities: %w", err)
@@ -240,15 +245,15 @@ func (s *Service) page(ctx context.Context, q ListQuery, limit int, countsIn fun
 	if len(rows) == 0 {
 		return page, nil
 	}
-	ps, err := s.participations.Participations(ctx, q.UserID)
+	ps, err := scope(ctx)
 	if err != nil {
-		return Page{}, fmt.Errorf("read participations: %w", err)
+		return Page{}, err
 	}
 	now := s.clock.Now()
 	for _, a := range rows {
 		page.Items = append(page.Items, Recorded{
 			Activity:     a,
-			ChallengeIDs: countsIn(ps, a),
+			ChallengeIDs: CountsIn(a.StartedAt, ps),
 			Locked:       IsLocked(now, a.StartedAt, ps),
 		})
 	}

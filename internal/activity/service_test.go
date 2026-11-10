@@ -650,15 +650,16 @@ const participant = "7c6b5a49-3827-4165-9f0e-d1c2b3a4f5e6"
 
 func TestServiceOfParticipant(t *testing.T) {
 	c1 := challengeOf(t, "c1")
-	// other starts on Thursday 2026-06-04: its week 1 ended at midnight
-	// between Wednesday 2026-06-10 and Thursday 2026-06-11.
-	other := participation(t, [3]int{2026, 6, 4}, 3)
-	other.ChallengeID = "other"
-	repo := &fakeRepository{listing: listing(t, participant, 3)}
+	// Wednesday 2026-06-10 and Thursday 2026-06-11 in week 2 of c1, not
+	// ended; Wednesday 2026-06-03 in week 1, ended on 2026-06-08.
+	rows := listing(t, participant, 2)
+	week1 := Activity{ID: "5f1e7c1a-0000-4000-8000-000000000099", UserID: participant, SportCode: "yoga", StartedAt: toronto(t, 2026, 6, 3, 7), DurationSeconds: 3600, Source: SourceManual}
+	repo := &fakeRepository{listing: append(rows, week1, week1)}
 	var asked [3]string
-	ps := fakeParticipations{t: t, user: participant, challenges: []Participation{c1, other}}
+	calls := 0
+	ps := fakeParticipations{t: t, user: participant, calls: &calls}
 	svc := NewService(repo, fakeProfiles{}, catalogue, ps, fakeChallenges{scope: c1, asked: &asked}, clock.NewFake(recordNow))
-	page, err := svc.OfParticipant(t.Context(), actor, "c1", participant, 2, nil)
+	page, err := svc.OfParticipant(t.Context(), actor, "c1", participant, 3, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,22 +667,25 @@ func TestServiceOfParticipant(t *testing.T) {
 		t.Fatalf("scope asked for %v, want the actor, the challenge and the participant", asked)
 	}
 	// Activities of the participant, in the window of the challenge.
-	want := ListQuery{UserID: participant, From: &c1.StartsAt, To: &c1.EndsAt, Limit: 3}
+	want := ListQuery{UserID: participant, From: &c1.StartsAt, To: &c1.EndsAt, Limit: 4}
 	if q := repo.listed; q == nil || !reflect.DeepEqual(*q, want) {
 		t.Fatalf("query %+v, want %+v", q, want)
 	}
-	if len(page.Items) != 2 || page.Next == nil {
-		t.Fatalf("%d items, next %v, want 2 items and a next page", len(page.Items), page.Next)
+	if len(page.Items) != 3 || page.Next == nil {
+		t.Fatalf("%d items, next %v, want 3 items and a next page", len(page.Items), page.Next)
 	}
-	// Both count in c1 and other; only c1 is shown. Wednesday 2026-06-10 is
-	// locked by other alone.
+	// The other challenges of the participant are never read: they could
+	// show through challenge_ids or locked.
+	if calls != 0 {
+		t.Fatalf("participations of the participant read %d times, want never", calls)
+	}
 	for i, it := range page.Items {
 		if !reflect.DeepEqual(it.ChallengeIDs, []string{"c1"}) {
-			t.Errorf("item %d: challenges %v, want [c1] only", i, it.ChallengeIDs)
+			t.Errorf("item %d: challenges %v, want [c1]", i, it.ChallengeIDs)
 		}
 	}
-	if page.Items[0].Locked || !page.Items[1].Locked {
-		t.Fatalf("locked %v, %v, want false, true", page.Items[0].Locked, page.Items[1].Locked)
+	if page.Items[0].Locked || page.Items[1].Locked || !page.Items[2].Locked {
+		t.Fatalf("locked %v, %v, %v, want false, false, true (week 1 of c1 ended)", page.Items[0].Locked, page.Items[1].Locked, page.Items[2].Locked)
 	}
 }
 

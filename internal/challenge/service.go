@@ -365,8 +365,8 @@ func (s *Service) AbandonAll(ctx context.Context, userID string) error {
 // Memberships returns the challenges, not deleted, that userID joined, with
 // their membership: where an activity of theirs may count, read in the
 // transaction of ctx, if any. It checks no actor: never expose it on a
-// route (activity.Service reads it to tell where an activity counts and
-// whether it is locked, never to list challenges).
+// route (activity.Service reads the actor's own, to tell where an activity
+// counts and whether it is locked).
 func (s *Service) Memberships(ctx context.Context, userID string) ([]UserChallenge, error) {
 	ms, err := s.repo.Memberships(ctx, userID)
 	if err != nil {
