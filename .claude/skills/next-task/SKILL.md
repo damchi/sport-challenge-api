@@ -1,11 +1,11 @@
 ---
 name: next-task
-description: Prend la prochaine issue GitHub du backlog du backend Sport Challenge, l'implémente et prépare le commit. À utiliser quand on dit « prochain ticket », « next task », « prends le ticket SC-API-0xx », « on continue le backlog » ou « quelle est la suite ».
+description: Prend la prochaine issue GitHub du backlog du backend Sport Challenge, l'implémente, committe, pousse et vérifie les commentaires de la pull request. À utiliser quand on dit « prochain ticket », « next task », « prends le ticket SC-API-0xx », « on continue le backlog » ou « quelle est la suite ».
 ---
 
 # Traiter un ticket du backlog
 
-Le backlog est dans les **issues GitHub** (tickets `SC-API-001` à `SC-API-075`, numérotation non consécutive : les tickets listés dans « Tickets fusionnés » de `TASKS.md` n'existent plus). **Un ticket = un commit.** Ne traite jamais deux tickets d'affilée sans que l'utilisateur ait validé le commit du premier.
+Le backlog est dans les **issues GitHub** (tickets `SC-API-001` à `SC-API-075`, numérotation non consécutive : les tickets listés dans « Tickets fusionnés » de `TASKS.md` n'existent plus). **Un ticket = un commit.** Ne traite jamais deux tickets d'affilée sans que la pull request du premier soit fusionnée ou que l'utilisateur te le demande.
 
 ## 1. Choisir le ticket
 
@@ -44,12 +44,14 @@ Les tickets sont des **issues GitHub** (importées depuis `TASKS.md`). Le statut
 - Migration : vérifie `make migrate-up` → `make migrate-down` → `make migrate-up` sur la base locale.
 - Lance les agents indiqués dans le ticket (champ **Revue**) et corrige les points bloquants.
 
-## 5. Clôturer, sans committer
+## 5. Clôturer : commit, push et revue de la pull request
 
 - Si **tous** les critères d'acceptation sont remplis : `python3 .claude/scripts/tasks.py tick <numéro>` coche les cases dans l'issue. S'il en reste un non rempli, ne lance pas `tick` : dis lequel et pourquoi.
 - Ne ferme pas l'issue et ne change pas son statut : elle se ferme toute seule à la fusion de la pull request qui contient `Closes #<numéro>`.
-- Présente : la liste des fichiers modifiés, un résumé du diff, le résultat des vérifications, les points ouverts éventuels, et le **message de commit** du ticket (adapté si besoin), terminé par `Closes #<numéro>` puis `Refs: SC-API-0xx` en pied.
-- **N'exécute ni `git commit`, ni `git push`, ni `gh pr create` (seule la création de branche du §2 est automatique).** Attends l'accord explicite de l'utilisateur. Tu peux utiliser `git add`, `git status` et `git diff`. Propose le titre et la description de la pull request (avec `Closes #<numéro>`) pour qu'il l'ouvre ou te le demande.
+- **Commit et push sans demander l'accord** de l'utilisateur, une fois les vérifications du §4 passées : `git add` des seuls fichiers du ticket, un commit cohérent avec le **message de commit** du ticket (adapté si besoin), terminé par `Closes #<numéro>` puis `Refs: SC-API-0xx` en pied, puis push de la branche du ticket. Jamais de push forcé, de `--no-verify`, de reset destructif ni de nettoyage forcé du dépôt. Ne pousse jamais sur `main`.
+- La pull request s'ouvre sur demande de l'utilisateur : propose le titre et la description (avec `Closes #<numéro>`). Ne fusionne jamais.
+- **Commentaires de la pull request** : pour chaque pull request du ticket, lis tous les commentaires avant de dire que le travail est terminé, puis après chaque push : `gh pr view <numéro> --comments`, `gh api repos/{owner}/{repo}/pulls/<numéro>/comments` (commentaires en ligne des relectures) et `gh pr checks <numéro>`. Traite chaque point : corrige-le (nouveau commit sur la même branche, poussé) ou explique pourquoi tu ne le suis pas. Un point qui change une règle produit (🟡 ou ❓) ou qui sort du périmètre du ticket se demande à l'utilisateur.
+- Présente : la liste des fichiers modifiés, un résumé du diff, le résultat des vérifications, les commits poussés, l'état des commentaires de la pull request et les points ouverts éventuels.
 - Termine en indiquant que le ticket suivant sera disponible une fois cette pull request fusionnée (ses dépendances seront alors fermées), et ses éventuelles décisions en attente. L'utilisateur peut aussi demander explicitement un autre ticket.
 
 ## Rappels
