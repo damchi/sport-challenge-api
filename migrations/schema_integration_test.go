@@ -21,6 +21,12 @@ import (
 const (
 	userID      = "00000000-0000-0000-0000-000000000001"
 	challengeID = "00000000-0000-0000-0000-0000000000c1"
+	categoryID  = "00000000-0000-0000-0000-0000000000ca"
+	// Another category of the fixture challenge, another user and another challenge.
+	timeCategoryID   = "00000000-0000-0000-0000-0000000000cb"
+	otherUserID      = "00000000-0000-0000-0000-000000000002"
+	otherChallengeID = "00000000-0000-0000-0000-0000000000c2"
+	deadID           = "00000000-0000-0000-0000-00000000dead"
 )
 
 // fixture is a user and a two-week challenge the cases build on.
@@ -29,6 +35,17 @@ INSERT INTO users (id, auth_subject) VALUES ('` + userID + `', 'schema|1');
 INSERT INTO challenges (id, title, visibility, timezone, starts_at, ends_at, created_by)
 VALUES ('` + challengeID + `', 'Spring', 'public', 'America/Montreal',
         '2026-12-01 05:00Z', '2026-12-15 05:00Z', '` + userID + `');`
+
+// eliminationFixture is the run elimination category of the fixture challenge
+// and its only participant.
+const eliminationFixture = `
+INSERT INTO categories (id, challenge_id, type, position) VALUES ('` + categoryID + `', '` + challengeID + `', 'run_elimination', 3);
+INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL);`
+
+// otherChallengeFixture is a second challenge of the same creator.
+const otherChallengeFixture = `
+INSERT INTO challenges (id, title, visibility, timezone, starts_at, ends_at, created_by)
+VALUES ('` + otherChallengeID + `', 'Autumn', 'public', 'UTC', '2026-12-01Z', '2026-12-15Z', '` + userID + `');`
 
 // TestConstraints runs each statement on the fixture, in a transaction rolled
 // back afterwards, and checks the constraint that refuses it (none: accepted).
@@ -97,6 +114,25 @@ func TestConstraints(t *testing.T) {
 		{name: "same idempotency key twice", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, idempotency_key) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 60, 'k1'), ('` + userID + `', 'yoga', '2026-12-03Z', 60, 'k1')`, constraint: "activities_user_idempotency_key_key"},
 		{name: "same external id twice", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, external_id) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 60, 'x1'), ('` + userID + `', 'yoga', '2026-12-03Z', 60, 'x1')`, constraint: "activities_source_external_id_key"},
 		{name: "keys optional", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 60), ('` + userID + `', 'yoga', '2026-12-02Z', 60)`},
+
+		// week_closure and elimination (000007)
+		{name: "closed week", sql: `INSERT INTO week_closure VALUES ('` + challengeID + `', 1, '2026-12-08 05:00Z')`},
+		{name: "week closed twice", sql: `INSERT INTO week_closure VALUES ('` + challengeID + `', 1, '2026-12-08 05:00Z'), ('` + challengeID + `', 1, '2026-12-08 06:00Z')`, constraint: "week_closure_pkey"},
+		{name: "week 0 closed", sql: `INSERT INTO week_closure VALUES ('` + challengeID + `', 0, '2026-12-08 05:00Z')`, constraint: "week_closure_week_number_check"},
+		{name: "closure of an unknown challenge", sql: `INSERT INTO week_closure VALUES ('00000000-0000-0000-0000-00000000dead', 1, '2026-12-08 05:00Z')`, constraint: "week_closure_challenge_id_fkey"},
+		{name: "elimination", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 2, 4000, 6000)`},
+		{name: "eliminated twice", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 2, 4000, 6000), ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 3, 0, 7000)`, constraint: "elimination_pkey"},
+		{name: "elimination in week 0", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 0, 4000, 6000)`, constraint: "elimination_week_number_check"},
+		{name: "elimination in week 1", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 1, 4000, 6000)`, constraint: "elimination_week_number_check"},
+		{name: "negative distance run", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 2, -1, 6000)`, constraint: "elimination_distance_meters_check"},
+		{name: "negative required distance", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 2, 0, -1)`, constraint: "elimination_required_meters_check"},
+		{name: "elimination from an unknown category", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + deadID + `', '` + userID + `', 2, 4000, 6000)`, constraint: "elimination_category_fkey"},
+		{name: "elimination of a non-participant", sql: eliminationFixture + `INSERT INTO users (id, auth_subject) VALUES ('` + otherUserID + `', 'schema|2');INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + otherUserID + `', 2, 4000, 6000)`, constraint: "elimination_participant_fkey"},
+		{name: "category of another challenge", sql: eliminationFixture + otherChallengeFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + otherChallengeID + `', '` + categoryID + `', '` + userID + `', 2, 4000, 6000)`, constraint: "elimination_category_fkey"},
+		{name: "category that is not a run elimination", sql: eliminationFixture + `INSERT INTO categories (id, challenge_id, type, position) VALUES ('` + timeCategoryID + `', '` + challengeID + `', 'cumulative_time', 1);INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + timeCategoryID + `', '` + userID + `', 2, 4000, 6000)`, constraint: "elimination_category_fkey"},
+		{name: "another category type recorded", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, category_type, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 'cumulative_time', 2, 4000, 6000)`, constraint: "elimination_category_type_check"},
+		{name: "elimination of an unknown user", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + deadID + `', 2, 4000, 6000)`, constraint: "elimination_participant_fkey"},
+		{name: "deleting a category with eliminations", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 2, 4000, 6000); DELETE FROM categories WHERE id = '` + categoryID + `'`, constraint: "elimination_category_fkey"},
 
 		// No cascade: results stay (anonymization, soft deletion).
 		{name: "deleting a challenge with participants", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL); DELETE FROM challenges WHERE id = '` + challengeID + `'`, constraint: "participants_challenge_id_fkey"},

@@ -422,7 +422,7 @@ flowchart TD
 | `sports` | code, mode de distance (obligatoire, interdite, facultative), coefficient suggéré (libellés traduits par le frontend) |
 | `activity` | utilisateur, sport, libellé du sport (si « autre »), date de début (UTC), durée, distance, source (manuelle ou fournisseur), identifiant externe, clé d'idempotence |
 | `week_closure` | challenge, numéro de semaine, date de clôture |
-| `elimination` | participant, catégorie, semaine d'élimination |
+| `elimination` | participant, catégorie, semaine d'élimination, distance courue et minimum exigé cette semaine-là (trace du jugement, jamais lue pour classer) |
 | `badge_definition` | challenge, nom, description, règle (JSON structuré), créateur, date de création |
 | `badge_award` | badge, utilisateur, date d'obtention, activité déclencheuse (si applicable) ; unique (badge, utilisateur) |
 | `result_snapshot` | challenge, catégorie, classement figé en fin de challenge |
