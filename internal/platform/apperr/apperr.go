@@ -38,6 +38,11 @@ const (
 	CodeCannotExcludeCreator Code = "cannot_exclude_creator"
 	// CodeChallengeEnded refuses a change to a finished challenge.
 	CodeChallengeEnded Code = "challenge_ended"
+	// CodeDistanceRequired refuses an activity without distance for a sport
+	// that has one.
+	CodeDistanceRequired Code = "distance_required"
+	// CodeDistanceNotAllowed refuses a distance for a sport without one.
+	CodeDistanceNotAllowed Code = "distance_not_allowed"
 	// CodeFieldNotEditable refuses a change to a field frozen at creation.
 	CodeFieldNotEditable Code = "field_not_editable"
 	// CodeChallengeNotFound also answers a private challenge the user may
@@ -80,6 +85,10 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "A creator cannot be excluded"}, true
 	case CodeChallengeEnded:
 		return definition{http.StatusUnprocessableEntity, "Challenge ended"}, true
+	case CodeDistanceRequired:
+		return definition{http.StatusUnprocessableEntity, "Distance required"}, true
+	case CodeDistanceNotAllowed:
+		return definition{http.StatusUnprocessableEntity, "Distance not allowed"}, true
 	case CodeFieldNotEditable:
 		return definition{http.StatusUnprocessableEntity, "Field not editable"}, true
 	case CodeChallengeNotFound:
