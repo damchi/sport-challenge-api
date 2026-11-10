@@ -364,14 +364,37 @@ func (s *Service) AbandonAll(ctx context.Context, userID string) error {
 
 // Memberships returns the challenges, not deleted, that userID joined, with
 // their membership: where an activity of theirs may count, read in the
-// transaction of ctx, if any. It checks no actor: the caller asks for its
-// own actor only (activity.Service), never expose it on a route.
+// transaction of ctx, if any. It checks no actor: never expose it on a
+// route (activity.Service reads the actor's own, to tell where an activity
+// counts and whether it is locked).
 func (s *Service) Memberships(ctx context.Context, userID string) ([]UserChallenge, error) {
 	ms, err := s.repo.Memberships(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("memberships: %w", err)
 	}
 	return ms, nil
+}
+
+// ActivitiesScope returns challenge id with the membership of userID in it,
+// for actorID to list the activities of userID there, once the rule
+// (ActivitiesRefusal) allows it. A missing or deleted challenge answers 404
+// challenge_not_found.
+func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID string) (UserChallenge, error) {
+	c, actor, err := s.repo.Get(ctx, id, actorID)
+	target := actor
+	if err == nil && userID != actorID {
+		_, target, err = s.repo.Get(ctx, id, userID)
+	}
+	if errors.Is(err, errChallengeNotFound) {
+		return UserChallenge{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return UserChallenge{}, fmt.Errorf("activities scope: %w", err)
+	}
+	if err := ActivitiesRefusal(actor, target, c.Visibility); err != nil {
+		return UserChallenge{}, err
+	}
+	return UserChallenge{ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Membership: target}, nil
 }
 
 // Exclude makes targetID abandon challenge id on behalf of actorID, one of

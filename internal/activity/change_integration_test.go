@@ -125,7 +125,7 @@ func TestChangeActivityWeekLocked(t *testing.T) {
 	}
 
 	// Recorded before the week ended: locked from then on.
-	later := NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations{challengeOf(t, "c1")}, clock.NewFake(toronto(t, 2026, 6, 15, 0)))
+	later := NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations{challengeOf(t, "c1")}, nil, clock.NewFake(toronto(t, 2026, 6, 15, 0)))
 	_, err = later.Update(t.Context(), f.user, rec.ID, run(toronto(t, 2026, 6, 10, 9)))
 	wantCode(t, err, apperr.CodeWeekLocked)
 	wantCode(t, later.Delete(t.Context(), f.user, rec.ID), apperr.CodeWeekLocked)

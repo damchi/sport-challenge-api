@@ -47,7 +47,7 @@ func newRecording(t *testing.T) recording {
 	users := user.NewService(user.NewRepository(gdb), nil, nil, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges := challenge.NewService(challenge.NewRepository(gdb), users, sports, clk)
-	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, clk)
+	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
 
 	var id string
 	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ('email|runner', 'runner') RETURNING id").Scan(&id); err != nil {
@@ -234,5 +234,135 @@ func wantLocked(t *testing.T, err error) {
 	var appErr *apperr.Error
 	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeWeekLocked {
 		t.Fatalf("error = %v, want week_locked", err)
+	}
+}
+
+// newUser inserts a user with a complete profile.
+func (r recording) newUser(pseudo string) string {
+	r.t.Helper()
+	var id string
+	if err := r.pool.QueryRow(r.t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ($1, $2) RETURNING id", "email|"+pseudo, pseudo).Scan(&id); err != nil {
+		r.t.Fatal(err)
+	}
+	return id
+}
+
+// join makes userID a participant of challengeID with status.
+func (r recording) join(challengeID, userID, status string) {
+	r.t.Helper()
+	var abandonedAt *time.Time
+	if status == string(challenge.ParticipantAbandoned) {
+		abandonedAt = &recordNow
+	}
+	if _, err := r.pool.Exec(r.t.Context(), "INSERT INTO participants VALUES ($1, $2, $3, $4, $5)", challengeID, userID, status, recordNow, abandonedAt); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+// TestListParticipantActivitiesVisibility follows the rights matrix of
+// README §5.7 end to end: the activities of a participant are shown to the
+// participants of the challenge, abandoned ones included, and its creators;
+// a non-participant of a public challenge sees the leaderboard only, and a
+// private challenge stays hidden.
+func TestListParticipantActivitiesVisibility(t *testing.T) {
+	r := newRecording(t)
+	public := r.challenge([3]int{2026, 6, 1}, 3, "active", false)
+	private := r.challenge([3]int{2026, 6, 1}, 3, "active", false)
+	deleted := r.challenge([3]int{2026, 6, 1}, 3, "active", true)
+	if _, err := r.pool.Exec(t.Context(), "UPDATE challenges SET visibility = 'private' WHERE id = $1", private); err != nil {
+		t.Fatal(err)
+	}
+	runner, quitter, outsider := r.newUser("runner2"), r.newUser("quitter"), r.newUser("outsider")
+	for _, c := range []string{public, private} {
+		r.join(c, runner, "active")
+		r.join(c, quitter, "abandoned")
+	}
+	// The creator's activities: one in the window, one before it.
+	in, err := r.record(toronto(t, 2026, 6, 10, 7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.record(toronto(t, 2026, 5, 20, 7)); err != nil {
+		t.Fatal(err)
+	}
+	// Joined afterwards: another challenge of the creator, from Thursday
+	// 2026-06-04, whose week 1 (holding the activity) ended on 2026-06-11.
+	// It locks the activity for its author but never shows through here.
+	r.challenge([3]int{2026, 6, 4}, 3, "active", false)
+	mine, err := r.activities.Mine(t.Context(), r.user, activity.Period{}, 1, nil)
+	if err != nil || len(mine.Items) != 1 || mine.Items[0].ID != in.ID || !mine.Items[0].Locked {
+		t.Fatalf("Mine() = %+v, %v, want the activity locked for its author", mine, err)
+	}
+
+	tests := []struct {
+		name      string
+		actor     string
+		challenge string
+		target    string
+		want      apperr.Code // empty: the activity in the window
+	}{
+		{name: "participant, private", actor: runner, challenge: private, target: r.user},
+		{name: "abandoned participant, private", actor: quitter, challenge: private, target: r.user},
+		{name: "creator reads an abandoned participant", actor: r.user, challenge: private, target: quitter},
+		{name: "own activities", actor: r.user, challenge: public, target: r.user},
+		{name: "non-participant of a public challenge", actor: outsider, challenge: public, target: r.user, want: apperr.CodeNotFound},
+		{name: "non-participant of a private challenge", actor: outsider, challenge: private, target: r.user, want: apperr.CodeChallengeNotFound},
+		{name: "target who never joined", actor: runner, challenge: public, target: outsider, want: apperr.CodeNotFound},
+		{name: "deleted challenge", actor: r.user, challenge: deleted, target: r.user, want: apperr.CodeChallengeNotFound},
+		{name: "missing challenge", actor: runner, challenge: "4b3a2c1d-0e9f-4a8b-9c7d-6e5f4a3b2c1d", target: r.user, want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page, err := r.activities.OfParticipant(t.Context(), tt.actor, tt.challenge, tt.target, 20, nil)
+			if tt.want != "" {
+				var appErr *apperr.Error
+				if !errors.As(err, &appErr) || appErr.Code != tt.want {
+					t.Fatalf("error = %v, want %s", err, tt.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.target != r.user {
+				if len(page.Items) != 0 {
+					t.Fatalf("items %+v, want none: the target recorded nothing", page.Items)
+				}
+				return
+			}
+			// The window only; this challenge only, for where it counts and
+			// whether it is locked.
+			if len(page.Items) != 1 || page.Items[0].ID != in.ID || !slices.Equal(page.Items[0].ChallengeIDs, []string{tt.challenge}) || page.Items[0].Locked {
+				t.Fatalf("items %+v, want the activity in the window, counting in %s only, unlocked there", page.Items, tt.challenge)
+			}
+		})
+	}
+}
+
+func TestListMyActivities(t *testing.T) {
+	r := newRecording(t)
+	c := r.challenge([3]int{2026, 6, 1}, 3, "active", false)
+	week2, err := r.record(toronto(t, 2026, 6, 10, 7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.pool.Exec(t.Context(), `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters)
+		VALUES ($1, 'run', $2, 1500, 5000)`, r.user, toronto(t, 2026, 6, 3, 7)); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := r.activities.Mine(t.Context(), r.user, activity.Period{}, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != week2.ID || page.Items[0].Locked || !slices.Equal(page.Items[0].ChallengeIDs, []string{c}) || page.Next == nil {
+		t.Fatalf("first page %+v, want the run of week 2, unlocked, and a next page", page)
+	}
+	page, err = r.activities.Mine(t.Context(), r.user, activity.Period{}, 1, page.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || !page.Items[0].Locked || page.Next != nil {
+		t.Fatalf("second page %+v, want the run of week 1, locked, and no next page", page)
 	}
 }

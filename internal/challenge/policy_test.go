@@ -443,6 +443,69 @@ func TestParticipantsRefusal(t *testing.T) {
 	}
 }
 
+// TestCanViewActivities follows the rights matrix of README §5.7: the
+// activities of a participant are shown to the participants of the challenge
+// (abandoned included) and its creators, never to an invited user nor an
+// outsider.
+func TestCanViewActivities(t *testing.T) {
+	tests := []struct {
+		role Role
+		want bool
+	}{
+		{role: RoleCreator, want: true},
+		{role: RoleParticipant, want: true},
+		{role: RoleAbandoned, want: true},
+		{role: RoleInvited},
+		{role: RoleOutsider},
+		{role: Role(99)},
+	}
+	for _, tt := range tests {
+		if got := CanViewActivities(tt.role); got != tt.want {
+			t.Errorf("CanViewActivities(%v) = %v, want %v", tt.role, got, tt.want)
+		}
+	}
+}
+
+func TestActivitiesRefusal(t *testing.T) {
+	tests := []struct {
+		name       string
+		actor      Membership
+		target     Membership
+		visibility string
+		want       apperr.Code // empty: visible
+	}{
+		{name: "participant, public", actor: active, target: active, visibility: VisibilityPublic},
+		{name: "participant, private", actor: active, target: active, visibility: VisibilityPrivate},
+		{name: "abandoned participant, private", actor: abandoned, target: active, visibility: VisibilityPrivate},
+		{name: "creator, private", actor: creatorActive, target: active, visibility: VisibilityPrivate},
+		{name: "creator who abandoned", actor: creatorAbandoned, target: active, visibility: VisibilityPrivate},
+		{name: "target who abandoned (or was excluded)", actor: active, target: abandoned, visibility: VisibilityPrivate},
+		{name: "target creator", actor: active, target: creatorActive, visibility: VisibilityPublic},
+		{name: "own activities", actor: active, target: active, visibility: VisibilityPublic},
+		{name: "outsider of a public challenge: leaderboard only", actor: outsider, target: active, visibility: VisibilityPublic, want: apperr.CodeNotFound},
+		{name: "invited to a private challenge: leaderboard only", actor: invited, target: active, visibility: VisibilityPrivate, want: apperr.CodeNotFound},
+		{name: "outsider of a private challenge: hidden", actor: outsider, target: active, visibility: VisibilityPrivate, want: apperr.CodeChallengeNotFound},
+		{name: "unknown visibility: hidden", actor: creatorActive, target: active, visibility: "unlisted", want: apperr.CodeChallengeNotFound},
+		{name: "target who never joined", actor: active, target: outsider, visibility: VisibilityPublic, want: apperr.CodeNotFound},
+		{name: "target only invited", actor: creatorActive, target: invited, visibility: VisibilityPrivate, want: apperr.CodeNotFound},
+		{name: "target with an unknown status", actor: active, target: Membership{Participant: "excluded"}, visibility: VisibilityPublic, want: apperr.CodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ActivitiesRefusal(tt.actor, tt.target, tt.visibility)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("ActivitiesRefusal() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("ActivitiesRefusal() = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestDeletionAbandons(t *testing.T) {
 	endsAt := time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)
 	tests := []struct {

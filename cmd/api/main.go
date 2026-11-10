@@ -86,7 +86,7 @@ func run() error {
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), users, sports, clock.Real{})
-	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, clock.Real{})
+	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clock.Real{})
 	handlers := server{
 		Handler:          health.NewHandler(pool, logger),
 		userHandler:      user.NewHandler(users),
@@ -147,9 +147,7 @@ type memberships interface {
 }
 
 // participations gives module activity the challenges of a user, as
-// activity.Participations: Active comes from the status of the
-// participation, never the role (a creator who abandoned no longer
-// competes, ADR 0001).
+// activity.Participations (toParticipation).
 type participations struct{ challenges memberships }
 
 func (p participations) Participations(ctx context.Context, userID string) ([]activity.Participation, error) {
@@ -159,20 +157,49 @@ func (p participations) Participations(ctx context.Context, userID string) ([]ac
 	}
 	out := make([]activity.Participation, 0, len(ms))
 	for _, m := range ms {
-		// Validated at creation: an unknown time zone is broken data.
-		loc, err := time.LoadLocation(m.Timezone)
+		part, err := toParticipation(m)
 		if err != nil {
-			return nil, fmt.Errorf("time zone of challenge %s: %w", m.ID, err)
+			return nil, err
 		}
-		out = append(out, activity.Participation{
-			ChallengeID: m.ID,
-			StartsAt:    m.StartsAt,
-			EndsAt:      m.EndsAt,
-			Location:    loc,
-			Active:      m.Participant == challenge.ParticipantActive,
-		})
+		out = append(out, part)
 	}
 	return out, nil
+}
+
+// scopes is what activityScopes reads from module challenge.
+type scopes interface {
+	ActivitiesScope(ctx context.Context, actorID, id, userID string) (challenge.UserChallenge, error)
+}
+
+// activityScopes gives module activity the challenge where an actor reads
+// the activities of a participant, as activity.Challenges: module challenge
+// applies the rights matrix.
+type activityScopes struct{ challenges scopes }
+
+func (a activityScopes) ActivitiesScope(ctx context.Context, actorID, challengeID, userID string) (activity.Participation, error) {
+	m, err := a.challenges.ActivitiesScope(ctx, actorID, challengeID, userID)
+	if err != nil {
+		return activity.Participation{}, err
+	}
+	return toParticipation(m)
+}
+
+// toParticipation turns a challenge of a user into an activity.Participation:
+// Active comes from the status of the participation, never the role (a
+// creator who abandoned no longer competes, ADR 0001).
+func toParticipation(m challenge.UserChallenge) (activity.Participation, error) {
+	// Validated at creation: an unknown time zone is broken data.
+	loc, err := time.LoadLocation(m.Timezone)
+	if err != nil {
+		return activity.Participation{}, fmt.Errorf("time zone of challenge %s: %w", m.ID, err)
+	}
+	return activity.Participation{
+		ChallengeID: m.ID,
+		StartsAt:    m.StartsAt,
+		EndsAt:      m.EndsAt,
+		Location:    loc,
+		Active:      m.Participant == challenge.ParticipantActive,
+	}, nil
 }
 
 // server gathers the handlers of every operation of the contract.

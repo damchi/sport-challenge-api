@@ -99,6 +99,40 @@ func ParticipantsRefusal(m Membership, visibility string) error {
 	return RequireView(RoleOf(m), visibility)
 }
 
+// CanViewActivities reports whether role may see the activities of a
+// participant (README §5.7): the participants of the challenge, abandoned or
+// excluded ones included, and its creators. An invited user or an outsider
+// sees the leaderboard only.
+func CanViewActivities(role Role) bool {
+	// An allowlist: a role this switch does not know is never let in.
+	switch role {
+	case RoleCreator, RoleParticipant, RoleAbandoned:
+		return true
+	default:
+		return false
+	}
+}
+
+// ActivitiesRefusal tells why a user with membership actor may not see the
+// activities of target in a challenge of that visibility, or nil if they
+// may. A challenge the actor may not see is not found (404
+// challenge_not_found); a visible one shows its leaderboard only to anyone
+// CanViewActivities lets out (404 not_found); a target who never joined has
+// no activities there (404 not_found).
+func ActivitiesRefusal(actor, target Membership, visibility string) error {
+	role := RoleOf(actor)
+	if err := RequireView(role, visibility); err != nil {
+		return err
+	}
+	if !CanViewActivities(role) {
+		return apperr.New(apperr.CodeNotFound, nil)
+	}
+	if target.Participant != ParticipantActive && target.Participant != ParticipantAbandoned {
+		return apperr.New(apperr.CodeNotFound, nil)
+	}
+	return nil
+}
+
 // CanJoin reports whether a user with membership m may join a challenge of
 // that visibility at now: JoinRefusal gives no reason.
 func CanJoin(m Membership, visibility string, now, deadline time.Time) bool {

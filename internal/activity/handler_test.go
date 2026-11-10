@@ -14,6 +14,7 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/api/apitest"
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
@@ -169,7 +170,7 @@ func TestCreateActivityRefusals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{}
-			svc := NewService(repo, fakeProfiles{complete: true}, catalogue, fakeParticipations{t: t, challenges: locked}, clock.NewFake(recordNow))
+			svc := NewService(repo, fakeProfiles{complete: true}, catalogue, fakeParticipations{t: t, challenges: locked}, nil, clock.NewFake(recordNow))
 			rec, body := postActivity(t, svc, tt.body, tt.headers)
 			if rec.Code != tt.status || errorCode(body) != tt.code {
 				t.Fatalf("got %d %v, want %d %s", rec.Code, body, tt.status, tt.code)
@@ -264,6 +265,145 @@ func TestChangeActivityRefusals(t *testing.T) {
 			}
 			if repo.updated != nil || repo.deleted != "" {
 				t.Fatalf("updated %+v, deleted %q: want nothing written", repo.updated, repo.deleted)
+			}
+		})
+	}
+}
+
+func TestListMyActivities(t *testing.T) {
+	c1 := challengeOf(t, "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b")
+	week1 := storedRun(t)
+	week1.ID, week1.StartedAt = "5f1e7c1a-0000-4000-8000-000000000003", toronto(t, 2026, 6, 3, 7)
+	repo := &fakeRepository{listing: []Activity{storedRun(t), week1}}
+	svc := newService(t, repo, fakeParticipations{challenges: []Participation{c1}})
+	rec, body := serve(t, svc, http.MethodGet, "/api/v1/me/activities?limit=1&from=2026-06-01T04:00:00Z&to=2026-06-22T04:00:00Z", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d (%s), want 200", rec.Code, rec.Body)
+	}
+	items, _ := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items %v, want one", body["items"])
+	}
+	first, _ := items[0].(map[string]any)
+	if first["id"] != activityID || first["locked"] != false || first["speed_mps"] == nil || first["source"] != "manual" {
+		t.Fatalf("item %v, want the run of week 2, unlocked, with its speed", first)
+	}
+	if q := repo.listed; q == nil || q.From == nil || q.To == nil || !q.From.Equal(toronto(t, 2026, 6, 1, 0)) || q.UserID != actor {
+		t.Fatalf("query %+v, want the actor's activities in the period", q)
+	}
+
+	// The next page starts after the cursor.
+	cursor, _ := body["next_cursor"].(string)
+	if cursor == "" {
+		t.Fatalf("next_cursor %v, want one", body["next_cursor"])
+	}
+	repo.listing = []Activity{week1}
+	rec, body = serve(t, svc, http.MethodGet, "/api/v1/me/activities?limit=1&cursor="+cursor, "", nil)
+	if rec.Code != http.StatusOK || body["next_cursor"] != nil {
+		t.Fatalf("status %d, body %v, want the last page", rec.Code, body)
+	}
+	if after := repo.listed.After; after == nil || after.ID != activityID || !after.StartedAt.Equal(storedRun(t).StartedAt) {
+		t.Fatalf("after %+v, want the position of the first page's last item", after)
+	}
+	items, _ = body["items"].([]any)
+	if second, _ := items[0].(map[string]any); second["locked"] != true {
+		t.Fatalf("item %v, want the run of week 1 locked", second)
+	}
+}
+
+func TestListMyActivitiesRefusals(t *testing.T) {
+	noDate, err := httpx.EncodeCursor(Position{ID: activityID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	badID, err := httpx.EncodeCursor(map[string]string{"s": "2026-06-10T11:00:00Z", "i": "nope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		query   string
+		headers map[string]string
+		status  int
+		code    string
+	}{
+		{name: "no token", headers: map[string]string{"Authorization": ""}, status: http.StatusUnauthorized, code: "unauthenticated"},
+		{name: "to before from", query: "?from=2026-06-10T00:00:00Z&to=2026-06-01T00:00:00Z", status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "malformed from", query: "?from=yesterday", status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "limit too high", query: "?limit=101", status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "cursor not base64", query: "?cursor=%25%25", status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "cursor without its date", query: "?cursor=" + noDate, status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "cursor with a bad id", query: "?cursor=" + badID, status: http.StatusBadRequest, code: "validation_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{}
+			rec, body := serve(t, newService(t, repo, fakeParticipations{}), http.MethodGet, "/api/v1/me/activities"+tt.query, "", tt.headers)
+			if rec.Code != tt.status || errorCode(body) != tt.code {
+				t.Fatalf("got %d %v, want %d %s", rec.Code, body, tt.status, tt.code)
+			}
+			if repo.listed != nil {
+				t.Fatal("activities read despite the refusal")
+			}
+		})
+	}
+}
+
+const participantActivities = "/api/v1/challenges/8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b/participants/" + participant + "/activities"
+
+func TestListParticipantActivities(t *testing.T) {
+	c1 := challengeOf(t, "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b")
+	other := challengeOf(t, "1d2c3b4a-5f6e-4d7c-8b9a-0f1e2d3c4b5a")
+	run := storedRun(t)
+	run.UserID = participant
+	repo := &fakeRepository{listing: []Activity{run}}
+	var asked [3]string
+	ps := fakeParticipations{t: t, user: participant, challenges: []Participation{c1, other}}
+	svc := NewService(repo, fakeProfiles{}, catalogue, ps, fakeChallenges{scope: c1, asked: &asked}, clock.NewFake(recordNow))
+	rec, body := serve(t, svc, http.MethodGet, participantActivities, "", nil)
+	if rec.Code != http.StatusOK || body["next_cursor"] != nil {
+		t.Fatalf("status %d (%s), want 200 and a single page", rec.Code, rec.Body)
+	}
+	if asked != [3]string{actor, c1.ChallengeID, participant} {
+		t.Fatalf("scope asked for %v", asked)
+	}
+	items, _ := body["items"].([]any)
+	first, _ := items[0].(map[string]any)
+	// The other challenge of the participant is never shown.
+	if ids, _ := first["challenge_ids"].([]any); len(ids) != 1 || ids[0] != c1.ChallengeID {
+		t.Fatalf("challenge_ids %v, want [%s] only", first["challenge_ids"], c1.ChallengeID)
+	}
+}
+
+func TestListParticipantActivitiesRefusals(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string
+		headers  map[string]string
+		scopeErr error
+		status   int
+		code     string
+	}{
+		{name: "no token", headers: map[string]string{"Authorization": ""}, status: http.StatusUnauthorized, code: "unauthenticated"},
+		{name: "non-participant of a public challenge", scopeErr: apperr.New(apperr.CodeNotFound, nil), status: http.StatusNotFound, code: "not_found"},
+		{name: "private challenge hidden", scopeErr: apperr.New(apperr.CodeChallengeNotFound, nil), status: http.StatusNotFound, code: "challenge_not_found"},
+		{name: "malformed user id", target: "/api/v1/challenges/8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b/participants/nope/activities", status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "limit zero", target: participantActivities + "?limit=0", status: http.StatusBadRequest, code: "validation_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := tt.target
+			if target == "" {
+				target = participantActivities
+			}
+			repo := &fakeRepository{}
+			svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{t: t, user: participant}, fakeChallenges{err: tt.scopeErr}, clock.NewFake(recordNow))
+			rec, body := serve(t, svc, http.MethodGet, target, "", tt.headers)
+			if rec.Code != tt.status || errorCode(body) != tt.code {
+				t.Fatalf("got %d %v, want %d %s", rec.Code, body, tt.status, tt.code)
+			}
+			if repo.listed != nil {
+				t.Fatal("activities read despite the refusal")
 			}
 		})
 	}

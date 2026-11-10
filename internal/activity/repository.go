@@ -160,6 +160,29 @@ func (r *Repository) change(ctx context.Context, actorID, id string, decide func
 	})
 }
 
+// List returns up to q.Limit activities of q.UserID, deleted ones left out,
+// started in [q.From, q.To), most recent first (started_at, id), after the
+// position q.After when set.
+func (r *Repository) List(ctx context.Context, q ListQuery) ([]Activity, error) {
+	tx := r.db.WithContext(ctx).Table("activities").
+		Select("id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source").
+		Where("user_id = ? AND deleted_at IS NULL", q.UserID)
+	if q.From != nil {
+		tx = tx.Where("started_at >= ?", *q.From)
+	}
+	if q.To != nil {
+		tx = tx.Where("started_at < ?", *q.To)
+	}
+	if q.After != nil {
+		tx = tx.Where("(started_at, id) < (?, ?)", q.After.StartedAt, q.After.ID)
+	}
+	var rows []Activity
+	if err := tx.Order("started_at DESC, id DESC").Limit(q.Limit).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list activities: %w", err)
+	}
+	return rows, nil
+}
+
 // byKey returns the activity of userID recorded with key, and false if none.
 // A deleted one gives errActivityNotFound: its key stays taken (unique
 // index), and a creation sent again never brings it back.
