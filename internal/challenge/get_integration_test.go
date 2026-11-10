@@ -261,6 +261,23 @@ func TestJoinWithAValidInvitation(t *testing.T) {
 	if _, err := svc.Join(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("not invited: error = %v, want challenge_not_found", err)
 	}
+	// An invitation expired or revoked at the time of the join opens nothing.
+	for name, insert := range map[string]string{
+		"expired": `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at)
+			VALUES ($1, $2, sha256('expired'::bytea), $3, $3::timestamptz - interval '1 hour') RETURNING id`,
+		"revoked": `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at, revoked_at)
+			VALUES ($1, $2, sha256('revoked'::bytea), '2026-03-11 04:00Z', $3, $3) RETURNING id`,
+	} {
+		if _, err := pool.Exec(t.Context(), "WITH i AS ("+insert+") INSERT INTO invitation_recipients SELECT id, $4, $3 FROM i", c.ID, creatorID, now, guest); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Join(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+			t.Fatalf("%s invitation: error = %v, want challenge_not_found", name, err)
+		}
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1", guest); n != 0 {
+		t.Fatalf("%d participations stored, want none", n)
+	}
 	if _, err := pool.Exec(t.Context(), `WITH i AS (
 		INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at)
 		VALUES ($1, $2, sha256('t'::bytea), '2026-03-11 04:00Z', $3) RETURNING id)
