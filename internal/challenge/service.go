@@ -11,6 +11,7 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 // repository is what the service needs from the storage.
@@ -213,8 +214,9 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
 	}
 
 	now := s.clock.Now()
-	deadline := RegistrationDeadline(c.StartsAt, loc)
-	week, weekEnd := CurrentWeek(now, c.StartsAt, c.EndsAt, loc)
+	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
+	deadline := w.RegistrationDeadline()
+	week, weekEnd := w.CurrentWeek()
 	return Detail{
 		Challenge:            c,
 		Role:                 role,
@@ -291,7 +293,8 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 		if err != nil {
 			return time.Time{}, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
 		}
-		if err := JoinRefusal(m, c.Visibility, now, RegistrationDeadline(c.StartsAt, loc)); err != nil {
+		w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
+		if err := JoinRefusal(m, c.Visibility, now, w.RegistrationDeadline()); err != nil {
 			return time.Time{}, err
 		}
 		if !complete {
