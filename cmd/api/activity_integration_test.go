@@ -174,3 +174,65 @@ func TestRecordCountsNowhere(t *testing.T) {
 		t.Fatalf("%d rows, want 2", r.count())
 	}
 }
+
+// TestChangeActivityLockedInAnyChallenge: an activity counting in two
+// challenges is locked as soon as its week has ended in one of them, for a
+// move as for a deletion.
+func TestChangeActivityLockedInAnyChallenge(t *testing.T) {
+	r := newRecording(t)
+	first := r.challenge([3]int{2026, 6, 1}, 3, "active", false)  // week 2 at recordNow
+	second := r.challenge([3]int{2026, 6, 4}, 2, "active", false) // weeks from Thursday: week 1 ended on 2026-06-11
+	d := 5000
+	run := activity.Draft{SportCode: "run", DurationSeconds: 1500, DistanceMeters: &d}
+
+	rec, err := r.record(toronto(t, 2026, 6, 11, 7)) // week 2 of both
+	if err != nil || !slices.Equal(rec.ChallengeIDs, []string{first, second}) {
+		t.Fatalf("Record() = %+v, %v, want it counting in both challenges", rec, err)
+	}
+	// Into week 1 of the second, ended; week 2 of the first, not ended.
+	run.StartedAt = toronto(t, 2026, 6, 9, 7)
+	_, err = r.activities.Update(t.Context(), r.user, rec.ID, run)
+	wantLocked(t, err)
+
+	// Recorded in that week before it ended: locked for a move and a deletion.
+	var locked string
+	if err := r.pool.QueryRow(t.Context(), `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters)
+		VALUES ($1, 'run', $2, 1500, 5000) RETURNING id`, r.user, toronto(t, 2026, 6, 9, 7)).Scan(&locked); err != nil {
+		t.Fatal(err)
+	}
+	run.StartedAt = toronto(t, 2026, 6, 11, 9)
+	_, err = r.activities.Update(t.Context(), r.user, locked, run)
+	wantLocked(t, err)
+	wantLocked(t, r.activities.Delete(t.Context(), r.user, locked))
+
+	got, err := r.activities.Update(t.Context(), r.user, rec.ID, run)
+	if err != nil || !slices.Equal(got.ChallengeIDs, []string{first, second}) {
+		t.Fatalf("Update() = %+v, %v, want it counting in both challenges", got, err)
+	}
+	if err := r.activities.Delete(t.Context(), r.user, rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	var live []string
+	rows, err := r.pool.Query(t.Context(), "SELECT id FROM activities WHERE user_id = $1 AND deleted_at IS NULL", r.user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		live = append(live, id)
+	}
+	if rows.Err() != nil || !slices.Equal(live, []string{locked}) {
+		t.Fatalf("live activities %v, %v, want only the locked one", live, rows.Err())
+	}
+}
+
+func wantLocked(t *testing.T, err error) {
+	t.Helper()
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeWeekLocked {
+		t.Fatalf("error = %v, want week_locked", err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -12,6 +13,9 @@ import (
 
 // errAccountDeleted means the author's account was deleted (anonymized).
 var errAccountDeleted = errors.New("account deleted")
+
+// errActivityNotFound means no activity has this id, or a deleted one.
+var errActivityNotFound = errors.New("activity not found")
 
 // Repository stores the activities in PostgreSQL.
 type Repository struct {
@@ -26,7 +30,8 @@ func NewRepository(gdb *gorm.DB) *Repository {
 // Record stores a in one transaction, carried by the ctx that decide gets so
 // that it reads in it. The author's row is locked first (lockUser). An
 // activity of the same author with the same idempotency key is returned as
-// is, with false, decide not being called. Otherwise decide refuses with an
+// is, with false, decide not being called; errActivityNotFound once it is
+// deleted. Otherwise decide refuses with an
 // error, nothing being written then, or a is inserted and returned with its
 // id and true. An anonymized account gives errAccountDeleted. The
 // participations decide reads are not locked: an abandon committed meanwhile
@@ -84,10 +89,87 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 	return out, created, nil
 }
 
+// Update replaces the fields entered of activity id with those of a, in one
+// transaction carried by the ctx that decide gets. The row of actorID is
+// locked first (lockUser), then the activity FOR UPDATE, so that a change
+// or a deletion of the same activity committed meanwhile is seen. decide
+// gets the activity as stored and refuses with an error, nothing being
+// written then. The source, the external id and the idempotency key stay.
+// A missing or deleted activity, or one of someone else, gives
+// errActivityNotFound; an anonymized actor errAccountDeleted.
+func (r *Repository) Update(ctx context.Context, actorID, id string, a Activity, decide func(ctx context.Context, current Activity) error) (Activity, error) {
+	var out Activity
+	err := r.change(ctx, actorID, id, decide, func(tx *gorm.DB, current Activity) error {
+		err := tx.Exec(`UPDATE activities
+			SET sport_code = ?, sport_label = ?, started_at = ?, duration_seconds = ?, distance_meters = ?
+			WHERE id = ?`,
+			a.SportCode, a.SportLabel, a.StartedAt, a.DurationSeconds, a.DistanceMeters, id,
+		).Error
+		if err != nil {
+			return fmt.Errorf("update activity: %w", err)
+		}
+		out = current
+		out.SportCode, out.SportLabel, out.StartedAt = a.SportCode, a.SportLabel, a.StartedAt
+		out.DurationSeconds, out.DistanceMeters = a.DurationSeconds, a.DistanceMeters
+		return nil
+	})
+	if err != nil {
+		return Activity{}, fmt.Errorf("update activity %s: %w", id, err)
+	}
+	return out, nil
+}
+
+// Delete marks activity id deleted at at, as Update does: decide gets the
+// activity as stored and refuses with an error, nothing being written then.
+func (r *Repository) Delete(ctx context.Context, actorID, id string, at time.Time, decide func(ctx context.Context, current Activity) error) error {
+	err := r.change(ctx, actorID, id, decide, func(tx *gorm.DB, _ Activity) error {
+		if err := tx.Exec("UPDATE activities SET deleted_at = ? WHERE id = ?", at, id).Error; err != nil {
+			return fmt.Errorf("mark activity deleted: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("delete activity %s: %w", id, err)
+	}
+	return nil
+}
+
+// change runs decide then write on activity id, locked, in one transaction
+// (Update, Delete). Only an activity of actorID is read, so that the row of
+// someone else is never locked: theirs gives errActivityNotFound, as a
+// missing one does.
+func (r *Repository) change(ctx context.Context, actorID, id string, decide func(ctx context.Context, current Activity) error, write func(tx *gorm.DB, current Activity) error) error {
+	return db.InTx(ctx, r.db, func(ctx context.Context) error {
+		tx := db.Conn(ctx, r.db)
+		if err := lockUser(tx, actorID); err != nil {
+			return err
+		}
+		var rows []Activity
+		err := tx.Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, idempotency_key
+			FROM activities WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE`, id, actorID).Scan(&rows).Error
+		if err != nil {
+			return fmt.Errorf("lock activity: %w", err)
+		}
+		if len(rows) == 0 {
+			return errActivityNotFound
+		}
+		if err := decide(ctx, rows[0]); err != nil {
+			return err
+		}
+		return write(tx, rows[0])
+	})
+}
+
 // byKey returns the activity of userID recorded with key, and false if none.
+// A deleted one gives errActivityNotFound: its key stays taken (unique
+// index), and a creation sent again never brings it back.
 func byKey(tx *gorm.DB, userID, key string) (Activity, bool, error) {
-	var rows []Activity
-	err := tx.Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, idempotency_key
+	var rows []struct {
+		Activity
+		Deleted bool
+	}
+	err := tx.Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, idempotency_key,
+			deleted_at IS NOT NULL AS deleted
 		FROM activities WHERE user_id = ? AND idempotency_key = ?`, userID, key).Scan(&rows).Error
 	if err != nil {
 		return Activity{}, false, fmt.Errorf("read activity by key: %w", err)
@@ -95,7 +177,10 @@ func byKey(tx *gorm.DB, userID, key string) (Activity, bool, error) {
 	if len(rows) == 0 {
 		return Activity{}, false, nil
 	}
-	return rows[0], true, nil
+	if rows[0].Deleted {
+		return Activity{}, false, errActivityNotFound
+	}
+	return rows[0].Activity, true, nil
 }
 
 // lockUser takes the row of user id FOR SHARE, as every write that

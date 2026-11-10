@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
@@ -12,6 +13,8 @@ import (
 // repository is what the service needs from the storage.
 type repository interface {
 	Record(ctx context.Context, a Activity, decide func(ctx context.Context) error) (Activity, bool, error)
+	Update(ctx context.Context, actorID, id string, a Activity, decide func(ctx context.Context, current Activity) error) (Activity, error)
+	Delete(ctx context.Context, actorID, id string, at time.Time, decide func(ctx context.Context, current Activity) error) error
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -53,7 +56,7 @@ func NewService(repo repository, profiles Profiles, catalogue Catalogue, partici
 // challenge where it counts, checked in the transaction of the write; it is
 // recorded even if it counts nowhere (ADR 0001). With idempotencyKey, an
 // activity of the actor recorded before with the same key is returned
-// instead, nothing being written.
+// instead, nothing being written, or 404 activity_not_found once deleted.
 func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *string, draft Draft) (Recorded, error) {
 	complete, err := s.profiles.ProfileComplete(ctx, actorID)
 	if err != nil {
@@ -63,14 +66,7 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 		return Recorded{}, apperr.New(apperr.CodeProfileIncomplete, nil)
 	}
 
-	mode, found, err := s.catalogue.DistanceMode(ctx, draft.SportCode)
-	if err != nil {
-		return Recorded{}, fmt.Errorf("read catalogue: %w", err)
-	}
-	if !found {
-		return Recorded{}, apperr.InvalidFields(nil, "sport_code")
-	}
-	draft, err = Validate(draft, mode, s.clock.Now())
+	draft, err = s.validate(ctx, draft)
 	if err != nil {
 		return Recorded{}, err
 	}
@@ -97,11 +93,8 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 		challenges = ps
 		return nil
 	})
-	if errors.Is(err, errAccountDeleted) {
-		return Recorded{}, apperr.New(apperr.CodeAccountDeleted, nil)
-	}
 	if err != nil {
-		return Recorded{}, err
+		return Recorded{}, storageError(err)
 	}
 	if !created {
 		// Recorded before: where it counts now, outside the transaction
@@ -111,4 +104,100 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 		}
 	}
 	return Recorded{Activity: stored, ChallengeIDs: CountsIn(stored.StartedAt, challenges), Created: created}, nil
+}
+
+// Update replaces activity id of actorID with draft, validated as at the
+// creation (Record): the body replaces every field entered. The activity of
+// someone else, a deleted or a missing one gives 404 activity_not_found. It
+// is refused with 422 week_locked when the week of its current start, or of
+// the new one, has ended in a challenge where it counts, checked in the
+// transaction of the write. The profile is not checked again: the activity
+// was recorded with a complete one. A badge won stays won (README §2.7,
+// V1.1).
+func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (Recorded, error) {
+	draft, err := s.validate(ctx, draft)
+	if err != nil {
+		return Recorded{}, err
+	}
+	a := Activity{
+		SportCode:       draft.SportCode,
+		SportLabel:      draft.SportLabel,
+		StartedAt:       draft.StartedAt.UTC(),
+		DurationSeconds: draft.DurationSeconds,
+		DistanceMeters:  draft.DistanceMeters,
+	}
+	var challenges []Participation
+	stored, err := s.repo.Update(ctx, actorID, id, a, func(ctx context.Context, current Activity) error {
+		// The current start is checked by changeable, the new one here,
+		// on the same participations.
+		ps, err := s.changeable(ctx, actorID, current)
+		if err != nil {
+			return err
+		}
+		if IsLocked(s.clock.Now(), a.StartedAt, ps) {
+			return apperr.New(apperr.CodeWeekLocked, nil)
+		}
+		challenges = ps
+		return nil
+	})
+	if err != nil {
+		return Recorded{}, storageError(err)
+	}
+	return Recorded{Activity: stored, ChallengeIDs: CountsIn(stored.StartedAt, challenges)}, nil
+}
+
+// Delete marks activity id of actorID deleted: it counts nowhere from then
+// on. As for Update, the activity of someone else gives 404
+// activity_not_found and a week ended where it counts 422 week_locked.
+func (s *Service) Delete(ctx context.Context, actorID, id string) error {
+	err := s.repo.Delete(ctx, actorID, id, s.clock.Now(), func(ctx context.Context, current Activity) error {
+		_, err := s.changeable(ctx, actorID, current)
+		return err
+	})
+	if err != nil {
+		return storageError(err)
+	}
+	return nil
+}
+
+// validate checks draft against the catalogue at the instant of the clock
+// (Validate), an unknown sport giving 400 validation_failed on sport_code.
+func (s *Service) validate(ctx context.Context, draft Draft) (Draft, error) {
+	mode, found, err := s.catalogue.DistanceMode(ctx, draft.SportCode)
+	if err != nil {
+		return Draft{}, fmt.Errorf("read catalogue: %w", err)
+	}
+	if !found {
+		return Draft{}, apperr.InvalidFields(nil, "sport_code")
+	}
+	return Validate(draft, mode, s.clock.Now())
+}
+
+// changeable checks that actorID may change current (CanChange, else 404
+// activity_not_found) and that its week has not ended in a challenge where
+// it counts (422 week_locked). It returns the participations of the author,
+// read in the transaction of ctx.
+func (s *Service) changeable(ctx context.Context, actorID string, current Activity) ([]Participation, error) {
+	if !CanChange(actorID, current.UserID) {
+		return nil, apperr.New(apperr.CodeActivityNotFound, nil)
+	}
+	ps, err := s.participations.Participations(ctx, actorID)
+	if err != nil {
+		return nil, fmt.Errorf("read participations: %w", err)
+	}
+	if IsLocked(s.clock.Now(), current.StartedAt, ps) {
+		return nil, apperr.New(apperr.CodeWeekLocked, nil)
+	}
+	return ps, nil
+}
+
+// storageError turns the errors of the storage into errors of the API.
+func storageError(err error) error {
+	switch {
+	case errors.Is(err, errActivityNotFound):
+		return apperr.New(apperr.CodeActivityNotFound, nil)
+	case errors.Is(err, errAccountDeleted):
+		return apperr.New(apperr.CodeAccountDeleted, nil)
+	}
+	return err
 }
