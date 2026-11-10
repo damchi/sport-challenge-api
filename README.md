@@ -485,7 +485,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Voir un challenge public et son classement | tout utilisateur connecté (✅) |
 | Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅) |
 | Rejoindre un challenge public | tout utilisateur connecté, jusqu'à la fin de la semaine 1 (✅) |
-| Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) ; une invitation n'est valide que tant que son auteur est encore créateur ou participant actif : un lien diffusé par un participant exclu ou qui a abandonné ne donne plus rien (✅) |
+| Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) ; une invitation n'est valide que tant que son auteur est encore créateur ou participant actif. Exclure un participant (ou qu'il abandonne) n'exclut pas les personnes qu'il a invitées : celles qui ont déjà rejoint restent participantes ; seul son lien est annulé, pour les personnes invitées qui n'ont pas encore rejoint (✅) |
 | Inviter | créateurs ; participants seulement si le créateur l'a autorisé à la création (✅) |
 | Modifier titre et description | créateurs (✅) |
 | Modifier les catégories | personne, après la création (✅) |

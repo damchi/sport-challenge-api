@@ -207,8 +207,8 @@ func TestGetInvited(t *testing.T) {
 		t.Fatalf("revoked after the link: error = %v, want challenge_not_found", err)
 	}
 
-	// Invited by a participant while members may invite: the access lasts
-	// as long as the author may invite, not after their exclusion.
+	// Invited by a participant while members may invite: the invitation
+	// lasts as long as the author may invite, not after their exclusion.
 	member := insertTestUser(t, pool, "email|member")
 	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET members_can_invite = true WHERE id = $1", c.ID); err != nil {
 		t.Fatal(err)
@@ -223,14 +223,25 @@ func TestGetInvited(t *testing.T) {
 	}
 	friend := insertTestUser(t, pool, "email|friend")
 	link(byMember, friend)
+	// Invited by the member too, and joined before the exclusion.
+	joined := insertTestUser(t, pool, "email|joined")
+	link(byMember, joined)
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, 'active', $3, NULL)", c.ID, joined, now); err != nil {
+		t.Fatal(err)
+	}
 	if d, err := svc.Get(t.Context(), friend, c.ID); err != nil || d.Role != RoleInvited {
 		t.Fatalf("invited by an active participant: %+v, %v, want invited", d.Role, err)
 	}
 	if err := svc.Exclude(t.Context(), creatorID, c.ID, member); err != nil {
 		t.Fatal(err)
 	}
+	// Excluding the member cancels their link for whoever has not joined
+	// yet; whoever joined stays a participant.
 	if _, err := svc.Get(t.Context(), friend, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
-		t.Fatalf("author excluded: error = %v, want challenge_not_found", err)
+		t.Fatalf("author excluded, not joined: error = %v, want challenge_not_found", err)
+	}
+	if d, err := svc.Get(t.Context(), joined, c.ID); err != nil || d.Role != RoleParticipant || d.Participant != ParticipantActive {
+		t.Fatalf("author excluded, joined before: %+v, %v, want an active participant", d.Role, err)
 	}
 }
 
