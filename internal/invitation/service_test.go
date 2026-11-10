@@ -23,14 +23,37 @@ const (
 var (
 	now      = time.Date(2026, 3, 4, 15, 0, 0, 0, time.UTC)
 	deadline = time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
+	start    = time.Date(2026, 3, 2, 5, 0, 0, 0, time.UTC)
+	end      = time.Date(2026, 4, 13, 4, 0, 0, 0, time.UTC)
 )
 
 type fakeChallenges struct {
-	err error
+	// err refuses the invitation deadline, previewErr the preview, joinErr
+	// the join.
+	err, previewErr, joinErr error
+	// joined, if set, records the join made: user and challenge.
+	joined *[2]string
 }
 
 func (f fakeChallenges) InvitationDeadline(context.Context, string, string) (time.Time, error) {
 	return deadline, f.err
+}
+
+func (f fakeChallenges) Preview(_ context.Context, _, id string) (Challenge, error) {
+	if f.previewErr != nil {
+		return Challenge{}, f.previewErr
+	}
+	return Challenge{ID: id, Title: "Spring run", StartsAt: start, EndsAt: end}, nil
+}
+
+func (f fakeChallenges) Join(_ context.Context, actorID, id string) error {
+	if f.joinErr != nil {
+		return f.joinErr
+	}
+	if f.joined != nil {
+		*f.joined = [2]string{actorID, id}
+	}
+	return nil
 }
 
 type fakeRepository struct {
@@ -185,5 +208,93 @@ func TestServiceLinkStorageFails(t *testing.T) {
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
+	}
+}
+
+// validToken is a well-formed token and its hash, the valid invitation of a
+// fakeRepository.
+func validToken() (token string, hash []byte) {
+	raw := bytes.Repeat([]byte{7}, 32)
+	sum := sha256.Sum256(raw)
+	return base64.RawURLEncoding.EncodeToString(raw), sum[:]
+}
+
+func TestServicePreview(t *testing.T) {
+	token, hash := validToken()
+	storage := errors.New("connection refused")
+	tests := []struct {
+		name       string
+		token      string
+		previewErr error
+		want       apperr.Code // empty: previewed
+		wantLinked bool
+	}{
+		{name: "valid", token: token, wantLinked: true},
+		{name: "invalid token", token: "nope", want: apperr.CodeInvitationInvalid},
+		// The invitation stopped being valid, or the challenge was deleted,
+		// right after the link: never an answer about the challenge.
+		{name: "challenge hidden after the link", token: token, previewErr: apperr.New(apperr.CodeChallengeNotFound, nil), want: apperr.CodeInvitationInvalid, wantLinked: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{valid: hash}
+			got, err := NewService(fakeChallenges{previewErr: tt.previewErr}, repo, clock.NewFake(now)).Preview(t.Context(), actor, tt.token)
+			if linked := repo.linkedUser == actor; linked != tt.wantLinked {
+				t.Fatalf("linked %v, want %v", linked, tt.wantLinked)
+			}
+			if tt.want == "" {
+				want := Challenge{ID: challengeID, Title: "Spring run", StartsAt: start, EndsAt: end}
+				if err != nil || got != want {
+					t.Fatalf("Preview() = %+v, %v, want %+v", got, err, want)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) || errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+				t.Fatalf("error = %v, want %s only", err, tt.want)
+			}
+		})
+	}
+
+	_, err := NewService(fakeChallenges{previewErr: storage}, &fakeRepository{valid: hash}, clock.NewFake(now)).Preview(t.Context(), actor, token)
+	var appErr *apperr.Error
+	if !errors.Is(err, storage) || errors.As(err, &appErr) {
+		t.Fatalf("error = %v, want %v as an internal error", err, storage)
+	}
+}
+
+func TestServiceAccept(t *testing.T) {
+	token, hash := validToken()
+	tests := []struct {
+		name    string
+		token   string
+		joinErr error
+		want    apperr.Code // empty: joined
+	}{
+		{name: "valid", token: token},
+		{name: "invalid token", token: "nope", want: apperr.CodeInvitationInvalid},
+		{name: "abandoned before", token: token, joinErr: apperr.New(apperr.CodeParticipationAbandoned, nil), want: apperr.CodeParticipationAbandoned},
+		{name: "already in", token: token, joinErr: apperr.New(apperr.CodeAlreadyParticipant, nil), want: apperr.CodeAlreadyParticipant},
+		{name: "incomplete profile", token: token, joinErr: apperr.New(apperr.CodeProfileIncomplete, nil), want: apperr.CodeProfileIncomplete},
+		{name: "registration closed while accepting", token: token, joinErr: apperr.New(apperr.CodeRegistrationClosed, nil), want: apperr.CodeRegistrationClosed},
+		{name: "challenge hidden after the link", token: token, joinErr: apperr.New(apperr.CodeChallengeNotFound, nil), want: apperr.CodeInvitationInvalid},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var joined [2]string
+			repo := &fakeRepository{valid: hash}
+			got, err := NewService(fakeChallenges{joinErr: tt.joinErr, joined: &joined}, repo, clock.NewFake(now)).Accept(t.Context(), actor, tt.token)
+			if tt.want == "" {
+				if err != nil || got != challengeID || joined != [2]string{actor, challengeID} {
+					t.Fatalf("Accept() = %q, %v, joined %v, want the actor in %s", got, err, joined, challengeID)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) || got != "" {
+				t.Fatalf("Accept() = %q, %v, want %s", got, err, tt.want)
+			}
+			if joined != [2]string{} {
+				t.Fatal("joined despite the refusal")
+			}
+		})
 	}
 }

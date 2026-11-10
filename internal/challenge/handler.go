@@ -179,15 +179,22 @@ func (h *Handler) GetChallenge(ctx context.Context, req api.GetChallengeRequestO
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	d, err := h.service.Get(ctx, actorID, req.ChallengeId.String())
-	if err != nil {
-		return nil, err
-	}
-	out, err := toDetail(d)
+	out, err := h.ChallengeDetail(ctx, actorID, req.ChallengeId.String())
 	if err != nil {
 		return nil, err
 	}
 	return api.GetChallenge200JSONResponse(out), nil
+}
+
+// ChallengeDetail gives challenge id as actorID sees it, in the shape of
+// the contract: for GetChallenge, and for the routes of other modules that
+// answer a challenge (accepting an invitation).
+func (h *Handler) ChallengeDetail(ctx context.Context, actorID, id string) (api.ChallengeDetail, error) {
+	d, err := h.service.Get(ctx, actorID, id)
+	if err != nil {
+		return api.ChallengeDetail{}, err
+	}
+	return toDetail(d)
 }
 
 // UpdateChallenge edits the title and the description.

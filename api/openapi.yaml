@@ -29,6 +29,8 @@ tags:
     description: Challenges, their categories and participants.
   - name: activities
     description: Activities of the user, entered once and counted in every challenge where they belong.
+  - name: invitations
+    description: Invitation links to a challenge, reusable until the end of week 1.
 paths:
   /healthz:
     get:
@@ -763,6 +765,119 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/invitations:
+    post:
+      operationId: createInvitation
+      summary: Create an invitation link
+      description: |
+        Creates a link to the challenge, reusable by several people until
+        the end of week 1. Creators, and active participants when the
+        challenge was created with `members_can_invite` (otherwise 403
+        `forbidden`); nobody from the end of week 1 (422
+        `registration_closed`). The token is answered here only: the server
+        keeps its hash.
+      tags: [invitations]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: The invitation, with its token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationCreated"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ChallengeNotFound"
+        "422":
+          description: Registration closed after week 1 (`registration_closed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/invitations/{token}:
+    get:
+      operationId: getInvitation
+      summary: Open an invitation link
+      description: |
+        A limited preview of the challenge of the invitation. Opening the
+        link makes the user invited: while the invitation is valid, they
+        read the challenge (`GET /challenges/{challengeId}`) and may join
+        it. Opening it again changes nothing. An unknown or malformed token,
+        an expired or revoked invitation, one whose author may no longer
+        invite, and one to a deleted challenge answer the same 404
+        `invitation_invalid`.
+      tags: [invitations]
+      parameters:
+        - $ref: "#/components/parameters/InvitationToken"
+      responses:
+        "200":
+          description: The preview of the challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationPreview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/InvitationInvalid"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/invitations/{token}/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Accept an invitation
+      description: |
+        Opens the link, then joins its challenge under the rules of
+        `POST /challenges/{challengeId}/join`: never twice
+        (`already_participant`), never after an abandon
+        (`participation_abandoned`), with a complete profile
+        (`profile_incomplete`). An invitation expires at the end of week 1,
+        when joining closes: from that instant the answer is 404
+        `invitation_invalid`, as for every invalid token.
+      tags: [invitations]
+      parameters:
+        - $ref: "#/components/parameters/InvitationToken"
+      responses:
+        "201":
+          description: Joined; the challenge as the user now sees it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/InvitationInvalid"
+        "409":
+          description: Already a participant (`already_participant`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            Abandoned for good (`participation_abandoned`), incomplete profile
+            (`profile_incomplete`), or registration closed while accepting
+            (`registration_closed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/activities:
     post:
       operationId: createActivity
@@ -911,6 +1026,16 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Auth0 access token of a user (audience of the API); machine-to-machine tokens are refused.
+  parameters:
+    InvitationToken:
+      name: token
+      in: path
+      required: true
+      description: |
+        The token of an invitation link. No format is checked here: a
+        malformed token is an invalid invitation (404), never a 400.
+      schema:
+        type: string
   responses:
     Unauthorized:
       description: |
@@ -936,6 +1061,15 @@ components:
       description: |
         No such challenge, a deleted one, or a private one the user may not
         see (`challenge_not_found`): the same answer in every case.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InvitationInvalid:
+      description: |
+        No valid invitation for the token (`invitation_invalid`): unknown,
+        malformed, expired, revoked, of an author who may no longer invite,
+        or to a deleted challenge. The same answer in every case.
       content:
         application/json:
           schema:
@@ -1510,6 +1644,34 @@ components:
           type: string
           format: uuid
           description: The participant to make a creator.
+    InvitationCreated:
+      type: object
+      required: [token, expires_at]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          description: The token of the link, to put in `/invitations/{token}`. Never answered again.
+        expires_at:
+          type: string
+          format: date-time
+          description: End of week 1 of the challenge, when the invitation expires.
+    InvitationPreview:
+      type: object
+      required: [challenge_id, title, starts_at, ends_at]
+      additionalProperties: false
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
     ActivityCreate:
       type: object
       required: [sport_code, started_at, duration_seconds]

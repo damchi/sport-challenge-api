@@ -21,6 +21,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/health"
+	"github.com/damchi/sport-challenge-api/internal/invitation"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
@@ -89,13 +90,16 @@ func run() error {
 	challenges = challenge.NewService(challenge.NewRepository(gdb), users, sports, clock.Real{})
 	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clock.Real{})
 	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, users, leaderboard.NewRepository(gdb), clock.Real{}, cfg.AtRiskThreshold)
+	invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clock.Real{})
+	challengeHandler := challenge.NewHandler(challenges)
 	handlers := server{
 		Handler:            health.NewHandler(pool, logger),
 		userHandler:        user.NewHandler(users),
 		sportHandler:       sport.NewHandler(sports),
-		challengeHandler:   challenge.NewHandler(challenges),
+		challengeHandler:   challengeHandler,
 		activityHandler:    activity.NewHandler(activities),
 		leaderboardHandler: leaderboard.NewHandler(leaderboards),
+		invitationHandler:  invitation.NewHandler(invitations, challengeHandler),
 	}
 	router, err := newRouter(logger, cfg.CORSAllowedOrigins, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
 		u, err := users.GetOrCreateBySubject(ctx, subject)
@@ -230,6 +234,35 @@ func (l leaderboardChallenges) Challenge(ctx context.Context, actorID, id string
 	return leaderboard.Challenge{ID: d.ID, Timezone: d.Timezone, StartsAt: d.StartsAt, EndsAt: d.EndsAt, Categories: categories}, nil
 }
 
+// invited is what invitationChallenges reads from module challenge.
+type invited interface {
+	InvitationDeadline(ctx context.Context, actorID, id string) (time.Time, error)
+	Get(ctx context.Context, actorID, id string) (challenge.Detail, error)
+	Join(ctx context.Context, actorID, id string) (challenge.Detail, error)
+}
+
+// invitationChallenges gives module invitation the challenge of an
+// invitation, as invitation.Challenges: module challenge applies the rights
+// matrix and the join rule to the actor.
+type invitationChallenges struct{ challenges invited }
+
+func (i invitationChallenges) InvitationDeadline(ctx context.Context, actorID, challengeID string) (time.Time, error) {
+	return i.challenges.InvitationDeadline(ctx, actorID, challengeID)
+}
+
+func (i invitationChallenges) Preview(ctx context.Context, actorID, challengeID string) (invitation.Challenge, error) {
+	d, err := i.challenges.Get(ctx, actorID, challengeID)
+	if err != nil {
+		return invitation.Challenge{}, err
+	}
+	return invitation.Challenge{ID: d.ID, Title: d.Title, StartsAt: d.StartsAt, EndsAt: d.EndsAt}, nil
+}
+
+func (i invitationChallenges) Join(ctx context.Context, actorID, challengeID string) error {
+	_, err := i.challenges.Join(ctx, actorID, challengeID)
+	return err
+}
+
 // server gathers the handlers of every operation of the contract.
 type server struct {
 	health.Handler
@@ -238,6 +271,7 @@ type server struct {
 	challengeHandler
 	activityHandler
 	leaderboardHandler
+	invitationHandler
 }
 
 // These aliases name the embedded handlers: embedding the *Handler of each
@@ -250,6 +284,7 @@ type (
 	activityHandler  = *activity.Handler
 
 	leaderboardHandler = *leaderboard.Handler
+	invitationHandler  = *invitation.Handler
 )
 
 // newRouter registers the routes of the contract behind the protection:
