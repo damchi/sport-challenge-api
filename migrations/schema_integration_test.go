@@ -79,6 +79,25 @@ func TestConstraints(t *testing.T) {
 		{name: "same fingerprint twice", sql: `INSERT INTO deleted_subjects (fingerprint) VALUES (sha256('email|1'::bytea)), (sha256('email|1'::bytea))`, constraint: "deleted_subjects_pkey"},
 		{name: "same pending deletion twice", sql: `INSERT INTO pending_auth0_deletions (auth_subject) VALUES ('email|1'), ('email|1')`, constraint: "pending_auth0_deletions_pkey"},
 
+		// activities (000006)
+		{name: "valid run", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters) VALUES ('` + userID + `', 'run', '2026-12-02Z', 1800, 5000)`},
+		{name: "yoga without distance", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 3600)`},
+		{name: "zero distance", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters) VALUES ('` + userID + `', 'run', '2026-12-02Z', 1800, 0)`},
+		{name: "other with a label", sql: `INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ('` + userID + `', 'other', 'Padel', '2026-12-02Z', 3600)`},
+		{name: "label bounds included", sql: `INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ('` + userID + `', 'other', 'Go', '2026-12-02Z', 60), ('` + userID + `', 'other', repeat('a', 40), '2026-12-02Z', 60)`},
+		{name: "zero duration", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 0)`, constraint: "activities_duration_seconds_check"},
+		{name: "negative distance", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters) VALUES ('` + userID + `', 'run', '2026-12-02Z', 1800, -1)`, constraint: "activities_distance_meters_check"},
+		{name: "unknown source", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, source) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 60, 'fitbit')`, constraint: "activities_source_check"},
+		{name: "other without a label", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'other', '2026-12-02Z', 60)`, constraint: "activities_sport_label_by_sport"},
+		{name: "label on a catalogue sport", sql: `INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', 'Hatha', '2026-12-02Z', 60)`, constraint: "activities_sport_label_by_sport"},
+		{name: "label too short", sql: `INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ('` + userID + `', 'other', 'P', '2026-12-02Z', 60)`, constraint: "activities_sport_label_check"},
+		{name: "label too long", sql: `INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ('` + userID + `', 'other', repeat('a', 41), '2026-12-02Z', 60)`, constraint: "activities_sport_label_check"},
+		{name: "unknown sport", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'curling', '2026-12-02Z', 60)`, constraint: "activities_sport_code_fkey"},
+		{name: "unknown user", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('00000000-0000-0000-0000-00000000dead', 'yoga', '2026-12-02Z', 60)`, constraint: "activities_user_id_fkey"},
+		{name: "same idempotency key twice", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, idempotency_key) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 60, 'k1'), ('` + userID + `', 'yoga', '2026-12-03Z', 60, 'k1')`, constraint: "activities_user_idempotency_key_key"},
+		{name: "same external id twice", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, external_id) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 60, 'x1'), ('` + userID + `', 'yoga', '2026-12-03Z', 60, 'x1')`, constraint: "activities_source_external_id_key"},
+		{name: "keys optional", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 60), ('` + userID + `', 'yoga', '2026-12-02Z', 60)`},
+
 		// No cascade: results stay (anonymization, soft deletion).
 		{name: "deleting a challenge with participants", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL); DELETE FROM challenges WHERE id = '` + challengeID + `'`, constraint: "participants_challenge_id_fkey"},
 		{name: "deleting a user who created a challenge", sql: `DELETE FROM users WHERE id = '` + userID + `'`, constraint: "challenges_created_by_fkey"},
