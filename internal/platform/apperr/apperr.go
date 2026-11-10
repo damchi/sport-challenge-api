@@ -43,6 +43,9 @@ const (
 	CodeDistanceRequired Code = "distance_required"
 	// CodeDistanceNotAllowed refuses a distance for a sport without one.
 	CodeDistanceNotAllowed Code = "distance_not_allowed"
+	// CodeWeekLocked refuses writing an activity whose week has ended in a
+	// challenge where it counts (ADR 0001).
+	CodeWeekLocked Code = "week_locked"
 	// CodeFieldNotEditable refuses a change to a field frozen at creation.
 	CodeFieldNotEditable Code = "field_not_editable"
 	// CodeChallengeNotFound also answers a private challenge the user may
@@ -89,6 +92,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "Distance required"}, true
 	case CodeDistanceNotAllowed:
 		return definition{http.StatusUnprocessableEntity, "Distance not allowed"}, true
+	case CodeWeekLocked:
+		return definition{http.StatusUnprocessableEntity, "Week locked"}, true
 	case CodeFieldNotEditable:
 		return definition{http.StatusUnprocessableEntity, "Field not editable"}, true
 	case CodeChallengeNotFound:

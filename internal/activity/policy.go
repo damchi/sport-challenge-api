@@ -17,28 +17,38 @@ func CanChange(actorID, authorID string) bool {
 // reads it: its window [StartsAt, EndsAt) in UTC, cut into weeks in its time
 // zone (required: loaded from the challenge's).
 type Participation struct {
-	StartsAt time.Time
-	EndsAt   time.Time
-	Location *time.Location
-	Deleted  bool
+	ChallengeID string
+	StartsAt    time.Time
+	EndsAt      time.Time
+	Location    *time.Location
+	Deleted     bool
 	// Active is true when the author is an active participant: read from the
 	// participation status, never the role (a creator who abandoned no
 	// longer competes).
 	Active bool
 }
 
+// CountsIn returns the challenges, in the order of challenges, where an
+// activity started at startedAt counts (ADR 0001): not deleted, finished
+// ones included, whose window holds startedAt and where the author is an
+// active participant. Never a reason to refuse an activity: it may count
+// nowhere.
+func CountsIn(startedAt time.Time, challenges []Participation) []string {
+	var ids []string
+	for _, c := range challenges {
+		if counts(c, startedAt) {
+			ids = append(ids, c.ChallengeID)
+		}
+	}
+	return ids
+}
+
 // IsLocked reports whether an activity started at startedAt is locked at now
 // (from platform/clock, never the worker): its week has ended in at least
-// one challenge where it counts (ADR 0001). It counts in a challenge not
-// deleted, finished ones included, whose window holds startedAt and where
-// the author is an active participant.
+// one challenge where it counts (CountsIn).
 func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 	for _, c := range challenges {
-		if c.Deleted || !c.Active {
-			continue
-		}
-		w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: c.Location}
-		if !w.Contains(startedAt) {
+		if !counts(c, startedAt) {
 			continue
 		}
 		// A challenge whose weeks cannot be cut locks rather than lets an
@@ -46,9 +56,19 @@ func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 		if c.Location == nil {
 			return true
 		}
+		w := window(c)
 		if _, end := w.WeekBounds(w.WeekOf(startedAt)); !now.Before(end) {
 			return true
 		}
 	}
 	return false
+}
+
+// counts reports whether an activity started at startedAt counts in c.
+func counts(c Participation, startedAt time.Time) bool {
+	return !c.Deleted && c.Active && window(c).Contains(startedAt)
+}
+
+func window(c Participation) scoring.Window {
+	return scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: c.Location}
 }

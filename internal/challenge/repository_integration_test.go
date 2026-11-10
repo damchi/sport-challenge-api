@@ -274,3 +274,51 @@ func TestCreateIsAtomic(t *testing.T) {
 		}
 	}
 }
+
+func TestMembershipsListsTheChallengesJoined(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, creatorID := setup(t, &pseudo)
+	created, err := svc.Create(t.Context(), creatorID, valid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := insertTestUser(t, pool, "email|other")
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET pseudo = 'other' WHERE id = $1", other); err != nil {
+		t.Fatal(err)
+	}
+	joined, err := svc.Create(t.Context(), other, valid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, 'abandoned', $3, $3)", joined.ID, creatorID, now); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := svc.Create(t.Context(), creatorID, valid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET deleted_at = now() WHERE id = $1", deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Not joined: left out.
+	if _, err := svc.Create(t.Context(), other, valid()); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Memberships(t.Context(), creatorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]Membership{
+		created.ID: {Creator: true, Participant: ParticipantActive},
+		joined.ID:  {Participant: ParticipantAbandoned},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Memberships() = %+v, want %d challenges", got, len(want))
+	}
+	for _, m := range got {
+		if w, ok := want[m.ID]; !ok || m.Membership != w || m.Timezone != created.Timezone || !m.StartsAt.Equal(created.StartsAt) || !m.EndsAt.Equal(created.EndsAt) {
+			t.Fatalf("membership %+v, want %+v with the window of the challenge", m, w)
+		}
+	}
+}

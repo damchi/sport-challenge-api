@@ -27,6 +27,8 @@ tags:
     description: Catalogue of sports.
   - name: challenges
     description: Challenges, their categories and participants.
+  - name: activities
+    description: Activities of the user, entered once and counted in every challenge where they belong.
 paths:
   /healthz:
     get:
@@ -601,6 +603,65 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/activities:
+    post:
+      operationId: createActivity
+      summary: Record an activity
+      description: |
+        Records a manual activity of the authenticated user, who needs a
+        complete profile (`profile_incomplete`). It belongs to the user, not
+        to a challenge: it counts in every challenge, not deleted, where the
+        user is an active participant and whose window holds `started_at`
+        (`challenge_ids`, possibly empty). An activity outside every window
+        is recorded all the same. It is refused (`week_locked`) when its week
+        has ended in one of those challenges, finished ones included. The
+        speed is computed, never sent. With `Idempotency-Key`, a valid
+        request sent again with the same key answers 200 with the activity
+        recorded first, which stays as it was, even if the body differs.
+      tags: [activities]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Key chosen by the client (a UUID, for instance), unique per user.
+          schema:
+            type: string
+            pattern: "^[!-~]{1,128}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityCreate"
+      responses:
+        "201":
+          description: The recorded activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "200":
+          description: The activity already recorded with this `Idempotency-Key`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: |
+            The profile is incomplete (`profile_incomplete`), the sport needs
+            a distance (`distance_required`) or takes none
+            (`distance_not_allowed`), or the week of `started_at` has ended
+            in a challenge where the activity counts (`week_locked`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -699,6 +760,7 @@ components:
         - not_active_participant
         - distance_required
         - distance_not_allowed
+        - week_locked
         - not_found
         - validation_failed
         - internal_error
@@ -1093,3 +1155,74 @@ components:
           type: string
           format: uuid
           description: The participant to make a creator.
+    ActivityCreate:
+      type: object
+      required: [sport_code, started_at, duration_seconds]
+      additionalProperties: false
+      properties:
+        sport_code:
+          type: string
+          description: Code of a sport of the catalogue (`GET /api/v1/sports`).
+          pattern: "^[a-z_]{1,32}$"
+          example: run
+        sport_label:
+          type: string
+          maxLength: 200
+          description: |
+            Free label of the sport `other`, required for it and refused for
+            the others: 2 to 40 characters once spaces are cleaned, no
+            control character.
+        started_at:
+          type: string
+          format: date-time
+          description: Start of the activity; never in the future (5 minutes of tolerance).
+        duration_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+        distance_meters:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          description: Required or refused according to the sport's `distance_mode`.
+    Activity:
+      type: object
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, speed_mps, pace_seconds_per_km, challenge_ids]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        sport_code:
+          type: string
+        sport_label:
+          type: string
+          nullable: true
+          description: Label of the sport `other`, cleaned; null for the others.
+        started_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+        distance_meters:
+          type: integer
+          nullable: true
+        source:
+          type: string
+          enum: [manual]
+        speed_mps:
+          type: number
+          format: double
+          nullable: true
+          description: Speed in meters per second, computed; null without distance.
+        pace_seconds_per_km:
+          type: number
+          format: double
+          nullable: true
+          description: Pace in seconds per kilometer, computed; null without distance.
+        challenge_ids:
+          type: array
+          description: Challenges where the activity counts, now; possibly empty.
+          items:
+            type: string
+            format: uuid

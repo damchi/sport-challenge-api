@@ -28,6 +28,7 @@ type repository interface {
 	Delete(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
 	Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error)
 	ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error)
+	Memberships(ctx context.Context, userID string) ([]UserChallenge, error)
 }
 
 // Profiles tells whether a user's profile is complete, and gives the pseudos
@@ -359,6 +360,18 @@ func (s *Service) AbandonAll(ctx context.Context, userID string) error {
 		}
 	}
 	return nil
+}
+
+// Memberships returns the challenges, not deleted, that userID joined, with
+// their membership: where an activity of theirs may count, read in the
+// transaction of ctx, if any. It checks no actor: the caller asks for its
+// own actor only (activity.Service), never expose it on a route.
+func (s *Service) Memberships(ctx context.Context, userID string) ([]UserChallenge, error) {
+	ms, err := s.repo.Memberships(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("memberships: %w", err)
+	}
+	return ms, nil
 }
 
 // Exclude makes targetID abandon challenge id on behalf of actorID, one of
