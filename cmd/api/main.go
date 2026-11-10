@@ -22,6 +22,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/health"
+	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
@@ -87,12 +88,14 @@ func run() error {
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), users, sports, clock.Real{})
 	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clock.Real{})
+	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, users, leaderboard.NewRepository(gdb), clock.Real{}, cfg.AtRiskThreshold)
 	handlers := server{
-		Handler:          health.NewHandler(pool, logger),
-		userHandler:      user.NewHandler(users),
-		sportHandler:     sport.NewHandler(sports),
-		challengeHandler: challenge.NewHandler(challenges),
-		activityHandler:  activity.NewHandler(activities),
+		Handler:            health.NewHandler(pool, logger),
+		userHandler:        user.NewHandler(users),
+		sportHandler:       sport.NewHandler(sports),
+		challengeHandler:   challenge.NewHandler(challenges),
+		activityHandler:    activity.NewHandler(activities),
+		leaderboardHandler: leaderboard.NewHandler(leaderboards),
 	}
 	router, err := newRouter(logger, cfg.CORSAllowedOrigins, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
 		u, err := users.GetOrCreateBySubject(ctx, subject)
@@ -202,6 +205,31 @@ func toParticipation(m challenge.UserChallenge) (activity.Participation, error) 
 	}, nil
 }
 
+// details is what leaderboardChallenges reads from module challenge.
+type details interface {
+	Get(ctx context.Context, actorID, id string) (challenge.Detail, error)
+}
+
+// leaderboardChallenges gives module leaderboard the challenge an actor
+// reads, as leaderboard.Challenges: Get applies the rights matrix, so a
+// private challenge the actor may not see is a 404 before anything else is
+// loaded.
+type leaderboardChallenges struct{ challenges details }
+
+func (l leaderboardChallenges) Challenge(ctx context.Context, actorID, id string) (leaderboard.Challenge, error) {
+	d, err := l.challenges.Get(ctx, actorID, id)
+	if err != nil {
+		return leaderboard.Challenge{}, err
+	}
+	categories := make([]leaderboard.Category, len(d.Categories))
+	for i, c := range d.Categories {
+		categories[i] = leaderboard.Category{
+			Type: c.Type, Factors: c.Params.Factors, Sport: c.Params.Sport, StepMeters: c.Params.StepMeters,
+		}
+	}
+	return leaderboard.Challenge{ID: d.ID, Timezone: d.Timezone, StartsAt: d.StartsAt, EndsAt: d.EndsAt, Categories: categories}, nil
+}
+
 // server gathers the handlers of every operation of the contract.
 type server struct {
 	health.Handler
@@ -209,6 +237,7 @@ type server struct {
 	sportHandler
 	challengeHandler
 	activityHandler
+	leaderboardHandler
 }
 
 // These aliases name the embedded handlers: embedding the *Handler of each
@@ -219,6 +248,8 @@ type (
 	sportHandler     = *sport.Handler
 	challengeHandler = *challenge.Handler
 	activityHandler  = *activity.Handler
+
+	leaderboardHandler = *leaderboard.Handler
 )
 
 // newRouter registers the routes of the contract behind the protection:

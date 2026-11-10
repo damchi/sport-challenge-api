@@ -43,6 +43,15 @@ func (f *fakeRepo) Activities(_ context.Context, _ string, from, to time.Time) (
 	return f.activities, f.err
 }
 
+type fakeProfiles struct {
+	pseudos map[string]string
+	err     error
+}
+
+func (f fakeProfiles) Pseudos(context.Context, []string) (map[string]string, error) {
+	return f.pseudos, f.err
+}
+
 func toronto(t *testing.T) *time.Location {
 	t.Helper()
 	loc, err := time.LoadLocation("America/Toronto")
@@ -53,6 +62,8 @@ func toronto(t *testing.T) *time.Location {
 }
 
 func meters(m int) *int { return &m }
+
+func pseudo(s string) *string { return &s }
 
 // twoWeeks is a challenge of 2 weeks from June 1, 2026 (Toronto) with the
 // three categories, the way the challenge module freezes them.
@@ -69,6 +80,8 @@ func twoWeeks(t *testing.T) Challenge {
 	}
 }
 
+var pseudos = fakeProfiles{pseudos: map[string]string{"a": "Ann", "b": "Bob"}}
+
 func TestGetRanksEveryCategory(t *testing.T) {
 	c := twoWeeks(t)
 	loc := toronto(t)
@@ -84,23 +97,31 @@ func TestGetRanksEveryCategory(t *testing.T) {
 			act("c", "run", at(2, 7), 3600, 99000),
 		},
 	}
-	svc := NewService(&fakeChallenges{c: c}, repo, clock.NewFake(c.EndsAt))
+	now := c.EndsAt
+	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), 24*time.Hour)
 
 	got, err := svc.Get(t.Context(), "actor", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []CategoryRanking{
-		{Type: CategoryCumulativeTime, Entries: []scoring.Entry{
-			{UserID: "a", Rank: 1, Value: 9000}, {UserID: "b", Rank: 2, Value: 3600}, {UserID: "c", Abandoned: true},
+	// c is an anonymized account: no pseudo.
+	want := Leaderboard{ComputedAt: now, Categories: []CategoryRanking{
+		{Type: CategoryCumulativeTime, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 3600}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-		{Type: CategoryCumulativeDistance, Entries: []scoring.Entry{
-			{UserID: "a", Rank: 1, Value: 28000}, {UserID: "b", Rank: 2, Value: 5000}, {UserID: "c", Abandoned: true},
+		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-		{Type: CategoryRunElimination, Entries: []scoring.Entry{
-			{UserID: "a", Rank: 1, Value: 22000}, {UserID: "b", Rank: 2, Value: 5000}, {UserID: "c", Abandoned: true},
+		{Type: CategoryRunElimination, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-	}
+	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Get() = %+v, want %+v", got, want)
 	}
@@ -124,15 +145,15 @@ func TestGetJudgesWeeksAtTheClockInstant(t *testing.T) {
 		},
 	}
 	fake := clock.NewFake(c.EndsAt.Add(-time.Second))
-	svc := NewService(&fakeChallenges{c: c}, repo, fake)
+	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, fake, 24*time.Hour)
 
-	rank := func() []scoring.Entry {
+	rank := func() []Ranked {
 		t.Helper()
 		got, err := svc.Get(t.Context(), "actor", "c1")
 		if err != nil {
 			t.Fatal(err)
 		}
-		return got[2].Entries
+		return got.Categories[2].Entries
 	}
 	if got := rank(); got[0].UserID != "a" {
 		t.Fatalf("one second before the end: %+v, want a (not yet judged) first", got)
@@ -143,34 +164,60 @@ func TestGetJudgesWeeksAtTheClockInstant(t *testing.T) {
 	}
 }
 
-func TestGetFailures(t *testing.T) {
-	boom := errors.New("boom")
+func TestGetUsesTheAtRiskSetting(t *testing.T) {
+	c := twoWeeks(t)
+	loc := toronto(t)
+	repo := &fakeRepo{
+		participants: []scoring.Participant{{UserID: "a"}},
+		activities: []scoring.Activity{
+			{UserID: "a", SportCode: "run", StartedAt: time.Date(2026, 6, 2, 7, 0, 0, 0, loc), DurationSeconds: 60, DistanceMeters: meters(5000)},
+			{UserID: "a", SportCode: "run", StartedAt: time.Date(2026, 6, 9, 7, 0, 0, 0, loc), DurationSeconds: 60, DistanceMeters: meters(6000)},
+		},
+	}
+	// Two hours before the end of week 2, 1 km short of the minimum.
+	now := c.EndsAt.Add(-2 * time.Hour)
 	tests := []struct {
-		name       string
-		challenges *fakeChallenges
-		repo       *fakeRepo
-		wantErr    error
-		wantCalls  int
+		name   string
+		atRisk time.Duration
+		want   string
 	}{
-		{
-			name:       "challenge the actor may not read: nothing is loaded",
-			challenges: &fakeChallenges{err: boom},
-			repo:       &fakeRepo{},
-			wantErr:    boom,
-		},
-		{
-			name:       "storage failure",
-			challenges: &fakeChallenges{c: Challenge{Timezone: "America/Toronto", Categories: []Category{{Type: CategoryCumulativeTime}}}},
-			repo:       &fakeRepo{err: boom},
-			wantErr:    boom,
-			wantCalls:  1,
-		},
+		{name: "inside the setting", atRisk: 3 * time.Hour, want: scoring.StatusAtRisk},
+		{name: "exactly the setting", atRisk: 2 * time.Hour, want: scoring.StatusAtRisk},
+		{name: "outside the setting", atRisk: time.Hour, want: scoring.StatusInProgress},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(tt.challenges, tt.repo, clock.NewFake(time.Now()))
-			if _, err := svc.Get(t.Context(), "actor", "c1"); !errors.Is(err, tt.wantErr) {
-				t.Fatalf("Get() error = %v, want %v", err, tt.wantErr)
+			svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), tt.atRisk)
+			got, err := svc.Get(t.Context(), "actor", "c1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status := got.Categories[2].Entries[0].Progress.Status; status != tt.want {
+				t.Fatalf("status = %q, want %q", status, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetFailures(t *testing.T) {
+	boom := errors.New("boom")
+	oneCategory := Challenge{Timezone: "America/Toronto", Categories: []Category{{Type: CategoryCumulativeTime}}}
+	tests := []struct {
+		name       string
+		challenges *fakeChallenges
+		profiles   fakeProfiles
+		repo       *fakeRepo
+		wantCalls  int
+	}{
+		{name: "challenge the actor may not read: nothing is loaded", challenges: &fakeChallenges{err: boom}, repo: &fakeRepo{}},
+		{name: "storage failure", challenges: &fakeChallenges{c: oneCategory}, repo: &fakeRepo{err: boom}, wantCalls: 1},
+		{name: "profiles failure", challenges: &fakeChallenges{c: oneCategory}, profiles: fakeProfiles{err: boom}, repo: &fakeRepo{}, wantCalls: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(tt.challenges, tt.profiles, tt.repo, clock.NewFake(time.Now()), time.Hour)
+			if _, err := svc.Get(t.Context(), "actor", "c1"); !errors.Is(err, boom) {
+				t.Fatalf("Get() error = %v, want %v", err, boom)
 			}
 			if tt.repo.calls != tt.wantCalls {
 				t.Fatalf("storage called %d times, want %d", tt.repo.calls, tt.wantCalls)
@@ -190,7 +237,7 @@ func TestGetRejectsWhatItCannotRank(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepo{}
-			svc := NewService(&fakeChallenges{c: tt.c}, repo, clock.NewFake(time.Now()))
+			svc := NewService(&fakeChallenges{c: tt.c}, pseudos, repo, clock.NewFake(time.Now()), time.Hour)
 			if _, err := svc.Get(t.Context(), "actor", "c1"); err == nil {
 				t.Fatal("Get() succeeded, want an error")
 			}
@@ -203,7 +250,7 @@ func TestGetRejectsWhatItCannotRank(t *testing.T) {
 
 func TestGetAsksForTheActorAndTheChallenge(t *testing.T) {
 	challenges := &fakeChallenges{c: twoWeeks(t)}
-	svc := NewService(challenges, &fakeRepo{}, clock.NewFake(time.Now()))
+	svc := NewService(challenges, pseudos, &fakeRepo{}, clock.NewFake(time.Now()), time.Hour)
 	if _, err := svc.Get(t.Context(), "actor", "c1"); err != nil {
 		t.Fatal(err)
 	}

@@ -33,8 +33,22 @@ type Category struct {
 	StepMeters int
 }
 
+// Ranked is a line of a ranking with the pseudo of the participant; nil for
+// an anonymized account.
+type Ranked struct {
+	scoring.Entry
+	Pseudo *string
+}
+
 // CategoryRanking is the ranking of one category.
 type CategoryRanking struct {
 	Type    string
-	Entries []scoring.Entry
+	Entries []Ranked
+}
+
+// Leaderboard is the rankings of a challenge, in category order, computed
+// at ComputedAt.
+type Leaderboard struct {
+	ComputedAt time.Time
+	Categories []CategoryRanking
 }
