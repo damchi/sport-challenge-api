@@ -53,8 +53,11 @@ const (
 	CodeChallengeNotFound Code = "challenge_not_found"
 	// CodeActivityNotFound also answers an activity of another user.
 	CodeActivityNotFound Code = "activity_not_found"
-	CodeValidationFailed Code = "validation_failed"
-	CodeInternal         Code = "internal_error"
+	// CodeInvitationInvalid answers an unknown, expired or revoked
+	// invitation token alike.
+	CodeInvitationInvalid Code = "invitation_invalid"
+	CodeValidationFailed  Code = "validation_failed"
+	CodeInternal          Code = "internal_error"
 )
 
 type definition struct {
@@ -102,6 +105,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusNotFound, "Challenge not found"}, true
 	case CodeActivityNotFound:
 		return definition{http.StatusNotFound, "Activity not found"}, true
+	case CodeInvitationInvalid:
+		return definition{http.StatusNotFound, "Invitation invalid"}, true
 	case CodeNotFound:
 		return definition{http.StatusNotFound, "Resource not found"}, true
 	case CodeValidationFailed:

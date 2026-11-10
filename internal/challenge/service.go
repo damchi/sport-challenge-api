@@ -18,14 +18,16 @@ import (
 type repository interface {
 	Create(ctx context.Context, c Challenge, joinedAt time.Time) (Challenge, error)
 	List(ctx context.Context, q ListQuery) ([]Summary, error)
-	Get(ctx context.Context, id, actorID string) (Challenge, Membership, error)
+	// Get, Join, Abandon, Exclude, AddCreator and Delete judge the
+	// invitations at now (Membership.Invited).
+	Get(ctx context.Context, id, actorID string, now time.Time) (Challenge, Membership, error)
 	Categories(ctx context.Context, id string) ([]Category, error)
 	UpdateText(ctx context.Context, id string, changes TextChanges) error
-	Join(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
-	Abandon(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (bool, time.Time, error)) error
-	Exclude(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, time.Time, error)) error
-	AddCreator(ctx context.Context, id, actorID, targetID string, decide func(c Challenge, actor, target Membership) (bool, error)) error
-	Delete(ctx context.Context, id, actorID string, decide func(Challenge, Membership) (time.Time, error)) error
+	Join(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error
+	Abandon(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (bool, time.Time, error)) error
+	Exclude(ctx context.Context, id, actorID, targetID string, now time.Time, decide func(c Challenge, actor, target Membership) (bool, time.Time, error)) error
+	AddCreator(ctx context.Context, id, actorID, targetID string, now time.Time, decide func(c Challenge, actor, target Membership) (bool, error)) error
+	Delete(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error
 	Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error)
 	ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error)
 	Memberships(ctx context.Context, userID string) ([]UserChallenge, error)
@@ -153,7 +155,7 @@ func (s *Service) Participants(ctx context.Context, actorID, id string, limit in
 	if limit < 1 {
 		return ParticipantPage{}, apperr.InvalidFields(nil, "limit")
 	}
-	c, m, err := s.repo.Get(ctx, id, actorID)
+	c, m, err := s.repo.Get(ctx, id, actorID, s.clock.Now())
 	if errors.Is(err, errChallengeNotFound) {
 		return ParticipantPage{}, apperr.New(apperr.CodeChallengeNotFound, nil)
 	}
@@ -194,7 +196,8 @@ func (s *Service) Participants(ctx context.Context, actorID, id string, limit in
 // challenge, and a private one the actor may not see, all answer the same
 // 404 challenge_not_found: nothing tells that a private challenge exists.
 func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
-	c, m, err := s.repo.Get(ctx, id, actorID)
+	now := s.clock.Now()
+	c, m, err := s.repo.Get(ctx, id, actorID, now)
 	if errors.Is(err, errChallengeNotFound) {
 		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
 	}
@@ -214,7 +217,6 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
 		return Detail{}, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
 	}
 
-	now := s.clock.Now()
 	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
 	deadline := w.RegistrationDeadline()
 	week, weekEnd := w.CurrentWeek()
@@ -237,7 +239,7 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
 // of the contract's fields), the texts valid (400). It returns the
 // challenge after the change, as the actor sees it.
 func (s *Service) UpdateText(ctx context.Context, actorID, id string, frozen []string, changes TextChanges) (Detail, error) {
-	c, m, err := s.repo.Get(ctx, id, actorID)
+	c, m, err := s.repo.Get(ctx, id, actorID, s.clock.Now())
 	if errors.Is(err, errChallengeNotFound) {
 		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
 	}
@@ -285,7 +287,9 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 	if err != nil {
 		return Detail{}, fmt.Errorf("check profile: %w", err)
 	}
-	err = s.repo.Join(ctx, id, actorID, func(c Challenge, m Membership) (time.Time, error) {
+	// The invitations are judged before the lock: one expires at the end of
+	// week 1, which decide checks again once locked.
+	err = s.repo.Join(ctx, id, actorID, s.clock.Now(), func(c Challenge, m Membership) (time.Time, error) {
 		// Read once the lock is held: a join waiting for it is judged at
 		// the instant it may write, never before the end of week 1.
 		now := s.clock.Now()
@@ -316,6 +320,37 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 	return s.Get(ctx, actorID, id)
 }
 
+// InvitationDeadline returns the end of week 1 of challenge id, when an
+// invitation to it expires, once actorID may invite to it (InviteRefusal:
+// visible, creator or participant allowed by members_can_invite, before the
+// end of week 1). A missing or deleted challenge answers 404
+// challenge_not_found. It writes nothing: module invitation stores the
+// invitation.
+func (s *Service) InvitationDeadline(ctx context.Context, actorID, id string) (time.Time, error) {
+	now := s.clock.Now()
+	c, m, err := s.repo.Get(ctx, id, actorID, now)
+	if errors.Is(err, errChallengeNotFound) {
+		return time.Time{}, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invitation deadline: %w", err)
+	}
+	// Checked before the time zone, like every rule: a hidden challenge
+	// reveals nothing.
+	if err := RequireView(RoleOf(m), c.Visibility); err != nil {
+		return time.Time{}, err
+	}
+	loc, err := location(c.Timezone)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
+	}
+	deadline := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}.RegistrationDeadline()
+	if err := InviteRefusal(m, c.Visibility, c.MembersCanInvite, now, deadline); err != nil {
+		return time.Time{}, err
+	}
+	return deadline, nil
+}
+
 // Abandon ends the participation of actorID in challenge id, for good: the
 // participant is eliminated from every category and shown as abandoned. A
 // creator keeps the creator rights but no longer competes. Abandoning again
@@ -324,7 +359,7 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 // locked by the repository, at the clock's now once locked. It returns the
 // challenge as the actor now sees it.
 func (s *Service) Abandon(ctx context.Context, actorID, id string) (Detail, error) {
-	err := s.repo.Abandon(ctx, id, actorID, func(c Challenge, m Membership) (bool, time.Time, error) {
+	err := s.repo.Abandon(ctx, id, actorID, s.clock.Now(), func(c Challenge, m Membership) (bool, time.Time, error) {
 		now := s.clock.Now()
 		noop, err := AbandonRefusal(m, c.Visibility, now, c.EndsAt)
 		return noop, now, err
@@ -350,7 +385,7 @@ func (s *Service) AbandonAll(ctx context.Context, userID string) error {
 		return fmt.Errorf("abandon all: %w", err)
 	}
 	for _, id := range ids {
-		err := s.repo.Abandon(ctx, id, userID, func(c Challenge, m Membership) (bool, time.Time, error) {
+		err := s.repo.Abandon(ctx, id, userID, s.clock.Now(), func(c Challenge, m Membership) (bool, time.Time, error) {
 			now := s.clock.Now()
 			return !DeletionAbandons(m, now, c.EndsAt), now, nil
 		})
@@ -380,10 +415,11 @@ func (s *Service) Memberships(ctx context.Context, userID string) ([]UserChallen
 // (ActivitiesRefusal) allows it. A missing or deleted challenge answers 404
 // challenge_not_found.
 func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID string) (UserChallenge, error) {
-	c, actor, err := s.repo.Get(ctx, id, actorID)
+	now := s.clock.Now()
+	c, actor, err := s.repo.Get(ctx, id, actorID, now)
 	target := actor
 	if err == nil && userID != actorID {
-		_, target, err = s.repo.Get(ctx, id, userID)
+		_, target, err = s.repo.Get(ctx, id, userID, now)
 	}
 	if errors.Is(err, errChallengeNotFound) {
 		return UserChallenge{}, apperr.New(apperr.CodeChallengeNotFound, nil)
@@ -404,7 +440,7 @@ func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID strin
 // finished) is checked on the challenge locked by the repository, at the
 // clock's now once locked. Excluding someone already out changes nothing.
 func (s *Service) Exclude(ctx context.Context, actorID, id, targetID string) error {
-	err := s.repo.Exclude(ctx, id, actorID, targetID, func(c Challenge, actor, target Membership) (bool, time.Time, error) {
+	err := s.repo.Exclude(ctx, id, actorID, targetID, s.clock.Now(), func(c Challenge, actor, target Membership) (bool, time.Time, error) {
 		now := s.clock.Now()
 		noop, err := ExcludeRefusal(actor, target, c.Visibility, now, c.EndsAt)
 		return noop, now, err
@@ -422,7 +458,7 @@ func (s *Service) Exclude(ctx context.Context, actorID, id, targetID string) err
 // clock's now once locked. Adding an existing creator changes nothing. It
 // returns the challenge as the actor now sees it.
 func (s *Service) AddCreator(ctx context.Context, actorID, id, targetID string) (Detail, error) {
-	err := s.repo.AddCreator(ctx, id, actorID, targetID, func(c Challenge, actor, target Membership) (bool, error) {
+	err := s.repo.AddCreator(ctx, id, actorID, targetID, s.clock.Now(), func(c Challenge, actor, target Membership) (bool, error) {
 		return AddCreatorRefusal(actor, target, c.Visibility, s.clock.Now(), c.EndsAt)
 	})
 	if errors.Is(err, errChallengeNotFound) {
@@ -441,7 +477,7 @@ func (s *Service) AddCreator(ctx context.Context, actorID, id, targetID string) 
 // deletion is stamped with the clock's now once locked. Deleting a deleted
 // challenge answers 404 like a missing one.
 func (s *Service) Delete(ctx context.Context, actorID, id string) error {
-	err := s.repo.Delete(ctx, id, actorID, func(c Challenge, m Membership) (time.Time, error) {
+	err := s.repo.Delete(ctx, id, actorID, s.clock.Now(), func(c Challenge, m Membership) (time.Time, error) {
 		if err := DeleteRefusal(m, c.Visibility); err != nil {
 			return time.Time{}, err
 		}

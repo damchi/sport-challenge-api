@@ -44,6 +44,9 @@ type fakeRepository struct {
 	membershipsErr error
 	// others are the memberships Get gives for users other than actor.
 	others map[string]Membership
+	// invitationsAt is the instant of the last read, when its invitations
+	// are judged.
+	invitationsAt time.Time
 }
 
 func (f *fakeRepository) ActiveParticipations(context.Context, string, time.Time) ([]string, error) {
@@ -67,7 +70,8 @@ func (f *fakeRepository) Participants(_ context.Context, _ string, limit int, af
 	return f.participants, nil
 }
 
-func (f *fakeRepository) Get(_ context.Context, _, actorID string) (Challenge, Membership, error) {
+func (f *fakeRepository) Get(_ context.Context, _, actorID string, now time.Time) (Challenge, Membership, error) {
+	f.invitationsAt = now
 	if f.err != nil {
 		return Challenge{}, Membership{}, f.err
 	}
@@ -91,7 +95,7 @@ func (f *fakeRepository) UpdateText(_ context.Context, _ string, changes TextCha
 	return nil
 }
 
-func (f *fakeRepository) Join(_ context.Context, _, _ string, decide func(Challenge, Membership) (time.Time, error)) error {
+func (f *fakeRepository) Join(_ context.Context, _, _ string, _ time.Time, decide func(Challenge, Membership) (time.Time, error)) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -107,7 +111,7 @@ func (f *fakeRepository) Join(_ context.Context, _, _ string, decide func(Challe
 	return nil
 }
 
-func (f *fakeRepository) Abandon(_ context.Context, _, _ string, decide func(Challenge, Membership) (bool, time.Time, error)) error {
+func (f *fakeRepository) Abandon(_ context.Context, _, _ string, _ time.Time, decide func(Challenge, Membership) (bool, time.Time, error)) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -125,7 +129,7 @@ func (f *fakeRepository) Abandon(_ context.Context, _, _ string, decide func(Cha
 	return nil
 }
 
-func (f *fakeRepository) Exclude(_ context.Context, _, _, _ string, decide func(Challenge, Membership, Membership) (bool, time.Time, error)) error {
+func (f *fakeRepository) Exclude(_ context.Context, _, _, _ string, _ time.Time, decide func(Challenge, Membership, Membership) (bool, time.Time, error)) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -142,7 +146,7 @@ func (f *fakeRepository) Exclude(_ context.Context, _, _, _ string, decide func(
 	return nil
 }
 
-func (f *fakeRepository) AddCreator(_ context.Context, _, _, _ string, decide func(Challenge, Membership, Membership) (bool, error)) error {
+func (f *fakeRepository) AddCreator(_ context.Context, _, _, _ string, _ time.Time, decide func(Challenge, Membership, Membership) (bool, error)) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -159,7 +163,7 @@ func (f *fakeRepository) AddCreator(_ context.Context, _, _, _ string, decide fu
 	return nil
 }
 
-func (f *fakeRepository) Delete(_ context.Context, _, _ string, decide func(Challenge, Membership) (time.Time, error)) error {
+func (f *fakeRepository) Delete(_ context.Context, _, _ string, _ time.Time, decide func(Challenge, Membership) (time.Time, error)) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -635,6 +639,7 @@ func TestServiceJoin(t *testing.T) {
 		{name: "active creator", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantActive}, profile: true, now: deadline.Add(-time.Hour), want: apperr.CodeAlreadyParticipant},
 		{name: "creator who abandoned", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantAbandoned}, profile: true, now: deadline.Add(-time.Hour), want: apperr.CodeParticipationAbandoned},
 		{name: "private without invitation", visibility: VisibilityPrivate, profile: true, now: deadline.Add(-time.Hour), want: apperr.CodeChallengeNotFound},
+		{name: "private with a valid invitation", visibility: VisibilityPrivate, membership: Membership{Invited: true}, profile: true, now: deadline.Add(-time.Hour)},
 		{name: "incomplete profile, after the rule", visibility: VisibilityPublic, now: deadline.Add(-time.Hour), want: apperr.CodeProfileIncomplete},
 		{name: "closed beats an incomplete profile", visibility: VisibilityPublic, now: deadline, want: apperr.CodeRegistrationClosed},
 	}
@@ -739,8 +744,62 @@ func TestServiceJoinDuplicateFromStorage(t *testing.T) {
 
 type duplicateJoin struct{ fakeRepository }
 
-func (d *duplicateJoin) Join(context.Context, string, string, func(Challenge, Membership) (time.Time, error)) error {
+func (d *duplicateJoin) Join(context.Context, string, string, time.Time, func(Challenge, Membership) (time.Time, error)) error {
 	return fmt.Errorf("join challenge: %w", errAlreadyParticipant)
+}
+
+// TestServiceInvitationDeadline: the end of week 1 of stored(), once the
+// rule lets the actor invite; the invitations are judged at the clock's now.
+func TestServiceInvitationDeadline(t *testing.T) {
+	deadline := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC) // end of week 1 of stored()
+	tests := []struct {
+		name             string
+		visibility       string
+		membersCanInvite bool
+		membership       Membership
+		now              time.Time
+		want             apperr.Code // empty: may invite
+	}{
+		{name: "creator", visibility: VisibilityPrivate, membership: Membership{Creator: true, Participant: ParticipantActive}, now: deadline.Add(-time.Second)},
+		{name: "participant when members may invite", visibility: VisibilityPrivate, membersCanInvite: true, membership: Membership{Participant: ParticipantActive}, now: deadline.Add(-time.Hour)},
+		{name: "participant: forbidden", visibility: VisibilityPrivate, membership: Membership{Participant: ParticipantActive}, now: deadline.Add(-time.Hour), want: apperr.CodeForbidden},
+		{name: "invited: forbidden", visibility: VisibilityPrivate, membersCanInvite: true, membership: Membership{Invited: true}, now: deadline.Add(-time.Hour), want: apperr.CodeForbidden},
+		{name: "outsider of a private challenge: hidden", visibility: VisibilityPrivate, membersCanInvite: true, now: deadline.Add(-time.Hour), want: apperr.CodeChallengeNotFound},
+		{name: "creator at the exact end of week 1", visibility: VisibilityPrivate, membership: Membership{Creator: true, Participant: ParticipantActive}, now: deadline, want: apperr.CodeRegistrationClosed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := stored(tt.visibility)
+			c.MembersCanInvite = tt.membersCanInvite
+			repo := &fakeRepository{challenge: c, membership: tt.membership}
+			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).InvitationDeadline(t.Context(), actor, c.ID)
+			if !repo.invitationsAt.Equal(tt.now) {
+				t.Fatalf("invitations judged at %s, want the clock's now %s", repo.invitationsAt, tt.now)
+			}
+			if tt.want == "" {
+				if err != nil || !got.Equal(deadline) {
+					t.Fatalf("InvitationDeadline() = %s, %v, want %s", got, err, deadline)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("error = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestServiceInvitationDeadlineMissingAndFailure(t *testing.T) {
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x")
+	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("missing: %v, want challenge_not_found", err)
+	}
+	storage := errors.New("connection refused")
+	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x")
+	var appErr *apperr.Error
+	if !errors.Is(err, storage) || errors.As(err, &appErr) {
+		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
+	}
 }
 
 func TestServiceAbandonMissingAndFailure(t *testing.T) {

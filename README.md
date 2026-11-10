@@ -10,7 +10,7 @@ Le **frontend** (web et mobile) est un projet séparé, avec son propre README. 
 
 ## 1. Concept
 
-Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la visibilité (privé ou public) et si les personnes invitées peuvent inviter à leur tour. Le classement est mis à jour pour chaque catégorie. Les activités sont saisies à la main en V1, puis synchronisées depuis Strava, Garmin, Polar et Coros dans une version ultérieure.
+Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la visibilité (privé ou public) et si les participants peuvent inviter à leur tour. Le classement est mis à jour pour chaque catégorie. Les activités sont saisies à la main en V1, puis synchronisées depuis Strava, Garmin, Polar et Coros dans une version ultérieure.
 
 ---
 
@@ -26,7 +26,7 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Visibilité :
   - **Public** : accès libre, listé sur la page d'accueil de l'app.
   - **Privé** : sur invitation d'un créateur ou d'un participant.
-- ✅ Le créateur choisit si les personnes invitées peuvent aussi inviter du monde.
+- ✅ Le créateur choisit si les participants peuvent aussi inviter du monde (une personne seulement invitée, qui n'a pas rejoint, ne peut pas inviter).
 - ✅ **Fuseau horaire** : début et fin sont définis selon le fuseau du lieu de lancement du challenge (ex. Montréal). Les semaines sont découpées dans ce même fuseau.
 - ✅ Après le début, on peut modifier le **titre** et la **description**, mais **pas les catégories**.
 - ✅ Personne ne « quitte » vraiment un challenge : l'action « quitter » (ou la suppression de son compte, pour les challenges à venir ou en cours) équivaut à un **abandon**. Les créateurs peuvent **supprimer le challenge**.
@@ -287,7 +287,7 @@ sportchallenge-api/
 │   │
 │   ├── invitation/
 │   │   ├── model.go · service.go · repository.go · handler.go
-│   │                                liens d'invitation, règle « les invités peuvent inviter »
+│   │                                liens d'invitation, règle « les participants peuvent inviter »
 │   │
 │   ├── sport/
 │   │   ├── catalog.go               catalogue : code, mode de distance, coefficient suggéré
@@ -400,7 +400,7 @@ flowchart TD
 |---|---|
 | `user` | Crée la ligne locale au premier login, gère pseudo, avatar, langue |
 | `challenge` | Création, modification limitée (titre, description), fuseau, durée, visibilité, règle d'invitation, co-créateurs |
-| `invitation` | Liens et invitations pour les challenges privés, selon la règle « les invités peuvent inviter » |
+| `invitation` | Liens et invitations pour les challenges privés, selon la règle « les participants peuvent inviter » |
 | `sport` | Catalogue des sports et coefficients de distance, figés par challenge à sa création |
 | `activity` | Saisie manuelle, validation (durée obligatoire, distance selon le sport, vitesse calculée et jamais saisie), marquage « manuelle » ; une activité hors de toute fenêtre est enregistrée et ne compte nulle part (ADR 0001) |
 | `scoring` | Calcule un classement à partir d'activités et de règles, sans dépendance à la base ni à Gin |
@@ -414,11 +414,11 @@ flowchart TD
 | Entité | Champs clés |
 |---|---|
 | `users` | id, identifiant du fournisseur d'auth, pseudo, avatar, langue |
-| `challenges` | id, titre, description, visibilité, invités peuvent inviter, fuseau, début et fin (UTC), créé par, suppression logique (`deleted_at`) ; le statut (à venir, en cours, terminé) se déduit des dates |
+| `challenges` | id, titre, description, visibilité, participants peuvent inviter (`members_can_invite`), fuseau, début et fin (UTC), créé par, suppression logique (`deleted_at`) ; le statut (à venir, en cours, terminé) se déduit des dates |
 | `challenge_creators` | challenge, utilisateur |
 | `categories` | challenge, type (temps cumulé, distance cumulée, course avec élimination), position, paramètres figés (`params`) ; le nom est traduit par le frontend |
 | `participants` | challenge, utilisateur, statut (actif ou abandonné), date d'inscription, date d'abandon |
-| `invitation` | challenge, invité par, jeton ou destinataire, état |
+| `invitation` | challenge, invité par, empreinte du jeton (jamais le jeton), expiration (fin de la semaine 1), révocation ; les personnes qui ont ouvert le lien (`invitation_recipients`) |
 | `sports` | code, mode de distance (obligatoire, interdite, facultative), coefficient suggéré (libellés traduits par le frontend) |
 | `activity` | utilisateur, sport, libellé du sport (si « autre »), date de début (UTC), durée, distance, source (manuelle ou fournisseur), identifiant externe, clé d'idempotence |
 | `week_closure` | challenge, numéro de semaine, date de clôture |
@@ -483,9 +483,9 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Action | Qui peut |
 |---|---|
 | Voir un challenge public et son classement | tout utilisateur connecté (✅) |
-| Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅) |
+| Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅). Une invitation est un **lien réutilisable** jusqu'à la fin de la semaine 1 : toute personne connectée qui l'ouvre devient invitée, tant que l'invitation reste valide ; connaître le jeton sans l'avoir ouvert ne donne rien (✅) |
 | Rejoindre un challenge public | tout utilisateur connecté, jusqu'à la fin de la semaine 1 (✅) |
-| Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) |
+| Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) ; une invitation n'est valide que tant que son auteur est encore créateur ou participant actif. Exclure un participant (ou qu'il abandonne) n'exclut pas les personnes qu'il a invitées : celles qui ont déjà rejoint restent participantes ; seul son lien est annulé, pour les personnes invitées qui n'ont pas encore rejoint (✅) |
 | Inviter | créateurs ; participants seulement si le créateur l'a autorisé à la création (✅) |
 | Modifier titre et description | créateurs (✅) |
 | Modifier les catégories | personne, après la création (✅) |
@@ -568,7 +568,7 @@ Le détail ticket par ticket (67 tickets, critères d'acceptation, commits propo
 | 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine terminée verrouillée** ; modification et suppression tant que sa semaine n'est terminée dans aucun challenge où elle compte ; route de détail des activités des participants (visible des seuls participants du challenge) |
 | 6 | Scoring et classement | Tests d'abord ; catégorie 3 : minimum = distance réelle de la semaine précédente + X, aucune élimination en semaine 1, sans délai de grâce ; classement des éliminés (dernier éliminé devant, puis km) ; ex aequo |
 | 7 | Clôtures et worker | `close-weeks` et `finalize-challenges` toutes les heures, **idempotents** ; résultat indépendant du moment où le worker passe ; horloge réglable en staging |
-| 8 | Invitations (badges reportés en V1.1) | Invitations avec la règle « les invités peuvent inviter » ; les badges (conditions structurées, évaluation après chaque activité) viennent en V1.1 |
+| 8 | Invitations (badges reportés en V1.1) | Invitations avec la règle « les participants peuvent inviter » ; les badges (conditions structurées, évaluation après chaque activité) viennent en V1.1 |
 | 9 | Limitation de débit et déploiement | `RateLimitIP` et `RateLimitUser`, Docker, compléments de CI/CD, Terraform, staging, alerte de budget ; jamais de `terraform apply` sans demande |
 
 **À chaque phase** : `make check` passe ; chaque nouvelle route a ses tests d'autorisation (autorisé, interdit, inexistant) ; les erreurs ont un code stable ; aucune donnée personnelle dans les logs ; une paire de migrations par changement de schéma ; les agents de relecture sont lancés ; **aucun commit ni push sans validation explicite**.

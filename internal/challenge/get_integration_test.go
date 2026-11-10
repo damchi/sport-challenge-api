@@ -127,6 +127,169 @@ func TestGetRegistrationDeadline(t *testing.T) {
 	}
 }
 
+// TestGetInvited: a private challenge is read by the invited only through a
+// valid invitation linked to them; a token never opened gives nothing, and an
+// invitation stops giving access when it expires or is revoked.
+func TestGetInvited(t *testing.T) {
+	pseudo := "marie_92"
+	_, pool, creatorID := setup(t, &pseudo)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clk := clock.NewFake(now)
+	svc := NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, clk)
+	c, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Visibility = VisibilityPrivate }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Visibility = VisibilityPrivate }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Date(2026, 3, 11, 4, 0, 0, 0, time.UTC) // end of week 1 of valid()
+
+	invite := func(challengeID, token string, revoked bool) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(t.Context(), `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at, revoked_at)
+			VALUES ($1, $2, sha256($3::bytea), $4, $5, CASE WHEN $6 THEN $5::timestamptz END) RETURNING id`,
+			challengeID, creatorID, []byte(token), deadline, now, revoked).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	link := func(invitationID, userID string) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), "INSERT INTO invitation_recipients VALUES ($1, $2, $3)", invitationID, userID, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	valid := invite(c.ID, "valid", false)
+	revoked := invite(c.ID, "revoked", true)
+	elsewhere := invite(other.ID, "elsewhere", false)
+
+	guest := insertTestUser(t, pool, "email|guest")
+	link(valid, guest)
+	revokedGuest := insertTestUser(t, pool, "email|revoked")
+	link(revoked, revokedGuest)
+	otherGuest := insertTestUser(t, pool, "email|elsewhere")
+	link(elsewhere, otherGuest)
+	// Holds the token of a valid invitation, never opened while logged in.
+	unlinked := insertTestUser(t, pool, "email|unlinked")
+
+	d, err := svc.Get(t.Context(), guest, c.ID)
+	if err != nil || d.Role != RoleInvited || !d.CanJoin {
+		t.Fatalf("linked to a valid invitation: %+v, %v, want invited, may join", d.Role, err)
+	}
+	for name, user := range map[string]string{"revoked": revokedGuest, "invited elsewhere": otherGuest, "token not linked": unlinked} {
+		if _, err := svc.Get(t.Context(), user, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+			t.Fatalf("%s: error = %v, want challenge_not_found", name, err)
+		}
+	}
+
+	// The invitation expires at the exact end of week 1.
+	clk.Set(deadline.Add(-time.Second))
+	if d, err := svc.Get(t.Context(), guest, c.ID); err != nil || d.Role != RoleInvited {
+		t.Fatalf("one second before the expiry: %+v, %v, want invited", d.Role, err)
+	}
+	clk.Set(deadline)
+	if _, err := svc.Get(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("at the expiry: error = %v, want challenge_not_found", err)
+	}
+
+	// Revoked after the link: the access goes with it.
+	clk.Set(now)
+	if _, err := pool.Exec(t.Context(), "UPDATE invitations SET revoked_at = $1 WHERE id = $2", now, valid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Get(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("revoked after the link: error = %v, want challenge_not_found", err)
+	}
+
+	// Invited by a participant while members may invite: the invitation
+	// lasts as long as the author may invite, not after their exclusion.
+	member := insertTestUser(t, pool, "email|member")
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET members_can_invite = true WHERE id = $1", c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, 'active', $3, NULL)", c.ID, member, now); err != nil {
+		t.Fatal(err)
+	}
+	var byMember string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at)
+		VALUES ($1, $2, sha256('member'::bytea), $3, $4) RETURNING id`, c.ID, member, deadline, now).Scan(&byMember); err != nil {
+		t.Fatal(err)
+	}
+	friend := insertTestUser(t, pool, "email|friend")
+	link(byMember, friend)
+	// Invited by the member too, and joined before the exclusion.
+	joined := insertTestUser(t, pool, "email|joined")
+	link(byMember, joined)
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, 'active', $3, NULL)", c.ID, joined, now); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := svc.Get(t.Context(), friend, c.ID); err != nil || d.Role != RoleInvited {
+		t.Fatalf("invited by an active participant: %+v, %v, want invited", d.Role, err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, c.ID, member); err != nil {
+		t.Fatal(err)
+	}
+	// Excluding the member cancels their link for whoever has not joined
+	// yet; whoever joined stays a participant.
+	if _, err := svc.Get(t.Context(), friend, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("author excluded, not joined: error = %v, want challenge_not_found", err)
+	}
+	if d, err := svc.Get(t.Context(), joined, c.ID); err != nil || d.Role != RoleParticipant || d.Participant != ParticipantActive {
+		t.Fatalf("author excluded, joined before: %+v, %v, want an active participant", d.Role, err)
+	}
+}
+
+// TestJoinWithAValidInvitation: a user linked to a valid invitation joins
+// the private challenge, judged under the lock like any join.
+func TestJoinWithAValidInvitation(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, creatorID := setup(t, &pseudo)
+	c, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Visibility = VisibilityPrivate }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guest := insertTestUser(t, pool, "email|guest")
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET pseudo = 'guest_1' WHERE id = $1", guest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Join(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("not invited: error = %v, want challenge_not_found", err)
+	}
+	// An invitation expired or revoked at the time of the join opens nothing.
+	for name, insert := range map[string]string{
+		"expired": `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at)
+			VALUES ($1, $2, sha256('expired'::bytea), $3, $3::timestamptz - interval '1 hour') RETURNING id`,
+		"revoked": `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at, revoked_at)
+			VALUES ($1, $2, sha256('revoked'::bytea), '2026-03-11 04:00Z', $3, $3) RETURNING id`,
+	} {
+		if _, err := pool.Exec(t.Context(), "WITH i AS ("+insert+") INSERT INTO invitation_recipients SELECT id, $4, $3 FROM i", c.ID, creatorID, now, guest); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Join(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+			t.Fatalf("%s invitation: error = %v, want challenge_not_found", name, err)
+		}
+	}
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1", guest); n != 0 {
+		t.Fatalf("%d participations stored, want none", n)
+	}
+	if _, err := pool.Exec(t.Context(), `WITH i AS (
+		INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at)
+		VALUES ($1, $2, sha256('t'::bytea), '2026-03-11 04:00Z', $3) RETURNING id)
+		INSERT INTO invitation_recipients SELECT id, $4, $3 FROM i`, c.ID, creatorID, now, guest); err != nil {
+		t.Fatal(err)
+	}
+	d, err := svc.Join(t.Context(), guest, c.ID)
+	if err != nil || d.Role != RoleParticipant {
+		t.Fatalf("invited: %+v, %v, want participant", d.Role, err)
+	}
+}
+
 func TestUpdateTextStoresTheChange(t *testing.T) {
 	pseudo := "marie_92"
 	svc, pool, creatorID := setup(t, &pseudo)

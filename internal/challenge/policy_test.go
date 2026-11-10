@@ -411,6 +411,73 @@ func TestDeleteRefusal(t *testing.T) {
 	}
 }
 
+// TestCanInvite follows the rights matrix of README §5.7: creators, even
+// after abandoning; active participants only when members may invite.
+func TestCanInvite(t *testing.T) {
+	tests := []struct {
+		role             Role
+		membersCanInvite bool
+		want             bool
+	}{
+		{role: RoleCreator, want: true},
+		{role: RoleCreator, membersCanInvite: true, want: true},
+		{role: RoleParticipant, membersCanInvite: true, want: true},
+		{role: RoleParticipant},
+		{role: RoleAbandoned, membersCanInvite: true},
+		{role: RoleInvited, membersCanInvite: true},
+		{role: RoleOutsider, membersCanInvite: true},
+		{role: Role(99), membersCanInvite: true},
+	}
+	for _, tt := range tests {
+		if got := CanInvite(tt.role, tt.membersCanInvite); got != tt.want {
+			t.Errorf("CanInvite(%v, %v) = %v, want %v", tt.role, tt.membersCanInvite, got, tt.want)
+		}
+	}
+}
+
+// TestInviteRefusal gives the reason of every refusal, in order: not visible
+// (404), not allowed to invite (403), registration closed from the exact end
+// of week 1, when an invitation would already be expired (422).
+func TestInviteRefusal(t *testing.T) {
+	deadline := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
+	before, at := deadline.Add(-time.Second), deadline
+	tests := []struct {
+		name             string
+		m                Membership
+		visibility       string
+		membersCanInvite bool
+		now              time.Time
+		want             apperr.Code // empty: may invite
+	}{
+		{name: "creator, private", m: creatorActive, visibility: VisibilityPrivate, now: before},
+		{name: "creator who abandoned", m: creatorAbandoned, visibility: VisibilityPrivate, now: before},
+		{name: "creator, public", m: creatorActive, visibility: VisibilityPublic, now: before},
+		{name: "participant when members may invite", m: active, visibility: VisibilityPrivate, membersCanInvite: true, now: before},
+		{name: "participant: forbidden", m: active, visibility: VisibilityPrivate, now: before, want: apperr.CodeForbidden},
+		{name: "abandoned participant: forbidden", m: abandoned, visibility: VisibilityPrivate, membersCanInvite: true, now: before, want: apperr.CodeForbidden},
+		{name: "invited: forbidden", m: invited, visibility: VisibilityPrivate, membersCanInvite: true, now: before, want: apperr.CodeForbidden},
+		{name: "outsider of a public challenge: forbidden", m: outsider, visibility: VisibilityPublic, membersCanInvite: true, now: before, want: apperr.CodeForbidden},
+		{name: "outsider of a private challenge: hidden", m: outsider, visibility: VisibilityPrivate, membersCanInvite: true, now: before, want: apperr.CodeChallengeNotFound},
+		{name: "unknown visibility: hidden", m: creatorActive, visibility: "unlisted", now: before, want: apperr.CodeChallengeNotFound},
+		{name: "creator at the exact deadline", m: creatorActive, visibility: VisibilityPrivate, now: at, want: apperr.CodeRegistrationClosed},
+		{name: "forbidden before closed", m: active, visibility: VisibilityPrivate, now: at, want: apperr.CodeForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := InviteRefusal(tt.m, tt.visibility, tt.membersCanInvite, tt.now, deadline)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("InviteRefusal() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("InviteRefusal() = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestParticipantsRefusal(t *testing.T) {
 	tests := []struct {
 		name       string

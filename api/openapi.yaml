@@ -1002,6 +1002,7 @@ components:
         - profile_incomplete
         - challenge_not_found
         - activity_not_found
+        - invitation_invalid
         - forbidden
         - field_not_editable
         - registration_closed
