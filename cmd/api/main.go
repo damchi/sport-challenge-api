@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -28,6 +27,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
+	"github.com/damchi/sport-challenge-api/internal/platform/logging"
 	"github.com/damchi/sport-challenge-api/internal/sport"
 	"github.com/damchi/sport-challenge-api/internal/user"
 )
@@ -51,7 +51,7 @@ func run() error {
 		return err
 	}
 
-	logger := newLogger(os.Stdout, cfg.LogLevel)
+	logger := logging.New(os.Stdout, cfg.LogLevel)
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -315,29 +315,4 @@ func logRoutes(logger *slog.Logger, routes gin.RoutesInfo) {
 		list = append(list, r.Method+" "+r.Path)
 	}
 	logger.Debug("routes registered", slog.Any("routes", list))
-}
-
-// newLogger writes JSON lines that Cloud Logging understands: "severity"
-// (DEBUG, INFO, WARNING, ERROR), "message" and "time" (in UTC).
-func newLogger(w io.Writer, level slog.Level) *slog.Logger {
-	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{
-		Level: level,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if len(groups) > 0 {
-				return a
-			}
-			switch a.Key {
-			case slog.TimeKey:
-				a.Value = slog.TimeValue(a.Value.Time().UTC())
-			case slog.LevelKey:
-				a.Key = "severity"
-				if lvl, ok := a.Value.Any().(slog.Level); ok && lvl == slog.LevelWarn {
-					a.Value = slog.StringValue("WARNING")
-				}
-			case slog.MessageKey:
-				a.Key = "message"
-			}
-			return a
-		},
-	}))
 }

@@ -71,6 +71,20 @@ func (w Window) CurrentWeek() (int, time.Time) {
 	return n, end
 }
 
+// EndedWeeks returns how many weeks have ended at Now: a week ends at its
+// exact last instant, with no grace period. Weeks end in order, so these
+// are weeks 1 to EndedWeeks.
+func (w Window) EndedWeeks() int {
+	ended := 0
+	for n := 1; n <= w.Weeks(); n++ {
+		if _, end := w.WeekBounds(n); w.Now.Before(end) {
+			break
+		}
+		ended = n
+	}
+	return ended
+}
+
 // RegistrationDeadline is the end of week 1, when joining closes.
 func (w Window) RegistrationDeadline() time.Time {
 	_, end := w.WeekBounds(1)
