@@ -31,8 +31,10 @@ type fakeRepo struct {
 	// calls, which count what a ranking is computed from.
 	snapshots map[string]json.RawMessage
 	frozenAt  time.Time
-	err       error
-	calls     int
+	// snapshotsErr is what Snapshots fails with.
+	snapshotsErr error
+	err          error
+	calls        int
 	// from and to are the window the activities were asked for.
 	from, to time.Time
 }
@@ -49,7 +51,7 @@ func (f *fakeRepo) Activities(_ context.Context, _ string, from, to time.Time) (
 }
 
 func (f *fakeRepo) Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error) {
-	return f.snapshots, f.frozenAt, nil
+	return f.snapshots, f.frozenAt, f.snapshotsErr
 }
 
 type fakeProfiles struct {
@@ -322,7 +324,11 @@ func TestGetComputesWhatIsNotFrozenYet(t *testing.T) {
 	}{
 		{name: "over, the worker has not run", now: c.EndsAt},
 		{name: "over, a category is missing", now: c.EndsAt, snapshots: map[string]json.RawMessage{CategoryCumulativeTime: json.RawMessage(`{"entries":[]}`)}},
-		{name: "still running", now: c.EndsAt.Add(-time.Second), snapshots: map[string]json.RawMessage{CategoryCumulativeTime: json.RawMessage(`{"entries":[]}`)}},
+		{name: "still running, snapshots are not read", now: c.EndsAt.Add(-time.Second), snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime:     json.RawMessage(`{"entries":[]}`),
+			CategoryCumulativeDistance: json.RawMessage(`{"entries":[]}`),
+			CategoryRunElimination:     json.RawMessage(`{"entries":[]}`),
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -333,6 +339,32 @@ func TestGetComputesWhatIsNotFrozenYet(t *testing.T) {
 			}
 			if repo.calls != 2 {
 				t.Fatalf("storage called %d times, want the ranking computed (2)", repo.calls)
+			}
+		})
+	}
+}
+
+func TestGetFrozenFailures(t *testing.T) {
+	boom := errors.New("boom")
+	c := twoWeeks(t)
+	bad := json.RawMessage(`not json`)
+	tests := []struct {
+		name string
+		repo *fakeRepo
+	}{
+		{name: "storage failure", repo: &fakeRepo{snapshotsErr: boom}},
+		{name: "invalid payload: an error, not a computed ranking", repo: &fakeRepo{snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime: bad, CategoryCumulativeDistance: bad, CategoryRunElimination: bad,
+		}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(&fakeChallenges{c: c}, pseudos, tt.repo, clock.NewFake(c.EndsAt), time.Hour)
+			if _, err := svc.Get(t.Context(), "actor", "c1"); err == nil {
+				t.Fatal("Get() succeeded, want an error")
+			}
+			if tt.repo.calls != 0 {
+				t.Fatalf("activities read %d times, want no fallback on a failure", tt.repo.calls)
 			}
 		})
 	}
