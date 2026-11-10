@@ -37,6 +37,17 @@ func (w Window) WeekBounds(n int) (time.Time, time.Time) {
 	return start, end
 }
 
+// Weeks returns the number of weeks of the window.
+func (w Window) Weeks() int {
+	n := 0
+	for {
+		if start, _ := w.WeekBounds(n + 1); !start.Before(w.End) {
+			return n
+		}
+		n++
+	}
+}
+
 // WeekOf returns the number of the week holding t, or 0 outside the window.
 func (w Window) WeekOf(t time.Time) int {
 	if !w.Contains(t) {

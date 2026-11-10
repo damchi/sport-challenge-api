@@ -95,3 +95,19 @@ func TestRank(t *testing.T) {
 		})
 	}
 }
+
+func TestRankByTier(t *testing.T) {
+	participants := []Participant{{UserID: "a"}, {UserID: "b"}, {UserID: "c"}, {UserID: "d"}}
+	values := map[string]int{"a": 10, "b": 10, "c": 10, "d": 20}
+	tiers := map[string]int{"a": 2, "b": 3, "c": 2, "d": 1}
+	// Same value in different tiers: distinct ranks; same tier and value: shared.
+	want := []Entry{
+		{UserID: "b", Rank: 1, Value: 10},
+		{UserID: "a", Rank: 2, Value: 10},
+		{UserID: "c", Rank: 2, Value: 10},
+		{UserID: "d", Rank: 4, Value: 20},
+	}
+	if got := rankByTier(participants, values, tiers); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rankByTier() = %+v, want %+v", got, want)
+	}
+}
