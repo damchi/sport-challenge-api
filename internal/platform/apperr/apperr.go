@@ -51,8 +51,10 @@ const (
 	// CodeChallengeNotFound also answers a private challenge the user may
 	// not see: its existence is never revealed.
 	CodeChallengeNotFound Code = "challenge_not_found"
-	CodeValidationFailed  Code = "validation_failed"
-	CodeInternal          Code = "internal_error"
+	// CodeActivityNotFound also answers an activity of another user.
+	CodeActivityNotFound Code = "activity_not_found"
+	CodeValidationFailed Code = "validation_failed"
+	CodeInternal         Code = "internal_error"
 )
 
 type definition struct {
@@ -98,6 +100,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "Field not editable"}, true
 	case CodeChallengeNotFound:
 		return definition{http.StatusNotFound, "Challenge not found"}, true
+	case CodeActivityNotFound:
+		return definition{http.StatusNotFound, "Activity not found"}, true
 	case CodeNotFound:
 		return definition{http.StatusNotFound, "Resource not found"}, true
 	case CodeValidationFailed:

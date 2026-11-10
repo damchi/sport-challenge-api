@@ -95,3 +95,11 @@ func (unimplemented) DeleteMe(context.Context, api.DeleteMeRequestObject) (api.D
 func (unimplemented) CreateActivity(context.Context, api.CreateActivityRequestObject) (api.CreateActivityResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) UpdateActivity(context.Context, api.UpdateActivityRequestObject) (api.UpdateActivityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) DeleteActivity(context.Context, api.DeleteActivityRequestObject) (api.DeleteActivityResponseObject, error) {
+	return nil, errNotImplemented
+}

@@ -31,14 +31,7 @@ func (h *Handler) CreateActivity(ctx context.Context, req api.CreateActivityRequ
 	if req.Body == nil {
 		return nil, apperr.InvalidFields(nil)
 	}
-	b := req.Body
-	rec, err := h.service.Record(ctx, actorID, req.Params.IdempotencyKey, Draft{
-		SportCode:       b.SportCode,
-		SportLabel:      b.SportLabel,
-		StartedAt:       b.StartedAt,
-		DurationSeconds: b.DurationSeconds,
-		DistanceMeters:  b.DistanceMeters,
-	})
+	rec, err := h.service.Record(ctx, actorID, req.Params.IdempotencyKey, toDraft(*req.Body))
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +43,48 @@ func (h *Handler) CreateActivity(ctx context.Context, req api.CreateActivityRequ
 		return api.CreateActivity200JSONResponse(out), nil
 	}
 	return api.CreateActivity201JSONResponse(out), nil
+}
+
+// UpdateActivity replaces an activity of the authenticated user.
+func (h *Handler) UpdateActivity(ctx context.Context, req api.UpdateActivityRequestObject) (api.UpdateActivityResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	if req.Body == nil {
+		return nil, apperr.InvalidFields(nil)
+	}
+	rec, err := h.service.Update(ctx, actorID, req.ActivityId.String(), toDraft(*req.Body))
+	if err != nil {
+		return nil, err
+	}
+	out, err := toAPI(rec)
+	if err != nil {
+		return nil, err
+	}
+	return api.UpdateActivity200JSONResponse(out), nil
+}
+
+// DeleteActivity deletes an activity of the authenticated user.
+func (h *Handler) DeleteActivity(ctx context.Context, req api.DeleteActivityRequestObject) (api.DeleteActivityResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	if err := h.service.Delete(ctx, actorID, req.ActivityId.String()); err != nil {
+		return nil, err
+	}
+	return api.DeleteActivity204Response{}, nil
+}
+
+func toDraft(b api.ActivityCreate) Draft {
+	return Draft{
+		SportCode:       b.SportCode,
+		SportLabel:      b.SportLabel,
+		StartedAt:       b.StartedAt,
+		DurationSeconds: b.DurationSeconds,
+		DistanceMeters:  b.DistanceMeters,
+	}
 }
 
 func toAPI(rec Recorded) (api.Activity, error) {

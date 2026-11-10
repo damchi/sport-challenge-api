@@ -617,7 +617,9 @@ paths:
         has ended in one of those challenges, finished ones included. The
         speed is computed, never sent. With `Idempotency-Key`, a valid
         request sent again with the same key answers 200 with the activity
-        recorded first, which stays as it was, even if the body differs.
+        recorded first, as it is now (replaced since, maybe), even if the
+        body differs; once that activity is deleted, it answers 404
+        `activity_not_found` and records nothing.
       tags: [activities]
       parameters:
         - name: Idempotency-Key
@@ -650,12 +652,92 @@ paths:
           $ref: "#/components/responses/ValidationFailed"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ActivityNotFound"
         "422":
           description: |
             The profile is incomplete (`profile_incomplete`), the sport needs
             a distance (`distance_required`) or takes none
             (`distance_not_allowed`), or the week of `started_at` has ended
             in a challenge where the activity counts (`week_locked`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/activities/{activityId}:
+    parameters:
+      - name: activityId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateActivity
+      summary: Replace an activity
+      description: |
+        Author only: the activity of someone else, a deleted one or a missing
+        one answers 404 `activity_not_found`, the same answer in every case.
+        The body replaces every field the author entered, with the
+        validations of the creation: a field left out is cleared
+        (`sport_label`, `distance_meters`). The source and the
+        `Idempotency-Key` of the creation stay. It is refused
+        (`week_locked`) when the week of the current `started_at`, or of the
+        new one, has ended in a challenge where the activity counts.
+      tags: [activities]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityCreate"
+      responses:
+        "200":
+          description: The activity as replaced, with the challenges where it counts now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ActivityNotFound"
+        "422":
+          description: |
+            The sport needs a distance (`distance_required`) or takes none
+            (`distance_not_allowed`), or the week of the current or the new
+            `started_at` has ended in a challenge where the activity counts
+            (`week_locked`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteActivity
+      summary: Delete an activity
+      description: |
+        Author only, as for the update (404 `activity_not_found`). The
+        activity stops counting at once; it is refused (`week_locked`) when
+        its week has ended in a challenge where it counts. Deleting it again
+        answers 404.
+      tags: [activities]
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ActivityNotFound"
+        "422":
+          description: The week of the activity has ended in a challenge where it counts (`week_locked`).
           content:
             application/json:
               schema:
@@ -694,6 +776,15 @@ components:
       description: |
         No such challenge, a deleted one, or a private one the user may not
         see (`challenge_not_found`): the same answer in every case.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ActivityNotFound:
+      description: |
+        No such activity, a deleted one, or one of another user
+        (`activity_not_found`): the same answer in every case. Also the
+        answer of a creation whose `Idempotency-Key` gave a deleted activity.
       content:
         application/json:
           schema:
@@ -750,6 +841,7 @@ components:
         - account_deleted
         - profile_incomplete
         - challenge_not_found
+        - activity_not_found
         - forbidden
         - field_not_editable
         - registration_closed
