@@ -24,10 +24,18 @@ import (
 // imports another module's repository.
 type sqlProfiles struct{ pool *pgxpool.Pool }
 
+// ProfileComplete answers as user.Service does: an anonymized account is
+// deleted, not incomplete.
 func (p sqlProfiles) ProfileComplete(ctx context.Context, id string) (bool, error) {
-	var complete bool
-	err := p.pool.QueryRow(ctx, "SELECT pseudo IS NOT NULL FROM users WHERE id = $1", id).Scan(&complete)
-	return complete, err
+	var complete, anonymized bool
+	err := p.pool.QueryRow(ctx, "SELECT pseudo IS NOT NULL, anonymized_at IS NOT NULL FROM users WHERE id = $1", id).Scan(&complete, &anonymized)
+	if err != nil {
+		return false, err
+	}
+	if anonymized {
+		return false, apperr.New(apperr.CodeAccountDeleted, nil)
+	}
+	return complete, nil
 }
 
 func (p sqlProfiles) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {

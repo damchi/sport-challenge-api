@@ -99,11 +99,16 @@ func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes Pro
 }
 
 // ProfileComplete reports whether the profile of user id is complete (pseudo
-// set): creating or joining a challenge requires it.
+// set): creating or joining a challenge requires it. An anonymized account
+// answers account_deleted, not an incomplete profile: anonymization clears
+// the pseudo, and a request racing the deletion may read it.
 func (s *Service) ProfileComplete(ctx context.Context, id string) (bool, error) {
 	u, err := s.Profile(ctx, id)
 	if err != nil {
 		return false, err
+	}
+	if u.AnonymizedAt != nil {
+		return false, apperr.New(apperr.CodeAccountDeleted, nil)
 	}
 	return u.ProfileComplete(), nil
 }

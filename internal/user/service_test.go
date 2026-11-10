@@ -244,14 +244,19 @@ func TestServiceUpdateProfile(t *testing.T) {
 
 func TestServiceProfileComplete(t *testing.T) {
 	storageErr := errors.New("connection reset")
+	deletedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name    string
-		repo    fakeRepository
-		want    bool
-		wantErr bool
+		name     string
+		repo     fakeRepository
+		want     bool
+		wantErr  bool
+		wantCode apperr.Code
 	}{
 		{name: "pseudo set", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie")}}, want: true},
 		{name: "no pseudo", repo: fakeRepository{user: User{ID: "u-1"}}},
+		// Anonymization clears the pseudo: a deleted account is deleted, not
+		// incomplete (a request racing the deletion).
+		{name: "anonymized account", repo: fakeRepository{user: User{ID: "u-1", AnonymizedAt: &deletedAt}}, wantErr: true, wantCode: apperr.CodeAccountDeleted},
 		{name: "storage error", repo: fakeRepository{err: storageErr}, wantErr: true},
 	}
 	for _, tt := range tests {
@@ -259,6 +264,9 @@ func TestServiceProfileComplete(t *testing.T) {
 			got, err := NewService(tt.repo, nil, nil, discard).ProfileComplete(t.Context(), "u-1")
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("ProfileComplete() = %v, %v, want %v (error %v)", got, err, tt.want, tt.wantErr)
+			}
+			if tt.wantCode != "" && !errors.Is(err, apperr.New(tt.wantCode, nil)) {
+				t.Fatalf("ProfileComplete() error = %v, want %s", err, tt.wantCode)
 			}
 		})
 	}
