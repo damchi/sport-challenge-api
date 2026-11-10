@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,10 +24,13 @@ type fakeRepo struct {
 	closedAt   map[string]time.Time            // by challenge and week
 	failOn     string                          // challenge where reading the closed weeks fails
 	loads      int                             // calls to OpenChallenges
+	ended      []EndedChallenge
+	snapshots  map[string][]Snapshot // by challenge
+	snapshotAt time.Time
 }
 
 func newFakeRepo(cs ...Challenge) *fakeRepo {
-	return &fakeRepo{challenges: cs, closed: map[string][]int{}, recorded: map[string][]scoring.Eliminated{}, closedAt: map[string]time.Time{}}
+	return &fakeRepo{challenges: cs, closed: map[string][]int{}, recorded: map[string][]scoring.Eliminated{}, closedAt: map[string]time.Time{}, snapshots: map[string][]Snapshot{}}
 }
 
 func (f *fakeRepo) ClosableChallenges(context.Context, time.Time) ([]Challenge, error) {
@@ -50,6 +54,31 @@ func (f *fakeRepo) CloseWeek(_ context.Context, c Challenge, week int, at time.T
 	f.closed[c.ID] = append(f.closed[c.ID], week)
 	f.recorded[c.ID] = append(f.recorded[c.ID], eliminated...)
 	f.closedAt[fmt.Sprintf("%s/%d", c.ID, week)] = at
+	return true, nil
+}
+
+// EndedChallenges and SaveSnapshots keep the snapshots in memory, as the
+// database does: a challenge with snapshots is no longer listed.
+func (f *fakeRepo) EndedChallenges(_ context.Context, now time.Time) ([]EndedChallenge, error) {
+	f.loads++
+	var out []EndedChallenge
+	for _, c := range f.ended {
+		if _, done := f.snapshots[c.ID]; !done && !now.Before(c.EndsAt) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) SaveSnapshots(_ context.Context, id string, at time.Time, snapshots []Snapshot) (bool, error) {
+	if id == f.failOn {
+		return false, errors.New("database down")
+	}
+	if _, done := f.snapshots[id]; done {
+		return false, nil
+	}
+	f.snapshots[id] = snapshots
+	f.snapshotAt = at
 	return true, nil
 }
 
@@ -275,4 +304,173 @@ func TestCloseWeeks(t *testing.T) {
 			t.Fatal("error = nil, want the unknown time zone")
 		}
 	})
+}
+
+func TestFinalizeChallenges(t *testing.T) {
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, 28).UTC()
+	c := EndedChallenge{
+		ID: "c1", Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end,
+		Categories: []Category{
+			{ID: "cat1", Type: categoryCumulativeTime},
+			{ID: "cat2", Type: categoryCumulativeDistance, Factors: map[string]float64{"run": 1}},
+			{ID: "cat3", Type: categoryRunElimination, Sport: "run", StepMeters: 2000},
+		},
+	}
+	run := func(week int, meters int) scoring.Activity {
+		m := meters
+		return scoring.Activity{
+			UserID: "", SportCode: "run", StartedAt: start.AddDate(0, 0, 7*(week-1)).Add(time.Hour).UTC(), DurationSeconds: 1800, DistanceMeters: &m,
+		}
+	}
+	runs := func(user string, distances ...int) []scoring.Activity {
+		var as []scoring.Activity
+		for i, d := range distances {
+			a := run(i+1, d)
+			a.UserID = user
+			as = append(as, a)
+		}
+		return as
+	}
+	participants := []scoring.Participant{{UserID: "a"}, {UserID: "b"}, {UserID: "quitter", Abandoned: true}}
+	// a misses the minimum of the last week (9000 + 2000 > 10000): eliminated
+	// in week 4, the week only the finalization judges; b keeps up.
+	var activities []scoring.Activity
+	activities = append(activities, runs("a", 5000, 7000, 9000, 10000)...)
+	activities = append(activities, runs("b", 5000, 7000, 9000, 11000)...)
+
+	finalize := func(t *testing.T, repo *fakeRepo, at time.Time) (FinalizeResult, error) {
+		t.Helper()
+		return NewService(repo, &fakeData{participants: participants, activities: activities}, clock.NewFake(at), discard()).FinalizeChallenges(t.Context())
+	}
+	payloadOf := func(t *testing.T, repo *fakeRepo, category string) payload {
+		t.Helper()
+		for _, s := range repo.snapshots["c1"] {
+			if s.CategoryID == category {
+				var p payload
+				if err := json.Unmarshal(s.Payload, &p); err != nil {
+					t.Fatal(err)
+				}
+				return p
+			}
+		}
+		t.Fatalf("no snapshot for %s", category)
+		return payload{}
+	}
+
+	t.Run("the exact end freezes the ranking of every category", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		got, err := finalize(t, repo, end)
+		if err != nil || got != (FinalizeResult{Challenges: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 challenge", got, err)
+		}
+		if !repo.snapshotAt.Equal(end) {
+			t.Fatalf("snapshot at %v, want the instant of the clock", repo.snapshotAt)
+		}
+		for i, cat := range c.Categories {
+			if s := repo.snapshots["c1"][i]; s.CategoryID != cat.ID || s.Type != cat.Type {
+				t.Fatalf("snapshot %d = %s %s, want %s %s", i, s.CategoryID, s.Type, cat.ID, cat.Type)
+			}
+		}
+		want := payload{Entries: []payloadEntry{
+			{UserID: "b", Rank: 1, Value: 32000},
+			{UserID: "a", Rank: 2, Value: 31000, EliminatedWeek: 4},
+			{UserID: "quitter", Abandoned: true},
+		}}
+		if got := payloadOf(t, repo, "cat3"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("elimination ranking = %+v, want %+v", got, want)
+		}
+		if got := payloadOf(t, repo, "cat1"); len(got.Entries) != 3 || got.Entries[0].Rank != 1 {
+			t.Fatalf("time ranking = %+v, want 3 entries from rank 1", got)
+		}
+	})
+
+	t.Run("nothing is frozen the nanosecond before the end", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		got, err := finalize(t, repo, end.Add(-time.Nanosecond))
+		if err != nil || got != (FinalizeResult{}) || len(repo.snapshots) != 0 {
+			t.Fatalf("result = %+v, err = %v, snapshots = %v, want nothing", got, err, repo.snapshots)
+		}
+	})
+
+	t.Run("running again, even later, changes nothing", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		if _, err := finalize(t, repo, end); err != nil {
+			t.Fatal(err)
+		}
+		before := repo.snapshots["c1"]
+		got, err := finalize(t, repo, end.Add(time.Hour))
+		if err != nil || got != (FinalizeResult{}) {
+			t.Fatalf("second run = %+v, err = %v, want nothing done", got, err)
+		}
+		if !reflect.DeepEqual(repo.snapshots["c1"], before) || !repo.snapshotAt.Equal(end) {
+			t.Fatalf("second run changed the snapshots")
+		}
+	})
+
+	t.Run("a run at the same time that lost records nothing", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		// The listing is stale: the challenge was finalized since it was read.
+		repo.snapshots["c1"] = []Snapshot{{CategoryID: "cat1"}}
+		svc := NewService(staleRepo{repo}, &fakeData{participants: participants, activities: activities}, clock.NewFake(end), discard())
+		got, err := svc.FinalizeChallenges(t.Context())
+		if err != nil || got != (FinalizeResult{}) {
+			t.Fatalf("result = %+v, err = %v, want nothing done", got, err)
+		}
+	})
+
+	t.Run("an hour late gives the same ranking", func(t *testing.T) {
+		onTime, late := newFakeRepo(), newFakeRepo()
+		onTime.ended, late.ended = []EndedChallenge{c}, []EndedChallenge{c}
+		if _, err := finalize(t, onTime, end); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := finalize(t, late, end.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(onTime.snapshots, late.snapshots) {
+			t.Fatalf("on time %+v, late %+v", onTime.snapshots, late.snapshots)
+		}
+	})
+
+	t.Run("a challenge in error does not stop the others", func(t *testing.T) {
+		other := c
+		other.ID = "c2"
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c, other}
+		repo.failOn = "c1"
+		got, err := finalize(t, repo, end)
+		if err == nil || got != (FinalizeResult{Challenges: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 challenge and an error", got, err)
+		}
+		if _, ok := repo.snapshots["c2"]; !ok {
+			t.Fatal("c2 was not finalized")
+		}
+	})
+
+	t.Run("an unknown category type is an error", func(t *testing.T) {
+		broken := c
+		broken.Categories = []Category{{ID: "cat9", Type: "fastest"}}
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{broken}
+		if _, err := finalize(t, repo, end); err == nil || len(repo.snapshots) != 0 {
+			t.Fatalf("err = %v, snapshots = %v, want an error and nothing recorded", err, repo.snapshots)
+		}
+	})
+}
+
+// staleRepo lists the challenges without looking at the snapshots, as a run
+// does that read the listing just before another one finalized.
+type staleRepo struct{ *fakeRepo }
+
+func (s staleRepo) EndedChallenges(context.Context, time.Time) ([]EndedChallenge, error) {
+	return s.ended, nil
 }

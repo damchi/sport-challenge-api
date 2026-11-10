@@ -47,6 +47,11 @@ const otherChallengeFixture = `
 INSERT INTO challenges (id, title, visibility, timezone, starts_at, ends_at, created_by)
 VALUES ('` + otherChallengeID + `', 'Autumn', 'public', 'UTC', '2026-12-01Z', '2026-12-15Z', '` + userID + `');`
 
+// snapshotRow is the insertion of the snapshot of a category.
+func snapshotRow(category, challenge, categoryType string) string {
+	return `INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at) VALUES ('` + category + `', '` + challenge + `', '` + categoryType + `', '{"entries": []}', '2026-12-15Z');`
+}
+
 // TestConstraints runs each statement on the fixture, in a transaction rolled
 // back afterwards, and checks the constraint that refuses it (none: accepted).
 func TestConstraints(t *testing.T) {
@@ -134,6 +139,13 @@ func TestConstraints(t *testing.T) {
 		{name: "elimination of an unknown user", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + deadID + `', 2, 4000, 6000)`, constraint: "elimination_participant_fkey"},
 		{name: "deleting a category with eliminations", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 2, 4000, 6000); DELETE FROM categories WHERE id = '` + categoryID + `'`, constraint: "elimination_category_fkey"},
 
+		// result_snapshot (000008)
+		{name: "snapshot of a category", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "run_elimination")},
+		{name: "category snapshotted twice", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "run_elimination") + snapshotRow(categoryID, challengeID, "run_elimination"), constraint: "result_snapshot_pkey"},
+		{name: "snapshot of an unknown category", sql: snapshotRow(deadID, challengeID, "run_elimination"), constraint: "result_snapshot_category_fkey"},
+		{name: "snapshot with another challenge", sql: eliminationFixture + otherChallengeFixture + snapshotRow(categoryID, otherChallengeID, "run_elimination"), constraint: "result_snapshot_category_fkey"},
+		{name: "snapshot with another type", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "cumulative_time"), constraint: "result_snapshot_category_fkey"},
+		{name: "deleting a category with a snapshot", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "run_elimination") + `DELETE FROM categories WHERE id = '` + categoryID + `'`, constraint: "result_snapshot_category_fkey"},
 		// No cascade: results stay (anonymization, soft deletion).
 		{name: "deleting a challenge with participants", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL); DELETE FROM challenges WHERE id = '` + challengeID + `'`, constraint: "participants_challenge_id_fkey"},
 		{name: "deleting a user who created a challenge", sql: `DELETE FROM users WHERE id = '` + userID + `'`, constraint: "challenges_created_by_fkey"},

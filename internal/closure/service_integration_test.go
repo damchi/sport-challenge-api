@@ -275,3 +275,127 @@ func TestCloseWeeksOfAParticipantWhoAbandonedSinceTheWeekEnded(t *testing.T) {
 		t.Fatalf("eliminations = %+v, want none: the participant is shown as abandoned", elims)
 	}
 }
+
+type storedSnapshot struct {
+	Category, Type string
+	Payload        payload
+	CreatedAt      time.Time
+}
+
+func (s seed) snapshots(challengeID string) []storedSnapshot {
+	s.t.Helper()
+	rows, err := s.pool.Query(s.t.Context(),
+		`SELECT rs.category_id, rs.category_type, rs.payload, rs.created_at
+		FROM result_snapshot rs JOIN categories c ON c.id = rs.category_id
+		WHERE rs.challenge_id = $1 ORDER BY c.position`, challengeID)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []storedSnapshot
+	for rows.Next() {
+		var r storedSnapshot
+		if err := rows.Scan(&r.Category, &r.Type, &r.Payload, &r.CreatedAt); err != nil {
+			s.t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, 28).UTC()
+	inWeek := func(n int) time.Time { return start.AddDate(0, 0, 7*(n-1)).Add(time.Hour) }
+
+	a, b, quitter := s.user("a"), s.user("b"), s.user("quitter")
+	challengeID, _ := s.challenge(a, start, false)
+	deletedID, _ := s.challenge(a, start, true)
+	runningID, _ := s.challenge(a, start.AddDate(0, 0, 7), false)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $4), ($1, $3, $4), ($5, $2, $4), ($6, $2, $4)`,
+		challengeID, a, b, start, deletedID, runningID)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $4)`,
+		challengeID, quitter, start, inWeek(1))
+	for week, meters := range []int{5000, 7000, 9000, 10000} { // a misses 9000 + 2000 in week 4
+		s.run(a, inWeek(week+1), meters)
+	}
+	for week, meters := range []int{5000, 7000, 9000, 11000} {
+		s.run(b, inWeek(week+1), meters)
+	}
+	s.run(quitter, inWeek(1), 100)
+
+	service := func(now time.Time) *Service {
+		return NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(now), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	}
+
+	t.Run("nothing is frozen the nanosecond before the end", func(t *testing.T) {
+		got, err := service(end.Add(-time.Nanosecond)).FinalizeChallenges(t.Context())
+		if err != nil || got != (FinalizeResult{}) {
+			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
+		}
+	})
+
+	t.Run("the end freezes the three categories, not the deleted challenge", func(t *testing.T) {
+		got, err := service(end.Add(time.Hour)).FinalizeChallenges(t.Context())
+		if err != nil || got != (FinalizeResult{Challenges: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 challenge", got, err)
+		}
+		snaps := s.snapshots(challengeID)
+		if len(snaps) != 3 {
+			t.Fatalf("%d snapshots, want 3", len(snaps))
+		}
+		wantTypes := []string{"cumulative_time", "cumulative_distance", "run_elimination"}
+		for i, snap := range snaps {
+			if snap.Type != wantTypes[i] || !snap.CreatedAt.Equal(end.Add(time.Hour)) {
+				t.Fatalf("snapshot %d = %s at %v, want %s at the instant of the clock", i, snap.Type, snap.CreatedAt, wantTypes[i])
+			}
+		}
+		want := payload{Entries: []payloadEntry{
+			{UserID: b, Rank: 1, Value: 32000},
+			{UserID: a, Rank: 2, Value: 31000, EliminatedWeek: 4},
+			{UserID: quitter, Abandoned: true},
+		}}
+		if !reflect.DeepEqual(snaps[2].Payload, want) {
+			t.Fatalf("elimination ranking = %+v, want %+v", snaps[2].Payload, want)
+		}
+		if got := s.snapshots(deletedID); len(got) != 0 {
+			t.Fatalf("deleted challenge has %d snapshots, want none", len(got))
+		}
+		if got := s.snapshots(runningID); len(got) != 0 {
+			t.Fatalf("challenge not over has %d snapshots, want none", len(got))
+		}
+	})
+
+	t.Run("running again, even later, changes nothing", func(t *testing.T) {
+		before := s.snapshots(challengeID)
+		got, err := service(end.Add(48 * time.Hour)).FinalizeChallenges(t.Context())
+		if err != nil || got != (FinalizeResult{}) {
+			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
+		}
+		if after := s.snapshots(challengeID); !reflect.DeepEqual(after, before) {
+			t.Fatalf("snapshots changed: %+v, want %+v", after, before)
+		}
+	})
+
+	t.Run("a run that lost the race records nothing", func(t *testing.T) {
+		repo := NewRepository(gdb)
+		taken := s.snapshots(challengeID)[0]
+		done, err := repo.SaveSnapshots(t.Context(), challengeID, end, []Snapshot{{CategoryID: taken.Category, Type: taken.Type, Payload: []byte(`{"entries": []}`)}})
+		if err != nil || done {
+			t.Fatalf("done = %v, err = %v, want false: the category already has its snapshot", done, err)
+		}
+		if after := s.snapshots(challengeID)[0]; !reflect.DeepEqual(after, taken) {
+			t.Fatalf("snapshot changed: %+v, want %+v", after, taken)
+		}
+	})
+}

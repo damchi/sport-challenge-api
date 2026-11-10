@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -107,6 +108,81 @@ func (r *Repository) CloseWeek(ctx context.Context, c Challenge, week int, close
 			}
 		}
 		recorded = true
+		return nil
+	})
+	return recorded, err
+}
+
+// EndedChallenges lists the challenges not deleted whose end is reached at
+// now and that have no result snapshot, each with its categories. The
+// snapshots of a challenge are written together, so none means none.
+func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]EndedChallenge, error) {
+	var rows []struct {
+		ID         string
+		Timezone   string
+		StartsAt   time.Time
+		EndsAt     time.Time
+		CategoryID string
+		Type       string
+		Factors    string
+		Sport      string
+		StepMeters int
+	}
+	err := db.Conn(ctx, r.db).Raw(
+		`SELECT c.id, c.timezone, c.starts_at, c.ends_at, cat.id AS category_id, cat.type,
+			COALESCE(cat.params->>'factors', '{}') AS factors,
+			COALESCE(cat.params->>'sport', '') AS sport,
+			COALESCE((cat.params->>'step_meters')::int, 0) AS step_meters
+		FROM challenges c
+		JOIN categories cat ON cat.challenge_id = c.id
+		WHERE c.deleted_at IS NULL AND c.ends_at <= @now
+			AND NOT EXISTS (SELECT 1 FROM result_snapshot rs WHERE rs.challenge_id = c.id)
+		ORDER BY c.ends_at, c.id, cat.position`,
+		map[string]any{"now": now},
+	).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("read ended challenges: %w", err)
+	}
+	var out []EndedChallenge
+	for _, row := range rows {
+		if len(out) == 0 || out[len(out)-1].ID != row.ID {
+			out = append(out, EndedChallenge{ID: row.ID, Timezone: row.Timezone, StartsAt: row.StartsAt.UTC(), EndsAt: row.EndsAt.UTC()})
+		}
+		cat := Category{ID: row.CategoryID, Type: row.Type, Sport: row.Sport, StepMeters: row.StepMeters}
+		if err := json.Unmarshal([]byte(row.Factors), &cat.Factors); err != nil {
+			return nil, fmt.Errorf("read factors of category %s: %w", row.CategoryID, err)
+		}
+		last := &out[len(out)-1]
+		last.Categories = append(last.Categories, cat)
+	}
+	return out, nil
+}
+
+// SaveSnapshots records the snapshots of a challenge in one transaction. A
+// run that finalized the challenge at the same time wins: this one records
+// nothing (false).
+func (r *Repository) SaveSnapshots(ctx context.Context, challengeID string, createdAt time.Time, snapshots []Snapshot) (bool, error) {
+	var recorded bool
+	err := db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+		for i, s := range snapshots {
+			res := tx.Exec(
+				`INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at)
+				VALUES (@category, @challenge, @type, @payload, @created_at)
+				ON CONFLICT (category_id) DO NOTHING`,
+				map[string]any{
+					"category": s.CategoryID, "challenge": challengeID, "type": s.Type,
+					"payload": string(s.Payload), "created_at": createdAt,
+				},
+			)
+			if res.Error != nil {
+				return fmt.Errorf("insert result snapshot: %w", res.Error)
+			}
+			// The snapshots go together: the first one taken means the others are.
+			if i == 0 && res.RowsAffected == 0 {
+				return nil
+			}
+		}
+		recorded = len(snapshots) > 0
 		return nil
 	})
 	return recorded, err

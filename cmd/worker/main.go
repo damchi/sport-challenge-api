@@ -2,6 +2,7 @@
 // API with another command, started by Cloud Scheduler as a Cloud Run job.
 //
 //	worker close-weeks
+//	worker finalize-challenges
 package main
 
 import (
@@ -27,8 +28,12 @@ import (
 // taskCloseWeeks is the name of the task that closes the weeks that ended.
 const taskCloseWeeks = "close-weeks"
 
+// taskFinalizeChallenges is the name of the task that freezes the results of
+// the challenges that are over.
+const taskFinalizeChallenges = "finalize-challenges"
+
 // errUsage is returned for a missing or unknown task.
-var errUsage = errors.New("usage: worker close-weeks")
+var errUsage = errors.New("usage: worker close-weeks|finalize-challenges")
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -62,13 +67,17 @@ func run(args []string) error {
 		return err
 	}
 
+	// The closure judges from the same data as the rankings.
+	service := closure.NewService(closure.NewRepository(gdb), leaderboard.NewRepository(gdb), clock.Real{}, logger)
 	switch task {
 	case taskCloseWeeks:
-		// The closure judges the weeks from the same data as the rankings.
-		service := closure.NewService(closure.NewRepository(gdb), leaderboard.NewRepository(gdb), clock.Real{}, logger)
 		result, err := service.CloseWeeks(ctx)
 		logger.Info("task done", slog.String("task", task),
 			slog.Int("challenges", result.Challenges), slog.Int("weeks", result.Weeks), slog.Int("eliminations", result.Eliminations))
+		return err
+	case taskFinalizeChallenges:
+		result, err := service.FinalizeChallenges(ctx)
+		logger.Info("task done", slog.String("task", task), slog.Int("challenges", result.Challenges))
 		return err
 	default:
 		return errUsage
@@ -77,7 +86,7 @@ func run(args []string) error {
 
 // parseTask reads the name of the task: exactly one known argument.
 func parseTask(args []string) (string, error) {
-	if len(args) != 1 || args[0] != taskCloseWeeks {
+	if len(args) != 1 || (args[0] != taskCloseWeeks && args[0] != taskFinalizeChallenges) {
 		return "", errUsage
 	}
 	return args[0], nil
