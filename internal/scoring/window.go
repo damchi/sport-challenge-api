@@ -34,7 +34,13 @@ func (w Window) Weeks() int {
 // Weeks(): outside, the bounds mean nothing.
 func (w Window) WeekBounds(n int) (time.Time, time.Time) {
 	local := w.Start.In(w.Location)
-	return local.AddDate(0, 0, 7*(n-1)).UTC(), local.AddDate(0, 0, 7*n).UTC()
+	start := local.AddDate(0, 0, 7*(n-1)).UTC()
+	end := local.AddDate(0, 0, 7*n).UTC()
+	// A window holds whole weeks, but its end stays the limit.
+	if end.After(w.End) {
+		end = w.End.UTC()
+	}
+	return start, end
 }
 
 // WeekOf returns the number of the week holding t, or 0 outside the window.

@@ -122,6 +122,24 @@ func TestWeekLengthsAtTimeChanges(t *testing.T) {
 	}
 }
 
+// TestWindowEndIsTheLimit checks a window that does not hold whole weeks:
+// the creation rules forbid it, but a stored row must never give a week
+// ending after the challenge.
+func TestWindowEndIsTheLimit(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 2)
+	w.End = w.End.Add(-24 * time.Hour)
+	if got := w.Weeks(); got != 2 {
+		t.Fatalf("Weeks() = %d, want 2", got)
+	}
+	if _, end := w.WeekBounds(2); !end.Equal(w.End) {
+		t.Fatalf("last week ends at %s, want the end %s", end, w.End)
+	}
+	w.Now = w.End.Add(-time.Second)
+	if week, ends := w.CurrentWeek(); week != 2 || !ends.Equal(w.End) {
+		t.Fatalf("last second: week %d ending %s, want 2 ending %s", week, ends, w.End)
+	}
+}
+
 func TestRegistrationDeadline(t *testing.T) {
 	tests := []struct {
 		name  string
