@@ -1,3 +1,6 @@
+// Package scoring computes the rankings of a challenge from raw activities
+// and the rules of its categories. It imports the standard library only: no
+// database, no HTTP, no clock (the window carries the current instant).
 package scoring
 
 import "time"
@@ -21,17 +24,8 @@ func (w Window) Contains(t time.Time) bool {
 	return !t.Before(w.Start) && t.Before(w.End)
 }
 
-// Weeks returns the number of weeks of the window.
-func (w Window) Weeks() int {
-	n := 0
-	for end := w.Start; end.Before(w.End); n++ {
-		_, end = w.WeekBounds(n + 1)
-	}
-	return n
-}
-
-// WeekBounds returns week n as [start, end) in UTC. n must be from 1 to
-// Weeks(): outside, the bounds mean nothing.
+// WeekBounds returns week n as [start, end) in UTC. n starts at 1 and must
+// stay within the window: outside, the bounds mean nothing.
 func (w Window) WeekBounds(n int) (time.Time, time.Time) {
 	local := w.Start.In(w.Location)
 	start := local.AddDate(0, 0, 7*(n-1)).UTC()

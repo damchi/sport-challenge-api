@@ -65,9 +65,6 @@ func TestWeeksAcrossTimeChanges(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := window(t, tt.zone, tt.start, tt.weeks)
-			if got := w.Weeks(); got != tt.weeks {
-				t.Fatalf("Weeks() = %d, want %d", got, tt.weeks)
-			}
 			for n := 1; n <= tt.weeks; n++ {
 				// Local midnight, built from the calendar, not from durations.
 				wantStart := time.Date(tt.start[0], time.Month(tt.start[1]), tt.start[2]+7*(n-1), 0, 0, 0, 0, w.Location)
@@ -128,9 +125,6 @@ func TestWeekLengthsAtTimeChanges(t *testing.T) {
 func TestWindowEndIsTheLimit(t *testing.T) {
 	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 2)
 	w.End = w.End.Add(-24 * time.Hour)
-	if got := w.Weeks(); got != 2 {
-		t.Fatalf("Weeks() = %d, want 2", got)
-	}
 	if _, end := w.WeekBounds(2); !end.Equal(w.End) {
 		t.Fatalf("last week ends at %s, want the end %s", end, w.End)
 	}
