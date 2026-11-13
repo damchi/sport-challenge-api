@@ -107,7 +107,8 @@ variable "clock_offset" {
   default     = ""
 
   validation {
-    condition     = var.clock_offset == "" || can(regex("^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$", var.clock_offset))
-    error_message = "clock_offset must be empty or a Go duration such as 168h or 90m (no days)."
+    # A positive duration, like config.Load requires: "0s" would stop the API and the worker.
+    condition     = var.clock_offset == "" || (can(regex("^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$", var.clock_offset)) && can(regex("[1-9]", var.clock_offset)))
+    error_message = "clock_offset must be empty or a positive Go duration such as 168h or 90m (no days, not zero)."
   }
 }
