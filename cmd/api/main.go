@@ -57,7 +57,7 @@ func run() error {
 		return err
 	}
 
-	logger := logging.New(os.Stdout, cfg.LogLevel)
+	logger := logging.New(os.Stdout, cfg.LogLevel, "api")
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)

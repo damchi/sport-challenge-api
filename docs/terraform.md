@@ -15,6 +15,7 @@ Cette procédure décrit l'infrastructure de base de chaque environnement (`depl
 | `cloud-run` | service de l'API (public, le JWT est vérifié par l'API), un job Cloud Run par tâche du worker, deux comptes de service (API et worker) |
 | `cloud-run` (migrations) | job `sport-challenge-migrate` (`migrate up`), avec son compte de service qui ne lit que `DATABASE_URL` : voir `docs/migrations.md` |
 | `scheduler` | une planification Cloud Scheduler par tâche, et un compte de service qui ne peut que lancer ces jobs |
+| `monitoring` | canal d'alerte par courriel et trois alertes : erreurs 5xx de l'API, échec d'un job (worker ou migrations), `close-weeks` sans succès depuis 3 heures |
 | `budget` | budget mensuel du projet, alertes à 50 %, 90 % et 100 % des dépenses, par courriel |
 
 Le secret `database-url` reçoit sa valeur de Terraform (URL de connexion construite avec l'IP privée). La valeur de `auth0-mgmt-client-secret` s'ajoute à la main : elle ne doit pas passer par le state.
@@ -27,6 +28,18 @@ Le secret `database-url` reçoit sa valeur de Terraform (URL de connexion constr
 - **Réseau** : sortie directe vers le VPC pour les adresses privées seulement (Cloud SQL) ; Auth0 est joint par Internet.
 - **Planification** : `close-weeks` à chaque heure pile et `finalize-challenges` dix minutes plus tard, en UTC. La tâche `retry-auth0-deletions` n'est pas planifiée : le ticket ne la demande pas.
 - **`trusted_proxies`** : sans valeur par défaut. Vérifier sur staging l'adresse que Cloud Run montre au conteneur avant de s'y fier, sinon la limitation de débit par IP compterait tous les clients ensemble.
+
+## Observabilité et alertes
+
+- **Journaux** : l'API, le worker et la commande `migrate` écrivent des lignes JSON que Cloud Logging lit (`severity`, `message`, `time`). Les lignes de requête et d'erreur portent `request_id`, le même que celui renvoyé au client.
+- **Error Reporting** : l'API du service est activée par Terraform. Chaque ligne de gravité `ERROR` porte le marqueur d'Error Reporting, le nom du programme (`api`, `worker`, `migrate`) et l'emplacement du code qui l'a écrite (fichier, ligne, fonction), ce qui tient lieu de trace de pile : Error Reporting les regroupe par emplacement. À vérifier sur staging. Aucune donnée personnelle dans ces lignes (règle générale des journaux).
+- **Alertes**, toutes envoyées à l'adresse `alert_email` :
+  - plus de 5 réponses 5xx de l'API en 5 minutes (seuil réglable par la variable `api_5xx_threshold`) ;
+  - l'échec d'une exécution d'un job Cloud Run, donc d'une tâche du worker ou d'une migration ;
+  - `close-weeks` sans exécution réussie depuis plus de 3 heures (elle tourne chaque heure) ;
+  - le budget (50 %, 90 % et 100 % des dépenses), par le même canal.
+- **Mise à jour d'un environnement déjà appliqué** : la variable `budget_alert_email` s'appelle désormais `alert_email` (à renommer dans `terraform.tfvars`, sinon `plan` la réclame). Le canal d'alerte, passé du module `budget` au module `monitoring`, est déplacé par un bloc `moved` : le `plan` ne doit pas le recréer.
+- Une alerte d'absence ne se déclenche qu'une fois que la tâche a réussi au moins une fois : après un déploiement, elle s'arme au premier succès de `close-weeks`.
 
 ## Choix
 

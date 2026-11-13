@@ -24,9 +24,10 @@ variable "budget_currency_code" {
   type        = string
 }
 
-variable "budget_alert_email" {
-  description = "Address that receives the budget alerts."
+variable "alert_email" {
+  description = "Address that receives the alerts (budget, API errors, worker)."
   type        = string
+  sensitive   = true
 }
 
 variable "db_tier" {
@@ -45,6 +46,12 @@ variable "db_deletion_protection" {
   description = "Refuse the deletion of the Cloud SQL instance."
   type        = bool
   default     = false
+}
+
+variable "api_5xx_threshold" {
+  description = "Number of 5xx responses in 5 minutes above which the API alerts."
+  type        = number
+  default     = 5
 }
 
 variable "run_deletion_protection" {

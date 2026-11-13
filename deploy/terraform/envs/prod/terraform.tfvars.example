@@ -3,7 +3,7 @@ project_id           = "sport-challenge-prod"
 billing_account_id   = "XXXXXX-XXXXXX-XXXXXX"
 budget_amount        = 0 # monthly, whole units
 budget_currency_code = "CAD" # the currency of the billing account
-budget_alert_email   = "you@example.com"
+alert_email          = "you@example.com"
 
 # <image_repository output>/api:<tag>, pushed before the first apply
 image                = "northamerica-northeast1-docker.pkg.dev/sport-challenge-prod/sport-challenge/api:TAG"

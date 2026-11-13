@@ -28,7 +28,7 @@ variable "currency_code" {
   type        = string
 }
 
-variable "alert_email" {
-  description = "Address that receives the alerts."
+variable "notification_channel_id" {
+  description = "Id of the Cloud Monitoring notification channel that receives the alerts."
   type        = string
 }

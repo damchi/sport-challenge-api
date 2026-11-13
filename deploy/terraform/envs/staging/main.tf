@@ -31,6 +31,7 @@ locals {
   apis = [
     "artifactregistry.googleapis.com",
     "billingbudgets.googleapis.com",
+    "clouderrorreporting.googleapis.com",
     "cloudscheduler.googleapis.com",
     "compute.googleapis.com",
     "iam.googleapis.com",
@@ -111,15 +112,33 @@ module "artifact_registry" {
   depends_on = [google_project_service.apis]
 }
 
+# The channel moved from the budget module to the monitoring one: an
+# environment that already applied it keeps it instead of recreating it.
+moved {
+  from = module.budget.google_monitoring_notification_channel.email
+  to   = module.monitoring.google_monitoring_notification_channel.email
+}
+
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  alert_email          = var.alert_email
+  api_service_name     = module.cloud_run.api_service_name
+  close_weeks_job_name = module.cloud_run.worker_jobs["close-weeks"]
+  api_5xx_threshold    = var.api_5xx_threshold
+
+  depends_on = [google_project_service.apis]
+}
+
 module "budget" {
   source = "../../modules/budget"
 
-  display_name       = "sport-challenge staging"
-  billing_account_id = var.billing_account_id
-  project_number     = data.google_project.this.number
-  amount             = var.budget_amount
-  currency_code      = var.budget_currency_code
-  alert_email        = var.budget_alert_email
+  display_name            = "sport-challenge staging"
+  billing_account_id      = var.billing_account_id
+  project_number          = data.google_project.this.number
+  amount                  = var.budget_amount
+  currency_code           = var.budget_currency_code
+  notification_channel_id = module.monitoring.notification_channel_id
 
   depends_on = [google_project_service.apis]
 }

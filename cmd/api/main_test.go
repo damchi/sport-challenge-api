@@ -36,7 +36,7 @@ func TestLogRoutesAtDebugLevel(t *testing.T) {
 	routes := gin.RoutesInfo{{Method: "GET", Path: "/healthz"}}
 
 	var out bytes.Buffer
-	logRoutes(logging.New(&out, slog.LevelDebug), routes)
+	logRoutes(logging.New(&out, slog.LevelDebug, "api"), routes)
 	var line map[string]any
 	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
 		t.Fatalf("not JSON: %q", out.String())
@@ -47,7 +47,7 @@ func TestLogRoutesAtDebugLevel(t *testing.T) {
 	}
 
 	out.Reset()
-	logRoutes(logging.New(&out, slog.LevelInfo), routes)
+	logRoutes(logging.New(&out, slog.LevelInfo, "api"), routes)
 	if out.Len() != 0 {
 		t.Fatalf("routes logged at info level: %q", out.String())
 	}
@@ -66,7 +66,7 @@ func TestPingDatabase(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var out bytes.Buffer
-			pingDatabase(t.Context(), logging.New(&out, slog.LevelDebug), func(ctx context.Context) error {
+			pingDatabase(t.Context(), logging.New(&out, slog.LevelDebug, "api"), func(ctx context.Context) error {
 				if _, ok := ctx.Deadline(); !ok {
 					t.Error("ping context has no deadline")
 				}
