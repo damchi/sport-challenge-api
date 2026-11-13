@@ -5,6 +5,7 @@ package testdb
 import (
 	"context"
 	"crypto/rand"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,6 +21,15 @@ import (
 // (a maintenance database such as postgres), applies every
 // migrations/*.up.sql file in order, and drops it when the test ends.
 func New(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	pool, _ := NewEmpty(t)
+	applyMigrations(t, pool)
+	return pool
+}
+
+// NewEmpty creates a temporary database like New, without any migration, and
+// returns its connection URL too (for the code that applies the migrations).
+func NewEmpty(t testing.TB) (*pgxpool.Pool, string) {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -55,8 +65,12 @@ func New(t testing.TB) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 
-	applyMigrations(t, pool)
-	return pool
+	u, err := neturl.Parse(url)
+	if err != nil {
+		t.Fatalf("parse TEST_DATABASE_URL: %v", err)
+	}
+	u.Path = "/" + name
+	return pool, u.String()
 }
 
 func applyMigrations(t testing.TB, pool *pgxpool.Pool) {

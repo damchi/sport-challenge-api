@@ -7,3 +7,8 @@ output "worker_jobs" {
   description = "Name of the Cloud Run job of each worker task."
   value       = { for task, job in google_cloud_run_v2_job.worker : task => job.name }
 }
+
+output "migrate_job" {
+  description = "Name of the Cloud Run job that applies the migrations."
+  value       = google_cloud_run_v2_job.migrate.name
+}

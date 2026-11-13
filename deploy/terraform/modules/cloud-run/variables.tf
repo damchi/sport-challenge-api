@@ -39,6 +39,11 @@ variable "secrets" {
   type        = map(string)
 }
 
+variable "migrate_secrets" {
+  description = "Secrets of the migration job: variable name => full id of the Secret Manager secret (the database only)."
+  type        = map(string)
+}
+
 variable "worker_tasks" {
   description = "Worker tasks, one Cloud Run job each."
   type        = set(string)

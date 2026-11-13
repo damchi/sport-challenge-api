@@ -187,3 +187,71 @@ resource "google_cloud_run_v2_job" "worker" {
 
   depends_on = [google_secret_manager_secret_iam_member.worker]
 }
+
+# The migrations, before each deployment: a job of its own, so that the API
+# never changes the schema when it starts. It runs `migrate up` and only
+# needs the database; a failed migration is not retried (it leaves the
+# database dirty, and a person decides, see docs/migrations.md).
+resource "google_service_account" "migrate" {
+  account_id   = "${var.name}-migrate"
+  display_name = "Sport Challenge migrations"
+}
+
+resource "google_secret_manager_secret_iam_member" "migrate" {
+  for_each  = var.migrate_secrets
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.migrate.member
+}
+
+resource "google_cloud_run_v2_job" "migrate" {
+  name                = "${var.name}-migrate"
+  location            = var.region
+  deletion_protection = var.deletion_protection
+
+  template {
+    template {
+      service_account = google_service_account.migrate.email
+      max_retries     = 0
+
+      vpc_access {
+        egress = "PRIVATE_RANGES_ONLY"
+        network_interfaces {
+          network    = var.network_id
+          subnetwork = var.subnet_id
+        }
+      }
+
+      containers {
+        image = var.image
+        args  = ["migrate", "up"]
+
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = var.memory
+          }
+        }
+
+        dynamic "env" {
+          for_each = var.migrate_secrets
+          content {
+            name = env.key
+            value_source {
+              secret_key_ref {
+                secret  = env.value
+                version = "latest"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image, client, client_version]
+  }
+
+  depends_on = [google_secret_manager_secret_iam_member.migrate]
+}

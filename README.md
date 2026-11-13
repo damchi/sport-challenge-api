@@ -235,7 +235,7 @@ flowchart LR
   API -.->|V3 push| PUSH[FCM / APNs]
 ```
 
-- ✅ **Monolithe modulaire** : un seul dépôt et une seule image Docker, avec deux commandes : `api` (requêtes HTTP) et `worker` (tâches planifiées).
+- ✅ **Monolithe modulaire** : un seul dépôt et une seule image Docker, avec trois commandes : `api` (requêtes HTTP), `worker` (tâches planifiées) et `migrate` (migrations, lancées par un job avant chaque déploiement).
 - ✅ Le worker est lancé par Cloud Scheduler, sans serveur permanent.
 - 🟡 Chaque module a ses couches : **handler** (HTTP) → **service** (règles métier) → **repository** (base de données).
 

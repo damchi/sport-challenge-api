@@ -12,3 +12,8 @@ output "api_url" {
   description = "Public URL of the API."
   value       = module.cloud_run.api_url
 }
+
+output "migrate_job" {
+  description = "Cloud Run job that applies the migrations (docs/migrations.md)."
+  value       = module.cloud_run.migrate_job
+}

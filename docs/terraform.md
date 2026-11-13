@@ -13,6 +13,7 @@ Cette procédure décrit l'infrastructure de base de chaque environnement (`depl
 | `secrets` | secrets `database-url` et `auth0-mgmt-client-secret` (conteneurs vides, stockés dans la région de l'environnement) |
 | `artifact-registry` | dépôt Docker `sport-challenge` |
 | `cloud-run` | service de l'API (public, le JWT est vérifié par l'API), un job Cloud Run par tâche du worker, deux comptes de service (API et worker) |
+| `cloud-run` (migrations) | job `sport-challenge-migrate` (`migrate up`), avec son compte de service qui ne lit que `DATABASE_URL` : voir `docs/migrations.md` |
 | `scheduler` | une planification Cloud Scheduler par tâche, et un compte de service qui ne peut que lancer ces jobs |
 | `budget` | budget mensuel du projet, alertes à 50 %, 90 % et 100 % des dépenses, par courriel |
 
