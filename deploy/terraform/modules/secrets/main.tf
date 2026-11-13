@@ -1,5 +1,6 @@
-# Only the secrets themselves are created here, as empty containers: a value
-# written by hand never goes through the Terraform state.
+# Only the secrets themselves are created here, as empty containers. A value
+# written by hand (the Auth0 secret) stays out of the Terraform state; one
+# written by Terraform (database-url, in the environment) is in it.
 resource "google_secret_manager_secret" "this" {
   for_each  = var.secret_ids
   secret_id = each.key
