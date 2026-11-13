@@ -342,7 +342,7 @@ sportchallenge-api/
 │   ├── Dockerfile                   build multi-stage, image minimale
 │   ├── docker-compose.yml           local : API, worker, PostgreSQL, émulateur de stockage
 │   └── terraform/
-│       ├── modules/                 cloud-run, cloud-sql, storage, scheduler, secrets
+│       ├── modules/                 network, cloud-sql, secrets, artifact-registry, budget (puis cloud-run, scheduler ; storage en V1.1)
 │       └── envs/                    staging/ et prod/ (un projet GCP chacun)
 ├── .github/workflows/               ci.yml, deploy-staging.yml, deploy-prod.yml
 ├── Makefile                         raccourcis : test, lint, migrate, run
