@@ -7,3 +7,8 @@ output "database_secret" {
   description = "Secret that holds DATABASE_URL."
   value       = module.secrets.ids["database-url"]
 }
+
+output "api_url" {
+  description = "Public URL of the API."
+  value       = module.cloud_run.api_url
+}
