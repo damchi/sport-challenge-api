@@ -68,12 +68,23 @@ func TestNewReportsErrorsToErrorReporting(t *testing.T) {
 				t.Fatalf("not JSON: %q", out.String())
 			}
 			marker, hasMarker := line["@type"]
-			context, _ := line["serviceContext"].(map[string]any)
-			if hasMarker != tt.reported || (context["service"] == "worker") != tt.reported {
+			service, _ := line["serviceContext"].(map[string]any)
+			if hasMarker != tt.reported || (service["service"] == "worker") != tt.reported {
 				t.Fatalf("line = %v, want reported %v", line, tt.reported)
 			}
 			if tt.reported && marker != errorEventType {
 				t.Fatalf("@type = %v, want %s", marker, errorEventType)
+			}
+			if tt.reported {
+				// Error Reporting needs a stack trace or the place of the call.
+				location, _ := line["context"].(map[string]any)["reportLocation"].(map[string]any)
+				file, _ := location["filePath"].(string)
+				function, _ := location["functionName"].(string)
+				if !strings.HasSuffix(file, "logging_test.go") || !strings.Contains(function, "TestNewReportsErrorsToErrorReporting") || location["lineNumber"] == nil {
+					t.Fatalf("reportLocation = %v, want the file, line and function of the log call", location)
+				}
+			} else if _, ok := line["context"]; ok {
+				t.Fatalf("line = %v, a line below ERROR must not carry a context", line)
 			}
 			// The other attributes stay where they were.
 			if line["request_id"] != "r1" || line["challenge_id"] != "c1" || line["message"] != "boom" {
@@ -91,9 +102,10 @@ func TestNewKeepsTheErrorReportingFieldsAtTheRootInsideAGroup(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
 		t.Fatalf("not JSON: %q", out.String())
 	}
-	context, _ := line["serviceContext"].(map[string]any)
-	if line["@type"] != errorEventType || context["service"] != "api" {
-		t.Fatalf("line = %v, want @type and serviceContext at the root", line)
+	service, _ := line["serviceContext"].(map[string]any)
+	_, hasLocation := line["context"].(map[string]any)["reportLocation"]
+	if line["@type"] != errorEventType || service["service"] != "api" || !hasLocation {
+		t.Fatalf("line = %v, want @type, serviceContext and context.reportLocation at the root", line)
 	}
 	if group, _ := line["g"].(map[string]any); group["k"] != "v" {
 		t.Fatalf("line = %v, want the attribute k inside the group g", line)

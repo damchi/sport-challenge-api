@@ -5,6 +5,8 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"runtime"
+	"slices"
 )
 
 // errorEventType marks a log line as an error for Error Reporting, which then
@@ -36,19 +38,20 @@ func New(w io.Writer, level slog.Level, service string) *slog.Logger {
 			return a
 		},
 	})
-	// The fields are given to the handler before any group can be opened, so
-	// that they stay at the root of the line.
-	reported := base.WithAttrs([]slog.Attr{
-		slog.String("@type", errorEventType),
-		slog.Group("serviceContext", slog.String("service", service)),
-	})
-	return slog.New(errorReporting{plain: base, reported: reported})
+	return slog.New(errorReporting{plain: base, base: base, service: service})
 }
 
-// errorReporting writes the lines at ERROR with the Error Reporting fields and
-// the others without. Both handlers always get the same attributes and groups.
+// errorReporting writes the lines at ERROR with the fields Error Reporting
+// needs: the marker, the program, and the place of the call (it takes the
+// place of a stack trace). They must sit at the root of the line, whatever
+// groups the logger has opened, so a line at ERROR is written by a handler
+// rebuilt from the root: the attributes and groups of the logger are replayed
+// on top of the root fields. The lines below ERROR use plain.
 type errorReporting struct {
-	plain, reported slog.Handler
+	plain   slog.Handler // base with the attributes and groups so far
+	base    slog.Handler // the JSON handler, as it was created
+	service string
+	ops     []func(slog.Handler) slog.Handler // the attributes and groups so far
 }
 
 func (h errorReporting) Enabled(ctx context.Context, level slog.Level) bool {
@@ -56,16 +59,34 @@ func (h errorReporting) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h errorReporting) Handle(ctx context.Context, r slog.Record) error {
-	if r.Level >= slog.LevelError {
-		return h.reported.Handle(ctx, r)
+	if r.Level < slog.LevelError {
+		return h.plain.Handle(ctx, r)
 	}
-	return h.plain.Handle(ctx, r)
+	frame, _ := runtime.CallersFrames([]uintptr{r.PC}).Next()
+	reported := h.base.WithAttrs([]slog.Attr{
+		slog.String("@type", errorEventType),
+		slog.Group("serviceContext", slog.String("service", h.service)),
+		slog.Group("context", slog.Group("reportLocation",
+			slog.String("filePath", frame.File),
+			slog.Int("lineNumber", frame.Line),
+			slog.String("functionName", frame.Function))),
+	})
+	for _, op := range h.ops {
+		reported = op(reported)
+	}
+	return reported.Handle(ctx, r)
 }
 
 func (h errorReporting) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return errorReporting{plain: h.plain.WithAttrs(attrs), reported: h.reported.WithAttrs(attrs)}
+	return h.with(func(handler slog.Handler) slog.Handler { return handler.WithAttrs(attrs) })
 }
 
 func (h errorReporting) WithGroup(name string) slog.Handler {
-	return errorReporting{plain: h.plain.WithGroup(name), reported: h.reported.WithGroup(name)}
+	return h.with(func(handler slog.Handler) slog.Handler { return handler.WithGroup(name) })
+}
+
+func (h errorReporting) with(op func(slog.Handler) slog.Handler) slog.Handler {
+	h.plain = op(h.plain)
+	h.ops = append(slices.Clone(h.ops), op)
+	return h
 }
