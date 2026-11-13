@@ -34,7 +34,7 @@ Le secret `database-url` reçoit sa valeur de Terraform (URL de connexion constr
 - **Journaux** : l'API, le worker et la commande `migrate` écrivent des lignes JSON que Cloud Logging lit (`severity`, `message`, `time`). Les lignes de requête et d'erreur portent `request_id`, le même que celui renvoyé au client.
 - **Error Reporting** : l'API du service est activée par Terraform. Chaque ligne de gravité `ERROR` porte le marqueur d'Error Reporting, le nom du programme (`api`, `worker`, `migrate`) et l'emplacement du code qui l'a écrite (fichier, ligne, fonction), ce qui tient lieu de trace de pile : Error Reporting les regroupe par emplacement. À vérifier sur staging. Aucune donnée personnelle dans ces lignes (règle générale des journaux).
 - **Alertes**, toutes envoyées à l'adresse `alert_email` :
-  - plus de 5 réponses 5xx de l'API en 5 minutes (seuil réglable, `api_5xx_threshold`) ;
+  - plus de 5 réponses 5xx de l'API en 5 minutes (seuil réglable par la variable `api_5xx_threshold`) ;
   - l'échec d'une exécution d'un job Cloud Run, donc d'une tâche du worker ou d'une migration ;
   - `close-weeks` sans exécution réussie depuis plus de 3 heures (elle tourne chaque heure) ;
   - le budget (50 %, 90 % et 100 % des dépenses), par le même canal.

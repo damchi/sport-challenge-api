@@ -48,6 +48,12 @@ variable "db_deletion_protection" {
   default     = true
 }
 
+variable "api_5xx_threshold" {
+  description = "Number of 5xx responses in 5 minutes above which the API alerts."
+  type        = number
+  default     = 5
+}
+
 variable "run_deletion_protection" {
   description = "Refuse the deletion of the Cloud Run service and jobs."
   type        = bool

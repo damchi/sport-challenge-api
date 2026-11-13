@@ -125,6 +125,7 @@ module "monitoring" {
   alert_email          = var.alert_email
   api_service_name     = module.cloud_run.api_service_name
   close_weeks_job_name = module.cloud_run.worker_jobs["close-weeks"]
+  api_5xx_threshold    = var.api_5xx_threshold
 
   depends_on = [google_project_service.apis]
 }
