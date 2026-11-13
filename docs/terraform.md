@@ -21,7 +21,7 @@ Le secret `database-url` reçoit sa valeur de Terraform (URL de connexion constr
 - **Un projet GCP par environnement**, créé à la main (il faut un compte de facturation) ; Terraform ne fait que le configurer et activer ses API.
 - **Région** : Montréal (`northamerica-northeast1`) pour toutes les ressources.
 - **Staging** : `db-f1-micro`, sans haute disponibilité, suppression possible. **Prod** : `db-custom-1-3840`, haute disponibilité régionale, protection contre la suppression ; ces valeurs se changent par variables, et rien n'est appliqué.
-- **State** : un bucket GCS par environnement (versionné, accès privé), créé à la main une fois. Le state contient le mot de passe de la base : l'accès au bucket est donc aussi sensible que le secret.
+- **State** : un bucket GCS par environnement (versionné, accès privé), créé à la main une fois. Le state contient le mot de passe de la base : l'accès au bucket est donc aussi sensible que le secret : il doit rester privé, versionné et limité à une ou deux personnes qui administrent l'infrastructure.
 - **Budget** : montant, devise, compte de facturation et courriel n'ont pas de valeur par défaut ; ils vont dans `terraform.tfvars`, ignoré par git.
 
 ## Mise en place d'un environnement
