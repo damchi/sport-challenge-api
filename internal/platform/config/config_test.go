@@ -367,3 +367,49 @@ func TestLoadRateLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadClockOffset(t *testing.T) {
+	base := func(env, offset string) map[string]string {
+		vars := map[string]string{"ENV": env, "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://db.example/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"}
+		if offset != "" {
+			vars["CLOCK_OFFSET"] = offset
+		}
+		return vars
+	}
+	tests := []struct {
+		name    string
+		vars    map[string]string
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "no offset by default", vars: base("staging", ""), want: 0},
+		{name: "staging", vars: base("staging", "168h"), want: 168 * time.Hour},
+		{name: "local", vars: base("local", "90m"), want: 90 * time.Minute},
+		{name: "surrounding spaces are ignored", vars: base("staging", " 24h "), want: 24 * time.Hour},
+		{name: "production without offset", vars: base("production", ""), want: 0},
+		{name: "production refuses an offset", vars: base("production", "1h"), wantErr: "CLOCK_OFFSET must not be set when ENV=production"},
+		{name: "production refuses even a zero offset", vars: base("production", "0s"), wantErr: "CLOCK_OFFSET must not be set when ENV=production"},
+		{name: "production refuses an invalid offset", vars: base("production", "soon"), wantErr: "CLOCK_OFFSET must not be set when ENV=production"},
+		{name: "not a duration", vars: base("staging", "soon"), wantErr: "CLOCK_OFFSET must be a positive duration"},
+		{name: "days are not a duration", vars: base("staging", "7d"), wantErr: "CLOCK_OFFSET must be a positive duration"},
+		{name: "negative", vars: base("staging", "-1h"), wantErr: "CLOCK_OFFSET must be a positive duration"},
+		{name: "zero", vars: base("staging", "0s"), wantErr: "CLOCK_OFFSET must be a positive duration"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Load(envFrom(tt.vars))
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load() error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.ClockOffset != tt.want {
+				t.Fatalf("ClockOffset = %v, want %v", cfg.ClockOffset, tt.want)
+			}
+		})
+	}
+}

@@ -153,14 +153,16 @@ module "cloud_run" {
   subnet_id    = module.network.cloud_run_subnet_id
   worker_tasks = toset(keys(local.worker_schedules))
 
-  env_vars = {
+  env_vars = merge({
     LOG_LEVEL            = var.log_level
     AUTH0_DOMAIN         = var.auth0_domain
     AUTH0_AUDIENCE       = var.auth0_audience
     AUTH0_MGMT_CLIENT_ID = var.auth0_mgmt_client_id
     CORS_ALLOWED_ORIGINS = join(",", var.cors_allowed_origins)
     TRUSTED_PROXIES      = join(",", var.trusted_proxies)
-  }
+    # Staging only: the production environment has no such variable, and the
+    # API and the worker refuse CLOCK_OFFSET when ENV=production anyway.
+  }, var.clock_offset == "" ? {} : { CLOCK_OFFSET = var.clock_offset })
 
   secrets = {
     DATABASE_URL             = module.secrets.ids[local.database_secret]

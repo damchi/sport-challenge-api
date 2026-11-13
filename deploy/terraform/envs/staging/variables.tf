@@ -100,3 +100,14 @@ variable "trusted_proxies" {
     error_message = "trusted_proxies must not be empty: the rate limit by IP would count every client together."
   }
 }
+
+variable "clock_offset" {
+  description = "Moves the clock of the API and the worker forward (a Go duration such as 168h) to see a week end in minutes. Empty: the real time. Remove it after the tests."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.clock_offset == "" || can(regex("^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$", var.clock_offset))
+    error_message = "clock_offset must be empty or a Go duration such as 168h or 90m (no days)."
+  }
+}

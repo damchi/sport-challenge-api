@@ -60,6 +60,10 @@ func run(args []string) error {
 	}
 	logger := logging.New(os.Stdout, cfg.LogLevel, "worker")
 	slog.SetDefault(logger)
+	clk := clock.New(cfg.ClockOffset)
+	if cfg.ClockOffset != 0 {
+		logger.Warn("clock moved forward", slog.Duration("offset", cfg.ClockOffset))
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -75,7 +79,7 @@ func run(args []string) error {
 	}
 
 	// The closure judges from the same data as the rankings.
-	service := closure.NewService(closure.NewRepository(gdb), leaderboard.NewRepository(gdb), clock.Real{}, logger)
+	service := closure.NewService(closure.NewRepository(gdb), leaderboard.NewRepository(gdb), clk, logger)
 	switch task {
 	case taskCloseWeeks:
 		result, err := service.CloseWeeks(ctx)
