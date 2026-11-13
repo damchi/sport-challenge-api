@@ -46,3 +46,50 @@ variable "db_deletion_protection" {
   type        = bool
   default     = false
 }
+
+variable "run_deletion_protection" {
+  description = "Refuse the deletion of the Cloud Run service and jobs."
+  type        = bool
+  default     = false
+}
+
+variable "image" {
+  description = "Image of the API and the worker (<image_repository>/api:<tag>), pushed to Artifact Registry before the first apply."
+  type        = string
+}
+
+variable "log_level" {
+  description = "LOG_LEVEL of the API and the worker."
+  type        = string
+  default     = "info"
+}
+
+variable "auth0_domain" {
+  description = "Host name of the Auth0 tenant of this environment (without scheme)."
+  type        = string
+}
+
+variable "auth0_audience" {
+  description = "Identifier of the API in Auth0."
+  type        = string
+}
+
+variable "auth0_mgmt_client_id" {
+  description = "Client id of the Auth0 machine-to-machine application that deletes users."
+  type        = string
+}
+
+variable "cors_allowed_origins" {
+  description = "Web origins allowed to call the API from a browser (scheme://host, no wildcard)."
+  type        = list(string)
+}
+
+variable "trusted_proxies" {
+  description = "Addresses or ranges of the proxies in front of the API, from which X-Forwarded-For is read (never wider than /8)."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.trusted_proxies) > 0
+    error_message = "trusted_proxies must not be empty: the rate limit by IP would count every client together."
+  }
+}
