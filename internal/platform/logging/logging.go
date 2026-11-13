@@ -16,7 +16,7 @@ const errorEventType = "type.googleapis.com/google.devtools.clouderrorreporting.
 // also carry what Error Reporting needs, with service as the name of the
 // program ("api", "worker", "migrate").
 func New(w io.Writer, level slog.Level, service string) *slog.Logger {
-	return slog.New(errorReporting{service: service, Handler: slog.NewJSONHandler(w, &slog.HandlerOptions{
+	base := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level: level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if len(groups) > 0 {
@@ -35,27 +35,37 @@ func New(w io.Writer, level slog.Level, service string) *slog.Logger {
 			}
 			return a
 		},
-	})})
+	})
+	// The fields are given to the handler before any group can be opened, so
+	// that they stay at the root of the line.
+	reported := base.WithAttrs([]slog.Attr{
+		slog.String("@type", errorEventType),
+		slog.Group("serviceContext", slog.String("service", service)),
+	})
+	return slog.New(errorReporting{plain: base, reported: reported})
 }
 
-// errorReporting adds the Error Reporting fields to the lines at ERROR.
+// errorReporting writes the lines at ERROR with the Error Reporting fields and
+// the others without. Both handlers always get the same attributes and groups.
 type errorReporting struct {
-	slog.Handler
-	service string
+	plain, reported slog.Handler
+}
+
+func (h errorReporting) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.plain.Enabled(ctx, level)
 }
 
 func (h errorReporting) Handle(ctx context.Context, r slog.Record) error {
 	if r.Level >= slog.LevelError {
-		r.AddAttrs(slog.String("@type", errorEventType),
-			slog.Group("serviceContext", slog.String("service", h.service)))
+		return h.reported.Handle(ctx, r)
 	}
-	return h.Handler.Handle(ctx, r)
+	return h.plain.Handle(ctx, r)
 }
 
 func (h errorReporting) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return errorReporting{service: h.service, Handler: h.Handler.WithAttrs(attrs)}
+	return errorReporting{plain: h.plain.WithAttrs(attrs), reported: h.reported.WithAttrs(attrs)}
 }
 
 func (h errorReporting) WithGroup(name string) slog.Handler {
-	return errorReporting{service: h.service, Handler: h.Handler.WithGroup(name)}
+	return errorReporting{plain: h.plain.WithGroup(name), reported: h.reported.WithGroup(name)}
 }

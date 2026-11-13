@@ -82,3 +82,20 @@ func TestNewReportsErrorsToErrorReporting(t *testing.T) {
 		})
 	}
 }
+
+func TestNewKeepsTheErrorReportingFieldsAtTheRootInsideAGroup(t *testing.T) {
+	var out bytes.Buffer
+	New(&out, slog.LevelDebug, "api").WithGroup("g").Error("boom", "k", "v")
+
+	var line map[string]any
+	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
+		t.Fatalf("not JSON: %q", out.String())
+	}
+	context, _ := line["serviceContext"].(map[string]any)
+	if line["@type"] != errorEventType || context["service"] != "api" {
+		t.Fatalf("line = %v, want @type and serviceContext at the root", line)
+	}
+	if group, _ := line["g"].(map[string]any); group["k"] != "v" {
+		t.Fatalf("line = %v, want the attribute k inside the group g", line)
+	}
+}
