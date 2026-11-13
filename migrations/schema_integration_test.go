@@ -1,8 +1,5 @@
 //go:build integration
 
-// Package migrations holds only the tests of the schema: the business rules
-// the migrations enforce with constraints, and their reversibility.
-// golang-migrate reads the *.up.sql and *.down.sql files and ignores this one.
 package migrations
 
 import (

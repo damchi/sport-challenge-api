@@ -5,4 +5,5 @@
 !go.sum
 !cmd
 !internal
+!migrations
 **/*_test.go

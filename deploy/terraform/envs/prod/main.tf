@@ -148,6 +148,11 @@ module "cloud_run" {
     AUTH0_MGMT_CLIENT_SECRET = module.secrets.ids["auth0-mgmt-client-secret"]
   }
 
+  # The migration job reaches the database and nothing else.
+  migrate_secrets = {
+    DATABASE_URL = module.secrets.ids[local.database_secret]
+  }
+
   deletion_protection = var.run_deletion_protection
 
   # The secrets need a value before an instance can start.
