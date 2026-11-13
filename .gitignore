@@ -35,3 +35,12 @@ CLAUDE.local.md
 # Editor/IDE
 .idea/
 # .vscode/
+
+# Terraform: state and variable values stay out (the lock file is committed)
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example

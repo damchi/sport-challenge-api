@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (ignored by git) and fill in.
+project_id           = "sport-challenge-prod"
+billing_account_id   = "XXXXXX-XXXXXX-XXXXXX"
+budget_amount        = 0 # monthly, whole units
+budget_currency_code = "CAD" # the currency of the billing account
+budget_alert_email   = "you@example.com"
