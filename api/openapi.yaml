@@ -46,6 +46,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /readyz:
     get:
       operationId: getReadyz
@@ -62,6 +64,8 @@ paths:
                 $ref: "#/components/schemas/Readiness"
               example:
                 status: ok
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           description: A dependency (the database) does not answer.
           content:
@@ -88,6 +92,8 @@ paths:
                 $ref: "#/components/schemas/Me"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
     patch:
@@ -122,6 +128,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
     delete:
@@ -142,6 +150,8 @@ paths:
           description: Deleted.
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/me/activities:
@@ -190,6 +200,8 @@ paths:
           $ref: "#/components/responses/ValidationFailed"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/sports:
@@ -217,6 +229,8 @@ paths:
                 $ref: "#/components/schemas/SportList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges:
@@ -267,6 +281,8 @@ paths:
           $ref: "#/components/responses/ValidationFailed"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -302,6 +318,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}:
@@ -334,6 +352,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/ChallengeNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
     delete:
@@ -363,6 +383,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/ChallengeNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
     patch:
@@ -411,6 +433,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/join:
@@ -461,6 +485,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/abandon:
@@ -508,6 +534,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/participants:
@@ -555,6 +583,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/ChallengeNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/leaderboard:
@@ -601,6 +631,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/ChallengeNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/participants/{userId}:
@@ -651,6 +683,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/participants/{userId}/activities:
@@ -717,6 +751,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/creators:
@@ -763,6 +799,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/invitations:
@@ -805,6 +843,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/invitations/{token}:
@@ -833,6 +873,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/InvitationInvalid"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/invitations/{token}/accept:
@@ -876,6 +918,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/activities:
@@ -939,6 +983,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/activities/{activityId}:
@@ -991,6 +1037,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
     delete:
@@ -1017,6 +1065,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
 components:
@@ -1091,6 +1141,20 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: |
+        Too many requests (`rate_limited`): from the same IP address on any
+        route, or by the same user on a write route. Retry after the delay.
+      headers:
+        Retry-After:
+          description: Seconds to wait before the next request.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     ValidationFailed:
       description: |
         The request does not match the contract (`validation_failed`).
@@ -1148,6 +1212,7 @@ components:
         - distance_required
         - distance_not_allowed
         - week_locked
+        - rate_limited
         - not_found
         - validation_failed
         - internal_error

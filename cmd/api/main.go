@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -49,6 +50,10 @@ func main() {
 func run() error {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
+		return err
+	}
+
+	if err := checkTrustedProxies(cfg.Env, cfg.TrustedProxies); err != nil {
 		return err
 	}
 
@@ -101,7 +106,13 @@ func run() error {
 		leaderboardHandler: leaderboard.NewHandler(leaderboards),
 		invitationHandler:  invitation.NewHandler(invitations, challengeHandler),
 	}
-	router, err := newRouter(logger, cfg.CORSAllowedOrigins, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
+	opts := routerOptions{
+		allowedOrigins: cfg.CORSAllowedOrigins,
+		trustedProxies: cfg.TrustedProxies,
+		ipLimiter:      httpx.NewRateLimiter(cfg.RateLimitIP.RPS, cfg.RateLimitIP.Burst, clock.Real{}),
+		userLimiter:    httpx.NewRateLimiter(cfg.RateLimitUser.RPS, cfg.RateLimitUser.Burst, clock.Real{}),
+	}
+	router, err := newRouter(logger, opts, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
 		u, err := users.GetOrCreateBySubject(ctx, subject)
 		return u.ID, err
 	})
@@ -287,12 +298,36 @@ type (
 	invitationHandler  = *invitation.Handler
 )
 
-// newRouter registers the routes of the contract behind the protection:
-// Authenticate then CurrentUser on every route except the public list below.
+// checkTrustedProxies refuses to start a deployed API without trusted
+// proxies: behind Cloud Run every request comes from the proxy, so all the
+// clients would share the bucket of its address and one of them could have
+// everyone refused. Only the API needs them, hence a check here rather than
+// in the configuration the worker shares.
+func checkTrustedProxies(env config.Environment, proxies []string) error {
+	if env != config.EnvLocal && len(proxies) == 0 {
+		return errors.New("invalid configuration: TRUSTED_PROXIES is required outside the local environment")
+	}
+	return nil
+}
+
+// routerOptions are the settings of the middlewares of newRouter.
+type routerOptions struct {
+	allowedOrigins []string
+	// trustedProxies are the only peers whose X-Forwarded-For is read.
+	trustedProxies []string
+	// ipLimiter bounds the requests of an IP address, userLimiter the write
+	// requests of a user.
+	ipLimiter   *httpx.RateLimiter
+	userLimiter *httpx.RateLimiter
+}
+
+// newRouter registers the routes of the contract behind the middlewares of
+// README §5.7: CORS, RateLimitIP, then the protection (Authenticate,
+// CurrentUser, RateLimitUser) on every route except the public list below.
 // Protect is added before the routes, so it applies to all of them, including
 // the ones added later. Each request is then checked against the contract
 // before its handler runs.
-func newRouter(logger *slog.Logger, allowedOrigins []string, handler api.StrictServerInterface, verifier auth.TokenVerifier, resolve auth.UserIDResolver) (*gin.Engine, error) {
+func newRouter(logger *slog.Logger, opts routerOptions, handler api.StrictServerInterface, verifier auth.TokenVerifier, resolve auth.UserIDResolver) (*gin.Engine, error) {
 	spec, err := api.GetSpec()
 	if err != nil {
 		return nil, fmt.Errorf("load embedded contract: %w", err)
@@ -309,12 +344,18 @@ func newRouter(logger *slog.Logger, allowedOrigins []string, handler api.StrictS
 		"GET /readyz",
 	}
 	router := httpx.NewRouter(logger)
+	if err := router.SetTrustedProxies(opts.trustedProxies); err != nil {
+		return nil, fmt.Errorf("trusted proxies: %w", err)
+	}
 	// CORS goes before Protect: it answers the preflights, which Protect lets
 	// through without a token.
-	router.Use(httpx.CORS(allowedOrigins))
+	router.Use(httpx.CORS(opts.allowedOrigins))
+	// Before Protect: a flood is refused before any token is verified.
+	router.Use(httpx.RateLimitIP(opts.ipLimiter, logger))
 	router.Use(auth.Protect(public,
 		auth.Authenticate(verifier, logger),
 		auth.CurrentUser(resolve, logger),
+		httpx.RateLimitUser(opts.userLimiter, auth.UserID, logger),
 	))
 	// The generated defaults send err.Error() to the client: every error
 	// handler is replaced by one that answers in the API error format.

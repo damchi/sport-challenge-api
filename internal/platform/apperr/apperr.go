@@ -57,7 +57,10 @@ const (
 	// invitation token alike.
 	CodeInvitationInvalid Code = "invitation_invalid"
 	CodeValidationFailed  Code = "validation_failed"
-	CodeInternal          Code = "internal_error"
+	// CodeRateLimited refuses a request beyond the rate limit of its IP
+	// address or of its user.
+	CodeRateLimited Code = "rate_limited"
+	CodeInternal    Code = "internal_error"
 )
 
 type definition struct {
@@ -111,6 +114,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusNotFound, "Resource not found"}, true
 	case CodeValidationFailed:
 		return definition{http.StatusBadRequest, "Invalid request"}, true
+	case CodeRateLimited:
+		return definition{http.StatusTooManyRequests, "Too many requests"}, true
 	case CodeInternal:
 		return definition{http.StatusInternalServerError, "Internal server error"}, true
 	}

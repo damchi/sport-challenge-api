@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"log/slog"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -44,10 +45,32 @@ type Config struct {
 	// under the minimum of the elimination category is "at risk". 24 hours
 	// unless AT_RISK_THRESHOLD says otherwise.
 	AtRiskThreshold time.Duration
+	// TrustedProxies are the addresses or CIDR ranges of the proxies in front
+	// of the API (the peer the container sees behind Cloud Run): only from
+	// them is X-Forwarded-For read to find the client IP. Empty: no proxy is
+	// trusted and the client IP is the peer address.
+	TrustedProxies []string
+	// RateLimitIP bounds the requests of one IP address, RateLimitUser the
+	// write requests of one user.
+	RateLimitIP   RateLimit
+	RateLimitUser RateLimit
+}
+
+// RateLimit is a token bucket: RPS tokens come back per second, up to Burst.
+type RateLimit struct {
+	RPS   float64
+	Burst int
 }
 
 // defaultAtRiskThreshold is the "at risk" threshold when none is configured.
 const defaultAtRiskThreshold = 24 * time.Hour
+
+// Rate limits when none is configured: the IP limit leaves room for several
+// users behind one address, the user limit for a burst of entries.
+var (
+	defaultRateLimitIP   = RateLimit{RPS: 20, Burst: 40}
+	defaultRateLimitUser = RateLimit{RPS: 2, Burst: 10}
+)
 
 // Load reads the configuration through getenv (os.Getenv in production).
 // Surrounding spaces are ignored. Every missing or invalid variable is
@@ -120,6 +143,15 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 	}
 
+	if proxies, ok := parseProxies(get("TRUSTED_PROXIES")); !ok {
+		problems = append(problems, "TRUSTED_PROXIES must be a comma-separated list of IP addresses or CIDR ranges, never wider than /8 (IPv4) or /16 (IPv6)")
+	} else {
+		cfg.TrustedProxies = proxies
+	}
+
+	cfg.RateLimitIP = rateLimit(get, "RATE_LIMIT_IP", defaultRateLimitIP, &problems)
+	cfg.RateLimitUser = rateLimit(get, "RATE_LIMIT_USER", defaultRateLimitUser, &problems)
+
 	if len(problems) > 0 {
 		return Config{}, errors.New("invalid configuration: " + strings.Join(problems, "; "))
 	}
@@ -151,6 +183,74 @@ func parseOrigins(raw string) ([]string, bool) {
 		origins = append(origins, entry)
 	}
 	return origins, true
+}
+
+// parseProxies reads a comma-separated list of proxy addresses or CIDR
+// ranges such as "169.254.0.0/16,10.0.0.1". Too wide a range is refused
+// (tooWide): a trusted client could forge its IP with X-Forwarded-For. Empty
+// entries are ignored.
+func parseProxies(raw string) ([]string, bool) {
+	var proxies []string
+	for entry := range strings.SplitSeq(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(entry); err == nil {
+			if tooWide(prefix) {
+				return nil, false
+			}
+		} else if _, err := netip.ParseAddr(entry); err != nil {
+			return nil, false
+		}
+		proxies = append(proxies, entry)
+	}
+	return proxies, true
+}
+
+// tooWide refuses a range of proxies wider than a /8 in IPv4 or a /16 in
+// IPv6: no proxy fleet is that large, and a range of (nearly) every address
+// would trust the clients themselves. An IPv4 range written in IPv6
+// (::ffff:0.0.0.0/96) is measured as the IPv4 range it matches.
+func tooWide(prefix netip.Prefix) bool {
+	bits := prefix.Bits()
+	switch {
+	case prefix.Addr().Is4():
+		return bits < 8
+	case prefix.Addr().Is4In6() && bits >= 96:
+		return bits-96 < 8
+	default:
+		return bits < 16
+	}
+}
+
+// RPS and Burst are bounded, far beyond any real setting: the time a bucket
+// takes to refill (Burst / RPS) must fit in a time.Duration.
+const (
+	minRateLimitRPS = 0.001
+	maxRateLimit    = 1_000_000
+)
+
+// rateLimit reads <prefix>_RPS (a number, decimals allowed) and
+// <prefix>_BURST (an integer); each one falls back to def when unset.
+func rateLimit(get func(string) string, prefix string, def RateLimit, problems *[]string) RateLimit {
+	limit := def
+	if raw := get(prefix + "_RPS"); raw != "" {
+		// "!(rps >= min)" also refuses NaN.
+		if rps, err := strconv.ParseFloat(raw, 64); err != nil || !(rps >= minRateLimitRPS) || rps > maxRateLimit {
+			*problems = append(*problems, prefix+"_RPS must be a number between 0.001 and 1000000")
+		} else {
+			limit.RPS = rps
+		}
+	}
+	if raw := get(prefix + "_BURST"); raw != "" {
+		if burst, err := strconv.Atoi(raw); err != nil || burst < 1 || burst > maxRateLimit {
+			*problems = append(*problems, prefix+"_BURST must be an integer between 1 and 1000000")
+		} else {
+			limit.Burst = burst
+		}
+	}
+	return limit
 }
 
 func isASCII(v string) bool {

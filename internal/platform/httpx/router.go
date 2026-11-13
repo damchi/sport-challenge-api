@@ -19,6 +19,11 @@ import (
 // middleware, so "/path/" would skip the request log and the authentication.
 // It goes to NoRoute instead, behind the same middlewares as any request.
 //
+// No proxy is trusted until the caller declares some with SetTrustedProxies
+// (Gin trusts every proxy by default, which lets any client forge its IP):
+// c.ClientIP() is the peer address. Behind trusted proxies, only
+// X-Forwarded-For is read, never X-Real-IP, which Cloud Run does not set.
+//
 // ContextWithFallback makes the *gin.Context, which the generated handlers
 // receive as their context.Context, expose the request context: its values
 // (the authenticated claims) and its cancellation. Gin reuses its contexts:
@@ -29,6 +34,9 @@ func NewRouter(logger *slog.Logger) *gin.Engine {
 	r := gin.New()
 	r.ContextWithFallback = true
 	r.RedirectTrailingSlash = false
+	// nil cannot fail: there is nothing to parse.
+	_ = r.SetTrustedProxies(nil)
+	r.RemoteIPHeaders = []string{"X-Forwarded-For"}
 	r.Use(
 		RequestIDMiddleware(),
 		LoggerMiddleware(logger),
