@@ -67,7 +67,7 @@ func run(args []string, getenv func(string) string) error {
 	if url == "" {
 		return errDatabaseURL
 	}
-	logger := logging.New(os.Stdout, slog.LevelInfo)
+	logger := logging.New(os.Stdout, slog.LevelInfo, "migrate")
 
 	db, err := sql.Open("pgx", url)
 	if err != nil {

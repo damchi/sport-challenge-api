@@ -24,9 +24,10 @@ variable "budget_currency_code" {
   type        = string
 }
 
-variable "budget_alert_email" {
-  description = "Address that receives the budget alerts."
+variable "alert_email" {
+  description = "Address that receives the alerts (budget, API errors, worker)."
   type        = string
+  sensitive   = true
 }
 
 variable "db_tier" {

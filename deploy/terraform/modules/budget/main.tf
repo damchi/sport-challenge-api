@@ -1,12 +1,3 @@
-resource "google_monitoring_notification_channel" "email" {
-  display_name = "Budget alerts"
-  type         = "email"
-
-  labels = {
-    email_address = var.alert_email
-  }
-}
-
 resource "google_billing_budget" "this" {
   billing_account = var.billing_account_id
   display_name    = var.display_name
@@ -31,6 +22,6 @@ resource "google_billing_budget" "this" {
   }
 
   all_updates_rule {
-    monitoring_notification_channels = [google_monitoring_notification_channel.email.id]
+    monitoring_notification_channels = [var.notification_channel_id]
   }
 }

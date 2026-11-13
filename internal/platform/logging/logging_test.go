@@ -21,7 +21,7 @@ func TestNewIsCloudLoggingCompatible(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.severity, func(t *testing.T) {
 			var out bytes.Buffer
-			New(&out, slog.LevelDebug).Log(t.Context(), tt.level, "hello")
+			New(&out, slog.LevelDebug, "api").Log(t.Context(), tt.level, "hello")
 
 			var line map[string]any
 			if err := json.Unmarshal(out.Bytes(), &line); err != nil {
@@ -42,8 +42,43 @@ func TestNewIsCloudLoggingCompatible(t *testing.T) {
 
 func TestNewFiltersBelowLevel(t *testing.T) {
 	var out bytes.Buffer
-	New(&out, slog.LevelWarn).Info("hidden")
+	New(&out, slog.LevelWarn, "api").Info("hidden")
 	if out.Len() != 0 {
 		t.Fatalf("info written at warn level: %q", out.String())
+	}
+}
+
+func TestNewReportsErrorsToErrorReporting(t *testing.T) {
+	tests := []struct {
+		level    slog.Level
+		reported bool
+	}{
+		{slog.LevelDebug, false},
+		{slog.LevelInfo, false},
+		{slog.LevelWarn, false},
+		{slog.LevelError, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.level.String(), func(t *testing.T) {
+			var out bytes.Buffer
+			New(&out, slog.LevelDebug, "worker").With("request_id", "r1").Log(t.Context(), tt.level, "boom", "challenge_id", "c1")
+
+			var line map[string]any
+			if err := json.Unmarshal(out.Bytes(), &line); err != nil {
+				t.Fatalf("not JSON: %q", out.String())
+			}
+			marker, hasMarker := line["@type"]
+			context, _ := line["serviceContext"].(map[string]any)
+			if hasMarker != tt.reported || (context["service"] == "worker") != tt.reported {
+				t.Fatalf("line = %v, want reported %v", line, tt.reported)
+			}
+			if tt.reported && marker != errorEventType {
+				t.Fatalf("@type = %v, want %s", marker, errorEventType)
+			}
+			// The other attributes stay where they were.
+			if line["request_id"] != "r1" || line["challenge_id"] != "c1" || line["message"] != "boom" {
+				t.Fatalf("line = %v lost an attribute", line)
+			}
+		})
 	}
 }
