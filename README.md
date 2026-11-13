@@ -464,7 +464,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 
 **Groupes de routes**
 - Publiques, sans jeton : `GET /healthz` et `GET /readyz` (sondes de Cloud Run), et les pré-requêtes `OPTIONS` (CORS).
-- Protégées (tout le reste, dont `/api/v1`) : middlewares 1 à 7. **Protégé par défaut** : `cmd/api` applique `Authenticate` puis `CurrentUser` à toute route absente d'une liste explicite de routes publiques, et `api/openapi.yaml` exige `bearerAuth` au niveau global (seules les sondes le surchargent avec `security: []`). Une nouvelle route est donc protégée sans rien ajouter ; un test parcourt les routes enregistrées pour le vérifier.
+- Protégées (tout le reste, dont `/api/v1`) : middlewares 1 à 8. **Protégé par défaut** : `cmd/api` applique `Authenticate` puis `CurrentUser` à toute route absente d'une liste explicite de routes publiques, et `api/openapi.yaml` exige `bearerAuth` au niveau global (seules les sondes le surchargent avec `security: []`). Une nouvelle route est donc protégée sans rien ajouter ; un test parcourt les routes enregistrées pour le vérifier.
 - ✅ Connexion **obligatoire** pour toutes les routes, y compris la lecture des challenges publics (V1). Pas de middleware `OptionalAuth` pour l'instant.
 - V2 : `POST /webhooks/{provider}` n'utilise pas le jeton utilisateur mais un middleware de **vérification de signature** du fournisseur.
 
