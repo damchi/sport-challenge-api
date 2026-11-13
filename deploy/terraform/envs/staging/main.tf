@@ -112,6 +112,13 @@ module "artifact_registry" {
   depends_on = [google_project_service.apis]
 }
 
+# The channel moved from the budget module to the monitoring one: an
+# environment that already applied it keeps it instead of recreating it.
+moved {
+  from = module.budget.google_monitoring_notification_channel.email
+  to   = module.monitoring.google_monitoring_notification_channel.email
+}
+
 module "monitoring" {
   source = "../../modules/monitoring"
 

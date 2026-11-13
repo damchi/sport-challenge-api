@@ -38,6 +38,7 @@ Le secret `database-url` reçoit sa valeur de Terraform (URL de connexion constr
   - l'échec d'une exécution d'un job Cloud Run, donc d'une tâche du worker ou d'une migration ;
   - `close-weeks` sans exécution réussie depuis plus de 3 heures (elle tourne chaque heure) ;
   - le budget (50 %, 90 % et 100 % des dépenses), par le même canal.
+- **Mise à jour d'un environnement déjà appliqué** : la variable `budget_alert_email` s'appelle désormais `alert_email` (à renommer dans `terraform.tfvars`, sinon `plan` la réclame). Le canal d'alerte, passé du module `budget` au module `monitoring`, est déplacé par un bloc `moved` : le `plan` ne doit pas le recréer.
 - Une alerte d'absence ne se déclenche qu'une fois que la tâche a réussi au moins une fois : après un déploiement, elle s'arme au premier succès de `close-weeks`.
 
 ## Choix
