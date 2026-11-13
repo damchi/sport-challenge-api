@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewIsCloudLoggingCompatible(t *testing.T) {
@@ -109,5 +110,37 @@ func TestNewKeepsTheErrorReportingFieldsAtTheRootInsideAGroup(t *testing.T) {
 	}
 	if group, _ := line["g"].(map[string]any); group["k"] != "v" {
 		t.Fatalf("line = %v, want the attribute k inside the group g", line)
+	}
+}
+
+func TestNewReplaysAttributesBeforeAndAfterAGroup(t *testing.T) {
+	var out bytes.Buffer
+	logger := New(&out, slog.LevelDebug, "api").With("before", "b").WithGroup("g").With("inside", "i")
+	logger.Error("boom", "k", "v")
+
+	var line map[string]any
+	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
+		t.Fatalf("not JSON: %q", out.String())
+	}
+	group, _ := line["g"].(map[string]any)
+	if line["before"] != "b" || group["inside"] != "i" || group["k"] != "v" || line["@type"] != errorEventType {
+		t.Fatalf("line = %v, want before at the root, inside and k in g, and @type at the root", line)
+	}
+}
+
+func TestNewReportsARecordWithoutACallSite(t *testing.T) {
+	var out bytes.Buffer
+	// A record built by hand has no program counter: it must still be written.
+	record := slog.NewRecord(time.Now(), slog.LevelError, "boom", 0)
+	if err := New(&out, slog.LevelDebug, "api").Handler().Handle(t.Context(), record); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+
+	var line map[string]any
+	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
+		t.Fatalf("not JSON: %q", out.String())
+	}
+	if line["@type"] != errorEventType || line["message"] != "boom" {
+		t.Fatalf("line = %v, want an error event", line)
 	}
 }
