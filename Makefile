@@ -7,6 +7,8 @@ DATABASE_URL ?= postgres://sport:sport@localhost:5432/sport_challenge?sslmode=di
 TEST_DATABASE_URL ?= postgres://sport:sport@localhost:5432/postgres?sslmode=disable
 
 COMPOSE_FILE   := deploy/docker-compose.yml
+DOCKERFILE     := deploy/Dockerfile
+IMAGE          := sport-challenge-api:local
 MIGRATIONS_DIR := migrations
 TOOLS_BIN      := $(CURDIR)/bin
 
@@ -43,7 +45,7 @@ LOCAL_DB_HOSTS := localhost 127.0.0.1 postgres
 
 .PHONY: help run worker build tools fmt lint test test-integration check generate openapi-lint doc \
 	migrate-new migrate-up migrate-down migrate-version \
-	docker-up docker-down guard-local-db
+	docker-up docker-down docker-build guard-local-db
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(firstword $(MAKEFILE_LIST))
@@ -145,3 +147,6 @@ docker-up: ## Start the local PostgreSQL
 
 docker-down: ## Stop the local PostgreSQL (data is kept)
 	docker compose -f $(COMPOSE_FILE) down
+
+docker-build: ## Build the image (api and worker) as sport-challenge-api:local
+	docker build -f $(DOCKERFILE) -t $(IMAGE) .
