@@ -1,0 +1,87 @@
+name: Release
+
+# Once the CI has passed on main, the next semantic version is computed from
+# the conventional commits since the last tag. When one is called for, the
+# image is built with it (to make sure the release builds), then the tag and
+# the GitHub release are created. See docs/release.md.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One release at a time, in the order of the merges.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: tag and release
+    # Only a push to main of this repository, never a pull request (a fork may
+    # name its branch main) and never a red CI.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the tag and the release
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0 # the history and the tags
+          persist-credentials: false
+
+      - name: Next version
+        id: version
+        run: |
+          # Runs can arrive late: only the tip of main is released. The run of
+          # a newer commit counts the commits of this one too.
+          if [ "$SHA" != "$(git rev-parse origin/main)" ]; then
+            echo "$SHA is no longer the tip of main: left to the run of the newer commit"
+            exit 0
+          fi
+          # A commit that already has a version is not released twice.
+          if [ -n "$(git tag --points-at "$SHA" --list 'v[0-9]*')" ]; then
+            echo "$SHA already has a version tag"
+            exit 0
+          fi
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$SHA" 2>/dev/null || true)
+          range=${last:+$last..}$SHA
+          next=$(git log --format=%B%x00 "$range" | .github/scripts/next-version.sh "$last")
+          if [ -z "$next" ]; then
+            echo "no commit since ${last:-the start} calls for a version"
+            exit 0
+          fi
+          echo "version: ${last:-none} -> $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      # The image the deployment will use: tagged with the version and the short
+      # commit (never latest). It is only built here; pushing it to Artifact
+      # Registry needs the GCP authentication of the continuous deployment.
+      - name: Build the image
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          date=$(git show -s --format=%cI "$SHA")
+          docker build -f deploy/Dockerfile \
+            --build-arg VERSION="$VERSION" --build-arg COMMIT="$SHA" --build-arg DATE="$date" \
+            -t "sport-challenge-api:$VERSION" -t "sport-challenge-api:${SHA:0:7}" .
+
+      - name: Tag and release
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" --target "$SHA" \
+            --title "$VERSION" --generate-notes

@@ -55,6 +55,10 @@ jobs:
       - name: Test
         run: make test
 
+      # The rules that compute the version of a release (release.yml).
+      - name: Release script
+        run: .github/scripts/next-version_test.sh
+
   migrations:
     name: migrations up, down, up
     runs-on: ubuntu-latest
@@ -149,13 +153,30 @@ jobs:
     name: docker image
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The API starts against a database (its /healthz is read below).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sport
+          POSTGRES_PASSWORD: sport
+          POSTGRES_DB: sport_challenge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sport -d sport_challenge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # The build facts go through the image: the version and the commit are
+      # given here as the release workflow gives them.
       - name: Build
-        run: make docker-build
+        run: make docker-build VERSION=v0.0.0-ci COMMIT="$GITHUB_SHA"
 
       # The three commands start in the minimal image, as a non-root user. Without
       # configuration each one must fail on its own message, not on a missing
@@ -169,3 +190,22 @@ jobs:
           grep -q "usage: worker" worker.log
           timeout 30 docker run --rm sport-challenge-api:local migrate up 2>&1 | tee migrate.log || true
           grep -q "DATABASE_URL is required" migrate.log
+
+      # The linker flags reach the binary: the running API tells its version and
+      # commit on /healthz (no token), and the image carries them as labels.
+      - name: Build info
+        run: |
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' sport-challenge-api:local)" = "$GITHUB_SHA"
+          container=$(docker run -d --network host \
+            -e ENV=local -e PORT=8080 -e LOG_LEVEL=info \
+            -e DATABASE_URL='postgres://sport:sport@127.0.0.1:5432/sport_challenge?sslmode=disable' \
+            -e AUTH0_DOMAIN=ci.invalid -e AUTH0_AUDIENCE=https://api.test \
+            -e AUTH0_MGMT_CLIENT_ID=ci -e AUTH0_MGMT_CLIENT_SECRET=ci \
+            sport-challenge-api:local)
+          # Whatever happens next, show what the API said and remove it.
+          trap 'docker logs "$container" 2>&1 | tail -n 20; docker rm -f "$container" >/dev/null' EXIT
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8080/healthz -o health.json && break; sleep 1; done
+          cat health.json
+          docker logs "$container" 2>&1 | grep '"server started"' | grep -q "\"commit\":\"$GITHUB_SHA\""
+          grep -q "\"commit\":\"$GITHUB_SHA\"" health.json
+          grep -q '"version":"v0.0.0-ci"' health.json

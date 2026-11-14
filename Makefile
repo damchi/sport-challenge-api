@@ -9,6 +9,11 @@ TEST_DATABASE_URL ?= postgres://sport:sport@localhost:5432/postgres?sslmode=disa
 COMPOSE_FILE   := deploy/docker-compose.yml
 DOCKERFILE     := deploy/Dockerfile
 IMAGE          := sport-challenge-api:local
+# Which build the image is: the nearest tag (or the short commit), the full
+# commit and its date. The release workflow gives them its own values.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+DATE    ?= $(shell git show -s --format=%cI HEAD 2>/dev/null || echo unknown)
 MIGRATIONS_DIR := migrations
 TOOLS_BIN      := $(CURDIR)/bin
 
@@ -149,4 +154,5 @@ docker-down: ## Stop the local PostgreSQL (data is kept)
 	docker compose -f $(COMPOSE_FILE) down
 
 docker-build: ## Build the image (api and worker) as sport-challenge-api:local
-	docker build -f $(DOCKERFILE) -t $(IMAGE) .
+	docker build -f $(DOCKERFILE) -t $(IMAGE) \
+		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg DATE=$(DATE) .
