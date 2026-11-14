@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	// The time zone database, embedded: challenges are cut in their own time
 	// zone, and a minimal image may have no zoneinfo.
@@ -49,12 +50,23 @@ func main() {
 	}
 }
 
+// workerEnv reads the environment for config.Load. The worker has no server,
+// but the configuration requires a port and Cloud Run does not let a job set
+// PORT (it is a reserved name), so the worker falls back to the API default.
+func workerEnv(key string) string {
+	value := os.Getenv(key)
+	if key == "PORT" && strings.TrimSpace(value) == "" {
+		return "8080"
+	}
+	return value
+}
+
 func run(args []string) error {
 	task, err := parseTask(args)
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(os.Getenv)
+	cfg, err := config.Load(workerEnv)
 	if err != nil {
 		return err
 	}
