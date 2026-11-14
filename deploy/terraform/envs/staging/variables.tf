@@ -112,3 +112,9 @@ variable "clock_offset" {
     error_message = "clock_offset must be empty or a positive Go duration such as 168h or 90m (no days, not zero)."
   }
 }
+
+variable "github_repository" {
+  description = "Repository whose workflows deploy to this environment, as owner/name."
+  type        = string
+  default     = "damchi/sport-challenge-api"
+}

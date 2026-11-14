@@ -1,0 +1,125 @@
+name: Deploy to GCP
+description: >-
+  Build and push the image, apply the migrations, deploy the API and the worker
+  to Cloud Run, and check that the deployed commit answers. The Terraform of the
+  environment (deploy/terraform) must have been applied; this never runs it.
+
+inputs:
+  project:
+    description: GCP project of the environment.
+    required: true
+  region:
+    description: Region of Cloud Run and Artifact Registry.
+    required: true
+  workload-identity-provider:
+    description: Full name of the Workload Identity provider (Terraform output).
+    required: true
+  service-account:
+    description: Deployment service account (Terraform output).
+    required: true
+  sha:
+    description: Commit to deploy (full SHA).
+    required: true
+  version:
+    description: Version of the build (vMAJOR.MINOR.PATCH, or the output of git describe).
+    required: true
+  rollback:
+    description: >-
+      "true" to deploy an image that is already in Artifact Registry, without
+      building it nor touching the schema (the migrations of an older image do
+      not know the newer versions of the database).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+      with:
+        workload_identity_provider: ${{ inputs.workload-identity-provider }}
+        service_account: ${{ inputs.service-account }}
+
+    - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+    # Names fixed by deploy/terraform: the repository of the artifact-registry
+    # module, the service and the jobs of the cloud-run module.
+    - name: Names
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        REGION: ${{ inputs.region }}
+        SHA: ${{ inputs.sha }}
+      run: |
+        {
+          echo "IMAGE_REPOSITORY=$REGION-docker.pkg.dev/$PROJECT/sport-challenge/api"
+          echo "SHORT_SHA=${SHA:0:7}"
+          echo "WORKER_TASKS=close-weeks finalize-challenges"
+        } >> "$GITHUB_ENV"
+
+    - name: Build and push the image
+      if: inputs.rollback != 'true'
+      shell: bash
+      env:
+        REGION: ${{ inputs.region }}
+        SHA: ${{ inputs.sha }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+        date=$(git show -s --format=%cI "$SHA")
+        docker build -f deploy/Dockerfile \
+          --build-arg VERSION="$VERSION" --build-arg COMMIT="$SHA" --build-arg DATE="$date" \
+          -t "$IMAGE_REPOSITORY:$SHORT_SHA" -t "$IMAGE_REPOSITORY:$VERSION" .
+        docker push "$IMAGE_REPOSITORY:$SHORT_SHA"
+        docker push "$IMAGE_REPOSITORY:$VERSION"
+
+    - name: Find the image to roll back to
+      if: inputs.rollback == 'true'
+      shell: bash
+      run: gcloud artifacts docker images describe "$IMAGE_REPOSITORY:$SHORT_SHA" --format='value(image_summary.digest)'
+
+    # A failed migration (including a dirty database) fails the step, hence the
+    # job: nothing is deployed. See docs/migrations.md.
+    - name: Apply the migrations
+      if: inputs.rollback != 'true'
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        REGION: ${{ inputs.region }}
+      run: |
+        gcloud run jobs update sport-challenge-migrate --project="$PROJECT" --region="$REGION" \
+          --image="$IMAGE_REPOSITORY:$SHORT_SHA"
+        gcloud run jobs execute sport-challenge-migrate --project="$PROJECT" --region="$REGION" --wait
+
+    - name: Deploy the API and the worker
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        REGION: ${{ inputs.region }}
+      run: |
+        gcloud run services update sport-challenge-api --project="$PROJECT" --region="$REGION" \
+          --image="$IMAGE_REPOSITORY:$SHORT_SHA"
+        for task in $WORKER_TASKS; do
+          gcloud run jobs update "sport-challenge-worker-$task" --project="$PROJECT" --region="$REGION" \
+            --image="$IMAGE_REPOSITORY:$SHORT_SHA"
+        done
+
+    # /healthz answers with the commit the binary was built from (docs/release.md).
+    - name: Smoke test
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        REGION: ${{ inputs.region }}
+        SHA: ${{ inputs.sha }}
+      run: |
+        url=$(gcloud run services describe sport-challenge-api --project="$PROJECT" --region="$REGION" \
+          --format='value(status.url)')
+        for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+          commit=$(curl -fsS --max-time 10 "$url/healthz" | jq -r .commit || true)
+          if [ "$commit" = "$SHA" ]; then
+            echo "the API runs $SHA"
+            exit 0
+          fi
+          echo "attempt $attempt: the API runs '${commit:-nothing}', expected $SHA"
+          sleep 10
+        done
+        echo "::error::the deployed API does not report commit $SHA"
+        exit 1

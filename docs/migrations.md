@@ -2,7 +2,7 @@
 
 Les migrations (golang-migrate, dossier `migrations/`) s'appliquent par un **job Cloud Run dédié**, `sport-challenge-migrate`, lancé **avant** le déploiement de la nouvelle version. L'API ne touche jamais au schéma en démarrant.
 
-Qui peut lancer `down` et `force` : les personnes qui ont le droit de lancer le job avec des arguments (rôle Cloud Run Developer sur le job), donc à limiter, en prod, à deux personnes ; ces exécutions sont tracées dans les journaux d'audit. Ni l'API, ni le worker, ni Cloud Scheduler ne peuvent lancer ce job. Un futur pipeline de déploiement qui lance `migrate up` aura son propre compte de service, distinct de celui du job.
+Qui peut lancer `down` et `force` : les personnes qui ont le droit de lancer le job avec des arguments (rôle Cloud Run Developer sur le job), donc à limiter, en prod, à deux personnes ; ces exécutions sont tracées dans les journaux d'audit. Ni l'API, ni le worker, ni Cloud Scheduler ne peuvent lancer ce job. Le pipeline de déploiement (`docs/deploiement.md`) lance `migrate up` avec son propre compte de service, distinct de celui du job ; il ne lance jamais `down` ni `force`.
 
 Le job utilise la même image que l'API et le worker, avec la commande `migrate` : les fichiers SQL sont embarqués dans le binaire, donc le schéma correspond toujours à la version du code. Il n'a accès qu'au secret `DATABASE_URL`, et une migration en échec n'est jamais relancée automatiquement.
 

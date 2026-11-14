@@ -8,6 +8,8 @@ L'infrastructure est décrite dans `docs/terraform.md` (premier `apply`, ordre d
 
 ## Publier une version
 
+Le déploiement est normalement automatique à chaque fusion dans `main` (`docs/deploiement.md`). Les étapes ci-dessous sont l'équivalent manuel, pour tester une branche.
+
 Droits nécessaires pour la personne qui publie : écrire dans Artifact Registry (`roles/artifactregistry.writer`) et mettre à jour et exécuter les services et jobs Cloud Run (`roles/run.developer`).
 
 1. Construire l'image depuis la branche à tester et la pousser dans Artifact Registry (une seule image : API, worker et migrations) :
