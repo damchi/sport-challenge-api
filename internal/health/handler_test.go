@@ -3,11 +3,13 @@ package health
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -15,8 +17,12 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/api/apitest"
+	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
 )
+
+// testBuild is the build the probes announce.
+var testBuild = buildinfo.Info{Version: "v1.2.3", Commit: "0123456789abcdef0123456789abcdef01234567", Date: "2026-11-14T10:00:00-05:00"}
 
 type fakePinger struct{ err error }
 
@@ -41,7 +47,7 @@ func serveWithLogs(t *testing.T, db Pinger, path string, logs io.Writer) *httpte
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	r := httpx.NewRouter(logger)
-	api.RegisterHandlers(r, api.NewStrictHandler(healthOnly{Handler: NewHandler(db, logger)}, nil))
+	api.RegisterHandlers(r, api.NewStrictHandler(healthOnly{Handler: NewHandler(db, logger, testBuild)}, nil))
 
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
@@ -57,8 +63,14 @@ func TestGetHealthz(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if got := rec.Body.String(); got != "{\"status\":\"ok\"}\n" {
-		t.Fatalf("body = %q, want {\"status\":\"ok\"}", got)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body = %q is not JSON: %v", rec.Body, err)
+	}
+	// The version and the commit, nothing else (not the date, not the host).
+	want := map[string]any{"status": "ok", "version": testBuild.Version, "commit": testBuild.Commit}
+	if !reflect.DeepEqual(body, want) {
+		t.Fatalf("body = %v, want %v", body, want)
 	}
 }
 

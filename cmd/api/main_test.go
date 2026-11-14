@@ -24,6 +24,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/health"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
@@ -104,7 +105,7 @@ const webOrigin = "https://app.example.com"
 func testHandlers() server {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	return server{
-		Handler:          health.NewHandler(pingerFunc(func(context.Context) error { return nil }), logger),
+		Handler:          health.NewHandler(pingerFunc(func(context.Context) error { return nil }), logger, buildinfo.Get()),
 		userHandler:      user.NewHandler(nil),
 		sportHandler:     sport.NewHandler(nil),
 		challengeHandler: challenge.NewHandler(nil),

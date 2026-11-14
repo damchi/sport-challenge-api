@@ -25,6 +25,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/invitation"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
@@ -59,6 +60,7 @@ func run() error {
 
 	logger := logging.New(os.Stdout, cfg.LogLevel, "api")
 	slog.SetDefault(logger)
+	build := buildinfo.Get()
 	clk := clock.New(cfg.ClockOffset)
 	if cfg.ClockOffset != 0 {
 		logger.Warn("clock moved forward", slog.Duration("offset", cfg.ClockOffset))
@@ -102,7 +104,7 @@ func run() error {
 	invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 	challengeHandler := challenge.NewHandler(challenges)
 	handlers := server{
-		Handler:            health.NewHandler(pool, logger),
+		Handler:            health.NewHandler(pool, logger, build),
 		userHandler:        user.NewHandler(users),
 		sportHandler:       sport.NewHandler(sports),
 		challengeHandler:   challengeHandler,
@@ -136,7 +138,8 @@ func run() error {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("server started", slog.Int("port", cfg.Port), slog.String("env", string(cfg.Env)))
+		logger.Info("server started", slog.Int("port", cfg.Port), slog.String("env", string(cfg.Env)),
+			slog.String("version", build.Version), slog.String("commit", build.Commit))
 		serveErr <- srv.ListenAndServe()
 	}()
 

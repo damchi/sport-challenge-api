@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/api"
+	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 )
 
 // pingTimeout keeps the readiness probe fast when the database hangs.
@@ -21,16 +22,19 @@ type Pinger interface {
 type Handler struct {
 	db     Pinger
 	logger *slog.Logger
+	build  buildinfo.Info
 }
 
-// NewHandler returns a Handler whose readiness depends on db.
-func NewHandler(db Pinger, logger *slog.Logger) Handler {
-	return Handler{db: db, logger: logger}
+// NewHandler returns a Handler whose readiness depends on db, and whose
+// liveness probe announces build.
+func NewHandler(db Pinger, logger *slog.Logger, build buildinfo.Info) Handler {
+	return Handler{db: db, logger: logger, build: build}
 }
 
-// GetHealthz always answers 200: it only tells that the process serves requests.
-func (Handler) GetHealthz(context.Context, api.GetHealthzRequestObject) (api.GetHealthzResponseObject, error) {
-	return api.GetHealthz200JSONResponse{Status: api.HealthStatusOk}, nil
+// GetHealthz always answers 200: it only tells that the process serves
+// requests, and which build it is (the version and the commit, nothing more).
+func (h Handler) GetHealthz(context.Context, api.GetHealthzRequestObject) (api.GetHealthzResponseObject, error) {
+	return api.GetHealthz200JSONResponse{Status: api.HealthStatusOk, Version: h.build.Version, Commit: h.build.Commit}, nil
 }
 
 // GetReadyz answers 200 when the database answers within pingTimeout, 503

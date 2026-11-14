@@ -22,6 +22,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/closure"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
@@ -72,6 +73,9 @@ func run(args []string) error {
 	}
 	logger := logging.New(os.Stdout, cfg.LogLevel, "worker")
 	slog.SetDefault(logger)
+	build := buildinfo.Get()
+	logger.Info("worker started", slog.String("task", task),
+		slog.String("version", build.Version), slog.String("commit", build.Commit))
 	clk := clock.New(cfg.ClockOffset)
 	if cfg.ClockOffset != 0 {
 		logger.Warn("clock moved forward", slog.Duration("offset", cfg.ClockOffset))

@@ -36,7 +36,10 @@ paths:
     get:
       operationId: getHealthz
       summary: Liveness probe
-      description: Always returns 200 while the process is able to serve requests.
+      description: |
+        Always returns 200 while the process is able to serve requests. It also
+        tells which build runs (version and commit), so that a deployment can
+        be checked without a token.
       tags: [health]
       security: []
       responses:
@@ -1218,12 +1221,22 @@ components:
         - internal_error
     Health:
       type: object
-      required: [status]
+      required: [status, version, commit]
       additionalProperties: false
       properties:
         status:
           type: string
           enum: [ok]
+        version:
+          type: string
+          description: |
+            The semantic version of the running build (`v1.2.3`), or `dev` for
+            a build that was not released.
+          example: v1.2.3
+        commit:
+          type: string
+          description: The full SHA of the Git commit the running build was made from, or `unknown`.
+          example: 0123456789abcdef0123456789abcdef01234567
     Readiness:
       type: object
       required: [status]
