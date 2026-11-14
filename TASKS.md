@@ -102,16 +102,16 @@ Tickets déplacés ou réduits : 012 (seulement CORS), 022 (limitation de débit
 
 ## Périmètre de la V1 : aller le plus vite possible
 
-Le frontend démarre en **web uniquement** (le mobile viendra en V2) et la V1 repose sur la saisie manuelle. Le backlog complet compte **67 tickets et 217 points** (E0 : 7 · E1 : 7 · E2 : 31 · E3 : 3 · E4 : 42 · E5 : 21 · E6 : 27 · E7 : 17 · E8 : 31 · E9 : 31).
+Le frontend démarre en **web uniquement** (le mobile viendra en V2) et la V1 repose sur la saisie manuelle. Le backlog complet compte **69 tickets et 225 points** (E0 : 7 · E1 : 7 · E2 : 31 · E3 : 3 · E4 : 42 · E5 : 21 · E6 : 27 · E7 : 17 · E8 : 31 · E9 : 39).
 
-**Décision D10 ✅** : les badges et l'upload d'avatar sont **reportés à une V1.1** pour sortir la V1 plus vite. La V1 compte donc **189 points** (217 − 28). Au lancement, les avatars sont des **initiales par défaut**.
+**Décision D10 ✅** : les badges et l'upload d'avatar sont **reportés à une V1.1** pour sortir la V1 plus vite. La V1 compte donc **197 points** (225 − 28). Au lancement, les avatars sont des **initiales par défaut**.
 
 | Reporté en V1.1 | Tickets | Points | Effet |
 |---|---|---|---|
 | Badges | 059 à 064 | 23 | Pas de badges au lancement ; la table et les règles viendront ensuite sans toucher au reste |
 | Upload d'avatar | 023 | 5 | Avatars par défaut (initiales) au lancement |
 
-À **garder** même pour aller vite : fondations et CI (E0, E1), authentification (E2), catalogue de sports, challenges et participation (E4), activités avec verrouillage de semaine (E5), classement des 3 catégories (E6), clôtures et résultats figés (E7), invitations (065 et 066, indispensables aux challenges privés), limitation de débit (022) et un déploiement minimal reproductible (067, 069 à 071, 073). L'observabilité (072) et le runbook (074) peuvent être réduits à l'essentiel mais pas supprimés : alerte de budget et alerte d'échec du worker comprises.
+À **garder** même pour aller vite : fondations et CI (E0, E1), authentification (E2), catalogue de sports, challenges et participation (E4), activités avec verrouillage de semaine (E5), classement des 3 catégories (E6), clôtures et résultats figés (E7), invitations (065 et 066, indispensables aux challenges privés), limitation de débit (022) et un déploiement minimal reproductible (067, 069 à 071, 073, 076, 077). L'observabilité (072) et le runbook (074) peuvent être réduits à l'essentiel mais pas supprimés : alerte de budget et alerte d'échec du worker comprises.
 
 Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` ne les prend jamais.
 
@@ -128,7 +128,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 | E6 | Scoring et classement | 047, 048, 049, 050, 051, 052, 053 |
 | E7 | Clôtures et worker | 054, 055, 056, 057, 058 |
 | E8 | Invitations (badges reportés en V1.1) | 059, 060, 061, 062, 063, 064, 065, 066 |
-| E9 | Sécurité avant exposition, déploiement et exploitation | 022, 067, 069, 070, 071, 072, 073, 074 |
+| E9 | Sécurité avant exposition, déploiement et exploitation | 022, 067, 069, 070, 071, 072, 073, 074, 076, 077 |
 
 ---
 
@@ -1189,4 +1189,44 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Revue** : `security-reviewer`.
 **Commit** : `docs: add runbook and production readiness checklist`
+**Statut** : À faire
+
+### SC-API-076 · Versioning sémantique et informations de build
+`E9` · Task · Phase 9 · Estimation 3 · Dépend de : 067
+
+**Description** : chaque build doit être identifiable et traçable : une version sémantique, le commit exact, et une image Docker taguée en conséquence. Prérequis du déploiement automatique (077).
+
+**Critères d'acceptation**
+- [ ] Version sémantique (`vMAJOR.MINOR.PATCH`) portée par un tag Git ; 🟡 la version est calculée automatiquement à partir des messages de commit conventionnels (`feat` = mineur, `fix` = correctif, `!` = majeur) ; à confirmer avec l'utilisateur avant d'implémenter.
+- [ ] Un package `internal/platform/buildinfo` (version, commit, date) renseigné à la compilation par `-ldflags -X` dans `deploy/Dockerfile` (arguments de build `VERSION`, `COMMIT`).
+- [ ] `GET /api/v1/version` (ou champ dans le health check existant) expose version et commit, sans donnée sensible ; contrat `api/openapi.yaml` modifié d'abord.
+- [ ] La version et le commit apparaissent dans les logs `slog` au démarrage de l'API et du worker.
+- [ ] Images Docker taguées `<version>` **et** `<sha court du commit>` (jamais `latest` comme référence de déploiement).
+- [ ] `CHANGELOG.md` généré à partir des commits, ou notes de release GitHub générées automatiquement.
+- [ ] Convention documentée (README ou `docs/`) : format des tags, comment sortir une version, comment retrouver quel commit tourne en staging/production.
+
+**Notes techniques** : pas de dépendance ajoutée sans justification ; préférer un workflow GitHub Actions (`release.yml`) avec actions épinglées par SHA, comme `ci.yml`. Tests unitaires pour le formatage de `buildinfo` et le handler de version.
+**Revue** : `go-reviewer`, `security-reviewer`.
+**Commit** : `feat(release): add semantic versioning and build info`
+**Statut** : À faire
+
+### SC-API-077 · Déploiement continu sur GCP à la fusion dans main
+`E9` · Ops · Phase 9 · Estimation 5 · Dépend de : 071, 073, 076
+
+**Description** : quand une pull request est fusionnée dans `main` et que la CI est verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés sur GCP sans action manuelle.
+
+**Critères d'acceptation**
+- [ ] Workflow `.github/workflows/deploy.yml` déclenché par `push` sur `main` (ou `workflow_run` après la CI verte) ; jamais sur une pull request.
+- [ ] Authentification à GCP par **Workload Identity Federation** (OIDC GitHub) : aucune clé de compte de service JSON, aucun secret long dans le dépôt ; compte de service dédié au déploiement, à droits minimaux (Artifact Registry writer, Cloud Run deployer, exécution du job de migration), déclaré dans Terraform.
+- [ ] Étapes : build de l'image avec la version et le commit (076) → push vers Artifact Registry → job de migrations (071, avant le déploiement ; arrêt si `dirty`) → déploiement du service Cloud Run de l'API et du job Cloud Run du worker avec l'image tagguée par SHA.
+- [ ] Test de fumée après déploiement : `GET /api/v1/version` doit renvoyer le commit déployé ; sinon le workflow échoue.
+- [ ] `concurrency` : un seul déploiement à la fois, sans annuler un déploiement en cours.
+- [ ] Retour arrière : redéployer une version précédente par `workflow_dispatch` (entrée : tag ou SHA) ; procédure ajoutée au runbook (074).
+- [ ] 🟡 Staging : déploiement **automatique** à chaque fusion sur `main`. Production : déploiement déclenché par un tag de version (`v*`) avec **approbation manuelle** (GitHub Environment `production` avec reviewers requis). À confirmer avec l'utilisateur avant d'implémenter.
+- [ ] Le workflow ne lance jamais `terraform apply` : l'infrastructure reste appliquée sur demande explicite.
+- [ ] Permissions du workflow minimales (`contents: read`, `id-token: write` uniquement sur le job de déploiement) ; actions épinglées par SHA.
+
+**Notes techniques** : la configuration Terraform actuelle prend l'image via `var.image` ; décider si le déploiement passe par `gcloud run deploy --image` (Terraform ignore alors le tag via `lifecycle.ignore_changes`) ou par une variable. À trancher dans le plan du ticket, en l'exposant à l'utilisateur.
+**Revue** : `security-reviewer`, `migration-reviewer`.
+**Commit** : `ci(deploy): deploy to GCP on merge to main`
 **Statut** : À faire
