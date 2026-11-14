@@ -28,3 +28,25 @@ func TestParseTask(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkerEnv(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		set  string
+		want string
+	}{
+		{name: "PORT empty falls back to the API default", key: "PORT", set: "", want: "8080"},
+		{name: "PORT of spaces falls back too", key: "PORT", set: "  ", want: "8080"},
+		{name: "PORT set is kept", key: "PORT", set: "9090", want: "9090"},
+		{name: "other keys are passed through", key: "LOG_LEVEL", set: "warn", want: "warn"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.key, tt.set)
+			if got := workerEnv(tt.key); got != tt.want {
+				t.Fatalf("workerEnv(%s) with %q = %q; want %q", tt.key, tt.set, got, tt.want)
+			}
+		})
+	}
+}

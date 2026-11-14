@@ -159,12 +159,6 @@ resource "google_cloud_run_v2_job" "worker" {
           }
         }
 
-        # The worker has no server, but config.Load requires PORT.
-        env {
-          name  = "PORT"
-          value = "8080"
-        }
-
         dynamic "env" {
           for_each = var.secrets
           content {
