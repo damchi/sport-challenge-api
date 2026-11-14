@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"testing"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/config"
 )
 
 func TestParseTask(t *testing.T) {
@@ -48,5 +50,29 @@ func TestWorkerEnv(t *testing.T) {
 				t.Fatalf("workerEnv(%s) with %q = %q; want %q", tt.key, tt.set, got, tt.want)
 			}
 		})
+	}
+}
+
+// A job has every variable of the configuration but PORT, which Cloud Run does
+// not let it set: the configuration must load, with the API default port.
+func TestWorkerEnvSatisfiesTheConfiguration(t *testing.T) {
+	for key, value := range map[string]string{
+		"ENV":                      "staging",
+		"LOG_LEVEL":                "info",
+		"DATABASE_URL":             "postgres://db.example/x",
+		"AUTH0_DOMAIN":             "tenant.ca.auth0.com",
+		"AUTH0_AUDIENCE":           "https://api.test",
+		"AUTH0_MGMT_CLIENT_ID":     "mgmt-id",
+		"AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret", //nolint:gosec // test value, not a credential
+		"PORT":                     "",
+	} {
+		t.Setenv(key, value)
+	}
+	cfg, err := config.Load(workerEnv)
+	if err != nil {
+		t.Fatalf("config.Load(workerEnv) = %v, want a valid configuration", err)
+	}
+	if cfg.Port != 8080 {
+		t.Fatalf("Port = %d, want 8080", cfg.Port)
 	}
 }
