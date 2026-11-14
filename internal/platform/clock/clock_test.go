@@ -43,3 +43,25 @@ func TestFakeClockIsSafeForConcurrentUse(t *testing.T) {
 		t.Fatalf("Now() = %s, want %s", got, want)
 	}
 }
+
+func TestNewWithoutOffsetIsTheRealClock(t *testing.T) {
+	if _, ok := New(0).(Real); !ok {
+		t.Fatalf("New(0) = %T, want Real", New(0))
+	}
+}
+
+func TestOffsetIsAheadOfTheRealClock(t *testing.T) {
+	const offset = 7 * 24 * time.Hour
+	c := New(offset)
+
+	before := time.Now()
+	got := c.Now()
+	after := time.Now()
+
+	if got.Location() != time.UTC {
+		t.Fatalf("Now() in %s, want UTC", got.Location())
+	}
+	if got.Before(before.Add(offset)) || got.After(after.Add(offset)) {
+		t.Fatalf("Now() = %s, want between %s and %s", got, before.Add(offset), after.Add(offset))
+	}
+}

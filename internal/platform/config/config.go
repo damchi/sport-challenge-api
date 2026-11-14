@@ -50,6 +50,9 @@ type Config struct {
 	// them is X-Forwarded-For read to find the client IP. Empty: no proxy is
 	// trusted and the client IP is the peer address.
 	TrustedProxies []string
+	// ClockOffset moves the clock of the process forward, to see a week end in
+	// minutes. Zero (the default) is the real time; it is refused in production.
+	ClockOffset time.Duration
 	// RateLimitIP bounds the requests of one IP address, RateLimitUser the
 	// write requests of one user.
 	RateLimitIP   RateLimit
@@ -88,6 +91,17 @@ func Load(getenv func(string) string) (Config, error) {
 		cfg.Env = env
 	default:
 		problems = append(problems, "ENV must be one of local, staging, production")
+	}
+
+	// The clock is never moved in production.
+	if raw := get("CLOCK_OFFSET"); raw != "" {
+		if cfg.Env == EnvProduction {
+			problems = append(problems, "CLOCK_OFFSET must not be set when ENV=production")
+		} else if d, err := time.ParseDuration(raw); err != nil || d <= 0 {
+			problems = append(problems, "CLOCK_OFFSET must be a positive duration such as 168h")
+		} else {
+			cfg.ClockOffset = d
+		}
 	}
 
 	if raw := get("PORT"); raw == "" {

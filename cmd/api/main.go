@@ -59,6 +59,10 @@ func run() error {
 
 	logger := logging.New(os.Stdout, cfg.LogLevel, "api")
 	slog.SetDefault(logger)
+	clk := clock.New(cfg.ClockOffset)
+	if cfg.ClockOffset != 0 {
+		logger.Warn("clock moved forward", slog.Duration("offset", cfg.ClockOffset))
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -92,10 +96,10 @@ func run() error {
 
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
-	challenges = challenge.NewService(challenge.NewRepository(gdb), users, sports, clock.Real{})
-	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clock.Real{})
-	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, users, leaderboard.NewRepository(gdb), clock.Real{}, cfg.AtRiskThreshold)
-	invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clock.Real{})
+	challenges = challenge.NewService(challenge.NewRepository(gdb), users, sports, clk)
+	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
+	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, users, leaderboard.NewRepository(gdb), clk, cfg.AtRiskThreshold)
+	invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 	challengeHandler := challenge.NewHandler(challenges)
 	handlers := server{
 		Handler:            health.NewHandler(pool, logger),

@@ -13,3 +13,6 @@ auth0_mgmt_client_id = "..."
 cors_allowed_origins = ["https://app.example.com"]
 # The peer address Cloud Run shows to the container, to check on staging before relying on it.
 trusted_proxies      = ["169.254.0.0/16"]
+
+# Staging tests only: moves the clock forward. Leave out for the real time.
+# clock_offset = "168h"
