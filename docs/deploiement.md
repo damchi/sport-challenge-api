@@ -23,7 +23,9 @@ Le workflow ne s'exécute jamais sur une pull request. La production ne part qu'
 
 Un seul déploiement à la fois par environnement (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans les jobs de déploiement. Les actions sont épinglées par SHA.
 
-Si le commit n'est plus le sommet de `main` quand le workflow arrive, il est laissé au déploiement du commit plus récent.
+Si le commit n'est plus le sommet de `main` quand le workflow arrive, son déploiement en staging est laissé au commit plus récent (qui le contient). Une version taguée n'est pas perdue pour autant : elle part quand même en production, après l'approbation, sans passer par un staging de ce commit exact. Ces règles sont dans `.github/scripts/plan-deploy.sh`, testé par la CI.
+
+Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. La production reconstruit l'image depuis le même commit que le staging (les deux environnements ont leur propre registre) : le build n'étant pas garanti identique au bit près, c'est le commit qui fait foi, pas le condensat de l'image.
 
 ## Mise en place d'un environnement
 

@@ -23,6 +23,9 @@ inputs:
   version:
     description: Version of the build (vMAJOR.MINOR.PATCH, or the output of git describe).
     required: true
+  source-directory:
+    description: Checkout of the commit to deploy (what the image is built from).
+    required: true
   rollback:
     description: >-
       "true" to deploy an image that is already in Artifact Registry, without
@@ -58,6 +61,7 @@ runs:
     - name: Build and push the image
       if: inputs.rollback != 'true'
       shell: bash
+      working-directory: ${{ inputs.source-directory }}
       env:
         REGION: ${{ inputs.region }}
         SHA: ${{ inputs.sha }}
