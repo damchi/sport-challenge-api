@@ -22,9 +22,11 @@ plan() {
   EVENT=$2 HEAD_SHA=$3 TARGET=$4 REF=$5 "$here/plan-deploy.sh" 2>/dev/null | tr '\n' ' ' || echo ERROR
 }
 
+# The whole output must match (a field added or changed does not go unseen); an
+# error is just "ERROR".
 check() {
   local name=$1 want=$2 got=$3
-  if [[ "$got" != *"$want"* ]]; then
+  if [[ "$got" != "$want" ]]; then
     echo "FAIL $name: got '$got', want '$want'"
     failed=1
   else
@@ -33,22 +35,22 @@ check() {
 }
 
 check "tip, untagged: staging only, version since the last tag" \
-  "version=v1.1.0-1-g${c4:0:7} rollback=false staging=true production=false superseded=false" \
+  "sha=$c4 version=v1.1.0-1-g${c4:0:7} rollback=false staging=true production=false superseded=false " \
   "$(plan "$c4" workflow_run "$c4" "" "")"
 check "tip, tagged: staging then production" \
-  "sha=$c3 version=v1.1.0 rollback=false staging=true production=true superseded=false" \
+  "sha=$c3 version=v1.1.0 rollback=false staging=true production=true superseded=false " \
   "$(plan "$c3" workflow_run "$c3" "" "")"
 check "tagged but no longer the tip: production only" \
-  "sha=$c3 version=v1.1.0 rollback=false staging=false production=true superseded=true" \
+  "sha=$c3 version=v1.1.0 rollback=false staging=false production=true superseded=true " \
   "$(plan "$c4" workflow_run "$c3" "" "")"
 check "untagged and no longer the tip: nothing" \
-  "staging=false production=false superseded=true" \
+  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=false staging=false production=false superseded=true " \
   "$(plan "$c4" workflow_run "$c2" "" "")"
 check "rollback to staging by tag" \
-  "sha=$c1 version=v1.0.0 rollback=true staging=true production=false superseded=false" \
+  "sha=$c1 version=v1.0.0 rollback=true staging=true production=false superseded=false " \
   "$(plan "$c4" workflow_dispatch "" staging v1.0.0)"
 check "rollback to production by sha" \
-  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=true staging=false production=true" \
+  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=true staging=false production=true superseded=false " \
   "$(plan "$c4" workflow_dispatch "" production "$c2")"
 check "rollback to a commit that is not in main" "ERROR" \
   "$(plan "$c2" workflow_dispatch "" staging "$c4")"
@@ -56,5 +58,21 @@ check "rollback with a ref that looks like an option" "ERROR" \
   "$(plan "$c4" workflow_dispatch "" staging --all)"
 check "rollback to an unknown ref" "ERROR" \
   "$(plan "$c4" workflow_dispatch "" staging nope)"
+
+# A repository without any tag: the version is made from the commit.
+untagged=$(mktemp -d)
+trap 'rm -rf "$repo" "$untagged"' EXIT
+(
+  cd "$untagged"
+  git init -q
+  git config user.email t@example.com
+  git config user.name t
+  git commit -q --allow-empty -m first
+) 
+u=$(git -C "$untagged" rev-parse HEAD)
+cd "$untagged"
+check "no tag at all: version made from the commit" \
+  "sha=$u version=v0.0.0-${u:0:7} rollback=false staging=true production=false superseded=false " \
+  "$(plan "$u" workflow_run "$u" "" "")"
 
 exit $failed

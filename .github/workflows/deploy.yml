@@ -89,8 +89,28 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           path: source
+          fetch-depth: 0 # the tags of the versions released since
           persist-credentials: false
+      # The approval can come late: a newer version may have been released
+      # meanwhile, and it goes to production instead of this one (never an
+      # older version after a newer one, and never a migration of an older
+      # image on a newer database). A rollback is deliberate: it is not checked.
+      - name: Newer version
+        id: newer
+        if: needs.plan.outputs.rollback != 'true'
+        working-directory: source
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          newer=$(git tag --contains "$SHA" --list 'v[0-9]*' | grep -vxF "$VERSION" || true)
+          if [ -n "$newer" ]; then
+            echo "::notice::$VERSION is not deployed: $(echo $newer) was released since"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
       - uses: ./.github/actions/deploy
+        if: steps.newer.outputs.skip != 'true'
         with:
           project: ${{ vars.GCP_PROJECT_ID }}
           region: ${{ vars.GCP_REGION }}
@@ -134,8 +154,28 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           path: source
+          fetch-depth: 0 # the tags of the versions released since
           persist-credentials: false
+      # The approval can come late: a newer version may have been released
+      # meanwhile, and it goes to production instead of this one (never an
+      # older version after a newer one, and never a migration of an older
+      # image on a newer database). A rollback is deliberate: it is not checked.
+      - name: Newer version
+        id: newer
+        if: needs.plan.outputs.rollback != 'true'
+        working-directory: source
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          newer=$(git tag --contains "$SHA" --list 'v[0-9]*' | grep -vxF "$VERSION" || true)
+          if [ -n "$newer" ]; then
+            echo "::notice::$VERSION is not deployed: $(echo $newer) was released since"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
       - uses: ./.github/actions/deploy
+        if: steps.newer.outputs.skip != 'true'
         with:
           project: ${{ vars.GCP_PROJECT_ID }}
           region: ${{ vars.GCP_REGION }}

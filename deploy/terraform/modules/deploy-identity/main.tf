@@ -1,5 +1,3 @@
-data "google_project" "this" {}
-
 # The pipeline signs in with the OIDC token of its GitHub job: there is no
 # service account key anywhere.
 resource "google_iam_workload_identity_pool" "github" {
