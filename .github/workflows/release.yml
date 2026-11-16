@@ -54,7 +54,7 @@ jobs:
             echo "$SHA already has a version tag"
             exit 0
           fi
-          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$SHA" 2>/dev/null || true)
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude 'v*-*' "$SHA" 2>/dev/null || true)
           next=$(.github/scripts/next-version.sh "$last")
           echo "version: ${last:-none} -> $next"
           echo "version=$next" >> "$GITHUB_OUTPUT"

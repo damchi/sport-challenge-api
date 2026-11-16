@@ -12,7 +12,7 @@ Après une CI verte sur `main`, le workflow `.github/workflows/release.yml` pren
 - **Version mineure ou majeure** : se décide à la main. Juste après la fusion, avant la fin de la CI (quelques minutes : passé ce délai, le correctif est déjà publié), créer la release voulue sur le commit de fusion (`gh release create v0.2.0 --target <sha> --generate-notes`) : un commit qui porte déjà un tag `v*` n'est pas publié deux fois, et c'est ce tag que le déploiement envoie en production.
 - Un commit qui porte déjà un tag n'est pas publié deux fois.
 - **Chaque fusion, même de documentation seule, publie une version** et demande donc une mise en production, soumise à l'approbation de l'Environment `production` (`docs/deploiement.md`) : c'est un choix assumé, pour ne pas dépendre des messages de commit.
-- Un dernier tag qui n'est pas de la forme `vX.Y.Z` (par exemple `v1.2.3-rc1`) fait échouer le workflow : ne pas en poser.
+- Les tags de pré-version (`v1.2.3-rc1`) sont ignorés pour calculer la suivante.
 
 Les règles sont testées par `.github/scripts/next-version_test.sh`, lancé par la CI.
 
