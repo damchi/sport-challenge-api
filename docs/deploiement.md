@@ -20,15 +20,13 @@ Aucun secret ici : les valeurs sensibles sont dans Secret Manager, seuls leurs n
 | Secrets (Secret Manager) | `database-url`, `auth0-mgmt-client-secret` | injectés comme variables `DATABASE_URL` et `AUTH0_MGMT_CLIENT_SECRET` |
 | Images | Artifact Registry `sport-challenge` (Docker) | image `…/sport-challenge/api`, taguée `<sha court>` et `<version>` |
 | Fédération GitHub | pool Workload Identity `github-prod`, fournisseur `github-provider` | émetteur `https://token.actions.githubusercontent.com` ; condition : dépôt `damchi/sport-challenge-api` **et** branche `main` |
-| Budget | « sport-challenge prod », sur le compte de facturation du projet | **à créer** (montant décidé le 2026-11-16) : 20 CAD par mois, filtré sur `sport-challenge-prod` ; avertissements à 50 %, 90 % et 100 %, envoyés par courriel aux administrateurs du compte de facturation. Un budget ne bloque aucune dépense : il prévient seulement. Commande ci-dessous |
+| Budget | « sport challenge », sur le compte de facturation du projet | 20 CAD par mois, **sur tout le compte de facturation** (pas filtré sur `sport-challenge-prod` : les autres projets du compte comptent aussi) ; avertissements à 50 %, 90 % et 100 %, envoyés par courriel aux administrateurs du compte de facturation. Un budget ne bloque aucune dépense : il prévient seulement |
 | Alertes Cloud Monitoring | aucune | ni alerte sur les erreurs 5xx de l'API, ni sur l'échec d'un job, ni sur l'absence de `close-weeks` : un problème ne se voit aujourd'hui que dans les journaux (Cloud Logging, Error Reporting) |
 
-Créer le budget (une fois ; l'appel est facturé à `sport-challenge-prod` grâce à `--billing-project`, sinon gcloud prendrait le projet par défaut du poste) :
+Lire le budget (l'appel est facturé à `sport-challenge-prod` grâce à `--billing-project`, sinon gcloud prendrait le projet par défaut du poste) :
 
 ```
-gcloud billing budgets create --billing-account=<compte de facturation> --billing-project=sport-challenge-prod \
-  --display-name="sport-challenge prod" --budget-amount=20CAD --filter-projects=projects/sport-challenge-prod \
-  --threshold-rule=percent=0.5 --threshold-rule=percent=0.9 --threshold-rule=percent=1.0
+gcloud billing budgets list --billing-account=<compte de facturation> --billing-project=sport-challenge-prod
 ```
 
 Le compte de facturation se lit avec `gcloud billing projects describe sport-challenge-prod --format='value(billingAccountName)'`.
