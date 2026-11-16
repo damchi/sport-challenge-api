@@ -4,6 +4,8 @@ Tickets de développement du backend, rédigés comme des tickets Jira. Ils serv
 
 Sources de vérité : `README.md` (règles et architecture) et `CLAUDE.md` (conventions). En cas de contradiction, le README gagne ; signale-la à l'utilisateur.
 
+> **Note (2026-11-16, SC-API-100)** : Terraform et le staging ont été retirés. La production est configurée à la main dans la console GCP et décrite dans `docs/deploiement.md`. Les tickets fermés qui parlent de Terraform (069, 070) ou du staging (073) sont gardés tels quels comme historique.
+
 ## Les tickets vivent dans GitHub
 
 `TASKS.md` est la **source d'import** et le document de référence (conventions, décisions, épopées, critères détaillés). Une fois importés, chaque ticket est une **issue GitHub** : c'est l'issue qui fait foi pour le statut, les cases à cocher et les dépendances. **Ne mets plus à jour les statuts de ce fichier.**

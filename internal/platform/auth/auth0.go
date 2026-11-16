@@ -87,7 +87,7 @@ func newVerifier(ctx context.Context, opts verifierOptions) (*Auth0Verifier, err
 			jwt.WithExpirationRequired(),
 			// exp and nbf are checked against the real time on purpose, never
 			// against platform/clock: Auth0 issues them in real time, and an
-			// offset clock (staging) would reject valid tokens.
+			// offset clock (CLOCK_OFFSET, local only) would reject valid tokens.
 		),
 	}, nil
 }

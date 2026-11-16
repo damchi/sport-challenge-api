@@ -12,7 +12,7 @@ API Go d'une application de challenges sportifs entre amis : catégories avec po
 
 ## Stack
 
-Go (version dans `go.mod`) · Gin · PostgreSQL (pgx) · GORM pour le CRUD, SQL brut pour classements et agrégations · **golang-migrate** · `log/slog` · validation JWT via JWKS (**Auth0**) · Docker · GitHub Actions · Terraform · GCP Montréal (Cloud Run, Cloud SQL, Cloud Storage, Cloud Scheduler, Secret Manager).
+Go (version dans `go.mod`) · Gin · PostgreSQL (pgx) · GORM pour le CRUD, SQL brut pour classements et agrégations · **golang-migrate** · `log/slog` · validation JWT via JWKS (**Auth0**) · Docker · GitHub Actions · GCP Montréal (Cloud Run, Cloud SQL, Cloud Storage, Cloud Scheduler, Secret Manager), infrastructure configurée à la main et décrite dans `docs/deploiement.md`.
 
 ## Commandes
 
@@ -116,7 +116,7 @@ Règles de dépendance :
 ## Ne jamais
 
 - Pousser sur `main`, fusionner une pull request, ou contourner une confirmation ou un refus de la configuration (autre commande git équivalente, script, `git -C`, etc.).
-- Lancer `terraform apply`, `terraform destroy` ou un déploiement sans demande explicite.
+- Créer, modifier ou supprimer une ressource GCP, ou déployer, sans demande explicite. Toute commande `gcloud` passe `--project=sport-challenge-prod`.
 - Modifier une migration déjà appliquée, ou utiliser `AutoMigrate`.
 - Appeler `time.Now()` dans la logique métier.
 - Ajouter une dépendance sans la justifier (préfère la bibliothèque standard).

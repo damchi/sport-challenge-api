@@ -60,7 +60,7 @@ Migrations `week_closure`, `elimination`, `result_snapshot`. Tâches `close-week
 
 ## Phase 9 — Limitation de débit et déploiement
 
-Limitation de débit par IP et par utilisateur, `Dockerfile` multi-stage, complément de la CI (build de l'image), Terraform (`deploy/terraform`, un projet GCP par environnement), alerte de budget, horloge réglable en staging. **Ne lance jamais `terraform apply` sans demande explicite.**
+Limitation de débit par IP et par utilisateur, `Dockerfile` multi-stage, complément de la CI (build de l'image), infrastructure de production configurée à la main et décrite dans `docs/deploiement.md`, alerte de budget, horloge réglable en local (`CLOCK_OFFSET`). **Ne modifie jamais l'infrastructure GCP sans demande explicite.**
 
 ## Fin de chaque phase
 
