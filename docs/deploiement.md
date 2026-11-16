@@ -18,7 +18,7 @@ Le workflow ne s'exécute jamais sur une pull request. Un tag de version est cr�
 1. Authentification à GCP par **Workload Identity Federation** : le jeton OIDC du job GitHub est échangé contre les droits du compte de service de déploiement. Aucune clé JSON, aucun secret.
 2. Construction de l'image avec la version, le commit et la date (`deploy/Dockerfile`), tagguée `<sha court>` et `<version>` (jamais `latest`), poussée vers Artifact Registry. Hors d'un commit tagué, la version est celle de `git describe` (`v0.3.0-2-gabc1234`).
 3. **Migrations** : mise à jour de l'image du job `<préfixe>-migrate`, puis exécution avec `--wait`. Si le job échoue (migration en échec, base `dirty`), le déploiement s'arrête là (voir `docs/migrations.md`).
-4. Mise à jour de l'image du service `<préfixe>-api` et des jobs `<préfixe>-worker-close-weeks` et `<préfixe>-worker-finalize-challenges`, avec l'image tagguée par le SHA court. Le préfixe vaut `sport-challenge` (les noms de `deploy/terraform`), ou la variable `CLOUD_RUN_NAME_PREFIX` de l'Environment pour des ressources créées à la main (par exemple `sc`).
+4. Mise à jour de l'image du service `<préfixe>-api` et des jobs `<préfixe>-worker-close-weeks`, `<préfixe>-worker-finalize-challenges` et `<préfixe>-worker-retry-auth0-deletions`, avec l'image tagguée par le SHA court. Le préfixe vaut `sport-challenge` (les noms de `deploy/terraform`), ou la variable `CLOUD_RUN_NAME_PREFIX` de l'Environment pour des ressources créées à la main (par exemple `sc`).
 5. **Test de fumée** : la révision qui sert tout le trafic doit être la dernière créée, prête, et utiliser l'image du commit déployé, puis `GET <api>/readyz` doit répondre (une douzaine d'essais, 10 s d'écart) ; sinon le workflow échoue. Sur l'URL `run.app`, Cloud Run répond lui-même à `/healthz` (404) : la requête n'atteint pas l'API.
 
 Un seul déploiement à la fois par environnement (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans les jobs de déploiement. Les actions sont épinglées par SHA.
@@ -28,6 +28,27 @@ Une version taguée part en production après l'approbation, même si `main` a a
 Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. Chaque environnement a son propre registre : l'image est construite pour lui à partir du commit, et c'est le commit qui fait foi, pas le condensat de l'image.
 
 ## Mise en place
+
+Chaque job du worker doit exister avant qu'un déploiement le mette à jour : le job d'une nouvelle tâche, et sa planification Cloud Scheduler, se créent dans le projet **avant** la fusion du code qui ajoute la tâche à `WORKER_TASKS` (`.github/actions/deploy/action.yml`), sinon l'étape 4 échoue. Le plus sûr est de copier un job existant, par exemple pour `retry-auth0-deletions` (préfixe `sc`) :
+
+```
+cd "$(mktemp -d)"   # job.yaml décrit la configuration du job : jamais dans le dépôt
+P=<projet>; R=northamerica-northeast1
+gcloud run jobs describe sc-worker-close-weeks --project=$P --region=$R --format=export > close-weeks.yaml
+sed 's/sc-worker-close-weeks/sc-worker-retry-auth0-deletions/; s/- close-weeks$/- retry-auth0-deletions/' close-weeks.yaml > job.yaml
+grep -nE 'name: sc-worker|- worker|- retry-auth0|close-weeks' job.yaml
+gcloud run jobs replace job.yaml --project=$P --region=$R
+gcloud scheduler jobs create http retry-auth0-deletions --project=$P --location=$R \
+  --schedule="20 * * * *" --time-zone="America/Toronto" --attempt-deadline=180s --http-method=POST \
+  --uri="https://run.googleapis.com/v2/projects/$P/locations/$R/jobs/sc-worker-retry-auth0-deletions:run" \
+  --oauth-service-account-email="sc-scheduler@$P.iam.gserviceaccount.com"
+gcloud run jobs execute sc-worker-retry-auth0-deletions --project=$P --region=$R --wait
+```
+
+- Avant le `replace`, le `grep` doit montrer le nouveau nom et `- retry-auth0-deletions` comme dernier argument, et plus aucun `close-weeks`.
+- Les droits (lancement par le compte `sc-scheduler`, mise à jour par le compte de déploiement) sont donnés au niveau du projet : le nouveau job en hérite, rien à copier. À vérifier avec `gcloud run jobs get-iam-policy` si un jour un job a ses propres droits.
+- Les planifications de la production sont dans le fuseau `America/Toronto`, comme celles de `close-weeks` et `finalize-challenges` ; pour une tâche horaire, le fuseau ne change rien.
+- Les lignes terminées par `\` se collent d'un bloc : un espace après le `\` coupe la commande.
 
 À faire une fois, **après** le premier `terraform apply` de `docs/terraform.md` (sur demande explicite).
 
