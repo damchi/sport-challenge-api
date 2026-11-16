@@ -1,5 +1,5 @@
 # Allow list: only what the image build needs enters the build context.
-# Everything else (.env, .git, bin/, docs, Terraform) stays out.
+# Everything else (.env, .git, bin/, docs) stays out.
 *
 !go.mod
 !go.sum

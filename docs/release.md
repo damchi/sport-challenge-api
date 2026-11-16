@@ -29,7 +29,7 @@ Les règles sont testées par `.github/scripts/next-version_test.sh`, lancé par
 - **L'image** : les étiquettes `org.opencontainers.image.version`, `.revision` (le commit) et `.created` : `docker image inspect <image>`.
 - **Le code** : `git show <sha>` ou `git checkout v1.2.3`.
 
-Sur staging comme en production, c'est donc `/healthz` qui dit quel commit tourne, sans accès à GCP.
+En production, c'est donc `/healthz` qui dit quel commit tourne, sans accès à GCP.
 
 ## À savoir
 

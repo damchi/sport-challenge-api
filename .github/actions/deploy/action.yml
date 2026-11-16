@@ -1,8 +1,9 @@
 name: Deploy to GCP
 description: >-
   Build and push the image, apply the migrations, deploy the API and the worker
-  to Cloud Run, and check that the deployed commit answers. The Terraform of the
-  environment (deploy/terraform) must have been applied; this never runs it.
+  to Cloud Run, and check that the deployed commit answers. The service and the
+  jobs must exist (set up by hand, see docs/deploiement.md): this only changes
+  their image.
 
 inputs:
   project:
@@ -12,10 +13,10 @@ inputs:
     description: Region of Cloud Run and Artifact Registry.
     required: true
   workload-identity-provider:
-    description: Full name of the Workload Identity provider (Terraform output).
+    description: Full name of the Workload Identity provider (docs/deploiement.md).
     required: true
   service-account:
-    description: Deployment service account (Terraform output).
+    description: Deployment service account (docs/deploiement.md).
     required: true
   sha:
     description: Commit to deploy (full SHA).
@@ -29,10 +30,9 @@ inputs:
   name-prefix:
     description: >-
       Prefix of the Cloud Run service and jobs: <prefix>-api, <prefix>-migrate,
-      <prefix>-worker-<task>. The Terraform of deploy/terraform names them
-      sport-challenge-*; resources created by hand may use another prefix.
+      <prefix>-worker-<task>; sc in production.
     required: false
-    default: sport-challenge
+    default: sc
   rollback:
     description: >-
       "true" to deploy an image that is already in Artifact Registry, without

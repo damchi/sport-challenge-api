@@ -64,4 +64,4 @@ Les tickets sont des **issues GitHub** (importées depuis `TASKS.md`). Le statut
 - Anglais pour le code, les commentaires et les messages de commit ; français pour la documentation.
 - Jamais de `time.Now()` dans la logique métier : passe par `platform/clock`.
 - Jamais d'autorisation dans un handler ou un middleware : dans le service, avec les fonctions de `policy.go`.
-- Jamais de `terraform apply` ni de déploiement sans demande explicite.
+- Jamais de modification de l'infrastructure GCP ni de déploiement sans demande explicite.

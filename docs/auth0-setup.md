@@ -17,17 +17,16 @@ Procédure manuelle, à refaire à l'identique pour chaque environnement. Elle c
 | Environnement | Tenant | Domaine (`AUTH0_DOMAIN`) | Audience (`AUTH0_AUDIENCE`) | URL du frontend |
 |---|---|---|---|---|
 | Développement ✅ | `sport-challenge-dev` | `sport-challenge-dev.ca.auth0.com` | `https://api.dev.sport-challenge` | `http://localhost:5173` |
-| Staging | `sport-challenge-staging` | `sport-challenge-staging.ca.auth0.com` | `https://api.staging.sport-challenge` | *à définir* |
 | Production | `sport-challenge-prod` | `sport-challenge-prod.ca.auth0.com` | `https://api.sport-challenge` | *à définir* |
 
-**État** : le tenant de développement est configuré (connexion par code testée). Les tenants de staging et de production seront créés avec cette procédure lors de la mise en place du déploiement (épopée E9), quand leurs URL de frontend seront connues.
+**État** : le tenant de développement est configuré (connexion par code testée). Le tenant de production sera créé avec cette procédure lors de la mise en place du déploiement (épopée E9), quand l'URL de son frontend sera connue. Un tenant de staging s'ajoutera si un staging est recréé.
 
 Le domaine exact est affiché dans les réglages d'une application (**Applications → Applications → `Sport Challenge Web` → Settings → Domain**) : reporte-le ici s'il diffère de `<tenant>.ca.auth0.com`. Le `ca` du domaine (ou de l'adresse du dashboard, `manage.auth0.com/dashboard/ca/…`) confirme la région Canada. L'audience est un identifiant (une URI), pas une adresse appelée : elle ne se change pas après la création de l'API. Le port du frontend local (`5173`) est celui de Vite par défaut : adapte-le au dépôt du frontend.
 
 ## 1. Créer le tenant
 
 1. Auth0 Dashboard → menu du tenant (en haut à gauche) → **Create tenant**.
-2. **Tenant Domain** : le nom du tableau ci-dessus ; **Region** : **Canada** ; **Environment Tag** : *Development*, *Staging* ou *Production*.
+2. **Tenant Domain** : le nom du tableau ci-dessus ; **Region** : **Canada** ; **Environment Tag** : *Development* ou *Production*.
 3. **Settings → General** : nom affiché `Sport Challenge`, langues `fr` et `en` (français par défaut), adresse de support.
 4. **Settings → Advanced** : **Log Retention** : la durée par défaut du forfait. Les logs Auth0 contiennent des données personnelles (adresse IP, e-mail) : ne pas l'allonger sans raison (Loi 25).
 5. **Applications → Applications** : supprimer la **Default App** créée avec le tenant.
@@ -78,11 +77,11 @@ Le domaine exact est affiché dans les réglages d'une application (**Applicatio
   - **Disable Sign Ups** : désactivé (l'inscription se fait à la première connexion ; l'API crée l'utilisateur local au premier login).
   - **Promote Connection to Domain Level** : désactivé (sinon la connexion est ouverte à toutes les applications du tenant, y compris tierces).
   - **Authentication Parameters** : vide.
-  - **From**, **Subject**, **Body** : ignorés tant que le fournisseur d'e-mail d'Auth0 est utilisé (avertissement affiché) ; les personnaliser en français et en anglais après avoir configuré un fournisseur d'e-mail (staging et production).
+  - **From**, **Subject**, **Body** : ignorés tant que le fournisseur d'e-mail d'Auth0 est utilisé (avertissement affiché) ; les personnaliser en français et en anglais après avoir configuré un fournisseur d'e-mail (production).
 - Onglet **Applications** de la connexion (ou onglet **Connections** de la SPA) : l'activer pour `Sport Challenge Web`.
 - **Authentication → Authentication Profile** : choisir **Identifier First** (l'écran de connexion demande d'abord l'e-mail, puis envoie le code). Sans ce mode, la connexion par code ne fonctionne pas avec le New Universal Login.
 - Vérifier avec le bouton **Try** que la connexion par code fonctionne (il exige les deux réglages ci-dessus : *Identifier First* et au moins une application assignée).
-- En staging et en production, configurer un fournisseur d'e-mail (**Branding → Email Provider**) : le fournisseur de test d'Auth0 est limité et ne convient qu'au développement.
+- En production, configurer un fournisseur d'e-mail (**Branding → Email Provider**) : le fournisseur de test d'Auth0 est limité et ne convient qu'au développement.
 
 **Universal Login** (**Branding → Universal Login**) : expérience *New*, langues `fr` et `en`.
 
@@ -158,7 +157,7 @@ Reportées après la V1. Selon la version du dashboard, les connexions sociales 
 
 **Google** (**Authentication → Social → Google / Gmail**) :
 - En développement, les clés de test d'Auth0 suffisent.
-- En staging et en production, créer un client OAuth dans Google Cloud (**APIs & Services → Credentials → OAuth client ID**, type *Web application*, URI de redirection `https://<AUTH0_DOMAIN>/login/callback`) et saisir son identifiant et son secret dans Auth0. Le secret Google reste dans Auth0 : il ne passe jamais par le dépôt ni par l'API.
+- En production, créer un client OAuth dans Google Cloud (**APIs & Services → Credentials → OAuth client ID**, type *Web application*, URI de redirection `https://<AUTH0_DOMAIN>/login/callback`) et saisir son identifiant et son secret dans Auth0. Le secret Google reste dans Auth0 : il ne passe jamais par le dépôt ni par l'API.
 - Attributs : `email`, `profile`.
 
 **Apple** (**Authentication → Social → Apple**), compte Apple Developer requis :

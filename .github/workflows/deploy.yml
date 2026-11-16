@@ -5,7 +5,8 @@ name: Deploy
 # approval of the `production` GitHub Environment. A rollback redeploys an
 # older commit by hand. See docs/deploiement.md.
 #
-# Terraform is never run here: the infrastructure is applied on explicit request.
+# The infrastructure is never changed here: it is set up by hand, on explicit
+# request (docs/deploiement.md); this only deploys an image.
 on:
   workflow_run:
     workflows: [Release]
@@ -119,4 +120,4 @@ jobs:
           version: ${{ needs.plan.outputs.version }}
           rollback: ${{ needs.plan.outputs.rollback }}
           source-directory: source
-          name-prefix: ${{ vars.CLOUD_RUN_NAME_PREFIX || 'sport-challenge' }}
+          name-prefix: ${{ vars.CLOUD_RUN_NAME_PREFIX || 'sc' }}

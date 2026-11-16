@@ -1,8 +1,47 @@
-# Déploiement continu sur GCP
+# Infrastructure et déploiement continu sur GCP
 
-Quand une pull request (une branche créée depuis `main`) est fusionnée dans `main` et que la CI est verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés en **production** sur Cloud Run, après approbation. Le workflow ne déploie qu'en production : il n'y a pas d'environnement staging pour l'instant. Le workflow est `.github/workflows/deploy.yml`, qui utilise l'action locale `.github/actions/deploy`.
+Il n'y a qu'un environnement déployé : la **production**, dans le projet GCP `sport-challenge-prod`, région Montréal (`northamerica-northeast1`). Son infrastructure a été **configurée à la main dans la console GCP** ; ce document la décrit. Il n'y a pas de staging aujourd'hui : il pourra être recréé plus tard, sur le modèle de la production.
 
-> **Le workflow ne lance jamais `terraform apply`.** L'infrastructure (dont le compte de déploiement décrit plus bas) s'applique à la main, sur demande explicite. Le workflow ne fait que publier une image et mettre à jour Cloud Run.
+Quand une pull request (une branche créée depuis `main`) est fusionnée dans `main` et que la CI est verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés sur Cloud Run, après approbation. Le workflow est `.github/workflows/deploy.yml`, qui utilise l'action locale `.github/actions/deploy`.
+
+> **Le workflow ne crée ni ne modifie l'infrastructure.** Il publie une image et met à jour l'image de ressources Cloud Run qui existent déjà. Toute autre modification se fait à la main, dans la console ou avec `gcloud`, sur demande explicite, en passant toujours `--project=sport-challenge-prod`.
+
+## Infrastructure de la production
+
+Aucun secret ici : les valeurs sensibles sont dans Secret Manager, seuls leurs noms sont donnés.
+
+| Ressource | Nom | Réglages |
+|---|---|---|
+| Service Cloud Run (API) | `sc-api` | entrée publique (`all`), 1 vCPU, 512 Mio, compte `sc-run`, connexion à `sc-db` par le connecteur Cloud SQL |
+| Job de migrations | `sc-migrate` | commande `migrate up`, compte `sc-run`, connecteur Cloud SQL |
+| Jobs du worker | `sc-worker-close-weeks`, `sc-worker-finalize-challenges`, `sc-worker-retry-auth0-deletions` | commande `worker <tâche>`, compte `sc-run`, connecteur Cloud SQL |
+| Planifications Cloud Scheduler | `close-weeks` (`0 * * * *`), `finalize-challenges` (`10 * * * *`), `retry-auth0-deletions` (`20 * * * *`) | fuseau `America/Toronto`, `POST` sur l'API Cloud Run `…/jobs/<job>:run`, jeton OAuth du compte `sc-scheduler`, délai de 180 s |
+| Base de données | Cloud SQL `sc-db` (connexion `sport-challenge-prod:northamerica-northeast1:sc-db`) | PostgreSQL 16, `db-f1-micro`, zonale ; IP publique **sans aucun réseau autorisé** (seul le connecteur Cloud SQL, authentifié par IAM, y entre), connexions chiffrées obligatoires (`ENCRYPTED_ONLY`) ; sauvegarde quotidienne à 00:00 UTC, 7 conservées, restauration à un instant donné ; protection contre la suppression |
+| Secrets (Secret Manager) | `database-url`, `auth0-mgmt-client-secret` | injectés comme variables `DATABASE_URL` et `AUTH0_MGMT_CLIENT_SECRET` |
+| Images | Artifact Registry `sport-challenge` (Docker) | image `…/sport-challenge/api`, taguée `<sha court>` et `<version>` |
+| Fédération GitHub | pool Workload Identity `github-prod`, fournisseur `github-provider` | émetteur `https://token.actions.githubusercontent.com` ; condition : dépôt `damchi/sport-challenge-api` **et** branche `main` |
+| Budget | « sport-challenge prod », sur le compte de facturation du projet | **à créer** (montant décidé le 2026-11-16) : 20 CAD par mois, filtré sur `sport-challenge-prod` ; avertissements à 50 %, 90 % et 100 %, envoyés par courriel aux administrateurs du compte de facturation. Un budget ne bloque aucune dépense : il prévient seulement. Commande ci-dessous |
+| Alertes Cloud Monitoring | aucune | ni alerte sur les erreurs 5xx de l'API, ni sur l'échec d'un job, ni sur l'absence de `close-weeks` : un problème ne se voit aujourd'hui que dans les journaux (Cloud Logging, Error Reporting) |
+
+Créer le budget (une fois ; l'appel est facturé à `sport-challenge-prod` grâce à `--billing-project`, sinon gcloud prendrait le projet par défaut du poste) :
+
+```
+gcloud billing budgets create --billing-account=<compte de facturation> --billing-project=sport-challenge-prod \
+  --display-name="sport-challenge prod" --budget-amount=20CAD --filter-projects=projects/sport-challenge-prod \
+  --threshold-rule=percent=0.5 --threshold-rule=percent=0.9 --threshold-rule=percent=1.0
+```
+
+Le compte de facturation se lit avec `gcloud billing projects describe sport-challenge-prod --format='value(billingAccountName)'`.
+
+Comptes de service et droits (tous au niveau du projet) :
+
+| Compte | Rôle dans l'application | Droits |
+|---|---|---|
+| `sc-run` | exécute l'API, le worker et les migrations | `roles/cloudsql.client`, `roles/secretmanager.secretAccessor` |
+| `sc-scheduler` | lance les jobs du worker | `roles/run.invoker` |
+| `sc-deploy` | utilisé par le workflow de déploiement (fédération GitHub) | `roles/artifactregistry.writer`, `roles/run.admin`, `roles/iam.serviceAccountUser` ; pris par les jetons du dépôt (`roles/iam.workloadIdentityUser`) |
+
+Les variables d'environnement de l'API et des jobs sont celles que lit `internal/platform/config` (`ENV=production`, `PORT` posé par Cloud Run pour l'API, `LOG_LEVEL`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_MGMT_CLIENT_ID`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, plus les deux secrets). `CLOCK_OFFSET` est refusé en production.
 
 ## Ce qui se passe
 
@@ -15,25 +54,25 @@ Le workflow ne s'exécute jamais sur une pull request. Un tag de version est cr�
 
 Étapes d'un déploiement (action `deploy`) :
 
-1. Authentification à GCP par **Workload Identity Federation** : le jeton OIDC du job GitHub est échangé contre les droits du compte de service de déploiement. Aucune clé JSON, aucun secret.
+1. Authentification à GCP par **Workload Identity Federation** : le jeton OIDC du job GitHub est échangé contre les droits du compte `sc-deploy`. Aucune clé JSON, aucun secret.
 2. Construction de l'image avec la version, le commit et la date (`deploy/Dockerfile`), tagguée `<sha court>` et `<version>` (jamais `latest`), poussée vers Artifact Registry. Hors d'un commit tagué, la version est celle de `git describe` (`v0.3.0-2-gabc1234`).
 3. **Migrations** : mise à jour de l'image du job `<préfixe>-migrate`, puis exécution avec `--wait`. Si le job échoue (migration en échec, base `dirty`), le déploiement s'arrête là (voir `docs/migrations.md`).
-4. Mise à jour de l'image du service `<préfixe>-api` et des jobs `<préfixe>-worker-close-weeks`, `<préfixe>-worker-finalize-challenges` et `<préfixe>-worker-retry-auth0-deletions`, avec l'image tagguée par le SHA court. Le préfixe vaut `sport-challenge` (les noms de `deploy/terraform`), ou la variable `CLOUD_RUN_NAME_PREFIX` de l'Environment pour des ressources créées à la main (par exemple `sc`).
+4. Mise à jour de l'image du service `<préfixe>-api` et des jobs `<préfixe>-worker-close-weeks`, `<préfixe>-worker-finalize-challenges` et `<préfixe>-worker-retry-auth0-deletions`, avec l'image tagguée par le SHA court. Le préfixe vaut `sc` ; la variable `CLOUD_RUN_NAME_PREFIX` de l'Environment le remplace si besoin.
 5. **Test de fumée** : la révision qui sert tout le trafic doit être la dernière créée, prête, et utiliser l'image du commit déployé, puis `GET <api>/readyz` doit répondre (une douzaine d'essais, 10 s d'écart) ; sinon le workflow échoue. Sur l'URL `run.app`, Cloud Run répond lui-même à `/healthz` (404) : la requête n'atteint pas l'API.
 
-Un seul déploiement à la fois par environnement (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans les jobs de déploiement. Les actions sont épinglées par SHA.
+Un seul déploiement à la fois (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans le job de déploiement. Les actions sont épinglées par SHA.
 
 Une version taguée part en production après l'approbation, même si `main` a avancé depuis. Ces règles sont dans `.github/scripts/plan-deploy.sh`, testé par la CI. Après l'approbation, le job de production saute une version si une plus récente a été publiée entre-temps (`.github/scripts/newer-versions.sh`, testé aussi) : jamais une version plus ancienne après une plus récente.
 
-Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. Chaque environnement a son propre registre : l'image est construite pour lui à partir du commit, et c'est le commit qui fait foi, pas le condensat de l'image.
+Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite.
 
-## Mise en place
+## Ajouter une tâche du worker
 
-Chaque job du worker doit exister avant qu'un déploiement le mette à jour : le job d'une nouvelle tâche, et sa planification Cloud Scheduler, se créent dans le projet **avant** la fusion du code qui ajoute la tâche à `WORKER_TASKS` (`.github/actions/deploy/action.yml`), sinon l'étape 4 échoue. Le plus sûr est de copier un job existant, par exemple pour `retry-auth0-deletions` (préfixe `sc`) :
+Chaque job du worker doit exister avant qu'un déploiement le mette à jour : le job d'une nouvelle tâche, et sa planification Cloud Scheduler, se créent dans le projet **avant** la fusion du code qui ajoute la tâche à `WORKER_TASKS` (`.github/actions/deploy/action.yml`), sinon l'étape 4 échoue. Le plus sûr est de copier un job existant, par exemple pour `retry-auth0-deletions` :
 
 ```
 cd "$(mktemp -d)"   # job.yaml décrit la configuration du job : jamais dans le dépôt
-P=<projet>; R=northamerica-northeast1
+P=sport-challenge-prod; R=northamerica-northeast1
 gcloud run jobs describe sc-worker-close-weeks --project=$P --region=$R --format=export > close-weeks.yaml
 sed 's/sc-worker-close-weeks/sc-worker-retry-auth0-deletions/; s/- close-weeks$/- retry-auth0-deletions/' close-weeks.yaml > job.yaml
 grep -nE 'name: sc-worker|- worker|- retry-auth0|close-weeks' job.yaml
@@ -46,31 +85,24 @@ gcloud run jobs execute sc-worker-retry-auth0-deletions --project=$P --region=$R
 ```
 
 - Avant le `replace`, le `grep` doit montrer le nouveau nom et `- retry-auth0-deletions` comme dernier argument, et plus aucun `close-weeks`.
-- Les droits (lancement par le compte `sc-scheduler`, mise à jour par le compte de déploiement) sont donnés au niveau du projet : le nouveau job en hérite, rien à copier. À vérifier avec `gcloud run jobs get-iam-policy` si un jour un job a ses propres droits.
-- Les planifications de la production sont dans le fuseau `America/Toronto`, comme celles de `close-weeks` et `finalize-challenges` ; pour une tâche horaire, le fuseau ne change rien.
+- Les droits (lancement par `sc-scheduler`, mise à jour par `sc-deploy`) sont donnés au niveau du projet : le nouveau job en hérite, rien à copier.
+- Les planifications sont dans le fuseau `America/Toronto` ; pour une tâche horaire, le fuseau ne change rien.
 - Les lignes terminées par `\` se collent d'un bloc : un espace après le `\` coupe la commande.
 
-À faire une fois, **après** le premier `terraform apply` de `docs/terraform.md` (sur demande explicite).
+## Réglages GitHub
 
-1. **Terraform** : le module `deploy-identity` crée le pool et le fournisseur Workload Identity (seul ce dépôt est accepté, par son nom et son identifiant numérique, variable `github_repository_id`), le compte de service `sport-challenge-deploy` et ses droits : écrire dans le dépôt Artifact Registry, `roles/run.developer` sur le service et sur les jobs (dont les migrations), et l'usage des comptes de service d'exécution. Seul un job du dépôt, sur `main`, qui tourne dans l'Environment GitHub `production` peut prendre ce compte. La variable `github_repository` donne le dépôt (par défaut `damchi/sport-challenge-api`).
-
-   ```
-   terraform output workload_identity_provider
-   terraform output deploy_service_account
-   ```
-
-2. **Environment GitHub** `production` (Settings > Environments), avec ces variables (pas des secrets : aucune n'est sensible) :
+1. **Environment GitHub** `production` (Settings > Environments), avec ces variables (pas des secrets : aucune n'est sensible) :
 
    | Variable | Valeur |
    |---|---|
-   | `GCP_PROJECT_ID` | le projet GCP de l'environnement |
+   | `GCP_PROJECT_ID` | `sport-challenge-prod` |
    | `GCP_REGION` | `northamerica-northeast1` |
-   | `GCP_WORKLOAD_IDENTITY_PROVIDER` | sortie `workload_identity_provider` |
-   | `GCP_DEPLOY_SERVICE_ACCOUNT` | sortie `deploy_service_account` |
-   | `CLOUD_RUN_NAME_PREFIX` | facultatif : préfixe des ressources Cloud Run si elles ne viennent pas de Terraform (`sc` pour `sc-api`, `sc-migrate`, `sc-worker-*`) |
+   | `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/<numéro du projet>/locations/global/workloadIdentityPools/github-prod/providers/github-provider` |
+   | `GCP_DEPLOY_SERVICE_ACCOUNT` | `sc-deploy@sport-challenge-prod.iam.gserviceaccount.com` |
+   | `CLOUD_RUN_NAME_PREFIX` | facultatif : `sc` par défaut |
 
-   **Deployment branches = Selected branches, `main` seulement**, et **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity refuse de toute façon un jeton qui ne vient pas de `main`. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
-3. **Variable du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elle ne vaut pas `true`, le job est ignoré : une fusion n'échoue pas avant que l'infrastructure existe.
+   **Deployment branches = Selected branches, `main` seulement**, et **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity refuse un jeton qui ne vient pas de `main`, mais il ne vérifie **ni l'Environment** `production` **ni l'identifiant numérique du dépôt** : tout workflow de `main` qui demande `id-token: write` peut prendre `sc-deploy`. L'approbation repose donc sur les règles GitHub (protection de `main`, reviewers de l'Environment). Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
+2. **Variable du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elle ne vaut pas `true`, le job est ignoré.
    ```
    gh variable set DEPLOY_PRODUCTION --body true   # après avoir créé l'Environment production et ses reviewers
    ```

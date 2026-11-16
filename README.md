@@ -159,7 +159,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 ### 3.2 Authentification
 
 - ✅ Service tiers pour les comptes et la connexion (OIDC). V1 : e-mail sans mot de passe par **code à usage unique**, seule méthode de connexion. Connexions sociales (Google, Apple) reportées à plus tard.
-- ✅ **Auth0**, avec un tenant par environnement (développement, staging, production), en région **Canada** (vérifiée disponible avec le forfait choisi). Procédure : `docs/auth0-setup.md`.
+- ✅ **Auth0**, avec un tenant par environnement (développement, production), en région **Canada** (vérifiée disponible avec le forfait choisi). Procédure : `docs/auth0-setup.md`.
 - ✅ Connexion par e-mail : **code à usage unique** (passwordless, mode code), et non lien magique : le New Universal Login d'Auth0 ne propose pas le lien magique.
 - Le backend reste indépendant du fournisseur (interface `TokenVerifier`, identifiant d'utilisateur local, validation JWT par JWKS) : un changement ultérieur ne toucherait pas les modules métier.
 - La région du tenant ne se change pas après sa création.
@@ -190,10 +190,10 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 
 - ✅ **Docker** multi-stage (binaire statique, image minimale).
 - ✅ Pas de Kubernetes : Cloud Run suffit.
-- ✅ **Environnements** : un projet GCP par environnement, dont un **staging** pour les tests, séparé de la production (base, Auth, projet).
-- 🟡 **Horloge réglable en staging** pour tester les clôtures de semaine en quelques minutes.
+- ✅ **Environnements** : la production seule (projet `sport-challenge-prod`) ; le développement se fait en local. Un staging pourra être recréé plus tard, dans un projet GCP séparé.
+- 🟡 **Horloge réglable** (`CLOCK_OFFSET`, refusée en production) pour tester les clôtures de semaine en quelques minutes.
 - 🟡 **CI/CD** : GitHub Actions (tests, build, push, migrations, déploiement Cloud Run), avec authentification sans clé (Workload Identity Federation).
-- 🟡 **Terraform** pour décrire l'infrastructure.
+- ✅ **Infrastructure configurée à la main** dans la console GCP, décrite dans `docs/deploiement.md` (pas de Terraform).
 - ⚠️ Mettre une **alerte de budget** dès le premier jour (Cloud SQL a un coût fixe).
 
 ### Observabilité et analytics
@@ -258,7 +258,7 @@ sportchallenge-api/
 │   │   │                            limitation de débit ; conversion des erreurs en réponses JSON
 │   │   ├── auth/                    interface TokenVerifier (JWKS), middlewares Authenticate et CurrentUser
 │   │   ├── storage/                 interface de stockage + implémentation Cloud Storage (URL signées)
-│   │   ├── clock/                   interface Clock : horloge réelle, horloge décalable (staging, tests)
+│   │   ├── clock/                   interface Clock : horloge réelle, horloge décalable (tests, `CLOCK_OFFSET`)
 │   │   └── apperr/                  erreurs métier avec code stable (traduit côté client)
 │   │
 │   ├── api/
@@ -340,11 +340,8 @@ sportchallenge-api/
 │   └── oapi-codegen.yaml            configuration de la génération du code serveur (internal/api)
 ├── deploy/
 │   ├── Dockerfile                   build multi-stage, image minimale
-│   ├── docker-compose.yml           local : API, worker, PostgreSQL, émulateur de stockage
-│   └── terraform/
-│       ├── modules/                 network, cloud-sql, secrets, artifact-registry, budget (puis cloud-run, scheduler ; storage en V1.1)
-│       └── envs/                    staging/ et prod/ (un projet GCP chacun)
-├── .github/workflows/               ci.yml, deploy-staging.yml, deploy-prod.yml
+│   └── docker-compose.yml           local : PostgreSQL (émulateur de stockage en V1.1)
+├── .github/workflows/               ci.yml, release.yml, deploy.yml, claude-review.yml
 ├── Makefile                         raccourcis : test, lint, migrate, run
 ├── go.mod
 └── README.md
@@ -511,12 +508,12 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 
 ### 5.8 Éléments transverses
 
-- ✅ **Horloge injectable** : toute règle qui dépend du temps passe par une horloge réglable, pour tester les clôtures en staging.
+- ✅ **Horloge injectable** : toute règle qui dépend du temps passe par une horloge réglable, pour tester les clôtures sans attendre (horloge simulée dans les tests, `CLOCK_OFFSET` hors production).
 - Configuration par variables d'environnement, secrets dans Secret Manager.
 - Logs structurés en JSON (lus par Cloud Logging), avec un identifiant de requête.
 - Limitation de débit sur les routes d'écriture et d'upload.
 - **Erreurs** (✅) : `platform/apperr` est écrit pour ce projet. Le package maison de Faunadex (`apierrors` et `translator`) n'est **pas repris** : il renvoie un code numérique et un message traduit par le serveur, sans paramètres ni cause chaînée. Contrat : un **code stable** (`snake_case`, en anglais) ; un statut HTTP associé ; des **paramètres** optionnels pour les textes avec valeur (par exemple la date limite) ; une **cause** chaînée (`errors.Is` et `errors.As` fonctionnent), jamais exposée au client ; aucune donnée personnelle dans les paramètres. Réponse unique : `{ "error": { "code", "message", "params", "request_id" } }`, construite à **un seul endroit** (`platform/httpx`). Les textes d'erreur affichés dans l'app viennent des fichiers de traduction du frontend, indexés par le code ; le `message` du serveur n'est qu'un texte de secours pour les autres clients. La traduction côté serveur sert aux textes **émis par le serveur** (courriels, notifications push). Les codes sont listés dans `openapi.yaml`.
-- 🟡 **Tests** : unitaires sur `scoring` et les validations (sans base), d'intégration avec PostgreSQL en conteneur dans la CI, tests de bout en bout sur staging.
+- 🟡 **Tests** : unitaires sur `scoring` et les validations (sans base), d'intégration avec PostgreSQL en conteneur dans la CI ; tests de bout en bout à prévoir si un staging est recréé.
 
 ### 5.9 Intégrations sportives (V2+)
 
@@ -567,9 +564,9 @@ Le détail ticket par ticket (67 tickets, critères d'acceptation, commits propo
 | 4 | Challenges et catégories | **`policy.go`** (matrice des droits §5.7) ; **aucune autorisation dans un middleware** ; 3 catégories figées ; inscription jusqu'à la fin de la semaine 1 ; plusieurs créateurs ; titre et description seuls modifiables ; test « interdit » pour chaque règle |
 | 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine terminée verrouillée** ; modification et suppression tant que sa semaine n'est terminée dans aucun challenge où elle compte ; route de détail des activités des participants (visible des seuls participants du challenge) |
 | 6 | Scoring et classement | Tests d'abord ; catégorie 3 : minimum = distance réelle de la semaine précédente + X, aucune élimination en semaine 1, sans délai de grâce ; classement des éliminés (dernier éliminé devant, puis km) ; ex aequo |
-| 7 | Clôtures et worker | `close-weeks` et `finalize-challenges` toutes les heures, **idempotents** ; résultat indépendant du moment où le worker passe ; horloge réglable en staging |
+| 7 | Clôtures et worker | `close-weeks` et `finalize-challenges` toutes les heures, **idempotents** ; résultat indépendant du moment où le worker passe ; horloge réglable hors production |
 | 8 | Invitations (badges reportés en V1.1) | Invitations avec la règle « les participants peuvent inviter » ; les badges (conditions structurées, évaluation après chaque activité) viennent en V1.1 |
-| 9 | Limitation de débit et déploiement | `RateLimitIP` et `RateLimitUser`, Docker, compléments de CI/CD, Terraform, staging, alerte de budget ; jamais de `terraform apply` sans demande |
+| 9 | Limitation de débit et déploiement | `RateLimitIP` et `RateLimitUser`, Docker, compléments de CI/CD, infrastructure de production (configurée à la main), alerte de budget ; jamais de modification de l'infrastructure sans demande |
 
 **À chaque phase** : `make check` passe ; chaque nouvelle route a ses tests d'autorisation (autorisé, interdit, inexistant) ; les erreurs ont un code stable ; aucune donnée personnelle dans les logs ; une paire de migrations par changement de schéma ; les agents de relecture sont lancés ; **aucun commit ni push sans validation explicite**.
 
