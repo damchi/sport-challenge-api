@@ -59,6 +59,12 @@ jobs:
       - name: Release script
         run: .github/scripts/next-version_test.sh
 
+      # The rules that decide what the deployment deploys (deploy.yml).
+      - name: Deploy plan script
+        run: |
+          .github/scripts/plan-deploy_test.sh
+          .github/scripts/newer-versions_test.sh
+
   migrations:
     name: migrations up, down, up
     runs-on: ubuntu-latest

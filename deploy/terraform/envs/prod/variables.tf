@@ -100,3 +100,15 @@ variable "trusted_proxies" {
     error_message = "trusted_proxies must not be empty: the rate limit by IP would count every client together."
   }
 }
+
+variable "github_repository" {
+  description = "Repository whose workflows deploy to this environment, as owner/name."
+  type        = string
+  default     = "damchi/sport-challenge-api"
+}
+
+variable "github_repository_id" {
+  description = "Numeric id of that repository (gh api repos/<owner>/<name> -q .id)."
+  type        = string
+  default     = "1438448292"
+}

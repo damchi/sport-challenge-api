@@ -25,7 +25,7 @@ Les règles sont testées par `.github/scripts/next-version_test.sh`, lancé par
 ## Ce que fait le workflow
 
 1. Calcule la version suivante (voir ci-dessus).
-2. **Construit l'image** avec la version, le commit et sa date (`make docker-build` fait de même en local), tagguée `<version>` et `<sha court>`, **jamais `latest`**. Si le build échoue, aucun tag n'est créé. L'image n'est pas encore poussée vers Artifact Registry : cela viendra avec le déploiement continu (SC-API-077), qui s'authentifie à GCP.
+2. **Construit l'image** avec la version, le commit et sa date (`make docker-build` fait de même en local), tagguée `<version>` et `<sha court>`, **jamais `latest`**. Si le build échoue, aucun tag n'est créé. Cette image n'est pas poussée ici : le déploiement continu (`docs/deploiement.md`), qui s'authentifie à GCP, reconstruit et pousse celle qu'il déploie.
 3. **Crée le tag et la release GitHub**, dont les notes sont générées automatiquement à partir des pull requests fusionnées. Il n'y a pas de `CHANGELOG.md` : les notes de release en tiennent lieu.
 
 Pour que la version soit bien calculée, **les messages de commit suivent la convention** : `type(portée): résumé` en anglais, par exemple `feat(activity): add speed filter` ou `fix(worker): retry the Auth0 deletion`. Un `!` ou une ligne `BREAKING CHANGE:` signale un changement cassant.
@@ -41,5 +41,5 @@ Sur staging comme en production, c'est donc `/healthz` qui dit quel commit tourn
 
 ## À savoir
 
-- Un tag créé par le workflow avec son jeton **ne déclenche pas d'autre workflow** (règle de GitHub). Un déploiement en production déclenché « par un tag `v*` » devra donc s'enchaîner autrement : par un `workflow_run` sur `Release`, ou par un jeton dédié.
+- Un tag créé par le workflow avec son jeton **ne déclenche pas d'autre workflow** (règle de GitHub). Le déploiement en production d'une version s'enchaîne donc par un `workflow_run` sur `Release` (`.github/workflows/deploy.yml`, voir `docs/deploiement.md`).
 - Pour rejouer une release qui a échoué avant le tag, relancer le workflow depuis l'onglet Actions. Une version publiée par erreur se supprime à la main (release puis tag), sur demande explicite : ne jamais déplacer un tag existant.

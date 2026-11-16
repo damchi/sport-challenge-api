@@ -35,11 +35,13 @@ locals {
     "cloudscheduler.googleapis.com",
     "compute.googleapis.com",
     "iam.googleapis.com",
+    "iamcredentials.googleapis.com",
     "monitoring.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
     "servicenetworking.googleapis.com",
     "sqladmin.googleapis.com",
+    "sts.googleapis.com",
   ]
 
   database_secret = "database-url"
@@ -188,4 +190,20 @@ module "scheduler" {
       schedule = local.worker_schedules[task]
     }
   }
+}
+
+# What the deployment pipeline signs in as (docs/deploiement.md).
+module "deploy_identity" {
+  source = "../../modules/deploy-identity"
+
+  region                   = var.region
+  github_repository        = var.github_repository
+  github_repository_id     = var.github_repository_id
+  github_environment       = "production"
+  repository_id            = module.artifact_registry.repository_id
+  service_name             = module.cloud_run.api_service_name
+  job_names                = toset(concat(values(module.cloud_run.worker_jobs), [module.cloud_run.migrate_job]))
+  runtime_service_accounts = module.cloud_run.runtime_service_accounts
+
+  depends_on = [google_project_service.apis]
 }

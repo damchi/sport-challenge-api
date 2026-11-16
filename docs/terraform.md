@@ -14,6 +14,7 @@ Cette procédure décrit l'infrastructure de base de chaque environnement (`depl
 | `artifact-registry` | dépôt Docker `sport-challenge` |
 | `cloud-run` | service de l'API (public, le JWT est vérifié par l'API), un job Cloud Run par tâche du worker, deux comptes de service (API et worker) |
 | `cloud-run` (migrations) | job `sport-challenge-migrate` (`migrate up`), avec son compte de service qui ne lit que `DATABASE_URL` : voir `docs/migrations.md` |
+| `deploy-identity` | pool et fournisseur Workload Identity (GitHub OIDC, ce dépôt seulement), compte de service de déploiement à droits minimaux : voir `docs/deploiement.md` |
 | `scheduler` | une planification Cloud Scheduler par tâche, et un compte de service qui ne peut que lancer ces jobs |
 | `monitoring` | canal d'alerte par courriel et trois alertes : erreurs 5xx de l'API, échec d'un job (worker ou migrations), `close-weeks` sans succès depuis 3 heures |
 | `budget` | budget mensuel du projet, alertes à 50 %, 90 % et 100 % des dépenses, par courriel |
@@ -22,7 +23,7 @@ Le secret `database-url` reçoit sa valeur de Terraform (URL de connexion constr
 
 ## Cloud Run et Cloud Scheduler
 
-- **Image** : une seule, pour l'API (commande par défaut `api`) et le worker (`worker <tâche>`). Elle est passée par la variable `image` et n'est utilisée qu'à la création : Terraform ignore ensuite ses changements, car c'est le pipeline de déploiement qui publie les versions suivantes (un `apply` ne revient donc pas en arrière).
+- **Image** : une seule, pour l'API (commande par défaut `api`) et le worker (`worker <tâche>`). Elle est passée par la variable `image` et n'est utilisée qu'à la création : Terraform ignore ensuite ses changements, car c'est le pipeline de déploiement (`docs/deploiement.md`) qui publie les versions suivantes (un `apply` ne revient donc pas en arrière).
 - **Secrets** : `DATABASE_URL` et `AUTH0_MGMT_CLIENT_SECRET` viennent de Secret Manager. Le domaine, l'audience et l'identifiant client Auth0 ne sont pas secrets : ce sont des variables d'environnement ordinaires.
 - **Comptes de service** : un par charge (API, worker, Scheduler), sans aucun rôle sur le projet. L'API et le worker lisent seulement les deux secrets ci-dessus ; le compte du Scheduler ne peut que lancer les jobs du worker.
 - **Réseau** : sortie directe vers le VPC pour les adresses privées seulement (Cloud SQL) ; Auth0 est joint par Internet.

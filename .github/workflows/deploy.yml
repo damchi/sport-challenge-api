@@ -1,0 +1,105 @@
+name: Deploy
+
+# Once a release run has finished on main (so the CI is green), the tip of main
+# is deployed to staging; when it also got a version tag, it is then deployed
+# to production, after the approval of the `production` GitHub Environment.
+# A rollback redeploys an older commit by hand. See docs/deploiement.md.
+#
+# Terraform is never run here: the infrastructure is applied on explicit request.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to roll back
+        type: choice
+        options: [staging, production]
+        required: true
+      ref:
+        description: Version tag or commit SHA to redeploy (its image must still be in Artifact Registry)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: what to deploy
+    # Only a run on main of this repository, never a pull request.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      version: ${{ steps.plan.outputs.version }}
+      rollback: ${{ steps.plan.outputs.rollback }}
+      staging: ${{ steps.plan.outputs.staging }}
+      production: ${{ steps.plan.outputs.production }}
+      superseded: ${{ steps.plan.outputs.superseded }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0 # the history and the tags
+          persist-credentials: false
+
+      # The rules are in a script of their own, tested by the CI.
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          TARGET: ${{ inputs.environment }}
+          REF: ${{ inputs.ref }}
+        run: |
+          .github/scripts/plan-deploy.sh | tee -a "$GITHUB_OUTPUT"
+
+  # Opt-in per repository (Settings > Secrets and variables > Actions > Variables):
+  # DEPLOY_STAGING and DEPLOY_PRODUCTION are set to "true" once the environment
+  # exists, so that a merge does not fail before then.
+  staging:
+    name: staging
+    needs: plan
+    if: >-
+      github.ref == 'refs/heads/main' && needs.plan.outputs.staging == 'true' &&
+      vars.DEPLOY_STAGING == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: staging
+      sha: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.version }}
+      rollback: ${{ needs.plan.outputs.rollback }}
+
+  production:
+    name: production
+    needs: [plan, staging]
+    # After a staging that succeeded. A rollback has no staging step, and a
+    # version that is no longer the tip of main was superseded by a commit that
+    # went to staging (it contains this version). Required reviewers are set on
+    # the production Environment: the job waits for them.
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && needs.plan.outputs.production == 'true' &&
+      vars.DEPLOY_PRODUCTION == 'true' &&
+      (needs.staging.result == 'success' ||
+       (needs.staging.result == 'skipped' &&
+        (needs.plan.outputs.rollback == 'true' || needs.plan.outputs.superseded == 'true')))
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: production
+      sha: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.version }}
+      rollback: ${{ needs.plan.outputs.rollback }}

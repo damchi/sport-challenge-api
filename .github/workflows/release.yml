@@ -65,9 +65,8 @@ jobs:
           echo "version: ${last:-none} -> $next"
           echo "version=$next" >> "$GITHUB_OUTPUT"
 
-      # The image the deployment will use: tagged with the version and the short
-      # commit (never latest). It is only built here; pushing it to Artifact
-      # Registry needs the GCP authentication of the continuous deployment.
+      # Only built here, to make sure the release builds: the deployment
+      # (deploy.yml) builds and pushes the image it deploys.
       - name: Build the image
         if: steps.version.outputs.version != ''
         env:
