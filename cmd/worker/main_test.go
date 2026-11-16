@@ -57,7 +57,7 @@ func TestWorkerEnv(t *testing.T) {
 // not let it set: the configuration must load, with the API default port.
 func TestWorkerEnvSatisfiesTheConfiguration(t *testing.T) {
 	for key, value := range map[string]string{
-		"ENV":                      "staging",
+		"ENV":                      "production",
 		"LOG_LEVEL":                "info",
 		"DATABASE_URL":             "postgres://db.example/x",
 		"AUTH0_DOMAIN":             "tenant.ca.auth0.com",

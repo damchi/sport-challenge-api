@@ -316,7 +316,6 @@ func TestCheckTrustedProxies(t *testing.T) {
 	}{
 		{name: "local without proxy", env: config.EnvLocal},
 		{name: "local with a proxy", env: config.EnvLocal, proxies: []string{"10.0.0.1"}},
-		{name: "staging without proxy", env: config.EnvStaging, wantErr: true},
 		{name: "production without proxy", env: config.EnvProduction, wantErr: true},
 		{name: "production with a proxy", env: config.EnvProduction, proxies: []string{"169.254.0.0/16"}},
 	}

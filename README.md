@@ -191,7 +191,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ **Docker** multi-stage (binaire statique, image minimale).
 - ✅ Pas de Kubernetes : Cloud Run suffit.
 - ✅ **Environnements** : la production seule (projet `sport-challenge-prod`) ; le développement se fait en local. Un staging pourra être recréé plus tard, dans un projet GCP séparé.
-- 🟡 **Horloge réglable** (`CLOCK_OFFSET`, refusée en production) pour tester les clôtures de semaine en quelques minutes.
+- 🟡 **Horloge réglable** (`CLOCK_OFFSET`, en local seulement) pour tester les clôtures de semaine en quelques minutes.
 - 🟡 **CI/CD** : GitHub Actions (tests, build, push, migrations, déploiement Cloud Run), avec authentification sans clé (Workload Identity Federation).
 - ✅ **Infrastructure configurée à la main** dans la console GCP, décrite dans `docs/deploiement.md` (pas de Terraform).
 - ⚠️ Mettre une **alerte de budget** dès le premier jour (Cloud SQL a un coût fixe).
@@ -508,7 +508,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 
 ### 5.8 Éléments transverses
 
-- ✅ **Horloge injectable** : toute règle qui dépend du temps passe par une horloge réglable, pour tester les clôtures sans attendre (horloge simulée dans les tests, `CLOCK_OFFSET` hors production).
+- ✅ **Horloge injectable** : toute règle qui dépend du temps passe par une horloge réglable, pour tester les clôtures sans attendre (horloge simulée dans les tests, `CLOCK_OFFSET` en local).
 - Configuration par variables d'environnement, secrets dans Secret Manager.
 - Logs structurés en JSON (lus par Cloud Logging), avec un identifiant de requête.
 - Limitation de débit sur les routes d'écriture et d'upload.

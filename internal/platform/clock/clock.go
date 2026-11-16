@@ -1,5 +1,5 @@
 // Package clock gives the current instant to the business code, which never
-// calls time.Now() directly: tests use a FakeClock, and staging an offset
+// calls time.Now() directly: tests use a FakeClock, and a local run an offset
 // clock to see a week end in minutes.
 package clock
 
@@ -20,8 +20,8 @@ type Real struct{}
 func (Real) Now() time.Time { return time.Now().UTC() }
 
 // Offset is the system clock moved forward by a fixed duration, in UTC. Only
-// staging uses it, to test the end of the weeks without waiting for them
-// (config refuses it in production).
+// a local run uses it, to test the end of the weeks without waiting for them
+// (config refuses it outside ENV=local).
 type Offset struct {
 	offset time.Duration
 }

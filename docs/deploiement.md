@@ -39,7 +39,7 @@ Comptes de service et droits (tous au niveau du projet) :
 | `sc-scheduler` | lance les jobs du worker | `roles/run.invoker` |
 | `sc-deploy` | utilisé par le workflow de déploiement (fédération GitHub) | `roles/artifactregistry.writer`, `roles/run.admin`, `roles/iam.serviceAccountUser` ; pris par les jetons du dépôt (`roles/iam.workloadIdentityUser`) |
 
-Les variables d'environnement de l'API et des jobs sont celles que lit `internal/platform/config` (`ENV=production`, `PORT` posé par Cloud Run pour l'API, `LOG_LEVEL`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_MGMT_CLIENT_ID`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, plus les deux secrets). `CLOCK_OFFSET` est refusé en production.
+Les variables d'environnement de l'API et des jobs sont celles que lit `internal/platform/config` (`ENV=production`, `PORT` posé par Cloud Run pour l'API, `LOG_LEVEL`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_MGMT_CLIENT_ID`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, plus les deux secrets). `CLOCK_OFFSET` n'est accepté qu'avec `ENV=local` : la production le refuse.
 
 ## Ce qui se passe
 

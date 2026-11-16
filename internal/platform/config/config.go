@@ -18,7 +18,6 @@ type Environment string
 // Supported environments.
 const (
 	EnvLocal      Environment = "local"
-	EnvStaging    Environment = "staging"
 	EnvProduction Environment = "production"
 )
 
@@ -51,7 +50,7 @@ type Config struct {
 	// trusted and the client IP is the peer address.
 	TrustedProxies []string
 	// ClockOffset moves the clock of the process forward, to see a week end in
-	// minutes. Zero (the default) is the real time; it is refused in production.
+	// minutes. Zero (the default) is the real time; it is only allowed locally.
 	ClockOffset time.Duration
 	// RateLimitIP bounds the requests of one IP address, RateLimitUser the
 	// write requests of one user.
@@ -87,16 +86,17 @@ func Load(getenv func(string) string) (Config, error) {
 	switch env := Environment(get("ENV")); env {
 	case "":
 		problems = append(problems, "ENV is required")
-	case EnvLocal, EnvStaging, EnvProduction:
+	case EnvLocal, EnvProduction:
 		cfg.Env = env
 	default:
-		problems = append(problems, "ENV must be one of local, staging, production")
+		problems = append(problems, "ENV must be one of local, production")
 	}
 
-	// The clock is never moved in production.
+	// The clock is only moved locally: an allowlist, so no other environment
+	// ever gets a moved clock.
 	if raw := get("CLOCK_OFFSET"); raw != "" {
-		if cfg.Env == EnvProduction {
-			problems = append(problems, "CLOCK_OFFSET must not be set when ENV=production")
+		if cfg.Env != EnvLocal {
+			problems = append(problems, "CLOCK_OFFSET is only allowed when ENV=local")
 		} else if d, err := time.ParseDuration(raw); err != nil || d <= 0 {
 			problems = append(problems, "CLOCK_OFFSET must be a positive duration such as 168h")
 		} else {

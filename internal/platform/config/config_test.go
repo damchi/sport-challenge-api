@@ -21,8 +21,8 @@ func TestLoad(t *testing.T) {
 	}{
 		{
 			name: "valid",
-			vars: map[string]string{"ENV": "staging", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
-			want: Config{Env: EnvStaging, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour, RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser},
+			vars: map[string]string{"ENV": "production", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
+			want: Config{Env: EnvProduction, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour, RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser},
 		},
 		{
 			name: "log level is case insensitive",
@@ -382,18 +382,19 @@ func TestLoadClockOffset(t *testing.T) {
 		want    time.Duration
 		wantErr string
 	}{
-		{name: "no offset by default", vars: base("staging", ""), want: 0},
-		{name: "staging", vars: base("staging", "168h"), want: 168 * time.Hour},
+		{name: "no offset by default", vars: base("local", ""), want: 0},
+		{name: "a week ahead", vars: base("local", "168h"), want: 168 * time.Hour},
 		{name: "local", vars: base("local", "90m"), want: 90 * time.Minute},
-		{name: "surrounding spaces are ignored", vars: base("staging", " 24h "), want: 24 * time.Hour},
+		{name: "surrounding spaces are ignored", vars: base("local", " 24h "), want: 24 * time.Hour},
 		{name: "production without offset", vars: base("production", ""), want: 0},
-		{name: "production refuses an offset", vars: base("production", "1h"), wantErr: "CLOCK_OFFSET must not be set when ENV=production"},
-		{name: "production refuses even a zero offset", vars: base("production", "0s"), wantErr: "CLOCK_OFFSET must not be set when ENV=production"},
-		{name: "production refuses an invalid offset", vars: base("production", "soon"), wantErr: "CLOCK_OFFSET must not be set when ENV=production"},
-		{name: "not a duration", vars: base("staging", "soon"), wantErr: "CLOCK_OFFSET must be a positive duration"},
-		{name: "days are not a duration", vars: base("staging", "7d"), wantErr: "CLOCK_OFFSET must be a positive duration"},
-		{name: "negative", vars: base("staging", "-1h"), wantErr: "CLOCK_OFFSET must be a positive duration"},
-		{name: "zero", vars: base("staging", "0s"), wantErr: "CLOCK_OFFSET must be a positive duration"},
+		{name: "production refuses an offset", vars: base("production", "1h"), wantErr: "CLOCK_OFFSET is only allowed when ENV=local"},
+		{name: "production refuses even a zero offset", vars: base("production", "0s"), wantErr: "CLOCK_OFFSET is only allowed when ENV=local"},
+		{name: "production refuses an invalid offset", vars: base("production", "soon"), wantErr: "CLOCK_OFFSET is only allowed when ENV=local"},
+		{name: "staging is no longer an environment", vars: base("staging", "1h"), wantErr: "ENV must be one of local, production"},
+		{name: "not a duration", vars: base("local", "soon"), wantErr: "CLOCK_OFFSET must be a positive duration"},
+		{name: "days are not a duration", vars: base("local", "7d"), wantErr: "CLOCK_OFFSET must be a positive duration"},
+		{name: "negative", vars: base("local", "-1h"), wantErr: "CLOCK_OFFSET must be a positive duration"},
+		{name: "zero", vars: base("local", "0s"), wantErr: "CLOCK_OFFSET must be a positive duration"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

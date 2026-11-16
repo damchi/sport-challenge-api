@@ -90,7 +90,7 @@ Les tâches sont idempotentes : une relance ne refait pas un travail déjà fait
 
   À faire après une panne d'Auth0, après une rotation du secret Auth0 (§5), ou si des comptes supprimés peuvent encore se connecter.
 - Une semaine déjà terminée se juge selon l'horloge, jamais selon le passage du worker : une relance tardive donne le même résultat qu'une exécution à l'heure.
-- **Tester une fin de semaine sans attendre** : jamais en production (`CLOCK_OFFSET` y est refusé). Les tests d'intégration couvrent le scénario complet avec une horloge simulée (`internal/closure/service_integration_test.go` : élimination semaine par semaine, relance sans effet, abandon, résultats figés). Pour le voir à la main, en local : avancer l'horloge de l'API et du worker du même décalage (`CLOCK_OFFSET=168h make run`, puis `CLOCK_OFFSET=168h make worker TASK=close-weeks`) ; une activité datée d'une semaine terminée doit alors être refusée (`week_locked`) avant même le passage du worker.
+- **Tester une fin de semaine sans attendre** : seulement en local (`CLOCK_OFFSET` n'est accepté qu'avec `ENV=local`). Les tests d'intégration couvrent le scénario complet avec une horloge simulée (`internal/closure/service_integration_test.go` : élimination semaine par semaine, relance sans effet, abandon, résultats figés). Pour le voir à la main, en local : avancer l'horloge de l'API et du worker du même décalage (`CLOCK_OFFSET=168h make run`, puis `CLOCK_OFFSET=168h make worker TASK=close-weeks`) ; une activité datée d'une semaine terminée doit alors être refusée (`week_locked`) avant même le passage du worker.
 
 ## 5. Rotation des secrets
 
@@ -132,7 +132,7 @@ Ne jamais coller un secret dans un ticket, un message ou un journal. Un secret e
 - [ ] **Suppression de compte testée** en production avec un compte de test : anonymisation dans l'API, abandon des challenges à venir ou en cours, résultats des challenges terminés sous un nom neutre, **utilisateur supprimé chez Auth0** (et reprise par `retry-auth0-deletions` si Auth0 a échoué).
 - [ ] **Sauvegardes testées** : restauration d'une sauvegarde (ou clone à un instant donné) vers une **instance séparée**, puis vérification des données ; durée de l'opération notée ici.
 - [ ] **Quotas** vérifiés : instances maximales de Cloud Run, connexions Cloud SQL, quotas de l'API de gestion Auth0 (suppressions) et du plan Auth0 (utilisateurs actifs).
-- [ ] **Budget** : alertes de budget actives (50 %, 90 %, 100 %) et reçues par une adresse lue ; coût fixe de Cloud SQL (haute disponibilité) connu.
+- [ ] **Budget** : alertes de budget actives (50 %, 90 %, 100 %) et reçues par une adresse lue ; coût fixe de Cloud SQL (`db-f1-micro`, zonale) connu.
 - [ ] **Alertes** reçues au moins une fois (5xx, échec de job, absence de `close-weeks`).
 - [ ] **Accès** : Environment `production` avec reviewers, tags `v*` protégés, deux personnes au plus avec les droits `down`/`force` sur le job de migration, vérifié dans la politique IAM du projet (`gcloud projects get-iam-policy sport-challenge-prod`).
 - [ ] Ce runbook relu, et les contacts du §7 remplis.
