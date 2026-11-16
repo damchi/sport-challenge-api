@@ -143,10 +143,16 @@ runs:
         fi
         image=$(gcloud run revisions describe "$serving" --project="$PROJECT" --region="$REGION" \
           --format='value(spec.containers[0].image)')
-        if [ "$image" != "$IMAGE_REPOSITORY:$SHORT_SHA" ]; then
-          echo "::error::the revision $serving runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA"
-          exit 1
-        fi
+        # Cloud Run may record the image by its tag or by its digest.
+        expected=$(gcloud artifacts docker images describe "$IMAGE_REPOSITORY:$SHORT_SHA" \
+          --format='value(image_summary.digest)')
+        case "$image" in
+          "$IMAGE_REPOSITORY:$SHORT_SHA" | "$IMAGE_REPOSITORY@$expected") ;;
+          *)
+            echo "::error::the API runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA ($expected)"
+            exit 1
+            ;;
+        esac
         url=$(gcloud run services describe "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
           --format='value(status.url)')
         for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
