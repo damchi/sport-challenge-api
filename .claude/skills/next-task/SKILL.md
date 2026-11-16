@@ -25,7 +25,7 @@ Les tickets sont des **issues GitHub** (importées depuis `TASKS.md`). Le statut
 - **Branche** (une par ticket, créée automatiquement) :
   1. `git status` : si l'arbre de travail n'est pas propre, **arrête-toi** et demande quoi faire (le travail non committé n'est jamais écrasé).
   2. Si l'utilisateur est déjà sur une branche de ce ticket (`sc-api-0xx-…`), reprends-la.
-  3. Sinon : `git switch staging`, `git pull --ff-only`, puis `git switch -c <identifiant en minuscules>-<résumé court du titre>` (ex. `sc-api-002-makefile-lint`) : minuscules, tirets, 40 caractères au plus pour le résumé.
+  3. Sinon : `git switch main`, `git pull --ff-only`, puis `git switch -c <identifiant en minuscules>-<résumé court du titre>` (ex. `sc-api-002-makefile-lint`) : minuscules, tirets, 40 caractères au plus pour le résumé.
   4. Ne pars jamais d'une autre branche de ticket non fusionnée sans l'accord de l'utilisateur.
 - Marque le ticket en cours : `python3 .claude/scripts/tasks.py start <numéro>` (étiquette `en-cours`, assigné à l'utilisateur, statut « In Progress » du Project).
 - Annonce un court plan.
@@ -47,8 +47,8 @@ Les tickets sont des **issues GitHub** (importées depuis `TASKS.md`). Le statut
 ## 5. Clôturer : commit, push et revue de la pull request
 
 - Si **tous** les critères d'acceptation sont remplis : `python3 .claude/scripts/tasks.py tick <numéro>` coche les cases dans l'issue. S'il en reste un non rempli, ne lance pas `tick` : dis lequel et pourquoi.
-- Ne ferme pas l'issue et ne change pas son statut : elle se ferme toute seule à la fusion dans `main` (la promotion de `staging`) d'une pull request qui contient `Closes #<numéro>` : les mots-clés ne ferment rien quand la pull request vise `staging`.
-- **Commit et push sans demander l'accord** de l'utilisateur, une fois les vérifications du §4 passées : `git add` des seuls fichiers du ticket, un commit cohérent avec le **message de commit** du ticket (adapté si besoin), terminé par `Closes #<numéro>` puis `Refs: SC-API-0xx` en pied, puis push de la branche du ticket. Jamais de push forcé, de `--no-verify`, de reset destructif ni de nettoyage forcé du dépôt. Ne pousse jamais sur `main` ni sur `staging` : la pull request du ticket vise `staging`.
+- Ne ferme pas l'issue et ne change pas son statut : elle se ferme toute seule à la fusion de la pull request qui contient `Closes #<numéro>`.
+- **Commit et push sans demander l'accord** de l'utilisateur, une fois les vérifications du §4 passées : `git add` des seuls fichiers du ticket, un commit cohérent avec le **message de commit** du ticket (adapté si besoin), terminé par `Closes #<numéro>` puis `Refs: SC-API-0xx` en pied, puis push de la branche du ticket. Jamais de push forcé, de `--no-verify`, de reset destructif ni de nettoyage forcé du dépôt. Ne pousse jamais sur `main`.
 - La pull request s'ouvre sur demande de l'utilisateur : propose le titre et la description (avec `Closes #<numéro>`). Ne fusionne jamais.
 - **Boucle de revue de la pull request** (dès qu'elle est ouverte, et après chaque push) :
   1. **Attends la fin de la CI** : surveille-la avec un `Monitor` (boucle `until` sur `gh pr checks <numéro>` tant qu'une vérification est `pending`, `queued` ou `in_progress`), sans `sleep` enchaînés ni sondage. Ne conclus rien tant que toutes les vérifications ne sont pas terminées.

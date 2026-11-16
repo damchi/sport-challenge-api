@@ -1,6 +1,6 @@
 # Déploiement continu sur GCP
 
-Deux branches, deux environnements : une pull request fusionnée dans `staging` (la branche d'intégration, où se fait le travail) est déployée en **staging** ; la pull request de promotion `staging` → `main` est déployée en **production**, après approbation. Dans les deux cas, une fois la CI verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés sur Cloud Run sans autre action manuelle. Le workflow est `.github/workflows/deploy.yml` ; les étapes d'un environnement sont dans le workflow réutilisable `.github/workflows/deploy-environment.yml` (appelé une fois pour staging, une fois pour production), qui utilise l'action locale `.github/actions/deploy`.
+Quand une pull request est fusionnée dans `main` et que la CI est verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés sur Cloud Run sans action manuelle. Le workflow est `.github/workflows/deploy.yml` ; les étapes d'un environnement sont dans le workflow réutilisable `.github/workflows/deploy-environment.yml` (appelé une fois pour staging, une fois pour production), qui utilise l'action locale `.github/actions/deploy`.
 
 > **Le workflow ne lance jamais `terraform apply`.** L'infrastructure (dont le compte de déploiement décrit plus bas) s'applique à la main, sur demande explicite. Le workflow ne fait que publier une image et mettre à jour Cloud Run.
 
@@ -8,13 +8,10 @@ Deux branches, deux environnements : une pull request fusionnée dans `staging` 
 
 | Événement | Staging | Production |
 |---|---|---|
-| Fusion dans `staging`, CI verte | déployé automatiquement (le sommet de `staging`) | non |
-| Fusion de `staging` dans `main`, CI verte, workflow `Release` terminé | non (déjà passé par `staging`) | le commit a reçu un tag de version `v*` (le workflow `Release` en pose un à chaque fusion dans `main`) ; part **après l'approbation** de l'Environment `production` |
-| `workflow_dispatch` (retour arrière) | redéploie un commit ou un tag précédent (de `main` ou de `staging`) | idem (de `main` seulement), avec la même approbation |
+| Fusion dans `main`, CI verte, workflow `Release` terminé | déployé automatiquement (le sommet de `main`) | si le commit a reçu un tag de version `v*` (à chaque fusion, le workflow `Release` en pose un), et **après l'approbation** de l'Environment `production` |
+| `workflow_dispatch` (retour arrière) | redéploie un commit ou un tag précédent | idem, avec la même approbation |
 
-Le workflow ne s'exécute jamais sur une pull request. Un tag de version est créé par `release.yml` (`docs/release.md`) ; comme un tag posé avec le jeton d'un workflow ne déclenche pas d'autre workflow, c'est la fin du workflow `Release` qui lance le déploiement en production, et celui-ci regarde si le commit porte un tag. Un workflow lancé par `workflow_run` s'exécute toujours depuis la branche par défaut (`main`) : le code de déploiement est celui de `main`, même pour un déploiement de `staging`.
-
-**Après chaque promotion**, reporter `main` dans `staging` (`git switch staging && git merge --ff-only origin/main`, ou une pull request `main` → `staging` si la fusion n'est pas en avance rapide) : sans cela, `staging` ne connaît pas le tag ni le commit de fusion, les deux branches divergent, et la version affichée en staging (`git describe`) reste celle d'avant.
+Le workflow ne s'exécute jamais sur une pull request. La production ne part qu'après un staging réussi (sauf retour arrière). Un tag de version est créé par `release.yml` (`docs/release.md`) ; comme un tag posé avec le jeton d'un workflow ne déclenche pas d'autre workflow, c'est la fin du workflow `Release` qui lance le déploiement, et celui-ci regarde si le commit porte un tag.
 
 Étapes d'un déploiement (action `deploy`) :
 
@@ -26,9 +23,9 @@ Le workflow ne s'exécute jamais sur une pull request. Un tag de version est cr�
 
 Un seul déploiement à la fois par environnement (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans les jobs de déploiement. Les actions sont épinglées par SHA.
 
-Si le commit n'est plus le sommet de `staging` quand le workflow arrive, son déploiement est laissé au commit plus récent (qui le contient). Une version taguée sur `main` part quand même en production, après l'approbation, même si `main` a avancé depuis. Ces règles sont dans `.github/scripts/plan-deploy.sh`, testé par la CI. Après l'approbation, le job de production saute une version si une plus récente a été publiée entre-temps (`.github/scripts/newer-versions.sh`, testé aussi) : jamais une version plus ancienne après une plus récente.
+Si le commit n'est plus le sommet de `main` quand le workflow arrive, son déploiement en staging est laissé au commit plus récent (qui le contient). Une version taguée n'est pas perdue pour autant : elle part quand même en production, après l'approbation, sans passer par un staging de ce commit exact. Ces règles sont dans `.github/scripts/plan-deploy.sh`, testé par la CI. Après l'approbation, le job de production saute une version si une plus récente a été publiée entre-temps (`.github/scripts/newer-versions.sh`, testé aussi) : jamais une version plus ancienne après une plus récente.
 
-Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. La production reconstruit l'image depuis le commit promu, que `staging` a déjà déployé (les deux environnements ont leur propre registre) : le build n'étant pas garanti identique au bit près, c'est le commit qui fait foi, pas le condensat de l'image.
+Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. La production reconstruit l'image depuis le même commit que le staging (les deux environnements ont leur propre registre) : le build n'étant pas garanti identique au bit près, c'est le commit qui fait foi, pas le condensat de l'image.
 
 ## Mise en place d'un environnement
 
@@ -50,7 +47,7 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
    | `GCP_WORKLOAD_IDENTITY_PROVIDER` | sortie `workload_identity_provider` |
    | `GCP_DEPLOY_SERVICE_ACCOUNT` | sortie `deploy_service_account` |
 
-   Pour les deux Environments : **Deployment branches = Selected branches, `main` seulement** (le déploiement de `staging` tourne lui aussi depuis `main`, voir plus haut). Pour `production` : **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity refuse de toute façon un jeton qui ne vient pas de `main`. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
+   Pour les deux Environments : **Deployment branches = Selected branches, `main` seulement**. Pour `production` : **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity refuse de toute façon un jeton qui ne vient pas de `main`. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
 3. **Variables du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_STAGING=true` quand l'environnement staging est prêt, `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elles ne valent pas `true`, le job correspondant est ignoré : une fusion n'échoue pas avant que l'infrastructure existe.
    ```
    gh variable set DEPLOY_STAGING --body true
@@ -67,10 +64,3 @@ Le plus rapide reste de revenir à la révision précédente dans Cloud Run (`do
 ## Retrouver ce qui tourne
 
 `GET <api>/healthz` donne la version et le commit (`docs/release.md`). Le déploiement lui-même est visible dans l'onglet Environments du dépôt (qui a approuvé, quand).
-
-## La branche `staging`
-
-À créer une fois, à partir de `main` : `git push origin origin/main:refs/heads/staging`. Les pull requests de travail visent `staging` ; seule la pull request de promotion vise `main`. Dans Settings > Branches, protéger `staging` comme `main` (pull request obligatoire, CI verte requise).
-
-- **Tickets** : `Closes #N` ne ferme rien quand la pull request vise `staging`. La promotion doit se faire par un **merge commit** (pas un squash, qui perdrait les messages des tickets), ou reprendre les `Closes #N` dans sa description.
-- **Hotfix** : un commit poussé directement sur `main` part en production sans être passé par staging ; l'approbation de l'Environment est alors la seule garde. À réserver aux urgences, puis à reporter dans `staging`.

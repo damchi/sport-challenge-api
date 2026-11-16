@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests of plan-deploy.sh on a throwaway repository: commit c1 (tagged v1.0.0),
-# c2, c3 (tagged v1.1.0), c4. origin/main and origin/staging are moved to the commits under test.
+# c2, c3 (tagged v1.1.0), c4. origin/main is moved to the commit under test.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(mktemp -d)
@@ -16,12 +16,10 @@ for i in 1 2 3 4; do
 done
 failed=0
 
-# plan <main tip> <staging tip> <event> <workflow> <branch> <head> <target> <ref>
-# -> the output lines, "ERROR" on failure
+# plan <tip> <event> <head> <target> <ref> -> the output lines, "ERROR" on failure
 plan() {
   git update-ref refs/remotes/origin/main "$1"
-  git update-ref refs/remotes/origin/staging "$2"
-  EVENT=$3 WORKFLOW=$4 BRANCH=$5 HEAD_SHA=$6 TARGET=$7 REF=$8 "$here/plan-deploy.sh" 2>/dev/null | tr '\n' ' ' || echo ERROR
+  EVENT=$2 HEAD_SHA=$3 TARGET=$4 REF=$5 "$here/plan-deploy.sh" 2>/dev/null | tr '\n' ' ' || echo ERROR
 }
 
 # The whole output must match (a field added or changed does not go unseen); an
@@ -36,44 +34,30 @@ check() {
   fi
 }
 
-check "CI green on the tip of staging: staging only" \
-  "sha=$c4 version=v1.1.0-1-g${c4:0:7} rollback=false staging=true production=false " \
-  "$(plan "$c3" "$c4" workflow_run CI staging "$c4" "" "")"
-check "CI on staging, no longer the tip: nothing" \
-  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=false staging=false production=false " \
-  "$(plan "$c3" "$c4" workflow_run CI staging "$c2" "" "")"
-check "CI on main: nothing (the release follows)" \
-  "sha=$c3 version=v1.1.0 rollback=false staging=false production=false " \
-  "$(plan "$c3" "$c4" workflow_run CI main "$c3" "" "")"
-check "Release on main, tagged: production only" \
-  "sha=$c3 version=v1.1.0 rollback=false staging=false production=true " \
-  "$(plan "$c3" "$c4" workflow_run Release main "$c3" "" "")"
-check "Release on main, tagged but no longer the tip: production still" \
-  "sha=$c3 version=v1.1.0 rollback=false staging=false production=true " \
-  "$(plan "$c4" "$c4" workflow_run Release main "$c3" "" "")"
-check "Release on main, untagged: nothing" \
-  "sha=$c4 version=v1.1.0-1-g${c4:0:7} rollback=false staging=false production=false " \
-  "$(plan "$c4" "$c4" workflow_run Release main "$c4" "" "")"
-check "Release on staging: nothing" \
-  "sha=$c3 version=v1.1.0 rollback=false staging=false production=false " \
-  "$(plan "$c3" "$c4" workflow_run Release staging "$c3" "" "")"
+check "tip, untagged: staging only, version since the last tag" \
+  "sha=$c4 version=v1.1.0-1-g${c4:0:7} rollback=false staging=true production=false superseded=false " \
+  "$(plan "$c4" workflow_run "$c4" "" "")"
+check "tip, tagged: staging then production" \
+  "sha=$c3 version=v1.1.0 rollback=false staging=true production=true superseded=false " \
+  "$(plan "$c3" workflow_run "$c3" "" "")"
+check "tagged but no longer the tip: production only" \
+  "sha=$c3 version=v1.1.0 rollback=false staging=false production=true superseded=true " \
+  "$(plan "$c4" workflow_run "$c3" "" "")"
+check "untagged and no longer the tip: nothing" \
+  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=false staging=false production=false superseded=true " \
+  "$(plan "$c4" workflow_run "$c2" "" "")"
 check "rollback to staging by tag" \
-  "sha=$c1 version=v1.0.0 rollback=true staging=true production=false " \
-  "$(plan "$c3" "$c4" workflow_dispatch "" "" "" staging v1.0.0)"
-check "rollback to staging with a commit of staging only" \
-  "sha=$c4 version=v1.1.0-1-g${c4:0:7} rollback=true staging=true production=false " \
-  "$(plan "$c3" "$c4" workflow_dispatch "" "" "" staging "$c4")"
+  "sha=$c1 version=v1.0.0 rollback=true staging=true production=false superseded=false " \
+  "$(plan "$c4" workflow_dispatch "" staging v1.0.0)"
 check "rollback to production by sha" \
-  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=true staging=false production=true " \
-  "$(plan "$c3" "$c4" workflow_dispatch "" "" "" production "$c2")"
-check "rollback to production with a commit of staging only" "ERROR" \
-  "$(plan "$c3" "$c4" workflow_dispatch "" "" "" production "$c4")"
-check "rollback to a commit that is in neither branch" "ERROR" \
-  "$(plan "$c2" "$c2" workflow_dispatch "" "" "" staging "$c4")"
+  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=true staging=false production=true superseded=false " \
+  "$(plan "$c4" workflow_dispatch "" production "$c2")"
+check "rollback to a commit that is not in main" "ERROR" \
+  "$(plan "$c2" workflow_dispatch "" staging "$c4")"
 check "rollback with a ref that looks like an option" "ERROR" \
-  "$(plan "$c4" "$c4" workflow_dispatch "" "" "" staging --all)"
+  "$(plan "$c4" workflow_dispatch "" staging --all)"
 check "rollback to an unknown ref" "ERROR" \
-  "$(plan "$c4" "$c4" workflow_dispatch "" "" "" staging nope)"
+  "$(plan "$c4" workflow_dispatch "" staging nope)"
 
 # A repository without any tag: the version is made from the commit.
 untagged=$(mktemp -d)
@@ -88,7 +72,7 @@ trap 'rm -rf "$repo" "$untagged"' EXIT
 u=$(git -C "$untagged" rev-parse HEAD)
 cd "$untagged"
 check "no tag at all: version made from the commit" \
-  "sha=$u version=v0.0.0-${u:0:7} rollback=false staging=true production=false " \
-  "$(plan "$u" "$u" workflow_run CI staging "$u" "" "")"
+  "sha=$u version=v0.0.0-${u:0:7} rollback=false staging=true production=false superseded=false " \
+  "$(plan "$u" workflow_run "$u" "" "")"
 
 exit $failed

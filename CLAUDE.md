@@ -102,8 +102,6 @@ Règles de dépendance :
 
 ## Workflow attendu
 
-Branches : le travail se fait sur des branches de ticket qui visent `staging` (déployée en staging) ; la pull request `staging` → `main` est la promotion vers la production (`docs/deploiement.md`).
-
 1. Lis la partie du README concernée. S'il y a un ❓ ou un 🟡 qui bloque, pose la question.
 2. Fais un court plan avant les changements importants (plusieurs fichiers, migration, nouveau module).
 3. Pour `scoring` et les règles de temps : écris d'abord les tests.
@@ -112,12 +110,12 @@ Branches : le travail se fait sur des branches de ticket qui visent `staging` (d
 6. **Git** : une fois format, lint, tests et relectures passés, tu **commits et pushes sans demander l'accord** (en anglais, un changement cohérent par commit, sur la branche du ticket). Tu présentes ensuite les fichiers modifiés, le résumé du diff et les commits poussés.
    - Tu peux utiliser `git status`, `git diff`, `git log`, `git add`, `git commit` et `git push` (branche de travail) librement.
    - **Pull request** : une fois ouverte, et après chaque push, attends la fin de la CI (`Monitor` sur `gh pr checks`, sans sondage), vérifie qu'elle est entièrement verte, puis lis tous les commentaires (`gh pr view --comments`, commentaires en ligne). Applique les corrections fondées (commit et push sur la même branche) ou explique pourquoi tu ne les suis pas, et recommence jusqu'à une CI verte sans commentaire en suspens. Ne dis un ticket terminé qu'à ce moment-là ; un point qui touche une règle produit (🟡 ou ❓) ou le périmètre se demande à l'utilisateur.
-   - Push vers `main` ou `staging`, suppression de branche distante, merge, rebase, tag, reset, `gh pr create/merge` : uniquement sur demande explicite de l'utilisateur, une action à la fois.
+   - Push vers `main`, suppression de branche distante, merge, rebase, tag, reset, `gh pr create/merge` : uniquement sur demande explicite de l'utilisateur, une action à la fois.
    - Push forcé, `git reset --hard`, `git clean`, `--no-verify` : interdits (bloqués par la configuration).
 
 ## Ne jamais
 
-- Pousser sur `main` ou `staging`, fusionner une pull request, ou contourner une confirmation ou un refus de la configuration (autre commande git équivalente, script, `git -C`, etc.).
+- Pousser sur `main`, fusionner une pull request, ou contourner une confirmation ou un refus de la configuration (autre commande git équivalente, script, `git -C`, etc.).
 - Lancer `terraform apply`, `terraform destroy` ou un déploiement sans demande explicite.
 - Modifier une migration déjà appliquée, ou utiliser `AutoMigrate`.
 - Appeler `time.Now()` dans la logique métier.
