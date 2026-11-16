@@ -8,7 +8,7 @@ Quand une pull request est fusionnée dans `main` et que la CI est verte, l'API 
 
 | Événement | Staging | Production |
 |---|---|---|
-| Fusion dans `main`, CI verte, workflow `Release` terminé | déployé automatiquement (le sommet de `main`) | seulement si le commit a reçu un tag de version `v*`, et **après l'approbation** de l'Environment `production` |
+| Fusion dans `main`, CI verte, workflow `Release` terminé | déployé automatiquement (le sommet de `main`) | si le commit a reçu un tag de version `v*` (à chaque fusion, le workflow `Release` en pose un), et **après l'approbation** de l'Environment `production` |
 | `workflow_dispatch` (retour arrière) | redéploie un commit ou un tag précédent | idem, avec la même approbation |
 
 Le workflow ne s'exécute jamais sur une pull request. La production ne part qu'après un staging réussi (sauf retour arrière). Un tag de version est créé par `release.yml` (`docs/release.md`) ; comme un tag posé avec le jeton d'un workflow ne déclenche pas d'autre workflow, c'est la fin du workflow `Release` qui lance le déploiement, et celui-ci regarde si le commit porte un tag.
@@ -49,6 +49,11 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
 
    Pour les deux Environments : **Deployment branches = Selected branches, `main` seulement**. Pour `production` : **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity refuse de toute façon un jeton qui ne vient pas de `main`. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
 3. **Variables du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_STAGING=true` quand l'environnement staging est prêt, `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elles ne valent pas `true`, le job correspondant est ignoré : une fusion n'échoue pas avant que l'infrastructure existe.
+   ```
+   gh variable set DEPLOY_STAGING --body true
+   gh variable set DEPLOY_PRODUCTION --body true   # après avoir créé l'Environment production et ses reviewers
+   ```
+   **Sans ces variables, rien n'est déployé** : le workflow `Deploy` se termine en succès avec les jobs `staging` et `production` ignorés.
 
 ## Retour arrière
 
