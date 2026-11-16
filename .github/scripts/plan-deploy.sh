@@ -31,7 +31,7 @@ fi
 
 version=$(release_tags "$sha" | sort -V | tail -n 1)
 # Between two releases: the last version, the commits since, the commit.
-[ -n "$version" ] || version=$(git describe --tags --match 'v[0-9]*' --always "$sha")
+[ -n "$version" ] || version=$(git describe --tags --match 'v[0-9]*' --exclude 'v*-*' --always "$sha")
 # A repository without any tag: git describe gives the bare commit.
 case "$version" in v*) ;; *) version=v0.0.0-$version ;; esac
 
