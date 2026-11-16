@@ -9,6 +9,9 @@
 # hand (a rollback run).
 set -euo pipefail
 
+# The version tags of a commit, without the pre-releases (v1.2.3-rc1).
+release_tags() { git tag --points-at "$1" --list 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; }
+
 staging=false
 production=false
 rollback=false
@@ -23,10 +26,10 @@ if [ "$EVENT" = workflow_dispatch ]; then
 else
   sha=$HEAD_SHA
   # A version tag on the commit: the release goes on to production.
-  if [ -n "$(git tag --points-at "$sha" --list 'v[0-9]*')" ]; then production=true; fi
+  if [ -n "$(release_tags "$sha")" ]; then production=true; fi
 fi
 
-version=$(git tag --points-at "$sha" --list 'v[0-9]*' | sort -V | tail -n 1)
+version=$(release_tags "$sha" | sort -V | tail -n 1)
 # Between two releases: the last version, the commits since, the commit.
 [ -n "$version" ] || version=$(git describe --tags --match 'v[0-9]*' --always "$sha")
 # A repository without any tag: git describe gives the bare commit.

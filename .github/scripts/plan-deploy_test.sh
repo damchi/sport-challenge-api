@@ -59,6 +59,13 @@ check "rollback with a ref that looks like an option" "ERROR" \
 check "rollback to an unknown ref" "ERROR" \
   "$(plan "$c4" workflow_dispatch "" staging nope)"
 
+# A pre-release tag is no version: nothing goes to production.
+git tag v1.2.0-rc1 "$c4"
+check "Release on main, only a pre-release tag: nothing" \
+  "sha=$c4 version=v1.1.0-1-g${c4:0:7} rollback=false staging=false production=false " \
+  "$(plan "$c4" workflow_run "$c4" "" "")"
+git tag -d v1.2.0-rc1 >/dev/null
+
 # A repository without any tag: the version is made from the commit.
 untagged=$(mktemp -d)
 trap 'rm -rf "$repo" "$untagged"' EXIT
