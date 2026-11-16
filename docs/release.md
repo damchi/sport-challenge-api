@@ -1,24 +1,18 @@
 # Versions et informations de build
 
-Chaque build est identifiable : une **version sémantique** (`vMAJOR.MINOR.PATCH`), le **commit** exact dont il vient, et une image Docker taguée en conséquence. La version n'est jamais choisie à la main : elle est **calculée à chaque fusion sur `main`**, d'après les messages de commit.
+Chaque build est identifiable : une **version sémantique** (`vMAJOR.MINOR.PATCH`), le **commit** exact dont il vient, et une image Docker taguée en conséquence. Chaque fusion sur `main` (CI verte) publie une nouvelle version : le **correctif** monte d'un cran, **quels que soient les messages de commit**.
 
-> Les tags et les releases sont créés par le workflow `release.yml`, jamais à la main, ni par moi (Claude) : on ne pose pas de tag sans demande explicite.
+> Les tags et les releases sont créés par le workflow `release.yml`. On ne pose pas de tag à la main (ni moi, Claude) sans demande explicite.
 
 ## Comment la version est calculée
 
-Après une CI verte sur `main`, le workflow `.github/workflows/release.yml` lit les messages de commit depuis le dernier tag `v*` et applique les règles des commits conventionnels (`.github/scripts/next-version.sh`) :
+Après une CI verte sur `main`, le workflow `.github/workflows/release.yml` prend le dernier tag `v*` et monte le **correctif** (`v1.2.3` → `v1.2.4`, `.github/scripts/next-version.sh`). Les messages de commit n'entrent pas en compte : ils sont trop ambigus pour décider d'un déploiement.
 
-| Message de commit | Effet |
-|---|---|
-| `feat(...)` : une nouvelle fonction | version **mineure** (`v1.2.3` → `v1.3.0`) |
-| `fix(...)` : une correction | **correctif** (`v1.2.3` → `v1.2.4`) |
-| `feat(...)!:` ou `fix!:` (un `!` avant les deux-points), ou une ligne `BREAKING CHANGE: ...` dans le corps | version **majeure** (`v1.2.3` → `v2.0.0`) |
-| `docs`, `chore`, `ci`, `test`, `refactor`, `perf`, les fusions de pull request… | aucune version |
-
-- La plus haute des règles l'emporte quand plusieurs commits s'accumulent.
-- **Avant la 1.0** (version majeure 0), un changement cassant ne monte que la version mineure (`v0.4.1` → `v0.5.0`).
-- **Première version** : `v0.1.0`, au premier `feat` ou `fix` quand aucun tag n'existe.
-- Sans commit qui appelle une version, rien n'est publié. Un commit qui porte déjà un tag n'est pas publié deux fois.
+- **Première version** : `v0.1.0`, quand aucun tag n'existe.
+- **Version mineure ou majeure** : se décide à la main. Juste après la fusion, avant la fin de la CI (quelques minutes : passé ce délai, le correctif est déjà publié), créer la release voulue sur le commit de fusion (`gh release create v0.2.0 --target <sha> --generate-notes`) : un commit qui porte déjà un tag `v*` n'est pas publié deux fois, et c'est ce tag que le déploiement envoie en production.
+- Un commit qui porte déjà un tag n'est pas publié deux fois.
+- **Chaque fusion, même de documentation seule, publie une version** et demande donc une mise en production, soumise à l'approbation de l'Environment `production` (`docs/deploiement.md`) : c'est un choix assumé, pour ne pas dépendre des messages de commit.
+- Les tags de pré-version (`v1.2.3-rc1`) sont ignorés pour calculer la suivante.
 
 Les règles sont testées par `.github/scripts/next-version_test.sh`, lancé par la CI.
 
@@ -27,8 +21,6 @@ Les règles sont testées par `.github/scripts/next-version_test.sh`, lancé par
 1. Calcule la version suivante (voir ci-dessus).
 2. **Construit l'image** avec la version, le commit et sa date (`make docker-build` fait de même en local), tagguée `<version>` et `<sha court>`, **jamais `latest`**. Si le build échoue, aucun tag n'est créé. Cette image n'est pas poussée ici : le déploiement continu (`docs/deploiement.md`), qui s'authentifie à GCP, reconstruit et pousse celle qu'il déploie.
 3. **Crée le tag et la release GitHub**, dont les notes sont générées automatiquement à partir des pull requests fusionnées. Il n'y a pas de `CHANGELOG.md` : les notes de release en tiennent lieu.
-
-Pour que la version soit bien calculée, **les messages de commit suivent la convention** : `type(portée): résumé` en anglais, par exemple `feat(activity): add speed filter` ou `fix(worker): retry the Auth0 deletion`. Un `!` ou une ligne `BREAKING CHANGE:` signale un changement cassant.
 
 ## Retrouver ce qui tourne
 
