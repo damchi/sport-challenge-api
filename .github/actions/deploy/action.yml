@@ -60,6 +60,11 @@ runs:
         SHA: ${{ inputs.sha }}
         PREFIX: ${{ inputs.name-prefix }}
       run: |
+        # Written to $GITHUB_ENV and used in resource names: a strict format.
+        if [[ ! "$PREFIX" =~ ^[a-z][a-z0-9-]{0,30}$ ]]; then
+          echo "::error::invalid name-prefix '$PREFIX'"
+          exit 1
+        fi
         {
           echo "IMAGE_REPOSITORY=$REGION-docker.pkg.dev/$PROJECT/sport-challenge/api"
           echo "SHORT_SHA=${SHA:0:7}"
@@ -119,17 +124,27 @@ runs:
 
     # Cloud Run answers /healthz itself on the run.app URL (a 404 that never
     # reaches the API), so the deployed commit is read from the revision that
-    # serves the traffic, then /readyz checks that the API and its database answer.
+    # serves all the traffic (the latest one, and ready), then /readyz checks
+    # that the API and its database answer.
     - name: Smoke test
       shell: bash
       env:
         PROJECT: ${{ inputs.project }}
         REGION: ${{ inputs.region }}
       run: |
-        image=$(gcloud run services describe "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
-          --format='value(spec.template.spec.containers[0].image)')
+        status=$(gcloud run services describe "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
+          --format=json | jq -c .status)
+        created=$(jq -r .latestCreatedRevisionName <<<"$status")
+        ready=$(jq -r .latestReadyRevisionName <<<"$status")
+        serving=$(jq -r '[.traffic[] | select(.percent == 100)][0].revisionName // empty' <<<"$status")
+        if [ "$ready" != "$created" ] || [ "$serving" != "$created" ]; then
+          echo "::error::the new revision $created does not serve all the traffic (ready: $ready, serving: ${serving:-several revisions})"
+          exit 1
+        fi
+        image=$(gcloud run revisions describe "$serving" --project="$PROJECT" --region="$REGION" \
+          --format='value(spec.containers[0].image)')
         if [ "$image" != "$IMAGE_REPOSITORY:$SHORT_SHA" ]; then
-          echo "::error::the API runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA"
+          echo "::error::the revision $serving runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA"
           exit 1
         fi
         url=$(gcloud run services describe "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
