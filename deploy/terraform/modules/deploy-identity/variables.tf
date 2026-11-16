@@ -14,6 +14,11 @@ variable "github_repository" {
   type        = string
 }
 
+variable "github_repository_id" {
+  description = "Numeric id of that repository (gh api repos/<owner>/<name> -q .id)."
+  type        = string
+}
+
 variable "github_environment" {
   description = "GitHub Environment of the deploy job (staging or production): only that job can use the service account."
   type        = string

@@ -106,3 +106,9 @@ variable "github_repository" {
   type        = string
   default     = "damchi/sport-challenge-api"
 }
+
+variable "github_repository_id" {
+  description = "Numeric id of that repository (gh api repos/<owner>/<name> -q .id)."
+  type        = string
+  default     = "1438448292"
+}

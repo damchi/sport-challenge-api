@@ -71,122 +71,35 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' && needs.plan.outputs.staging == 'true' &&
       vars.DEPLOY_STAGING == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: staging
-    # One deployment at a time, and a running one is never cancelled.
-    concurrency:
-      group: deploy-staging
-      cancel-in-progress: false
     permissions:
       contents: read
-      id-token: write # the OIDC token exchanged for GCP credentials
-    steps:
-      # The deployment code always comes from main (a rollback must not run the
-      # action of an old commit, with the right to deploy); the commit to deploy
-      # is only what the image is built from.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-          path: source
-          fetch-depth: 0 # the tags of the versions released since
-          persist-credentials: false
-      # The approval can come late: a newer version may have been released
-      # meanwhile, and it goes to production instead of this one (never an
-      # older version after a newer one, and never a migration of an older
-      # image on a newer database). A rollback is deliberate: it is not checked.
-      - name: Newer version
-        id: newer
-        if: needs.plan.outputs.rollback != 'true'
-        working-directory: source
-        env:
-          SHA: ${{ needs.plan.outputs.sha }}
-          VERSION: ${{ needs.plan.outputs.version }}
-        run: |
-          newer=$(git tag --contains "$SHA" --list 'v[0-9]*' | grep -vxF "$VERSION" || true)
-          if [ -n "$newer" ]; then
-            echo "::notice::$VERSION is not deployed: $(echo $newer) was released since"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-        shell: bash
-      - uses: ./.github/actions/deploy
-        if: steps.newer.outputs.skip != 'true'
-        with:
-          project: ${{ vars.GCP_PROJECT_ID }}
-          region: ${{ vars.GCP_REGION }}
-          workload-identity-provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service-account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
-          sha: ${{ needs.plan.outputs.sha }}
-          version: ${{ needs.plan.outputs.version }}
-          rollback: ${{ needs.plan.outputs.rollback }}
-          source-directory: source
+      id-token: write
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: staging
+      sha: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.version }}
+      rollback: ${{ needs.plan.outputs.rollback }}
 
   production:
     name: production
     needs: [plan, staging]
     # After a staging that succeeded. A rollback has no staging step, and a
     # version that is no longer the tip of main was superseded by a commit that
-    # went to staging (it contains this version).
+    # went to staging (it contains this version). Required reviewers are set on
+    # the production Environment: the job waits for them.
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && needs.plan.outputs.production == 'true' &&
       vars.DEPLOY_PRODUCTION == 'true' &&
       (needs.staging.result == 'success' ||
        (needs.staging.result == 'skipped' &&
         (needs.plan.outputs.rollback == 'true' || needs.plan.outputs.superseded == 'true')))
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Required reviewers are set on this Environment: the job waits for them.
-    environment: production
-    concurrency:
-      group: deploy-production
-      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
-    steps:
-      # The deployment code always comes from main (a rollback must not run the
-      # action of an old commit, with the right to deploy); the commit to deploy
-      # is only what the image is built from.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-          path: source
-          fetch-depth: 0 # the tags of the versions released since
-          persist-credentials: false
-      # The approval can come late: a newer version may have been released
-      # meanwhile, and it goes to production instead of this one (never an
-      # older version after a newer one, and never a migration of an older
-      # image on a newer database). A rollback is deliberate: it is not checked.
-      - name: Newer version
-        id: newer
-        if: needs.plan.outputs.rollback != 'true'
-        working-directory: source
-        env:
-          SHA: ${{ needs.plan.outputs.sha }}
-          VERSION: ${{ needs.plan.outputs.version }}
-        run: |
-          newer=$(git tag --contains "$SHA" --list 'v[0-9]*' | grep -vxF "$VERSION" || true)
-          if [ -n "$newer" ]; then
-            echo "::notice::$VERSION is not deployed: $(echo $newer) was released since"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-        shell: bash
-      - uses: ./.github/actions/deploy
-        if: steps.newer.outputs.skip != 'true'
-        with:
-          project: ${{ vars.GCP_PROJECT_ID }}
-          region: ${{ vars.GCP_REGION }}
-          workload-identity-provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service-account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
-          sha: ${{ needs.plan.outputs.sha }}
-          version: ${{ needs.plan.outputs.version }}
-          rollback: ${{ needs.plan.outputs.rollback }}
-          source-directory: source
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: production
+      sha: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.version }}
+      rollback: ${{ needs.plan.outputs.rollback }}

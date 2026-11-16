@@ -200,6 +200,7 @@ module "deploy_identity" {
 
   region                   = var.region
   github_repository        = var.github_repository
+  github_repository_id     = var.github_repository_id
   github_environment       = "staging"
   repository_id            = module.artifact_registry.repository_id
   service_name             = module.cloud_run.api_service_name

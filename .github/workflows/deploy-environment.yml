@@ -1,0 +1,85 @@
+name: Deploy to an environment
+
+# Called by deploy.yml, once for staging and once for production: the same
+# steps, in the GitHub Environment of the same name (its variables, and for
+# production its required reviewers). See docs/deploiement.md.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: staging or production
+        type: string
+        required: true
+      sha:
+        description: Commit to deploy
+        type: string
+        required: true
+      version:
+        description: Version of the build
+        type: string
+        required: true
+      rollback:
+        description: '"true" to redeploy an image that is already in Artifact Registry'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    # One deployment at a time per environment, and a running one is never cancelled.
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # the OIDC token exchanged for GCP credentials
+    steps:
+      # The deployment code always comes from main (a rollback must not run the
+      # action of an old commit, with the right to deploy); the commit to deploy
+      # is only what the image is built from.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          path: source
+          fetch-depth: 0 # the tags of the versions released since
+          persist-credentials: false
+
+      # The approval can come late: a newer version may have been released
+      # meanwhile, and it goes to production instead of this one (never an older
+      # version after a newer one, and never a migration of an older image on a
+      # newer database). A rollback is deliberate: it is not checked.
+      - name: Newer version
+        id: newer
+        if: inputs.rollback != 'true'
+        working-directory: source
+        env:
+          SHA: ${{ inputs.sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          newer=$("$GITHUB_WORKSPACE/.github/scripts/newer-versions.sh" "$SHA")
+          if [ -n "$newer" ]; then
+            echo "::notice::$VERSION is not deployed: $(echo $newer) was released since"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/deploy
+        if: steps.newer.outputs.skip != 'true'
+        with:
+          project: ${{ vars.GCP_PROJECT_ID }}
+          region: ${{ vars.GCP_REGION }}
+          workload-identity-provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service-account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          sha: ${{ inputs.sha }}
+          version: ${{ inputs.version }}
+          rollback: ${{ inputs.rollback }}
+          source-directory: source

@@ -61,7 +61,9 @@ jobs:
 
       # The rules that decide what the deployment deploys (deploy.yml).
       - name: Deploy plan script
-        run: .github/scripts/plan-deploy_test.sh
+        run: |
+          .github/scripts/plan-deploy_test.sh
+          .github/scripts/newer-versions_test.sh
 
   migrations:
     name: migrations up, down, up

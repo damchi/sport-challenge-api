@@ -17,8 +17,9 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 
   # No token from another repository, nor from a branch other than main, is
   # accepted: the subject of an Environment job does not carry the branch, so a
-  # modified workflow on another branch would otherwise be let in.
-  attribute_condition = "assertion.repository == \"${var.github_repository}\" && assertion.ref == \"refs/heads/main\""
+  # modified workflow on another branch would otherwise be let in. The numeric
+  # id also rules out a repository that took the name of a deleted one.
+  attribute_condition = "assertion.repository == \"${var.github_repository}\" && assertion.repository_id == \"${var.github_repository_id}\" && assertion.ref == \"refs/heads/main\""
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"

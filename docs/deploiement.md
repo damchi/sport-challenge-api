@@ -1,6 +1,6 @@
 # Déploiement continu sur GCP
 
-Quand une pull request est fusionnée dans `main` et que la CI est verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés sur Cloud Run sans action manuelle. Le workflow est `.github/workflows/deploy.yml` ; les étapes communes aux deux environnements sont dans l'action locale `.github/actions/deploy`.
+Quand une pull request est fusionnée dans `main` et que la CI est verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés sur Cloud Run sans action manuelle. Le workflow est `.github/workflows/deploy.yml` ; les étapes d'un environnement sont dans le workflow réutilisable `.github/workflows/deploy-environment.yml` (appelé une fois pour staging, une fois pour production), qui utilise l'action locale `.github/actions/deploy`.
 
 > **Le workflow ne lance jamais `terraform apply`.** L'infrastructure (dont le compte de déploiement décrit plus bas) s'applique à la main, sur demande explicite. Le workflow ne fait que publier une image et mettre à jour Cloud Run.
 
@@ -23,7 +23,7 @@ Le workflow ne s'exécute jamais sur une pull request. La production ne part qu'
 
 Un seul déploiement à la fois par environnement (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans les jobs de déploiement. Les actions sont épinglées par SHA.
 
-Si le commit n'est plus le sommet de `main` quand le workflow arrive, son déploiement en staging est laissé au commit plus récent (qui le contient). Une version taguée n'est pas perdue pour autant : elle part quand même en production, après l'approbation, sans passer par un staging de ce commit exact. Ces règles sont dans `.github/scripts/plan-deploy.sh`, testé par la CI.
+Si le commit n'est plus le sommet de `main` quand le workflow arrive, son déploiement en staging est laissé au commit plus récent (qui le contient). Une version taguée n'est pas perdue pour autant : elle part quand même en production, après l'approbation, sans passer par un staging de ce commit exact. Ces règles sont dans `.github/scripts/plan-deploy.sh`, testé par la CI. Après l'approbation, le job de production saute une version si une plus récente a été publiée entre-temps (`.github/scripts/newer-versions.sh`, testé aussi) : jamais une version plus ancienne après une plus récente.
 
 Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. La production reconstruit l'image depuis le même commit que le staging (les deux environnements ont leur propre registre) : le build n'étant pas garanti identique au bit près, c'est le commit qui fait foi, pas le condensat de l'image.
 
@@ -31,7 +31,7 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
 
 À faire une fois par environnement, **après** le premier `terraform apply` de `docs/terraform.md` (sur demande explicite).
 
-1. **Terraform** : le module `deploy-identity` crée le pool et le fournisseur Workload Identity (seul ce dépôt est accepté), le compte de service `sport-challenge-deploy` et ses droits : écrire dans le dépôt Artifact Registry, `roles/run.developer` sur le service et sur les jobs (dont les migrations), et l'usage des comptes de service d'exécution. Seul un job du dépôt, sur `main`, qui tourne dans l'Environment GitHub de l'environnement (`staging` ou `production`) peut prendre ce compte. La variable `github_repository` donne le dépôt (par défaut `damchi/sport-challenge-api`).
+1. **Terraform** : le module `deploy-identity` crée le pool et le fournisseur Workload Identity (seul ce dépôt est accepté, par son nom et son identifiant numérique, variable `github_repository_id`), le compte de service `sport-challenge-deploy` et ses droits : écrire dans le dépôt Artifact Registry, `roles/run.developer` sur le service et sur les jobs (dont les migrations), et l'usage des comptes de service d'exécution. Seul un job du dépôt, sur `main`, qui tourne dans l'Environment GitHub de l'environnement (`staging` ou `production`) peut prendre ce compte. La variable `github_repository` donne le dépôt (par défaut `damchi/sport-challenge-api`).
 
    ```
    terraform output workload_identity_provider
