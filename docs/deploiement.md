@@ -17,9 +17,9 @@ Le workflow ne s'exécute jamais sur une pull request. Un tag de version est cr�
 
 1. Authentification à GCP par **Workload Identity Federation** : le jeton OIDC du job GitHub est échangé contre les droits du compte de service de déploiement. Aucune clé JSON, aucun secret.
 2. Construction de l'image avec la version, le commit et la date (`deploy/Dockerfile`), tagguée `<sha court>` et `<version>` (jamais `latest`), poussée vers Artifact Registry. Hors d'un commit tagué, la version est celle de `git describe` (`v0.3.0-2-gabc1234`).
-3. **Migrations** : mise à jour de l'image du job `sport-challenge-migrate`, puis exécution avec `--wait`. Si le job échoue (migration en échec, base `dirty`), le déploiement s'arrête là (voir `docs/migrations.md`).
-4. Mise à jour de l'image du service `sport-challenge-api` et des jobs `sport-challenge-worker-close-weeks` et `sport-challenge-worker-finalize-challenges`, avec l'image tagguée par le SHA court.
-5. **Test de fumée** : `GET <api>/healthz` doit répondre avec le commit déployé (une douzaine d'essais, 10 s d'écart) ; sinon le workflow échoue.
+3. **Migrations** : mise à jour de l'image du job `<préfixe>-migrate`, puis exécution avec `--wait`. Si le job échoue (migration en échec, base `dirty`), le déploiement s'arrête là (voir `docs/migrations.md`).
+4. Mise à jour de l'image du service `<préfixe>-api` et des jobs `<préfixe>-worker-close-weeks` et `<préfixe>-worker-finalize-challenges`, avec l'image tagguée par le SHA court. Le préfixe vaut `sport-challenge` (les noms de `deploy/terraform`), ou la variable `CLOUD_RUN_NAME_PREFIX` de l'Environment pour des ressources créées à la main (par exemple `sc`).
+5. **Test de fumée** : la révision qui sert le trafic doit utiliser l'image du commit déployé, puis `GET <api>/readyz` doit répondre (une douzaine d'essais, 10 s d'écart) ; sinon le workflow échoue. Sur l'URL `run.app`, Cloud Run répond lui-même à `/healthz` (404) : la requête n'atteint pas l'API.
 
 Un seul déploiement à la fois par environnement (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans les jobs de déploiement. Les actions sont épinglées par SHA.
 
@@ -46,6 +46,7 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
    | `GCP_REGION` | `northamerica-northeast1` |
    | `GCP_WORKLOAD_IDENTITY_PROVIDER` | sortie `workload_identity_provider` |
    | `GCP_DEPLOY_SERVICE_ACCOUNT` | sortie `deploy_service_account` |
+   | `CLOUD_RUN_NAME_PREFIX` | facultatif : préfixe des ressources Cloud Run si elles ne viennent pas de Terraform (`sc` pour `sc-api`, `sc-migrate`, `sc-worker-*`) |
 
    Pour les deux Environments : **Deployment branches = Selected branches, `main` seulement**. Pour `production` : **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity refuse de toute façon un jeton qui ne vient pas de `main`. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
 3. **Variables du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_STAGING=true` quand l'environnement staging est prêt (il ne sert qu'aux déploiements manuels), `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elles ne valent pas `true`, le job correspondant est ignoré : une fusion n'échoue pas avant que l'infrastructure existe.
@@ -57,7 +58,7 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
 
 ## Retour arrière
 
-Onglet Actions > `Deploy` > Run workflow : choisir l'environnement et un **tag de version ou un SHA** (de `main`) dont l'image est encore dans Artifact Registry. Le workflow redéploie cette image **sans la reconstruire et sans migrations** : les migrations d'une image plus ancienne ne connaissent pas les versions plus récentes de la base. Il faut donc que le schéma actuel reste compatible avec l'ancien code (ce que vise chaque migration), sinon corriger en avant ; voir `docs/migrations.md`. Le test de fumée vérifie ensuite que le commit redéployé est bien celui qui répond. En production, la même approbation s'applique.
+Onglet Actions > `Deploy` > Run workflow : choisir l'environnement et un **tag de version ou un SHA** (de `main`) dont l'image est encore dans Artifact Registry. Le workflow redéploie cette image **sans la reconstruire et sans migrations** : les migrations d'une image plus ancienne ne connaissent pas les versions plus récentes de la base. Il faut donc que le schéma actuel reste compatible avec l'ancien code (ce que vise chaque migration), sinon corriger en avant ; voir `docs/migrations.md`. Le test de fumée vérifie ensuite que la révision servie utilise bien l'image redéployée. En production, la même approbation s'applique.
 
 Le plus rapide reste de revenir à la révision précédente dans Cloud Run (`docs/migrations.md`, section Retour arrière) ; ce workflow sert à revenir à une version précise par un chemin tracé.
 

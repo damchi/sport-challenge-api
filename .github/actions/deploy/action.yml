@@ -26,6 +26,13 @@ inputs:
   source-directory:
     description: Checkout of the commit to deploy (what the image is built from).
     required: true
+  name-prefix:
+    description: >-
+      Prefix of the Cloud Run service and jobs: <prefix>-api, <prefix>-migrate,
+      <prefix>-worker-<task>. The Terraform of deploy/terraform names them
+      sport-challenge-*; resources created by hand may use another prefix.
+    required: false
+    default: sport-challenge
   rollback:
     description: >-
       "true" to deploy an image that is already in Artifact Registry, without
@@ -43,18 +50,22 @@ runs:
 
     - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
-    # Names fixed by deploy/terraform: the repository of the artifact-registry
-    # module, the service and the jobs of the cloud-run module.
+    # The repository of the artifact-registry module, and the service and the
+    # jobs, named <prefix>-api, <prefix>-migrate and <prefix>-worker-<task>.
     - name: Names
       shell: bash
       env:
         PROJECT: ${{ inputs.project }}
         REGION: ${{ inputs.region }}
         SHA: ${{ inputs.sha }}
+        PREFIX: ${{ inputs.name-prefix }}
       run: |
         {
           echo "IMAGE_REPOSITORY=$REGION-docker.pkg.dev/$PROJECT/sport-challenge/api"
           echo "SHORT_SHA=${SHA:0:7}"
+          echo "API_SERVICE=$PREFIX-api"
+          echo "MIGRATE_JOB=$PREFIX-migrate"
+          echo "WORKER_JOB_PREFIX=$PREFIX-worker"
           echo "WORKER_TASKS=close-weeks finalize-challenges"
         } >> "$GITHUB_ENV"
 
@@ -89,9 +100,9 @@ runs:
         PROJECT: ${{ inputs.project }}
         REGION: ${{ inputs.region }}
       run: |
-        gcloud run jobs update sport-challenge-migrate --project="$PROJECT" --region="$REGION" \
+        gcloud run jobs update "$MIGRATE_JOB" --project="$PROJECT" --region="$REGION" \
           --image="$IMAGE_REPOSITORY:$SHORT_SHA"
-        gcloud run jobs execute sport-challenge-migrate --project="$PROJECT" --region="$REGION" --wait
+        gcloud run jobs execute "$MIGRATE_JOB" --project="$PROJECT" --region="$REGION" --wait
 
     - name: Deploy the API and the worker
       shell: bash
@@ -99,31 +110,37 @@ runs:
         PROJECT: ${{ inputs.project }}
         REGION: ${{ inputs.region }}
       run: |
-        gcloud run services update sport-challenge-api --project="$PROJECT" --region="$REGION" \
+        gcloud run services update "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
           --image="$IMAGE_REPOSITORY:$SHORT_SHA"
         for task in $WORKER_TASKS; do
-          gcloud run jobs update "sport-challenge-worker-$task" --project="$PROJECT" --region="$REGION" \
+          gcloud run jobs update "$WORKER_JOB_PREFIX-$task" --project="$PROJECT" --region="$REGION" \
             --image="$IMAGE_REPOSITORY:$SHORT_SHA"
         done
 
-    # /healthz answers with the commit the binary was built from (docs/release.md).
+    # Cloud Run answers /healthz itself on the run.app URL (a 404 that never
+    # reaches the API), so the deployed commit is read from the revision that
+    # serves the traffic, then /readyz checks that the API and its database answer.
     - name: Smoke test
       shell: bash
       env:
         PROJECT: ${{ inputs.project }}
         REGION: ${{ inputs.region }}
-        SHA: ${{ inputs.sha }}
       run: |
-        url=$(gcloud run services describe sport-challenge-api --project="$PROJECT" --region="$REGION" \
+        image=$(gcloud run services describe "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
+          --format='value(spec.template.spec.containers[0].image)')
+        if [ "$image" != "$IMAGE_REPOSITORY:$SHORT_SHA" ]; then
+          echo "::error::the API runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA"
+          exit 1
+        fi
+        url=$(gcloud run services describe "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
           --format='value(status.url)')
         for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-          commit=$(curl -fsS --max-time 10 "$url/healthz" | jq -r .commit || true)
-          if [ "$commit" = "$SHA" ]; then
-            echo "the API runs $SHA"
+          if curl -fsS --max-time 10 "$url/readyz" > /dev/null; then
+            echo "the API runs $SHORT_SHA and is ready"
             exit 0
           fi
-          echo "attempt $attempt: the API runs '${commit:-nothing}', expected $SHA"
+          echo "attempt $attempt: $url/readyz does not answer yet"
           sleep 10
         done
-        echo "::error::the deployed API does not report commit $SHA"
+        echo "::error::$url/readyz does not answer"
         exit 1
