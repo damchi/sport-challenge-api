@@ -32,19 +32,23 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
 Chaque job du worker doit exister avant qu'un déploiement le mette à jour : le job d'une nouvelle tâche, et sa planification Cloud Scheduler, se créent dans le projet **avant** la fusion du code qui ajoute la tâche à `WORKER_TASKS` (`.github/actions/deploy/action.yml`), sinon l'étape 4 échoue. Le plus sûr est de copier un job existant, par exemple pour `retry-auth0-deletions` (préfixe `sc`) :
 
 ```
+cd "$(mktemp -d)"   # job.yaml décrit la configuration du job : jamais dans le dépôt
 P=<projet>; R=northamerica-northeast1
-gcloud run jobs describe sc-worker-close-weeks --project=$P --region=$R --format=export > job.yaml
-sed -i '' 's/sc-worker-close-weeks/sc-worker-retry-auth0-deletions/; s/- close-weeks$/- retry-auth0-deletions/' job.yaml
+gcloud run jobs describe sc-worker-close-weeks --project=$P --region=$R --format=export > close-weeks.yaml
+sed 's/sc-worker-close-weeks/sc-worker-retry-auth0-deletions/; s/- close-weeks$/- retry-auth0-deletions/' close-weeks.yaml > job.yaml
+grep -nE 'name: sc-worker|- worker|- retry-auth0|close-weeks' job.yaml
 gcloud run jobs replace job.yaml --project=$P --region=$R
-gcloud run jobs get-iam-policy sc-worker-close-weeks --project=$P --region=$R --format=json | jq 'del(.etag)' > policy.json
-gcloud run jobs set-iam-policy sc-worker-retry-auth0-deletions policy.json --project=$P --region=$R
 gcloud scheduler jobs create http retry-auth0-deletions --project=$P --location=$R \
   --schedule="20 * * * *" --time-zone="America/Toronto" --attempt-deadline=180s --http-method=POST \
   --uri="https://run.googleapis.com/v2/projects/$P/locations/$R/jobs/sc-worker-retry-auth0-deletions:run" \
   --oauth-service-account-email="sc-scheduler@$P.iam.gserviceaccount.com"
+gcloud run jobs execute sc-worker-retry-auth0-deletions --project=$P --region=$R --wait
 ```
 
-Vérifier `job.yaml` avant le `replace` : le nom et le dernier argument doivent être ceux de la nouvelle tâche.
+- Avant le `replace`, le `grep` doit montrer le nouveau nom et `- retry-auth0-deletions` comme dernier argument, et plus aucun `close-weeks`.
+- Les droits (lancement par le compte `sc-scheduler`, mise à jour par le compte de déploiement) sont donnés au niveau du projet : le nouveau job en hérite, rien à copier. À vérifier avec `gcloud run jobs get-iam-policy` si un jour un job a ses propres droits.
+- Les planifications de la production sont dans le fuseau `America/Toronto`, comme celles de `close-weeks` et `finalize-challenges` ; pour une tâche horaire, le fuseau ne change rien.
+- Les lignes terminées par `\` se collent d'un bloc : un espace après le `\` coupe la commande.
 
 À faire une fois, **après** le premier `terraform apply` de `docs/terraform.md` (sur demande explicite).
 
