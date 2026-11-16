@@ -52,7 +52,47 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       rollback: ${{ steps.plan.outputs.rollback }}
       staging: ${{ steps.plan.outputs.staging }}
-      production:
+      production: ${{ steps.plan.outputs.production }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0 # the history and the tags
+          persist-credentials: false
+
+      # The rules are in a script of their own, tested by the CI.
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          TARGET: ${{ inputs.environment }}
+          REF: ${{ inputs.ref }}
+        run: |
+          .github/scripts/plan-deploy.sh | tee -a "$GITHUB_OUTPUT"
+
+  # Opt-in per repository (Settings > Secrets and variables > Actions > Variables):
+  # DEPLOY_STAGING and DEPLOY_PRODUCTION are set to "true" once the environment
+  # exists, so that a merge does not fail before then.
+  staging:
+    name: staging
+    needs: plan
+    if: >-
+      github.ref == 'refs/heads/main' && needs.plan.outputs.staging == 'true' &&
+      vars.DEPLOY_STAGING == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: staging
+      sha: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.version }}
+      rollback: ${{ needs.plan.outputs.rollback }}
+
+  production:
     name: production
     needs: plan
     # Required reviewers are set on the production Environment: the job waits
