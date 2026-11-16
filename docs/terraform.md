@@ -27,7 +27,7 @@ Le secret `database-url` reçoit sa valeur de Terraform (URL de connexion constr
 - **Secrets** : `DATABASE_URL` et `AUTH0_MGMT_CLIENT_SECRET` viennent de Secret Manager. Le domaine, l'audience et l'identifiant client Auth0 ne sont pas secrets : ce sont des variables d'environnement ordinaires.
 - **Comptes de service** : un par charge (API, worker, Scheduler), sans aucun rôle sur le projet. L'API et le worker lisent seulement les deux secrets ci-dessus ; le compte du Scheduler ne peut que lancer les jobs du worker.
 - **Réseau** : sortie directe vers le VPC pour les adresses privées seulement (Cloud SQL) ; Auth0 est joint par Internet.
-- **Planification** : un job Cloud Run et une planification par tâche du worker, en UTC : `close-weeks` à chaque heure pile, `finalize-challenges` dix minutes plus tard et `retry-auth0-deletions` à la vingtième minute (elle rejoue les suppressions de comptes qui ont échoué chez Auth0, README §6). Un job en échec déclenche l'alerte « job failed » : pour `retry-auth0-deletions`, c'est qu'une suppression chez Auth0 échoue encore.
+- **Planification** : `close-weeks` à chaque heure pile et `finalize-challenges` dix minutes plus tard, en UTC. La tâche `retry-auth0-deletions` n'est pas planifiée : le ticket ne la demande pas.
 - **`trusted_proxies`** : sans valeur par défaut. Vérifier sur staging l'adresse que Cloud Run montre au conteneur avant de s'y fier, sinon la limitation de débit par IP compterait tous les clients ensemble.
 
 ## Observabilité et alertes

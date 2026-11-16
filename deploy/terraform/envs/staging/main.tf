@@ -48,12 +48,10 @@ locals {
 
   # The worker tasks and when Cloud Scheduler starts them (UTC, every hour:
   # weeks end at different hours in each challenge's time zone). Finalizing
-  # comes ten minutes after closing, which judges the weeks first. The Auth0
-  # deletions that failed are replayed every hour too, apart from both.
+  # comes ten minutes after closing, which judges the weeks first.
   worker_schedules = {
-    "close-weeks"           = "0 * * * *"
-    "finalize-challenges"   = "10 * * * *"
-    "retry-auth0-deletions" = "20 * * * *"
+    "close-weeks"         = "0 * * * *"
+    "finalize-challenges" = "10 * * * *"
   }
 }
 

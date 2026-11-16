@@ -29,7 +29,22 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
 
 ## Mise en place
 
-Chaque job du worker doit exister avant qu'un déploiement le mette à jour : un job ajouté à `worker_schedules` (Terraform) s'applique **avant** la fusion du code qui l'ajoute à `WORKER_TASKS` (`.github/actions/deploy/action.yml`), sinon l'étape 4 échoue. Pour des ressources créées à la main (`CLOUD_RUN_NAME_PREFIX`), le job et sa planification se créent aussi à la main, sur le modèle des autres.
+Chaque job du worker doit exister avant qu'un déploiement le mette à jour : le job d'une nouvelle tâche, et sa planification Cloud Scheduler, se créent dans le projet **avant** la fusion du code qui ajoute la tâche à `WORKER_TASKS` (`.github/actions/deploy/action.yml`), sinon l'étape 4 échoue. Le plus sûr est de copier un job existant, par exemple pour `retry-auth0-deletions` (préfixe `sc`) :
+
+```
+P=<projet>; R=northamerica-northeast1
+gcloud run jobs describe sc-worker-close-weeks --project=$P --region=$R --format=export > job.yaml
+sed -i '' 's/sc-worker-close-weeks/sc-worker-retry-auth0-deletions/; s/- close-weeks$/- retry-auth0-deletions/' job.yaml
+gcloud run jobs replace job.yaml --project=$P --region=$R
+gcloud run jobs get-iam-policy sc-worker-close-weeks --project=$P --region=$R --format=json | jq 'del(.etag)' > policy.json
+gcloud run jobs set-iam-policy sc-worker-retry-auth0-deletions policy.json --project=$P --region=$R
+gcloud scheduler jobs create http retry-auth0-deletions --project=$P --location=$R \
+  --schedule="20 * * * *" --time-zone="America/Toronto" --attempt-deadline=180s --http-method=POST \
+  --uri="https://run.googleapis.com/v2/projects/$P/locations/$R/jobs/sc-worker-retry-auth0-deletions:run" \
+  --oauth-service-account-email="sc-scheduler@$P.iam.gserviceaccount.com"
+```
+
+Vérifier `job.yaml` avant le `replace` : le nom et le dernier argument doivent être ceux de la nouvelle tâche.
 
 À faire une fois, **après** le premier `terraform apply` de `docs/terraform.md` (sur demande explicite).
 
