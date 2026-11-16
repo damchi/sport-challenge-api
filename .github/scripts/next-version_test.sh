@@ -28,4 +28,11 @@ else
   echo "ok   a version without v is refused"
 fi
 
+if "$here/next-version.sh" "v1.2.3-rc1" >/dev/null 2>&1; then
+  echo "FAIL a pre-release version is refused"
+  failed=1
+else
+  echo "ok   a pre-release version is refused"
+fi
+
 exit "$failed"

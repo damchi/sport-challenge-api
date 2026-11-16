@@ -43,8 +43,8 @@ jobs:
       - name: Next version
         id: version
         run: |
-          # Runs can arrive late: only the tip of main is released. The run of
-          # a newer commit counts the commits of this one too.
+          # Runs can arrive late: only the tip of main is released (the run of a
+          # newer commit publishes the next version).
           if [ "$SHA" != "$(git rev-parse origin/main)" ]; then
             echo "$SHA is no longer the tip of main: left to the run of the newer commit"
             exit 0

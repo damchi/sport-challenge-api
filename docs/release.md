@@ -9,8 +9,10 @@ Chaque build est identifiable : une **version sémantique** (`vMAJOR.MINOR.PATCH
 Après une CI verte sur `main`, le workflow `.github/workflows/release.yml` prend le dernier tag `v*` et monte le **correctif** (`v1.2.3` → `v1.2.4`, `.github/scripts/next-version.sh`). Les messages de commit n'entrent pas en compte : ils sont trop ambigus pour décider d'un déploiement.
 
 - **Première version** : `v0.1.0`, quand aucun tag n'existe.
-- **Version mineure ou majeure** : se décide à la main. Avant de fusionner, ou sur le sommet de `main` avant la fin de la CI, créer la release voulue (`gh release create v0.2.0 --target <sha> --generate-notes`) : un commit qui porte déjà un tag `v*` n'est pas publié deux fois, et c'est ce tag que le déploiement envoie en production.
+- **Version mineure ou majeure** : se décide à la main. Juste après la fusion, avant la fin de la CI (quelques minutes : passé ce délai, le correctif est déjà publié), créer la release voulue sur le commit de fusion (`gh release create v0.2.0 --target <sha> --generate-notes`) : un commit qui porte déjà un tag `v*` n'est pas publié deux fois, et c'est ce tag que le déploiement envoie en production.
 - Un commit qui porte déjà un tag n'est pas publié deux fois.
+- **Chaque fusion, même de documentation seule, publie une version** et demande donc une mise en production, soumise à l'approbation de l'Environment `production` (`docs/deploiement.md`) : c'est un choix assumé, pour ne pas dépendre des messages de commit.
+- Un dernier tag qui n'est pas de la forme `vX.Y.Z` (par exemple `v1.2.3-rc1`) fait échouer le workflow : ne pas en poser.
 
 Les règles sont testées par `.github/scripts/next-version_test.sh`, lancé par la CI.
 
