@@ -2,9 +2,8 @@ name: Deploy
 
 # Once a release run has finished on main (so the CI is green and the commit
 # has its version tag), that version is deployed to production, after the
-# approval of the `production` GitHub Environment. Staging is deployed by hand
-# only, like a rollback (an older commit, or a commit to try). See
-# docs/deploiement.md.
+# approval of the `production` GitHub Environment. A rollback redeploys an
+# older commit by hand. See docs/deploiement.md.
 #
 # Terraform is never run here: the infrastructure is applied on explicit request.
 on:
@@ -14,11 +13,6 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      environment:
-        description: Environment to roll back
-        type: choice
-        options: [staging, production]
-        required: true
       ref:
         description: Version tag or commit SHA to redeploy (its image must still be in Artifact Registry)
         type: string
@@ -42,7 +36,6 @@ jobs:
       sha: ${{ steps.plan.outputs.sha }}
       version: ${{ steps.plan.outputs.version }}
       rollback: ${{ steps.plan.outputs.rollback }}
-      staging: ${{ steps.plan.outputs.staging }}
       production: ${{ steps.plan.outputs.production }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,44 +50,73 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          TARGET: ${{ inputs.environment }}
           REF: ${{ inputs.ref }}
         run: |
           .github/scripts/plan-deploy.sh | tee -a "$GITHUB_OUTPUT"
 
-  # Opt-in per repository (Settings > Secrets and variables > Actions > Variables):
-  # DEPLOY_STAGING and DEPLOY_PRODUCTION are set to "true" once the environment
-  # exists, so that a merge does not fail before then.
-  staging:
-    name: staging
-    needs: plan
-    if: >-
-      github.ref == 'refs/heads/main' && needs.plan.outputs.staging == 'true' &&
-      vars.DEPLOY_STAGING == 'true'
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/deploy-environment.yml
-    with:
-      environment: staging
-      sha: ${{ needs.plan.outputs.sha }}
-      version: ${{ needs.plan.outputs.version }}
-      rollback: ${{ needs.plan.outputs.rollback }}
-
   production:
     name: production
     needs: plan
-    # Required reviewers are set on the production Environment: the job waits
-    # for them.
+    # Opt-in per repository (Settings > Secrets and variables > Actions >
+    # Variables): DEPLOY_PRODUCTION is set to "true" once the environment
+    # exists, so that a merge does not fail before then. Required reviewers are
+    # set on the production Environment: the job waits for them.
     if: >-
       github.ref == 'refs/heads/main' && needs.plan.outputs.production == 'true' &&
       vars.DEPLOY_PRODUCTION == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    # One deployment at a time, and a running one is never cancelled.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     permissions:
       contents: read
-      id-token: write
-    uses: ./.github/workflows/deploy-environment.yml
-    with:
-      environment: production
-      sha: ${{ needs.plan.outputs.sha }}
-      version: ${{ needs.plan.outputs.version }}
-      rollback: ${{ needs.plan.outputs.rollback }}
+      id-token: write # the OIDC token exchanged for GCP credentials
+    env:
+      SHA: ${{ needs.plan.outputs.sha }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      ROLLBACK: ${{ needs.plan.outputs.rollback }}
+    steps:
+      # The deployment code always comes from main (a rollback must not run the
+      # action of an old commit, with the right to deploy); the commit to deploy
+      # is only what the image is built from.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          path: source
+          fetch-depth: 0 # the tags of the versions released since
+          persist-credentials: false
+
+      # The approval can come late: a newer version may have been released
+      # meanwhile, and it goes to production instead of this one (never an older
+      # version after a newer one, and never a migration of an older image on a
+      # newer database). A rollback is deliberate: it is not checked.
+      - name: Newer version
+        id: newer
+        if: needs.plan.outputs.rollback != 'true'
+        working-directory: source
+        run: |
+          newer=$("$GITHUB_WORKSPACE/.github/scripts/newer-versions.sh" "$SHA")
+          if [ -n "$newer" ]; then
+            echo "::notice::$VERSION is not deployed: $(echo $newer) was released since"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/deploy
+        if: steps.newer.outputs.skip != 'true'
+        with:
+          project: ${{ vars.GCP_PROJECT_ID }}
+          region: ${{ vars.GCP_REGION }}
+          workload-identity-provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service-account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          sha: ${{ needs.plan.outputs.sha }}
+          version: ${{ needs.plan.outputs.version }}
+          rollback: ${{ needs.plan.outputs.rollback }}
+          source-directory: source
+          name-prefix: ${{ vars.CLOUD_RUN_NAME_PREFIX || 'sport-challenge' }}

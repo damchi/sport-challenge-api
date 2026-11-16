@@ -8,7 +8,7 @@ L'infrastructure est décrite dans `docs/terraform.md` (premier `apply`, ordre d
 
 ## Publier une version
 
-Le déploiement en staging n'est plus automatique : il se lance à la main (`Deploy` > Run workflow, `docs/deploiement.md`). Les étapes ci-dessous sont l'équivalent en ligne de commande, pour tester une branche.
+Le workflow `Deploy` ne déploie qu'en production (`docs/deploiement.md`) : staging, s'il est recréé, se déploie à la main, avec les étapes ci-dessous.
 
 Droits nécessaires pour la personne qui publie : écrire dans Artifact Registry (`roles/artifactregistry.writer`) et mettre à jour et exécuter les services et jobs Cloud Run (`roles/run.developer`).
 
