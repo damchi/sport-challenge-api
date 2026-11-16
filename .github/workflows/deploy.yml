@@ -31,9 +31,10 @@ jobs:
     name: what to deploy
     # Only a run on main of this repository, never a pull request.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -67,7 +68,9 @@ jobs:
   staging:
     name: staging
     needs: plan
-    if: needs.plan.outputs.staging == 'true' && vars.DEPLOY_STAGING == 'true'
+    if: >-
+      github.ref == 'refs/heads/main' && needs.plan.outputs.staging == 'true' &&
+      vars.DEPLOY_STAGING == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: staging
@@ -84,6 +87,7 @@ jobs:
       # is only what the image is built from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -128,7 +132,7 @@ jobs:
     # version that is no longer the tip of main was superseded by a commit that
     # went to staging (it contains this version).
     if: >-
-      !cancelled() && needs.plan.outputs.production == 'true' &&
+      !cancelled() && github.ref == 'refs/heads/main' && needs.plan.outputs.production == 'true' &&
       vars.DEPLOY_PRODUCTION == 'true' &&
       (needs.staging.result == 'success' ||
        (needs.staging.result == 'skipped' &&
@@ -149,6 +153,7 @@ jobs:
       # is only what the image is built from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
