@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 # What the deployment (deploy.yml) deploys. Run in a clone that has the history
 # and the tags, with origin/main fetched. Reads EVENT (workflow_dispatch or
-# workflow_run), HEAD_SHA (the commit of the run), TARGET and REF (the
-# environment and the tag or commit of a rollback). Prints key=value lines:
-#   sha, version, rollback, staging, production
+# workflow_run), HEAD_SHA (the commit of the run) and REF (the tag or commit
+# of a rollback). Prints key=value lines:
+#   sha, version, rollback, production
 # A merge to main goes to production when its commit carries a version tag
-# (the Release workflow gives one to every merge). Staging is only deployed by
-# hand (a rollback run).
+# (the Release workflow gives one to every merge); a rollback always does.
 set -euo pipefail
 
 # The version tags of a commit, without the pre-releases (v1.2.3-rc1).
 release_tags() { git tag --points-at "$1" --list 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; }
 
-staging=false
 production=false
 rollback=false
 
@@ -22,7 +20,7 @@ if [ "$EVENT" = workflow_dispatch ]; then
   sha=$(git rev-parse --verify "$REF^{commit}")
   # Only what was merged into main is ever deployed.
   git merge-base --is-ancestor "$sha" origin/main || { echo "::error::$REF is not in main" >&2; exit 1; }
-  if [ "$TARGET" = production ]; then production=true; else staging=true; fi
+  production=true
 else
   sha=$HEAD_SHA
   # A version tag on the commit: the release goes on to production.
@@ -38,5 +36,4 @@ case "$version" in v*) ;; *) version=v0.0.0-$version ;; esac
 echo "sha=$sha"
 echo "version=$version"
 echo "rollback=$rollback"
-echo "staging=$staging"
 echo "production=$production"
