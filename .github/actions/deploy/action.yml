@@ -71,7 +71,7 @@ runs:
           echo "API_SERVICE=$PREFIX-api"
           echo "MIGRATE_JOB=$PREFIX-migrate"
           echo "WORKER_JOB_PREFIX=$PREFIX-worker"
-          echo "WORKER_TASKS=close-weeks finalize-challenges"
+          echo "WORKER_TASKS=close-weeks finalize-challenges retry-auth0-deletions"
         } >> "$GITHUB_ENV"
 
     - name: Build and push the image

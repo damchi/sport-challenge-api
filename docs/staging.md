@@ -29,6 +29,7 @@ Droits nécessaires pour la personne qui publie : écrire dans Artifact Registry
    gcloud run services update sport-challenge-api --project=<projet> --region=northamerica-northeast1 --image=<image>
    gcloud run jobs update sport-challenge-worker-close-weeks --project=<projet> --region=northamerica-northeast1 --image=<image>
    gcloud run jobs update sport-challenge-worker-finalize-challenges --project=<projet> --region=northamerica-northeast1 --image=<image>
+   gcloud run jobs update sport-challenge-worker-retry-auth0-deletions --project=<projet> --region=northamerica-northeast1 --image=<image>
    ```
 
 4. Vérifier que `GET <api_url>/healthz` et `/readyz` répondent 200.

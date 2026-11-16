@@ -18,7 +18,7 @@ Le workflow ne s'exécute jamais sur une pull request. Un tag de version est cr�
 1. Authentification à GCP par **Workload Identity Federation** : le jeton OIDC du job GitHub est échangé contre les droits du compte de service de déploiement. Aucune clé JSON, aucun secret.
 2. Construction de l'image avec la version, le commit et la date (`deploy/Dockerfile`), tagguée `<sha court>` et `<version>` (jamais `latest`), poussée vers Artifact Registry. Hors d'un commit tagué, la version est celle de `git describe` (`v0.3.0-2-gabc1234`).
 3. **Migrations** : mise à jour de l'image du job `<préfixe>-migrate`, puis exécution avec `--wait`. Si le job échoue (migration en échec, base `dirty`), le déploiement s'arrête là (voir `docs/migrations.md`).
-4. Mise à jour de l'image du service `<préfixe>-api` et des jobs `<préfixe>-worker-close-weeks` et `<préfixe>-worker-finalize-challenges`, avec l'image tagguée par le SHA court. Le préfixe vaut `sport-challenge` (les noms de `deploy/terraform`), ou la variable `CLOUD_RUN_NAME_PREFIX` de l'Environment pour des ressources créées à la main (par exemple `sc`).
+4. Mise à jour de l'image du service `<préfixe>-api` et des jobs `<préfixe>-worker-close-weeks`, `<préfixe>-worker-finalize-challenges` et `<préfixe>-worker-retry-auth0-deletions`, avec l'image tagguée par le SHA court. Le préfixe vaut `sport-challenge` (les noms de `deploy/terraform`), ou la variable `CLOUD_RUN_NAME_PREFIX` de l'Environment pour des ressources créées à la main (par exemple `sc`).
 5. **Test de fumée** : la révision qui sert tout le trafic doit être la dernière créée, prête, et utiliser l'image du commit déployé, puis `GET <api>/readyz` doit répondre (une douzaine d'essais, 10 s d'écart) ; sinon le workflow échoue. Sur l'URL `run.app`, Cloud Run répond lui-même à `/healthz` (404) : la requête n'atteint pas l'API.
 
 Un seul déploiement à la fois par environnement (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans les jobs de déploiement. Les actions sont épinglées par SHA.
@@ -28,6 +28,8 @@ Une version taguée part en production après l'approbation, même si `main` a a
 Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. Chaque environnement a son propre registre : l'image est construite pour lui à partir du commit, et c'est le commit qui fait foi, pas le condensat de l'image.
 
 ## Mise en place
+
+Chaque job du worker doit exister avant qu'un déploiement le mette à jour : un job ajouté à `worker_schedules` (Terraform) s'applique **avant** la fusion du code qui l'ajoute à `WORKER_TASKS` (`.github/actions/deploy/action.yml`), sinon l'étape 4 échoue. Pour des ressources créées à la main (`CLOUD_RUN_NAME_PREFIX`), le job et sa planification se créent aussi à la main, sur le modèle des autres.
 
 À faire une fois, **après** le premier `terraform apply` de `docs/terraform.md` (sur demande explicite).
 
