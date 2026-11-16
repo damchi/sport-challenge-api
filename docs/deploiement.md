@@ -71,3 +71,6 @@ Le plus rapide reste de revenir à la révision précédente dans Cloud Run (`do
 ## La branche `staging`
 
 À créer une fois, à partir de `main` : `git push origin origin/main:refs/heads/staging`. Les pull requests de travail visent `staging` ; seule la pull request de promotion vise `main`. Dans Settings > Branches, protéger `staging` comme `main` (pull request obligatoire, CI verte requise).
+
+- **Tickets** : `Closes #N` ne ferme rien quand la pull request vise `staging`. La promotion doit se faire par un **merge commit** (pas un squash, qui perdrait les messages des tickets), ou reprendre les `Closes #N` dans sa description.
+- **Hotfix** : un commit poussé directement sur `main` part en production sans être passé par staging ; l'approbation de l'Environment est alors la seule garde. À réserver aux urgences, puis à reporter dans `staging`.
