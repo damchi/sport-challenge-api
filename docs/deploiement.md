@@ -1,6 +1,6 @@
 # Déploiement continu sur GCP
 
-Quand une pull request est fusionnée dans `main` et que la CI est verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés sur Cloud Run sans action manuelle. Le workflow est `.github/workflows/deploy.yml` ; les étapes d'un environnement sont dans le workflow réutilisable `.github/workflows/deploy-environment.yml` (appelé une fois pour staging, une fois pour production), qui utilise l'action locale `.github/actions/deploy`.
+Quand une pull request (une branche créée depuis `main`) est fusionnée dans `main` et que la CI est verte, l'API et le worker sont construits, poussés vers Artifact Registry et déployés en **production** sur Cloud Run, après approbation. Le staging n'est plus déployé automatiquement : on le lance à la main. Le workflow est `.github/workflows/deploy.yml` ; les étapes d'un environnement sont dans le workflow réutilisable `.github/workflows/deploy-environment.yml` (appelé une fois pour staging, une fois pour production), qui utilise l'action locale `.github/actions/deploy`.
 
 > **Le workflow ne lance jamais `terraform apply`.** L'infrastructure (dont le compte de déploiement décrit plus bas) s'applique à la main, sur demande explicite. Le workflow ne fait que publier une image et mettre à jour Cloud Run.
 
@@ -8,10 +8,10 @@ Quand une pull request est fusionnée dans `main` et que la CI est verte, l'API 
 
 | Événement | Staging | Production |
 |---|---|---|
-| Fusion dans `main`, CI verte, workflow `Release` terminé | déployé automatiquement (le sommet de `main`) | si le commit a reçu un tag de version `v*` (à chaque fusion, le workflow `Release` en pose un), et **après l'approbation** de l'Environment `production` |
-| `workflow_dispatch` (retour arrière) | redéploie un commit ou un tag précédent | idem, avec la même approbation |
+| Fusion dans `main`, CI verte, workflow `Release` terminé | non | le commit a reçu un tag de version `v*` (le workflow `Release` en pose un à chaque fusion) ; part **après l'approbation** de l'Environment `production` |
+| `workflow_dispatch` | déploie un commit ou un tag de `main` (retour arrière, ou essai) | idem, avec la même approbation |
 
-Le workflow ne s'exécute jamais sur une pull request. La production ne part qu'après un staging réussi (sauf retour arrière). Un tag de version est créé par `release.yml` (`docs/release.md`) ; comme un tag posé avec le jeton d'un workflow ne déclenche pas d'autre workflow, c'est la fin du workflow `Release` qui lance le déploiement, et celui-ci regarde si le commit porte un tag.
+Le workflow ne s'exécute jamais sur une pull request. Un tag de version est créé par `release.yml` (`docs/release.md`) ; comme un tag posé avec le jeton d'un workflow ne déclenche pas d'autre workflow, c'est la fin du workflow `Release` qui lance le déploiement, et celui-ci regarde si le commit porte un tag.
 
 Étapes d'un déploiement (action `deploy`) :
 
@@ -23,9 +23,9 @@ Le workflow ne s'exécute jamais sur une pull request. La production ne part qu'
 
 Un seul déploiement à la fois par environnement (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans les jobs de déploiement. Les actions sont épinglées par SHA.
 
-Si le commit n'est plus le sommet de `main` quand le workflow arrive, son déploiement en staging est laissé au commit plus récent (qui le contient). Une version taguée n'est pas perdue pour autant : elle part quand même en production, après l'approbation, sans passer par un staging de ce commit exact. Ces règles sont dans `.github/scripts/plan-deploy.sh`, testé par la CI. Après l'approbation, le job de production saute une version si une plus récente a été publiée entre-temps (`.github/scripts/newer-versions.sh`, testé aussi) : jamais une version plus ancienne après une plus récente.
+Une version taguée part en production après l'approbation, même si `main` a avancé depuis. Ces règles sont dans `.github/scripts/plan-deploy.sh`, testé par la CI. Après l'approbation, le job de production saute une version si une plus récente a été publiée entre-temps (`.github/scripts/newer-versions.sh`, testé aussi) : jamais une version plus ancienne après une plus récente.
 
-Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. La production reconstruit l'image depuis le même commit que le staging (les deux environnements ont leur propre registre) : le build n'étant pas garanti identique au bit près, c'est le commit qui fait foi, pas le condensat de l'image.
+Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite. Chaque environnement a son propre registre : l'image est construite pour lui à partir du commit, et c'est le commit qui fait foi, pas le condensat de l'image.
 
 ## Mise en place d'un environnement
 
@@ -48,7 +48,7 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
    | `GCP_DEPLOY_SERVICE_ACCOUNT` | sortie `deploy_service_account` |
 
    Pour les deux Environments : **Deployment branches = Selected branches, `main` seulement**. Pour `production` : **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity refuse de toute façon un jeton qui ne vient pas de `main`. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
-3. **Variables du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_STAGING=true` quand l'environnement staging est prêt, `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elles ne valent pas `true`, le job correspondant est ignoré : une fusion n'échoue pas avant que l'infrastructure existe.
+3. **Variables du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_STAGING=true` quand l'environnement staging est prêt (il ne sert qu'aux déploiements manuels), `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elles ne valent pas `true`, le job correspondant est ignoré : une fusion n'échoue pas avant que l'infrastructure existe.
    ```
    gh variable set DEPLOY_STAGING --body true
    gh variable set DEPLOY_PRODUCTION --body true   # après avoir créé l'Environment production et ses reviewers

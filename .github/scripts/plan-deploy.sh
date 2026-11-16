@@ -3,16 +3,15 @@
 # and the tags, with origin/main fetched. Reads EVENT (workflow_dispatch or
 # workflow_run), HEAD_SHA (the commit of the run), TARGET and REF (the
 # environment and the tag or commit of a rollback). Prints key=value lines:
-#   sha, version, rollback, staging, production, superseded
-# superseded=true: the commit is no longer the tip of main, so staging is left
-# to the run of the newer commit; a version tag it carries still goes to
-# production.
+#   sha, version, rollback, staging, production
+# A merge to main goes to production when its commit carries a version tag
+# (the Release workflow gives one to every merge). Staging is only deployed by
+# hand (a rollback run).
 set -euo pipefail
 
 staging=false
 production=false
 rollback=false
-superseded=false
 
 if [ "$EVENT" = workflow_dispatch ]; then
   rollback=true
@@ -23,8 +22,6 @@ if [ "$EVENT" = workflow_dispatch ]; then
   if [ "$TARGET" = production ]; then production=true; else staging=true; fi
 else
   sha=$HEAD_SHA
-  # Runs can arrive late: only the tip of main is deployed to staging.
-  if [ "$sha" = "$(git rev-parse origin/main)" ]; then staging=true; else superseded=true; fi
   # A version tag on the commit: the release goes on to production.
   if [ -n "$(git tag --points-at "$sha" --list 'v[0-9]*')" ]; then production=true; fi
 fi
@@ -40,4 +37,3 @@ echo "version=$version"
 echo "rollback=$rollback"
 echo "staging=$staging"
 echo "production=$production"
-echo "superseded=$superseded"

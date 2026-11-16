@@ -34,23 +34,23 @@ check() {
   fi
 }
 
-check "tip, untagged: staging only, version since the last tag" \
-  "sha=$c4 version=v1.1.0-1-g${c4:0:7} rollback=false staging=true production=false superseded=false " \
+check "tip, untagged: nothing, version since the last tag" \
+  "sha=$c4 version=v1.1.0-1-g${c4:0:7} rollback=false staging=false production=false " \
   "$(plan "$c4" workflow_run "$c4" "" "")"
-check "tip, tagged: staging then production" \
-  "sha=$c3 version=v1.1.0 rollback=false staging=true production=true superseded=false " \
+check "tip, tagged: production" \
+  "sha=$c3 version=v1.1.0 rollback=false staging=false production=true " \
   "$(plan "$c3" workflow_run "$c3" "" "")"
-check "tagged but no longer the tip: production only" \
-  "sha=$c3 version=v1.1.0 rollback=false staging=false production=true superseded=true " \
+check "tagged but no longer the tip: production still" \
+  "sha=$c3 version=v1.1.0 rollback=false staging=false production=true " \
   "$(plan "$c4" workflow_run "$c3" "" "")"
 check "untagged and no longer the tip: nothing" \
-  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=false staging=false production=false superseded=true " \
+  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=false staging=false production=false " \
   "$(plan "$c4" workflow_run "$c2" "" "")"
 check "rollback to staging by tag" \
-  "sha=$c1 version=v1.0.0 rollback=true staging=true production=false superseded=false " \
+  "sha=$c1 version=v1.0.0 rollback=true staging=true production=false " \
   "$(plan "$c4" workflow_dispatch "" staging v1.0.0)"
 check "rollback to production by sha" \
-  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=true staging=false production=true superseded=false " \
+  "sha=$c2 version=v1.0.0-1-g${c2:0:7} rollback=true staging=false production=true " \
   "$(plan "$c4" workflow_dispatch "" production "$c2")"
 check "rollback to a commit that is not in main" "ERROR" \
   "$(plan "$c2" workflow_dispatch "" staging "$c4")"
@@ -72,7 +72,7 @@ trap 'rm -rf "$repo" "$untagged"' EXIT
 u=$(git -C "$untagged" rev-parse HEAD)
 cd "$untagged"
 check "no tag at all: version made from the commit" \
-  "sha=$u version=v0.0.0-${u:0:7} rollback=false staging=true production=false superseded=false " \
+  "sha=$u version=v0.0.0-${u:0:7} rollback=false staging=false production=false " \
   "$(plan "$u" workflow_run "$u" "" "")"
 
 exit $failed
