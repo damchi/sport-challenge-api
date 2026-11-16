@@ -83,3 +83,4 @@ jobs:
           version: ${{ inputs.version }}
           rollback: ${{ inputs.rollback }}
           source-directory: source
+          name-prefix: ${{ vars.CLOUD_RUN_NAME_PREFIX || 'sport-challenge' }}
