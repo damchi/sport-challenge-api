@@ -448,7 +448,7 @@ func TestParticipationsActiveComesFromTheStatus(t *testing.T) {
 				t.Fatalf("Participations() = %+v, %v", got, err)
 			}
 			g := got[0]
-			if g.Active != tt.want || g.ChallengeID != "c1" || !g.StartsAt.Equal(start) || !g.EndsAt.Equal(end) || g.Location == nil || g.Location.String() != "America/Toronto" || g.Deleted {
+			if g.Active != tt.want || g.ChallengeID != "c1" || !g.StartsAt.Equal(start) || !g.EndsAt.Equal(end) || g.Location == nil || g.Location.String() != "America/Toronto" {
 				t.Fatalf("participation %+v, want active %v on c1 in Toronto", g, tt.want)
 			}
 		})

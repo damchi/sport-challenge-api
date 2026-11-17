@@ -15,13 +15,13 @@ func CanChange(actorID, authorID string) bool {
 
 // Participation is a challenge of the author of an activity, as the lock
 // reads it: its window [StartsAt, EndsAt) in UTC, cut into weeks in its time
-// zone (required: loaded from the challenge's).
+// zone (required: loaded from the challenge's). A deleted challenge is never
+// one: the memberships are read without them.
 type Participation struct {
 	ChallengeID string
 	StartsAt    time.Time
 	EndsAt      time.Time
 	Location    *time.Location
-	Deleted     bool
 	// Active is true when the author is an active participant: read from the
 	// participation status, never the role (a creator who abandoned no
 	// longer competes).
@@ -29,10 +29,9 @@ type Participation struct {
 }
 
 // CountsIn returns the challenges, in the order of challenges, where an
-// activity started at startedAt counts (ADR 0001): not deleted, finished
-// ones included, whose window holds startedAt and where the author is an
-// active participant. Never a reason to refuse an activity: it may count
-// nowhere.
+// activity started at startedAt counts (ADR 0001): finished ones included,
+// whose window holds startedAt and where the author is an active
+// participant. Never a reason to refuse an activity: it may count nowhere.
 func CountsIn(startedAt time.Time, challenges []Participation) []string {
 	var ids []string
 	for _, c := range challenges {
@@ -66,7 +65,7 @@ func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 
 // counts reports whether an activity started at startedAt counts in c.
 func counts(c Participation, startedAt time.Time) bool {
-	return !c.Deleted && c.Active && window(c).Contains(startedAt)
+	return c.Active && window(c).Contains(startedAt)
 }
 
 func window(c Participation) scoring.Window {

@@ -74,8 +74,6 @@ func TestIsLocked(t *testing.T) {
 	emptyWindow := monday
 	emptyWindow.EndsAt = emptyWindow.StartsAt
 
-	deleted := monday
-	deleted.Deleted = true
 	// Abandoned, excluded, or a creator who abandoned: no longer competes.
 	notActive := monday
 	notActive.Active = false
@@ -135,9 +133,8 @@ func TestIsLocked(t *testing.T) {
 		{name: "empty window: counts nowhere", now: endMonday1, startedAt: tuesday, challenges: []Participation{emptyWindow}},
 
 		// Ignored: where the activity does not count.
-		{name: "deleted challenge ignored", now: endMonday1, startedAt: tuesday, challenges: []Participation{deleted}},
 		{name: "not an active participant: ignored", now: endMonday1, startedAt: tuesday, challenges: []Participation{notActive}},
-		{name: "ignored challenge does not hide an active one", now: endMonday1, startedAt: tuesday, challenges: []Participation{deleted, notActive, monday}, want: true},
+		{name: "ignored challenge does not hide an active one", now: endMonday1, startedAt: tuesday, challenges: []Participation{notActive, monday}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,8 +153,6 @@ func TestCountsIn(t *testing.T) {
 	thursday.ChallengeID = "thursday"
 	finished := participation(t, [3]int{2026, 4, 27}, 2)
 	finished.ChallengeID = "finished"
-	deleted := monday
-	deleted.ChallengeID, deleted.Deleted = "deleted", true
 	notActive := monday
 	notActive.ChallengeID, notActive.Active = "abandoned", false
 
@@ -174,7 +169,7 @@ func TestCountsIn(t *testing.T) {
 		{name: "start of the window included", startedAt: monday.StartsAt, challenges: []Participation{monday}, want: []string{"monday"}},
 		{name: "end of the window excluded", startedAt: monday.EndsAt, challenges: []Participation{monday}},
 		{name: "finished challenge still holds its window", startedAt: toronto(t, 2026, 5, 1, 10), challenges: []Participation{finished}, want: []string{"finished"}},
-		{name: "deleted and not active ignored", startedAt: toronto(t, 2026, 6, 2, 10), challenges: []Participation{deleted, notActive, monday}, want: []string{"monday"}},
+		{name: "not active ignored", startedAt: toronto(t, 2026, 6, 2, 10), challenges: []Participation{notActive, monday}, want: []string{"monday"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
