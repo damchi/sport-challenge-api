@@ -113,7 +113,7 @@ func (f fakeCatalogue) DistanceMode(_ context.Context, code string) (string, boo
 	return mode, ok, f.err
 }
 
-var catalogue = fakeCatalogue{modes: map[string]string{"run": distanceRequired, "yoga": distanceNone, "other": distanceOptional}}
+var catalogue = fakeCatalogue{modes: map[string]string{"run": distanceRequired, "yoga": distanceNone, "other": distanceOptional, "ski_2": distanceOptional}}
 
 // fakeParticipations gives challenges for user, the actor when empty, only;
 // calls counts them.

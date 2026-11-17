@@ -115,6 +115,16 @@ func TestCreateActivityRecords(t *testing.T) {
 	}
 }
 
+// A code of the catalogue may hold digits (constraint sports_code_check):
+// the contract lets it through.
+func TestCreateActivityCodeWithADigit(t *testing.T) {
+	svc := newService(t, &fakeRepository{}, fakeParticipations{})
+	rec, body := postActivity(t, svc, `{"sport_code":"ski_2","started_at":"2026-06-10T11:00:00Z","duration_seconds":3600}`, nil)
+	if rec.Code != http.StatusCreated || body["sport_code"] != "ski_2" {
+		t.Fatalf("status %d (%s), want 201 for ski_2", rec.Code, rec.Body)
+	}
+}
+
 func TestCreateActivityWithoutDistanceOrChallenge(t *testing.T) {
 	svc := newService(t, &fakeRepository{}, fakeParticipations{})
 	rec, body := postActivity(t, svc, `{"sport_code":"yoga","started_at":"2026-06-10T11:00:00Z","duration_seconds":3600}`, nil)
@@ -159,6 +169,8 @@ func TestCreateActivityRefusals(t *testing.T) {
 		{name: "no token", body: runBody, headers: map[string]string{"Authorization": ""}, status: http.StatusUnauthorized, code: "unauthenticated"},
 		{name: "week locked", body: `{"sport_code":"run","started_at":"2026-06-03T11:00:00Z","duration_seconds":1500,"distance_meters":5000}`, status: http.StatusUnprocessableEntity, code: "week_locked"},
 		{name: "distance required", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500}`, status: http.StatusUnprocessableEntity, code: "distance_required"},
+		{name: "code starting with a digit", body: `{"sport_code":"2ski","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500}`, status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "code of 33 characters", body: `{"sport_code":"a` + strings.Repeat("b", 32) + `","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "unknown sport", body: `{"sport_code":"chess","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "speed sent", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"distance_meters":5000,"speed_mps":3}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "source sent", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"distance_meters":5000,"source":"strava"}`, status: http.StatusBadRequest, code: "validation_failed"},
