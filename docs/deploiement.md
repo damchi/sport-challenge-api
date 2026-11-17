@@ -234,7 +234,7 @@ notificationChannels:
 
 | Événement | Production |
 |---|---|
-| Fusion dans `main`, CI verte, workflow `Release` terminé | le commit a reçu un tag de version `v*` (le workflow `Release` en pose un à chaque fusion) ; part **après l'approbation** de l'Environment `production` |
+| Fusion dans `main`, CI verte, workflow `Release` terminé | le commit a reçu un tag de version `v*` (le workflow `Release` en pose un à chaque fusion qui change du code ; une fusion de documentation seule n'en reçoit pas, et le job `production` est alors sauté, sans approbation) ; part **après l'approbation** de l'Environment `production` |
 | `workflow_dispatch` (retour arrière) | redéploie un commit ou un tag de `main`, avec la même approbation |
 
 Le workflow ne s'exécute jamais sur une pull request. Un tag de version est créé par `release.yml` (`docs/release.md`) ; comme un tag posé avec le jeton d'un workflow ne déclenche pas d'autre workflow, c'est la fin du workflow `Release` qui lance le déploiement, et celui-ci regarde si le commit porte un tag.

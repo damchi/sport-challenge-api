@@ -1,6 +1,6 @@
 # Versions et informations de build
 
-Chaque build est identifiable : une **version sémantique** (`vMAJOR.MINOR.PATCH`), le **commit** exact dont il vient, et une image Docker taguée en conséquence. Chaque fusion sur `main` (CI verte) publie une nouvelle version : le **correctif** monte d'un cran, **quels que soient les messages de commit**.
+Chaque build est identifiable : une **version sémantique** (`vMAJOR.MINOR.PATCH`), le **commit** exact dont il vient, et une image Docker taguée en conséquence. Chaque fusion sur `main` (CI verte) qui change du code publie une nouvelle version : le **correctif** monte d'un cran, **quels que soient les messages de commit**.
 
 > Les tags et les releases sont créés par le workflow `release.yml`. On ne pose pas de tag à la main (ni moi, Claude) sans demande explicite.
 
@@ -11,7 +11,8 @@ Après une CI verte sur `main`, le workflow `.github/workflows/release.yml` pren
 - **Première version** : `v0.1.0`, quand aucun tag n'existe.
 - **Version mineure ou majeure** : se décide à la main. Juste après la fusion, avant la fin de la CI (quelques minutes : passé ce délai, le correctif est déjà publié), créer la release voulue sur le commit de fusion (`gh release create v0.2.0 --target <sha> --generate-notes`) : un commit qui porte déjà un tag `v*` n'est pas publié deux fois, et c'est ce tag que le déploiement envoie en production.
 - Un commit qui porte déjà un tag n'est pas publié deux fois.
-- **Chaque fusion, même de documentation seule, publie une version** et demande donc une mise en production, soumise à l'approbation de l'Environment `production` (`docs/deploiement.md`) : c'est un choix assumé, pour ne pas dépendre des messages de commit.
+- **Chaque fusion qui change du code publie une version** et demande donc une mise en production, soumise à l'approbation de l'Environment `production` (`docs/deploiement.md`) ; les messages de commit n'entrent pas en compte.
+- **Une fusion de documentation seule** (`docs/`, fichiers `*.md`, `.claude/`, depuis la dernière version) ne publie **rien** : ni tag, ni release, ni build, donc ni déploiement ni approbation à donner. La décision se prend sur les fichiers modifiés (`.github/scripts/release-needed.sh`, qui s'appuie sur `code-changed.sh`, le même script que la CI ; tous deux testés par la CI), jamais sur les messages. La fusion de code suivante publie une version qui contient aussi cette documentation. Dans le doute (aucune version précédente), la version est publiée.
 - Les tags de pré-version (`v1.2.3-rc1`) sont ignorés pour calculer la suivante.
 
 Les règles sont testées par `.github/scripts/next-version_test.sh`, lancé par la CI.

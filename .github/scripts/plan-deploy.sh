@@ -5,7 +5,8 @@
 # of a rollback). Prints key=value lines:
 #   sha, version, rollback, production
 # A merge to main goes to production when its commit carries a version tag
-# (the Release workflow gives one to every merge); a rollback always does.
+# (the Release workflow gives one to every merge that changes code, none to a
+# documentation-only one, release-needed.sh); a rollback always does.
 set -euo pipefail
 
 # The version tags of a commit, without the pre-releases (v1.2.3-rc1).

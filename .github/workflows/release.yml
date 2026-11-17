@@ -55,6 +55,13 @@ jobs:
             exit 0
           fi
           last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude 'v*-*' "$SHA" 2>/dev/null || true)
+          # Only documentation (docs/, Markdown, .claude/) since the last version:
+          # no version, so no deployment either. The next merge with code
+          # releases it all (.github/scripts/release-needed.sh).
+          if [ "$(.github/scripts/release-needed.sh "$last" "$SHA")" = "release=false" ]; then
+            echo "only documentation since $last: no new version"
+            exit 0
+          fi
           next=$(.github/scripts/next-version.sh "$last")
           echo "version: ${last:-none} -> $next"
           echo "version=$next" >> "$GITHUB_OUTPUT"
