@@ -24,6 +24,7 @@ make worker TASK=...      tâche du worker (close-weeks, finalize-challenges, re
 make test                 tests unitaires
 make test-integration     tests avec PostgreSQL en conteneur
 make lint                 golangci-lint
+make vuln                 govulncheck (vulnérabilités atteintes par le code)
 make fmt                  gofmt + gofumpt
 make migrate-new NAME=x   crée une paire de migrations
 make migrate-up           applique les migrations (base locale)

@@ -52,6 +52,11 @@ jobs:
       - name: Lint
         run: make lint
 
+      # Fails on a known vulnerability that the code reaches; one published
+      # after a merge breaks the next run, which then upgrades the module.
+      - name: Vulnerabilities
+        run: make vuln
+
       - name: Test
         run: make test
 
