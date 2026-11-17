@@ -14,7 +14,7 @@ Détail : `docs/deploiement.md`, `docs/release.md`.
 - **Approuver** : onglet Actions > `Deploy` > *Review deployments*. Avant d'approuver, lire les notes de la release (onglet Releases) et vérifier qu'aucune migration risquée n'en fait partie (`migrations/`).
 - **Vérifier après coup** :
   - l'exécution `Deploy` est verte (le test de fumée vérifie que la révision qui sert tout le trafic utilise l'image du commit, puis que `/readyz` répond) ;
-  - aucune erreur 5xx dans les minutes qui suivent : l'alerte « API : erreurs 5xx » prévient au-delà de 5 réponses 5xx en 5 minutes (`docs/deploiement.md`, « Alertes ») ; une erreur isolée se lit dans les journaux du service `sc-api` ;
+  - aucune erreur 5xx dans les minutes qui suivent : l'alerte « API : erreurs 5xx » prévient au-delà de 5 réponses 5xx en 5 minutes (`docs/deploiement.md`, « Alertes ») ; une erreur isolée se lit dans les journaux du service `sc-api` ; si l'API ne répond plus du tout (aucune requête, donc aucun 5xx) ou que sa base est injoignable, c'est l'alerte « API injoignable » qui arrive (vérification de `/readyz` toutes les 5 minutes, échec pendant 10 minutes) ;
   - Error Reporting ne montre pas de nouvelle erreur.
 - **Un déploiement échoue** :
   - au build : rien n'est changé en production, corriger et refusionner ;
@@ -133,7 +133,7 @@ Ne jamais coller un secret dans un ticket, un message ou un journal. Un secret e
 - [ ] **Sauvegardes testées** : restauration d'une sauvegarde (ou clone à un instant donné) vers une **instance séparée**, puis vérification des données ; durée de l'opération notée ici.
 - [ ] **Quotas** vérifiés : instances maximales de Cloud Run, connexions Cloud SQL, quotas de l'API de gestion Auth0 (suppressions) et du plan Auth0 (utilisateurs actifs).
 - [ ] **Budget** : alertes de budget actives (50 %, 90 %, 100 %) et reçues par une adresse lue ; coût fixe de Cloud SQL (`db-f1-micro`, zonale) connu.
-- [ ] **Alertes** reçues au moins une fois (5xx, échec de job, absence de `close-weeks`) : chaque courriel est arrivé lors du test du 2026-11-17 (`docs/deploiement.md`, « Alertes ») ; à refaire si le canal ou l'adresse change.
+- [ ] **Alertes** reçues au moins une fois (5xx, échec de job, absence de `close-weeks`, API injoignable) : chaque courriel est arrivé lors du test du 2026-11-17 (`docs/deploiement.md`, « Alertes ») ; à refaire si le canal ou l'adresse change.
 - [ ] **Accès** : Environment `production` avec reviewers, tags `v*` protégés, deux personnes au plus avec les droits `down`/`force` sur le job de migration, vérifié dans la politique IAM du projet (`gcloud projects get-iam-policy sport-challenge-prod`).
 - [ ] Ce runbook relu, et les contacts du §7 remplis.
 

@@ -23,7 +23,7 @@ Aucun secret ici : les valeurs sensibles sont dans Secret Manager, seuls leurs n
 | Images | Artifact Registry `sport-challenge` (Docker) | image `…/sport-challenge/api`, taguée `<sha court>` et `<version>` |
 | Fédération GitHub | pool Workload Identity `github-prod`, fournisseur `github-provider` | émetteur `https://token.actions.githubusercontent.com` ; condition : identifiant numérique du dépôt (`1438448292`), nom `damchi/sport-challenge-api`, branche `main` **et** Environment `production` ; `sc-deploy` n'est lié qu'au sujet `repo:damchi@38217786/sport-challenge-api@1438448292:environment:production` (le dépôt utilise les sujets OIDC **immuables** de GitHub : propriétaire et dépôt suivis de leur identifiant numérique ; `gh api repos/damchi/sport-challenge-api/actions/oidc/customization/sub` le montre) |
 | Budget | « sport challenge », sur le compte de facturation du projet | 20 CAD par mois, **sur tout le compte de facturation** (pas filtré sur `sport-challenge-prod` : les autres projets du compte comptent aussi) ; avertissements à 50 %, 90 % et 100 %, envoyés par courriel aux administrateurs du compte de facturation. Un budget ne bloque aucune dépense : il prévient seulement |
-| Alertes Cloud Monitoring | canal « Production : courriel » ; politiques « API : erreurs 5xx », « Job Cloud Run en échec », « close-weeks : aucune exécution réussie depuis 3 heures » | courriel vers une adresse lue (gardée dans la console, jamais dans le dépôt) ; détail et fichiers de politique dans « Alertes » ci-dessous |
+| Alertes Cloud Monitoring | canal « Production : courriel » ; politiques « API : erreurs 5xx », « Job Cloud Run en échec », « close-weeks : aucune exécution réussie depuis 3 heures », « API injoignable » ; vérification de disponibilité « API : /readyz » | courriel vers une adresse lue (gardée dans la console, jamais dans le dépôt) ; détail et fichiers de politique dans « Alertes » ci-dessous |
 
 Lire le budget (l'appel est facturé à `sport-challenge-prod` grâce à `--billing-project`, sinon gcloud prendrait le projet par défaut du poste) :
 
@@ -66,15 +66,16 @@ gcloud sql instances describe sc-db --project=sport-challenge-prod \
 
 ## Alertes
 
-Trois politiques Cloud Monitoring, créées le 2026-11-17, envoient un courriel par le canal « Production : courriel ». Chacune porte une courte documentation (que lire, que faire) qui renvoie à `docs/runbook.md`. Un incident se ferme seul 30 minutes après le retour à la normale.
+Quatre politiques Cloud Monitoring, créées le 2026-11-17, envoient un courriel par le canal « Production : courriel ». Chacune porte une courte documentation (que lire, que faire) qui renvoie à `docs/runbook.md`. Un incident se ferme seul 30 minutes après le retour à la normale.
 
 | Politique | Condition | Runbook |
 |---|---|---|
 | « API : erreurs 5xx » | service `sc-api`, `run.googleapis.com/request_count` avec `response_code_class = 5xx` : plus de 5 réponses sur 5 minutes | §1, §2 |
 | « Job Cloud Run en échec » | tout job du projet (`sc-migrate`, `sc-worker-*`), `run.googleapis.com/job/completed_execution_count` avec `result = failed` : dès une exécution en échec, un incident par job | §3, §4 |
 | « close-weeks : aucune exécution réussie depuis 3 heures » | `sc-worker-close-weeks`, même métrique avec `result = succeeded` : absente pendant 3 heures. La condition ne s'arme qu'après un premier succès | §4 |
+| « API injoignable » | vérification de disponibilité « API : /readyz » (`GET /readyz` de `sc-api` en HTTPS, 200 attendu en 10 s, toutes les 5 minutes, depuis les régions par défaut de Cloud Monitoring), `monitoring.googleapis.com/uptime_check/check_passed` : en échec depuis plus d'une région pendant 10 minutes. Couvre l'API injoignable (aucune requête n'arrive, donc aucun 5xx) et la base injoignable (`/readyz` répond 503) | §1, §2 |
 
-Chaque alerte a été déclenchée une fois le 2026-11-17 pour vérifier la réception du courriel : une exécution de `sc-worker-finalize-challenges` avec un argument invalide (échec de job), la condition 5xx basculée un moment sur 4xx avec un seuil à 0, la durée d'absence ramenée un moment à 10 minutes ; les deux politiques ont ensuite retrouvé leurs réglages ci-dessous.
+Chaque alerte a été déclenchée une fois le 2026-11-17 pour vérifier la réception du courriel : une exécution de `sc-worker-finalize-challenges` avec un argument invalide (échec de job), la condition 5xx basculée un moment sur 4xx avec un seuil à 0, la durée d'absence ramenée un moment à 10 minutes ; les deux politiques ont ensuite retrouvé leurs réglages ci-dessous. « API injoignable » a été déclenchée le même jour en faisant pointer la vérification un moment vers un chemin inexistant (404), puis remise sur `/readyz`.
 
 Recréer les alertes (composant `beta` de gcloud) : créer le canal, puis chaque politique depuis son fichier, après avoir remplacé `<canal>` par l'identifiant du canal. Le canal se crée de préférence dans la console (Monitoring > Alerting > Edit notification channels) : en ligne de commande, l'adresse reste dans l'historique du shell. Ne jamais coller la sortie de `channels describe`, qui contient l'adresse, dans une issue ou une pull request. Les fichiers nomment les ressources avec le préfixe `sc` (`sc-api`, `sc-worker-close-weeks`) : si `CLOUD_RUN_NAME_PREFIX` change, adapter les filtres, sinon les alertes ne voient plus rien, sans erreur.
 
@@ -84,6 +85,11 @@ gcloud beta monitoring channels create --project=sport-challenge-prod --type=ema
 gcloud beta monitoring channels list --project=sport-challenge-prod --format='value(name,displayName)'
 gcloud beta monitoring policies create --project=sport-challenge-prod --policy-from-file=<fichier>.yaml
 gcloud beta monitoring policies list --project=sport-challenge-prod --format='value(name,displayName)'
+# Vérification de disponibilité : son identifiant (<check_id>) va dans le filtre de api-unreachable.yaml
+gcloud monitoring uptime create "API : /readyz" --project=sport-challenge-prod --resource-type=uptime-url \
+  --resource-labels=host=<hôte run.app de sc-api>,project_id=sport-challenge-prod --protocol=https --path=/readyz \
+  --request-method=get --port=443 --validate-ssl=true --status-codes=200 --period=5 --timeout=10
+gcloud monitoring uptime list-configs --project=sport-challenge-prod --format='value(name,displayName)'
 ```
 
 `api-5xx.yaml` :
@@ -183,6 +189,42 @@ documentation:
     Le job sc-worker-close-weeks (lancé chaque heure par Cloud Scheduler) n'a pas réussi depuis 3 heures : les semaines ne se clôturent plus.
     Lire : Cloud Scheduler > close-weeks (dernière exécution, statut) et Cloud Run > Jobs > sc-worker-close-weeks.
     Faire : runbook §4 (relance du worker ; la tâche est idempotente).
+    Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
+notificationChannels:
+  - projects/sport-challenge-prod/notificationChannels/<canal>
+```
+
+`api-unreachable.yaml` :
+
+```yaml
+displayName: "API injoignable"
+combiner: OR
+conditions:
+  - displayName: "/readyz échoue depuis plusieurs régions pendant 10 minutes"
+    conditionThreshold:
+      filter: >-
+        resource.type = "uptime_url"
+        AND metric.type = "monitoring.googleapis.com/uptime_check/check_passed"
+        AND metric.labels.check_id = "<check_id>"
+      aggregations:
+        - alignmentPeriod: 1200s
+          perSeriesAligner: ALIGN_NEXT_OLDER
+          crossSeriesReducer: REDUCE_COUNT_FALSE
+          groupByFields:
+            - resource.label.*
+      comparison: COMPARISON_GT
+      thresholdValue: 1
+      duration: 600s
+      trigger:
+        count: 1
+alertStrategy:
+  autoClose: 1800s
+documentation:
+  mimeType: text/markdown
+  content: |-
+    La vérification de disponibilité « API : /readyz » échoue depuis plusieurs régions depuis 10 minutes : l'API sc-api ne répond plus, ou sa base ne répond plus (/readyz renvoie 503).
+    Lire : Cloud Run > sc-api (révisions, trafic, journaux au démarrage) ; Monitoring > Uptime checks (code reçu, régions).
+    Faire : si la panne suit un déploiement, retour arrière (runbook §2) ; sinon vérifier la base sc-db et la dernière révision (runbook §1).
     Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
 notificationChannels:
   - projects/sport-challenge-prod/notificationChannels/<canal>
