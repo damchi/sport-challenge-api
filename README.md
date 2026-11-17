@@ -466,18 +466,20 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 
 | # | Middleware | Rôle |
 |---|---|---|
-| 1 | `Recovery` | Transforme un plantage en erreur 500 propre, sans arrêter le serveur |
+| 1 | `SecurityHeaders` | En-têtes posés sur toute réponse, erreurs comprises : `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` (sauf si le handler en fixe un autre) |
 | 2 | `RequestID` | Identifiant de requête, repris dans les logs et les réponses d'erreur |
 | 3 | `Logger` | Logs structurés (`slog`), sans donnée personnelle ni jeton |
-| 4 | `CORS` | Origines explicites (web uniquement, `CORS_ALLOWED_ORIGINS`), jamais `*` ; répond aux pré-requêtes `OPTIONS` sans jeton ; pas de cookie, donc pas d'`Allow-Credentials` |
-| 5 | `RateLimitIP` | Limite de débit par adresse IP, avant tout travail coûteux ; répond 429 au-delà |
-| 6 | `Authenticate` | Lit le jeton `Bearer`, le vérifie (signature par JWKS, émetteur, audience, expiration), place les informations du jeton dans le contexte |
-| 7 | `CurrentUser` | Retrouve l'utilisateur local à partir de l'identifiant du fournisseur (`sub`), le crée au premier login, place son identifiant dans le contexte |
-| 8 | `RateLimitUser` | Limite de débit par utilisateur, sur les routes d'écriture et d'upload seulement |
+| 4 | `Recovery` | Transforme un plantage en erreur 500 propre, sans arrêter le serveur ; placé après `RequestID` et `Logger` pour que le plantage rattrapé soit journalisé comme un 500 avec son identifiant de requête |
+| 5 | `CORS` | Origines explicites (web uniquement, `CORS_ALLOWED_ORIGINS`), jamais `*` ; répond aux pré-requêtes `OPTIONS` sans jeton ; pas de cookie, donc pas d'`Allow-Credentials` |
+| 6 | `RateLimitIP` | Limite de débit par adresse IP, avant tout travail coûteux ; répond 429 au-delà |
+| 7 | `Authenticate` | Lit le jeton `Bearer`, le vérifie (signature par JWKS, émetteur, audience, expiration), place les informations du jeton dans le contexte |
+| 8 | `CurrentUser` | Retrouve l'utilisateur local à partir de l'identifiant du fournisseur (`sub`), le crée au premier login, place son identifiant dans le contexte |
+| 9 | `RateLimitUser` | Limite de débit par utilisateur, sur les requêtes d'écriture seulement (toute méthode sauf `GET`, `HEAD` et `OPTIONS`) |
+| 10 | `RequestValidator` | Par route du contrat, juste avant le handler : vérifie la requête contre `api/openapi.yaml` (400 `validation_failed`) |
 
 **Groupes de routes**
 - Publiques, sans jeton : `GET /healthz` et `GET /readyz` (sondes de Cloud Run), et les pré-requêtes `OPTIONS` (CORS).
-- Protégées (tout le reste, dont `/api/v1`) : middlewares 1 à 8. **Protégé par défaut** : `cmd/api` applique `Authenticate` puis `CurrentUser` à toute route absente d'une liste explicite de routes publiques, et `api/openapi.yaml` exige `bearerAuth` au niveau global (seules les sondes le surchargent avec `security: []`). Une nouvelle route est donc protégée sans rien ajouter ; un test parcourt les routes enregistrées pour le vérifier.
+- Protégées (tout le reste, dont `/api/v1`) : middlewares 1 à 10 ; les routes publiques passent par tous sauf 7 à 9. **Protégé par défaut** : `cmd/api` applique `Authenticate` puis `CurrentUser` à toute route absente d'une liste explicite de routes publiques, et `api/openapi.yaml` exige `bearerAuth` au niveau global (seules les sondes le surchargent avec `security: []`). Une nouvelle route est donc protégée sans rien ajouter ; un test parcourt les routes enregistrées pour le vérifier.
 - ✅ Connexion **obligatoire** pour toutes les routes, y compris la lecture des challenges publics (V1). Pas de middleware `OptionalAuth` pour l'instant.
 - V2 : `POST /webhooks/{provider}` n'utilise pas le jeton utilisateur mais un middleware de **vérification de signature** du fournisseur.
 
