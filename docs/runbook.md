@@ -14,7 +14,7 @@ Détail : `docs/deploiement.md`, `docs/release.md`.
 - **Approuver** : onglet Actions > `Deploy` > *Review deployments*. Avant d'approuver, lire les notes de la release (onglet Releases) et vérifier qu'aucune migration risquée n'en fait partie (`migrations/`).
 - **Vérifier après coup** :
   - l'exécution `Deploy` est verte (le test de fumée vérifie que la révision qui sert tout le trafic utilise l'image du commit, puis que `/readyz` répond) ;
-  - aucune erreur 5xx dans les minutes qui suivent (journaux du service `sc-api` ; aucune alerte Cloud Monitoring n'existe aujourd'hui) ;
+  - aucune erreur 5xx dans les minutes qui suivent : l'alerte « API : erreurs 5xx » prévient au-delà de 5 réponses 5xx en 5 minutes (`docs/deploiement.md`, « Alertes ») ; une erreur isolée se lit dans les journaux du service `sc-api` ;
   - Error Reporting ne montre pas de nouvelle erreur.
 - **Un déploiement échoue** :
   - au build : rien n'est changé en production, corriger et refusionner ;
@@ -52,7 +52,7 @@ Un retour arrière n'annule jamais une migration. Le code plus ancien doit reste
 
 Détail : `docs/migrations.md`.
 
-- **Symptôme** : l'étape *Apply the migrations* du workflow `Deploy` échoue (aucune alerte Cloud Monitoring n'existe aujourd'hui : l'échec se voit dans le workflow et les journaux du job). Rien n'est déployé : la production continue de tourner sur l'ancienne version.
+- **Symptôme** : l'étape *Apply the migrations* du workflow `Deploy` échoue (l'alerte « Job Cloud Run en échec » arrive par courriel pour `sc-migrate` ; l'échec se voit aussi dans le workflow et les journaux du job). Rien n'est déployé : la production continue de tourner sur l'ancienne version.
 - **Diagnostic** : journaux de l'exécution du job `<préfixe>-migrate` dans Cloud Logging. Si la base est marquée `dirty`, ni `up` ni `down` ne s'exécutent.
 - **Réparer** : suivre la section « Migration sale » de `docs/migrations.md` (état réel du schéma, remise en état à la main, `migrate force <version>`, correction dans une **nouvelle** migration). Avant toute action sur le schéma, lancer une sauvegarde à la demande :
 
@@ -72,7 +72,7 @@ Les tâches sont idempotentes : une relance ne refait pas un travail déjà fait
 | `finalize-challenges` | chaque heure, à :10 | `<préfixe>-worker-finalize-challenges` |
 | `retry-auth0-deletions` | chaque heure, à :20 | `<préfixe>-worker-retry-auth0-deletions` |
 
-- **Symptômes** : une exécution en échec dans Cloud Run > Jobs (aucune alerte Cloud Monitoring n'existe aujourd'hui, `docs/deploiement.md`). Les semaines ne se clôturent pas, les classements finaux ne se figent pas.
+- **Symptômes** : l'alerte « Job Cloud Run en échec » (une exécution en échec dans Cloud Run > Jobs, nom du job dans l'incident) ou « close-weeks : aucune exécution réussie depuis 3 heures » (le job ne tourne plus ou échoue à chaque fois ; vérifier aussi la planification dans Cloud Scheduler), `docs/deploiement.md`, « Alertes ». Les semaines ne se clôturent pas, les classements finaux ne se figent pas.
 - **Diagnostic** : journaux de la dernière exécution (Cloud Run > Jobs > le job > Exécutions), puis cause (base indisponible, migration en attente, erreur de code).
 - **Relancer** une fois la cause traitée :
 
@@ -133,7 +133,7 @@ Ne jamais coller un secret dans un ticket, un message ou un journal. Un secret e
 - [ ] **Sauvegardes testées** : restauration d'une sauvegarde (ou clone à un instant donné) vers une **instance séparée**, puis vérification des données ; durée de l'opération notée ici.
 - [ ] **Quotas** vérifiés : instances maximales de Cloud Run, connexions Cloud SQL, quotas de l'API de gestion Auth0 (suppressions) et du plan Auth0 (utilisateurs actifs).
 - [ ] **Budget** : alertes de budget actives (50 %, 90 %, 100 %) et reçues par une adresse lue ; coût fixe de Cloud SQL (`db-f1-micro`, zonale) connu.
-- [ ] **Alertes** reçues au moins une fois (5xx, échec de job, absence de `close-weeks`).
+- [ ] **Alertes** reçues au moins une fois (5xx, échec de job, absence de `close-weeks`) : chaque courriel est arrivé lors du test du 2026-11-17 (`docs/deploiement.md`, « Alertes ») ; à refaire si le canal ou l'adresse change.
 - [ ] **Accès** : Environment `production` avec reviewers, tags `v*` protégés, deux personnes au plus avec les droits `down`/`force` sur le job de migration, vérifié dans la politique IAM du projet (`gcloud projects get-iam-policy sport-challenge-prod`).
 - [ ] Ce runbook relu, et les contacts du §7 remplis.
 

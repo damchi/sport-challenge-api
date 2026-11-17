@@ -23,7 +23,7 @@ Aucun secret ici : les valeurs sensibles sont dans Secret Manager, seuls leurs n
 | Images | Artifact Registry `sport-challenge` (Docker) | image `…/sport-challenge/api`, taguée `<sha court>` et `<version>` |
 | Fédération GitHub | pool Workload Identity `github-prod`, fournisseur `github-provider` | émetteur `https://token.actions.githubusercontent.com` ; condition : dépôt `damchi/sport-challenge-api` **et** branche `main` |
 | Budget | « sport challenge », sur le compte de facturation du projet | 20 CAD par mois, **sur tout le compte de facturation** (pas filtré sur `sport-challenge-prod` : les autres projets du compte comptent aussi) ; avertissements à 50 %, 90 % et 100 %, envoyés par courriel aux administrateurs du compte de facturation. Un budget ne bloque aucune dépense : il prévient seulement |
-| Alertes Cloud Monitoring | aucune | ni alerte sur les erreurs 5xx de l'API, ni sur l'échec d'un job, ni sur l'absence de `close-weeks` : un problème ne se voit aujourd'hui que dans les journaux (Cloud Logging, Error Reporting) |
+| Alertes Cloud Monitoring | canal « Production : courriel » ; politiques « API : erreurs 5xx », « Job Cloud Run en échec », « close-weeks : aucune exécution réussie depuis 3 heures » | courriel vers une adresse lue (gardée dans la console, jamais dans le dépôt) ; détail et fichiers de politique dans « Alertes » ci-dessous |
 
 Lire le budget (l'appel est facturé à `sport-challenge-prod` grâce à `--billing-project`, sinon gcloud prendrait le projet par défaut du poste) :
 
@@ -62,6 +62,130 @@ gcloud run services describe sc-api --region=northamerica-northeast1 --project=s
   --format='value(spec.template.metadata.annotations."run.googleapis.com/cloudsql-instances")'
 gcloud sql instances describe sc-db --project=sport-challenge-prod \
   --format='value(settings.ipConfiguration.sslMode,settings.ipConfiguration.authorizedNetworks.len())'
+```
+
+## Alertes
+
+Trois politiques Cloud Monitoring, créées le 2026-11-17, envoient un courriel par le canal « Production : courriel ». Chacune porte une courte documentation (que lire, que faire) qui renvoie à `docs/runbook.md`. Un incident se ferme seul 30 minutes après le retour à la normale.
+
+| Politique | Condition | Runbook |
+|---|---|---|
+| « API : erreurs 5xx » | service `sc-api`, `run.googleapis.com/request_count` avec `response_code_class = 5xx` : plus de 5 réponses sur 5 minutes | §1, §2 |
+| « Job Cloud Run en échec » | tout job du projet (`sc-migrate`, `sc-worker-*`), `run.googleapis.com/job/completed_execution_count` avec `result = failed` : dès une exécution en échec, un incident par job | §3, §4 |
+| « close-weeks : aucune exécution réussie depuis 3 heures » | `sc-worker-close-weeks`, même métrique avec `result = succeeded` : absente pendant 3 heures. La condition ne s'arme qu'après un premier succès | §4 |
+
+Chaque alerte a été déclenchée une fois le 2026-11-17 pour vérifier la réception du courriel : une exécution de `sc-worker-finalize-challenges` avec un argument invalide (échec de job), la condition 5xx basculée un moment sur 4xx avec un seuil à 0, la durée d'absence ramenée un moment à 10 minutes ; les deux politiques ont ensuite retrouvé leurs réglages ci-dessous.
+
+Recréer les alertes (composant `beta` de gcloud) : créer le canal, puis chaque politique depuis son fichier, après avoir remplacé `<canal>` par l'identifiant du canal. Le canal se crée de préférence dans la console (Monitoring > Alerting > Edit notification channels) : en ligne de commande, l'adresse reste dans l'historique du shell. Ne jamais coller la sortie de `channels describe`, qui contient l'adresse, dans une issue ou une pull request.
+
+```
+gcloud beta monitoring channels create --project=sport-challenge-prod --type=email \
+  --display-name="Production : courriel" --channel-labels=email_address=<adresse>
+gcloud beta monitoring channels list --project=sport-challenge-prod --format='value(name,displayName)'
+gcloud beta monitoring policies create --project=sport-challenge-prod --policy-from-file=<fichier>.yaml
+gcloud beta monitoring policies list --project=sport-challenge-prod --format='value(name,displayName)'
+```
+
+`api-5xx.yaml` :
+
+```yaml
+displayName: "API : erreurs 5xx"
+combiner: OR
+conditions:
+  - displayName: "sc-api : plus de 5 réponses 5xx en 5 minutes"
+    conditionThreshold:
+      filter: >-
+        resource.type = "cloud_run_revision" AND resource.labels.service_name = "sc-api"
+        AND metric.type = "run.googleapis.com/request_count"
+        AND metric.labels.response_code_class = "5xx"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_SUM
+          crossSeriesReducer: REDUCE_SUM
+      comparison: COMPARISON_GT
+      thresholdValue: 5
+      duration: 0s
+      trigger:
+        count: 1
+alertStrategy:
+  autoClose: 1800s
+documentation:
+  mimeType: text/markdown
+  content: |-
+    L'API (service Cloud Run sc-api) a renvoyé plus de 5 réponses 5xx en 5 minutes.
+    Lire : Error Reporting et les journaux de sc-api (severity>=ERROR, request_id de la réponse).
+    Faire : si l'erreur suit un déploiement, retour arrière (runbook §2) ; sinon vérifier /readyz et la base (runbook §1).
+    Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
+notificationChannels:
+  - projects/sport-challenge-prod/notificationChannels/<canal>
+```
+
+`job-failed.yaml` :
+
+```yaml
+displayName: "Job Cloud Run en échec"
+combiner: OR
+conditions:
+  - displayName: "Une exécution en échec (sc-migrate, sc-worker-*)"
+    conditionThreshold:
+      filter: >-
+        resource.type = "cloud_run_job"
+        AND metric.type = "run.googleapis.com/job/completed_execution_count"
+        AND metric.labels.result = "failed"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_SUM
+          crossSeriesReducer: REDUCE_SUM
+          groupByFields:
+            - resource.labels.job_name
+      comparison: COMPARISON_GT
+      thresholdValue: 0
+      duration: 0s
+      trigger:
+        count: 1
+alertStrategy:
+  autoClose: 1800s
+documentation:
+  mimeType: text/markdown
+  content: |-
+    Une exécution d'un job Cloud Run a échoué (le nom du job est dans l'incident).
+    Lire : Cloud Run > Jobs > le job > l'exécution en échec, et ses journaux.
+    Faire : sc-migrate -> runbook §3 (migration en échec, rien n'est déployé) ; sc-worker-* -> runbook §4 (relance du worker, chaque tâche est idempotente).
+    Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
+notificationChannels:
+  - projects/sport-challenge-prod/notificationChannels/<canal>
+```
+
+`close-weeks-absent.yaml` :
+
+```yaml
+displayName: "close-weeks : aucune exécution réussie depuis 3 heures"
+combiner: OR
+conditions:
+  - displayName: "sc-worker-close-weeks : pas de succès depuis 3 heures"
+    conditionAbsent:
+      filter: >-
+        resource.type = "cloud_run_job" AND resource.labels.job_name = "sc-worker-close-weeks"
+        AND metric.type = "run.googleapis.com/job/completed_execution_count"
+        AND metric.labels.result = "succeeded"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_SUM
+          crossSeriesReducer: REDUCE_SUM
+      duration: 10800s
+      trigger:
+        count: 1
+alertStrategy:
+  autoClose: 1800s
+documentation:
+  mimeType: text/markdown
+  content: |-
+    Le job sc-worker-close-weeks (lancé chaque heure par Cloud Scheduler) n'a pas réussi depuis 3 heures : les semaines ne se clôturent plus.
+    Lire : Cloud Scheduler > close-weeks (dernière exécution, statut) et Cloud Run > Jobs > sc-worker-close-weeks.
+    Faire : runbook §4 (relance du worker ; la tâche est idempotente).
+    Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
+notificationChannels:
+  - projects/sport-challenge-prod/notificationChannels/<canal>
 ```
 
 ## Ce qui se passe
