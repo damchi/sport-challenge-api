@@ -99,9 +99,11 @@ jobs:
           .github/scripts/plan-deploy_test.sh
           .github/scripts/newer-versions_test.sh
 
-      # The rule that skips this CI for documentation-only changes.
-      - name: Changed files script
-        run: .github/scripts/code-changed_test.sh
+      # The rules that skip this CI and the release for documentation-only changes.
+      - name: Changed files scripts
+        run: |
+          .github/scripts/code-changed_test.sh
+          .github/scripts/release-needed_test.sh
 
   migrations:
     name: migrations up, down, up
