@@ -55,7 +55,7 @@ Du plus sûr au plus risqué :
    gcloud run jobs execute sc-migrate --project=<projet> --region=northamerica-northeast1 --wait --args=migrate,down,1
    ```
 
-   Un `.down.sql` supprime souvent des colonnes ou des tables, donc des données. Avant : lancer une sauvegarde à la demande (`gcloud sql backups create --instance=sc-db --project=<projet>`) et relire le fichier.
+   Un `.down.sql` supprime souvent des colonnes ou des tables, donc des données. Avant : lancer une sauvegarde à la demande (`gcloud sql backups create --instance=sc-db --location=northamerica-northeast1 --project=<projet>`) et relire le fichier.
 4. **Restaurer la base** à un instant précédant la migration (récupération à un instant donné, 7 jours de journaux), en dernier recours : `gcloud sql instances clone` vers une nouvelle instance, puis bascule à décider avec l'équipe.
 
 ## À vérifier au premier passage sur une base neuve
