@@ -57,7 +57,7 @@ Règles de dépendance :
 
 ## Règles métier non négociables
 
-- **Temps** : tout instant est stocké en UTC (`timestamptz`). Le fuseau du challenge sert à découper : minuit local, semaines calculées en heure locale (`AddDate`, pas des durées fixes de 7×24 h). Aucun appel direct à `time.Now()` dans les services ni dans `scoring` : passe par `platform/clock`.
+- **Temps** : tout instant est stocké en UTC (`timestamptz`). Le fuseau du challenge sert à découper : minuit local (ou premier instant du jour si un changement d'heure saute minuit : `scoring.StartOfDay`), semaines calculées en jours locaux (pas des durées fixes de 7×24 h). Aucun appel direct à `time.Now()` dans les services ni dans `scoring` : passe par `platform/clock`.
 - **Classement** : toujours recalculé depuis les activités brutes. Jamais de totaux stockés comme source de vérité. Seul `result_snapshot` fige les résultats à la fin du challenge.
 - **Catégories** : exactement **3** (temps cumulé tous sports ; distance cumulée avec ratio à la course ; course seule avec élimination). Un participant est classé dans **toutes** les catégories. Catégories et coefficients sont **figés** à la création.
 - **Activité** : saisie une seule fois, elle compte dans chaque challenge où l'auteur est participant actif et dont la fenêtre contient `started_at` (`[starts_at, ends_at)`). Une activité datée de la fenêtre d'un challenge terminé est refusée (semaine verrouillée) ; une activité hors de toute fenêtre est acceptée et ne compte nulle part (ADR `docs/adr/0001-activity-scope.md`). Durée obligatoire ; distance seulement si le sport produit des km.

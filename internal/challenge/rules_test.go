@@ -264,6 +264,40 @@ func TestValidateWindowIsNeverFixedDurations(t *testing.T) {
 	}
 }
 
+// TestValidateStartsOnTheChosenLocalDay pins SC-API-079: in Santiago,
+// midnight is skipped on 2027-09-05 (the clocks go from 23:59:59 to 01:00).
+// The challenge starts at the first instant of that day, 01:00, never at
+// 23:00 the day before, and ends at local midnight 2 weeks later.
+func TestValidateStartsOnTheChosenLocalDay(t *testing.T) {
+	santiago, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Date(2027, 9, 5, 0, 0, 0, 0, santiago).Day() == 5 {
+		t.Skip("this zone database does not skip midnight on 2027-09-05 in Santiago")
+	}
+	draft := with(func(d *Draft) { d.Timezone = "America/Santiago"; d.StartDate = "2027-09-05"; d.Weeks = 2 })
+	w, err := Validate(draft, time.Date(2027, 9, 1, 12, 0, 0, 0, time.UTC), distanceSports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := w.StartsAt.In(santiago).Format("2006-01-02 15:04"); got != "2027-09-05 01:00" {
+		t.Fatalf("starts at %s local, want 2027-09-05 01:00", got)
+	}
+	if got := w.EndsAt.In(santiago).Format("2006-01-02 15:04"); got != "2027-09-19 00:00" {
+		t.Fatalf("ends at %s local, want 2027-09-19 00:00", got)
+	}
+	// On that day, starting the same day is still allowed at its first instant.
+	if _, err := Validate(draft, w.StartsAt, distanceSports); err != nil {
+		t.Fatalf("start today refused at the first instant of the day: %v", err)
+	}
+	// And the day before is yesterday from that first instant.
+	yesterday := with(func(d *Draft) { d.Timezone = "America/Santiago"; d.StartDate = "2027-09-04"; d.Weeks = 2 })
+	if _, err := Validate(yesterday, w.StartsAt, distanceSports); err == nil {
+		t.Fatal("start yesterday accepted at the first instant of the day")
+	}
+}
+
 func TestValidateAYearAheadIsACalendarYear(t *testing.T) {
 	// From 2027-03-01, a year ahead is 2028-03-01: 366 days later, since
 	// 2028-02-29 exists. 365 days would stop at 2028-02-29.
