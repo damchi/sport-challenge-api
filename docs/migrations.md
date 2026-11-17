@@ -15,15 +15,15 @@ Le job utilise la même image que l'API et le worker, avec la commande `migrate`
 | `migrate down <n>` | annule les `n` dernières migrations (`n` obligatoire, de 1 à 3 : au-delà, restaurer une sauvegarde) |
 | `migrate force <version>` | fixe la version après un échec : **à la main seulement** |
 
-> Les commandes ci-dessous visent un environnement (`<projet>` : son projet GCP). Elles modifient la base : jamais sur la prod sans accord.
+> Les commandes ci-dessous visent la production (`sport-challenge-prod`, le seul environnement GCP) et se copient telles quelles, sauf `<image>` et `<version>`. Elles modifient la base : jamais sans accord.
 
 ## Ordre d'un déploiement
 
 1. Mettre l'image du job à jour, puis l'exécuter en attendant sa fin :
 
    ```
-   gcloud run jobs update sc-migrate --project=<projet> --region=northamerica-northeast1 --image=<image>
-   gcloud run jobs execute sc-migrate --project=<projet> --region=northamerica-northeast1 --wait
+   gcloud run jobs update sc-migrate --project=sport-challenge-prod --region=northamerica-northeast1 --image=<image>
+   gcloud run jobs execute sc-migrate --project=sport-challenge-prod --region=northamerica-northeast1 --wait
    ```
 
    `--wait` rend un code de sortie non nul si la migration échoue : **le pipeline s'arrête là et le déploiement n'a pas lieu**. L'échec est visible dans l'exécution du pipeline (et, avec le ticket d'observabilité, dans une alerte).
@@ -38,7 +38,7 @@ Une migration qui échoue en route laisse la base marquée `dirty` : `up` et `do
 3. Remettre le schéma dans l'état d'une version connue, à la main (`force` ne répare rien : il change seulement la version notée), puis indiquer **la dernière version dont la migration s'est entièrement appliquée** :
 
    ```
-   gcloud run jobs execute sc-migrate --project=<projet> --region=northamerica-northeast1 --wait --args=migrate,force,<version>
+   gcloud run jobs execute sc-migrate --project=sport-challenge-prod --region=northamerica-northeast1 --wait --args=migrate,force,<version>
    ```
 
 4. Corriger la migration, puis relancer `migrate up`. Une migration qu'aucun environnement n'a appliquée en entier peut se corriger sur place ; dès qu'elle a été appliquée quelque part, la correction va **dans une nouvelle migration** (une migration appliquée ne se modifie jamais).
@@ -52,10 +52,10 @@ Du plus sûr au plus risqué :
 3. **Annuler la dernière migration** avec son fichier `.down.sql` :
 
    ```
-   gcloud run jobs execute sc-migrate --project=<projet> --region=northamerica-northeast1 --wait --args=migrate,down,1
+   gcloud run jobs execute sc-migrate --project=sport-challenge-prod --region=northamerica-northeast1 --wait --args=migrate,down,1
    ```
 
-   Un `.down.sql` supprime souvent des colonnes ou des tables, donc des données. Avant : lancer une sauvegarde à la demande (`gcloud sql backups create --instance=sc-db --location=northamerica-northeast1 --project=<projet>`) et relire le fichier.
+   Un `.down.sql` supprime souvent des colonnes ou des tables, donc des données. Avant : lancer une sauvegarde à la demande (`gcloud sql backups create --instance=sc-db --location=northamerica-northeast1 --project=sport-challenge-prod`) et relire le fichier.
 4. **Restaurer la base** à un instant précédant la migration (récupération à un instant donné, 7 jours de journaux), en dernier recours : `gcloud sql instances clone` vers une nouvelle instance, puis bascule à décider avec l'équipe.
 
 ## À vérifier au premier passage sur une base neuve
