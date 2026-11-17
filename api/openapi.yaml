@@ -37,14 +37,15 @@ tags:
   - name: invitations
     description: Invitation links to a challenge, reusable until the end of week 1.
 paths:
-  /healthz:
+  /health:
     get:
-      operationId: getHealthz
+      operationId: getHealth
       summary: Liveness probe
       description: |
         Always returns 200 while the process is able to serve requests. It also
         tells which build runs (version and commit), so that a deployment can
-        be checked without a token.
+        be checked without a token. No trailing "z" (as in /healthz): Cloud Run
+        reserves some paths ending in z and answers them itself.
       tags: [health]
       security: []
       responses:
@@ -56,9 +57,9 @@ paths:
                 $ref: "#/components/schemas/Health"
         "429":
           $ref: "#/components/responses/RateLimited"
-  /readyz:
+  /ready:
     get:
-      operationId: getReadyz
+      operationId: getReady
       summary: Readiness probe
       description: Returns 200 when the database answers, 503 otherwise.
       tags: [health]

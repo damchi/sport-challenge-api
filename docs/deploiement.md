@@ -23,7 +23,7 @@ Aucun secret ici : les valeurs sensibles sont dans Secret Manager, seuls leurs n
 | Images | Artifact Registry `sport-challenge` (Docker) | image `…/sport-challenge/api`, taguée `<sha court>` et `<version>` |
 | Fédération GitHub | pool Workload Identity `github-prod`, fournisseur `github-provider` | émetteur `https://token.actions.githubusercontent.com` ; condition : identifiant numérique du dépôt (`1438448292`), nom `damchi/sport-challenge-api`, branche `main` **et** Environment `production` ; `sc-deploy` n'est lié qu'au sujet `repo:damchi@38217786/sport-challenge-api@1438448292:environment:production` (le dépôt utilise les sujets OIDC **immuables** de GitHub : propriétaire et dépôt suivis de leur identifiant numérique ; `gh api repos/damchi/sport-challenge-api/actions/oidc/customization/sub` le montre) |
 | Budget | « sport challenge », sur le compte de facturation du projet | 20 CAD par mois, **sur tout le compte de facturation** (pas filtré sur `sport-challenge-prod` : les autres projets du compte comptent aussi) ; avertissements à 50 %, 90 % et 100 %, envoyés par courriel aux administrateurs du compte de facturation. Un budget ne bloque aucune dépense : il prévient seulement |
-| Alertes Cloud Monitoring | canal « Production : courriel » ; politiques « API : erreurs 5xx », « Job Cloud Run en échec », « close-weeks : aucune exécution réussie depuis 3 heures », « API injoignable » ; vérification de disponibilité « API : /readyz » | courriel vers une adresse lue (gardée dans la console, jamais dans le dépôt) ; détail et fichiers de politique dans « Alertes » ci-dessous |
+| Alertes Cloud Monitoring | canal « Production : courriel » ; politiques « API : erreurs 5xx », « Job Cloud Run en échec », « close-weeks : aucune exécution réussie depuis 3 heures », « API injoignable » ; vérification de disponibilité « API : /ready » | courriel vers une adresse lue (gardée dans la console, jamais dans le dépôt) ; détail et fichiers de politique dans « Alertes » ci-dessous |
 
 Lire le budget (l'appel est facturé à `sport-challenge-prod` grâce à `--billing-project`, sinon gcloud prendrait le projet par défaut du poste) :
 
@@ -73,9 +73,9 @@ Quatre politiques Cloud Monitoring, créées le 2026-11-17, envoient un courriel
 | « API : erreurs 5xx » | service `sc-api`, `run.googleapis.com/request_count` avec `response_code_class = 5xx` : plus de 5 réponses sur 5 minutes | §1, §2 |
 | « Job Cloud Run en échec » | tout job du projet (`sc-migrate`, `sc-worker-*`), `run.googleapis.com/job/completed_execution_count` avec `result = failed` : dès une exécution en échec, un incident par job | §3, §4 |
 | « close-weeks : aucune exécution réussie depuis 3 heures » | `sc-worker-close-weeks`, même métrique avec `result = succeeded` : absente pendant 3 heures. La condition ne s'arme qu'après un premier succès | §4 |
-| « API injoignable » | vérification de disponibilité « API : /readyz » (`GET /readyz` de `sc-api` en HTTPS, 200 attendu en 10 s, toutes les 5 minutes, depuis les régions par défaut de Cloud Monitoring), `monitoring.googleapis.com/uptime_check/check_passed` : en échec depuis plus d'une région pendant 10 minutes. Couvre l'API injoignable (aucune requête n'arrive, donc aucun 5xx) et la base injoignable (`/readyz` répond 503) | §1, §2 |
+| « API injoignable » | vérification de disponibilité « API : /ready » (`GET /ready` de `sc-api` en HTTPS, 200 attendu en 10 s, toutes les 5 minutes, depuis les régions par défaut de Cloud Monitoring), `monitoring.googleapis.com/uptime_check/check_passed` : en échec depuis plus d'une région pendant 10 minutes. Couvre l'API injoignable (aucune requête n'arrive, donc aucun 5xx) et la base injoignable (`/ready` répond 503) | §1, §2 |
 
-Chaque alerte a été déclenchée une fois le 2026-11-17 pour vérifier la réception du courriel : une exécution de `sc-worker-finalize-challenges` avec un argument invalide (échec de job), la condition 5xx basculée un moment sur 4xx avec un seuil à 0, la durée d'absence ramenée un moment à 10 minutes ; les deux politiques ont ensuite retrouvé leurs réglages ci-dessous. « API injoignable » a été déclenchée le même jour en faisant pointer la vérification un moment vers un chemin inexistant (404), puis remise sur `/readyz`.
+Chaque alerte a été déclenchée une fois le 2026-11-17 pour vérifier la réception du courriel : une exécution de `sc-worker-finalize-challenges` avec un argument invalide (échec de job), la condition 5xx basculée un moment sur 4xx avec un seuil à 0, la durée d'absence ramenée un moment à 10 minutes ; les deux politiques ont ensuite retrouvé leurs réglages ci-dessous. « API injoignable » a été déclenchée le même jour en faisant pointer la vérification un moment vers un chemin inexistant (404), puis remise sur son chemin. Le 2026-11-17 aussi (SC-API-106), la sonde est passée de `/readyz` à `/ready` (Cloud Run intercepte `/healthz` et peut intercepter d'autres chemins finissant par `z`) : pour qu'aucune fausse alerte ne parte entre le déploiement et le changement de la vérification, celle-ci (même identifiant) est passée sur `/ready` sous le nom « API : /ready » **avant** la fusion, en acceptant 200 ou 401 (la route inconnue répondait 401), puis n'a plus accepté que 200 une fois la nouvelle version déployée. Une API réellement en panne (pas de réponse, 5xx, 503) alertait pendant toute la transition.
 
 Recréer les alertes (composant `beta` de gcloud) : créer le canal, puis chaque politique depuis son fichier, après avoir remplacé `<canal>` par l'identifiant du canal. Le canal se crée de préférence dans la console (Monitoring > Alerting > Edit notification channels) : en ligne de commande, l'adresse reste dans l'historique du shell. Ne jamais coller la sortie de `channels describe`, qui contient l'adresse, dans une issue ou une pull request. Les fichiers nomment les ressources avec le préfixe `sc` (`sc-api`, `sc-worker-close-weeks`) : si `CLOUD_RUN_NAME_PREFIX` change, adapter les filtres, sinon les alertes ne voient plus rien, sans erreur.
 
@@ -86,8 +86,8 @@ gcloud beta monitoring channels list --project=sport-challenge-prod --format='va
 gcloud beta monitoring policies create --project=sport-challenge-prod --policy-from-file=<fichier>.yaml
 gcloud beta monitoring policies list --project=sport-challenge-prod --format='value(name,displayName)'
 # Vérification de disponibilité : son identifiant (<check_id>) va dans le filtre de api-unreachable.yaml
-gcloud monitoring uptime create "API : /readyz" --project=sport-challenge-prod --resource-type=uptime-url \
-  --resource-labels=host=<hôte run.app de sc-api>,project_id=sport-challenge-prod --protocol=https --path=/readyz \
+gcloud monitoring uptime create "API : /ready" --project=sport-challenge-prod --resource-type=uptime-url \
+  --resource-labels=host=<hôte run.app de sc-api>,project_id=sport-challenge-prod --protocol=https --path=/ready \
   --request-method=get --port=443 --validate-ssl=true --status-codes=200 --period=5 --timeout=10
 gcloud monitoring uptime list-configs --project=sport-challenge-prod --format='value(name,displayName)'
 ```
@@ -120,7 +120,7 @@ documentation:
   content: |-
     L'API (service Cloud Run sc-api) a renvoyé plus de 5 réponses 5xx en 5 minutes.
     Lire : Error Reporting et les journaux de sc-api (severity>=ERROR, request_id de la réponse).
-    Faire : si l'erreur suit un déploiement, retour arrière (runbook §2) ; sinon vérifier /readyz et la base (runbook §1).
+    Faire : si l'erreur suit un déploiement, retour arrière (runbook §2) ; sinon vérifier /ready et la base (runbook §1).
     Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
 notificationChannels:
   - projects/sport-challenge-prod/notificationChannels/<canal>
@@ -200,7 +200,7 @@ notificationChannels:
 displayName: "API injoignable"
 combiner: OR
 conditions:
-  - displayName: "/readyz échoue depuis plusieurs régions pendant 10 minutes"
+  - displayName: "/ready échoue depuis plusieurs régions pendant 10 minutes"
     conditionThreshold:
       filter: >-
         resource.type = "uptime_url"
@@ -222,7 +222,7 @@ alertStrategy:
 documentation:
   mimeType: text/markdown
   content: |-
-    La vérification de disponibilité « API : /readyz » échoue depuis plusieurs régions depuis 10 minutes : l'API sc-api ne répond plus, ou sa base ne répond plus (/readyz renvoie 503).
+    La vérification de disponibilité « API : /ready » échoue depuis plusieurs régions depuis 10 minutes : l'API sc-api ne répond plus, ou sa base ne répond plus (/ready renvoie 503).
     Lire : Cloud Run > sc-api (révisions, trafic, journaux au démarrage) ; Monitoring > Uptime checks (code reçu, régions).
     Faire : si la panne suit un déploiement, retour arrière (runbook §2) ; sinon vérifier la base sc-db et la dernière révision (runbook §1).
     Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
@@ -245,7 +245,7 @@ Le workflow ne s'exécute jamais sur une pull request. Un tag de version est cr�
 2. Construction de l'image avec la version, le commit et la date (`deploy/Dockerfile`), tagguée `<sha court>` et `<version>` (jamais `latest`), poussée vers Artifact Registry. Hors d'un commit tagué, la version est celle de `git describe` (`v0.3.0-2-gabc1234`).
 3. **Migrations** : mise à jour de l'image du job `<préfixe>-migrate`, puis exécution avec `--wait`. Si le job échoue (migration en échec, base `dirty`), le déploiement s'arrête là (voir `docs/migrations.md`).
 4. Mise à jour de l'image du service `<préfixe>-api` et des jobs `<préfixe>-worker-close-weeks`, `<préfixe>-worker-finalize-challenges` et `<préfixe>-worker-retry-auth0-deletions`, avec l'image tagguée par le SHA court. Le préfixe vaut `sc` ; la variable `CLOUD_RUN_NAME_PREFIX` de l'Environment le remplace si besoin.
-5. **Test de fumée** : la révision qui sert tout le trafic doit être la dernière créée, prête, et utiliser l'image du commit déployé, puis `GET <api>/readyz` doit répondre (une douzaine d'essais, 10 s d'écart) ; sinon le workflow échoue. Sur l'URL `run.app`, Cloud Run répond lui-même à `/healthz` (404) : la requête n'atteint pas l'API.
+5. **Test de fumée** : la révision qui sert tout le trafic doit être la dernière créée, prête, et utiliser l'image du commit déployé, puis `GET <api>/ready` doit répondre (une douzaine d'essais, 10 s d'écart) ; sinon le workflow échoue. Sur l'URL `run.app`, Cloud Run répond lui-même à `/healthz` (404) : la requête n'atteint pas l'API, d'où les sondes `/health` et `/ready`, sans « z » final.
 
 Un seul déploiement à la fois (`concurrency`), et un déploiement en cours n'est jamais annulé. Les permissions sont minimales : `contents: read` partout, `id-token: write` seulement dans le job de déploiement. Les actions sont épinglées par SHA.
 
@@ -367,4 +367,4 @@ Le plus rapide reste de revenir à la révision précédente dans Cloud Run (`do
 
 ## Retrouver ce qui tourne
 
-`GET <api>/healthz` donne la version et le commit (`docs/release.md`). Le déploiement lui-même est visible dans l'onglet Environments du dépôt (qui a approuvé, quand).
+`GET <api>/health` donne la version et le commit (`docs/release.md`). Le déploiement lui-même est visible dans l'onglet Environments du dépôt (qui a approuvé, quand).

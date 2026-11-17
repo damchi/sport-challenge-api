@@ -24,9 +24,9 @@ Avance **une phase à la fois**. À la fin de chaque phase : `make fmt && make l
 
 ## Phase 1 — Serveur minimal
 
-Configuration limitée aux variables utilisées, `slog` direct, Gin avec `Recovery`, `RequestID` et `Logger`, `GET /healthz`, pool `pgx` et `GET /readyz`, arrêt propre. Pas encore de GORM, d'erreurs applicatives, d'horloge ni de transactions : ils arrivent avec leur premier usage.
+Configuration limitée aux variables utilisées, `slog` direct, Gin avec `Recovery`, `RequestID` et `Logger`, `GET /health`, pool `pgx` et `GET /ready`, arrêt propre. Pas encore de GORM, d'erreurs applicatives, d'horloge ni de transactions : ils arrivent avec leur premier usage.
 
-**Terminé quand** : l'API démarre, répond sur `/healthz` et `/readyz`.
+**Terminé quand** : l'API démarre, répond sur `/health` et `/ready`.
 
 ## Phase 2 — Utilisateur et authentification
 

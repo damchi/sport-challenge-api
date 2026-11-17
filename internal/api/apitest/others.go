@@ -28,11 +28,11 @@ var _ api.StrictServerInterface = Others{}
 
 type unimplemented struct{}
 
-func (unimplemented) GetHealthz(context.Context, api.GetHealthzRequestObject) (api.GetHealthzResponseObject, error) {
+func (unimplemented) GetHealth(context.Context, api.GetHealthRequestObject) (api.GetHealthResponseObject, error) {
 	return nil, errNotImplemented
 }
 
-func (unimplemented) GetReadyz(context.Context, api.GetReadyzRequestObject) (api.GetReadyzResponseObject, error) {
+func (unimplemented) GetReady(context.Context, api.GetReadyRequestObject) (api.GetReadyResponseObject, error) {
 	return nil, errNotImplemented
 }
 

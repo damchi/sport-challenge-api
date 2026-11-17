@@ -34,7 +34,7 @@ import (
 )
 
 func TestLogRoutesAtDebugLevel(t *testing.T) {
-	routes := gin.RoutesInfo{{Method: "GET", Path: "/healthz"}}
+	routes := gin.RoutesInfo{{Method: "GET", Path: "/health"}}
 
 	var out bytes.Buffer
 	logRoutes(logging.New(&out, slog.LevelDebug, "api"), routes)
@@ -43,8 +43,8 @@ func TestLogRoutesAtDebugLevel(t *testing.T) {
 		t.Fatalf("not JSON: %q", out.String())
 	}
 	got, _ := line["routes"].([]any)
-	if line["message"] != "routes registered" || len(got) != 1 || got[0] != "GET /healthz" {
-		t.Fatalf("line = %v, want the GET /healthz route", line)
+	if line["message"] != "routes registered" || len(got) != 1 || got[0] != "GET /health" {
+		t.Fatalf("line = %v, want the GET /health route", line)
 	}
 
 	out.Reset()
@@ -158,7 +158,7 @@ var pathParam = regexp.MustCompile(`(/)[:*][^/]+`)
 // until the contract has a protected operation, that test route is the one
 // that keeps the guard from passing on public routes only.
 func TestEveryRouteIsProtectedByDefault(t *testing.T) {
-	public := map[string]bool{"GET /healthz": true, "GET /readyz": true}
+	public := map[string]bool{"GET /health": true, "GET /ready": true}
 	r := newTestRouter(t, rejectingVerifier{t}, func(context.Context, string) (string, error) {
 		t.Error("user resolved for a request without a token")
 		return "", nil
@@ -189,6 +189,13 @@ func TestEveryRouteIsProtectedByDefault(t *testing.T) {
 	// A trailing slash is not redirected before the middlewares.
 	if status, code := serve(t, r, httptest.NewRequest(http.MethodGet, "/api/v1/test-only/x/", nil)); status != http.StatusUnauthorized || code != "unauthenticated" {
 		t.Errorf("trailing slash got %d %q without a token, want 401 unauthenticated", status, code)
+	}
+	// The probes were /healthz and /readyz (Cloud Run answers /healthz itself):
+	// the old paths are no route anymore, so they fall to the protected default.
+	for _, path := range []string{"/healthz", "/readyz"} {
+		if status, code := serve(t, r, httptest.NewRequest(http.MethodGet, path, nil)); status != http.StatusUnauthorized || code != "unauthenticated" {
+			t.Errorf("GET %s got %d %q without a token, want 401 unauthenticated", path, status, code)
+		}
 	}
 	for name := range public {
 		if !slices.ContainsFunc(r.Routes(), func(ri gin.RouteInfo) bool { return ri.Method+" "+ri.Path == name }) {
@@ -355,7 +362,7 @@ func TestRateLimitIPComesBeforeAuthentication(t *testing.T) {
 			t.Fatalf("within the limit got %d %q, want 204", status, code)
 		}
 	}
-	for _, path := range []string{"/api/v1/probe", "/healthz", "/readyz", "/unknown"} {
+	for _, path := range []string{"/api/v1/probe", "/health", "/ready", "/unknown"} {
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, request(path))
 		if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
@@ -374,7 +381,7 @@ func TestTrustedProxyGivesTheClientIP(t *testing.T) {
 	opts := routerOptions{trustedProxies: []string{"192.0.2.1"}, ipLimiter: testLimiter(1), userLimiter: testLimiter(1000)}
 	r := newTestRouterWith(t, opts, testHandlers(), rejectingVerifier{t}, nil)
 	get := func(forwardedFor string) int {
-		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
 		req.Header.Set("X-Forwarded-For", forwardedFor)
 		status, _ := serve(t, r, req)
 		return status
