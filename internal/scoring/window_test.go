@@ -81,11 +81,13 @@ func TestStartOfDay(t *testing.T) {
 // TestStartOfDaySkippedMidnight pins the bug of the audit (SC-API-079): where
 // midnight does not exist, time.Date gives 23:00 the day before, and the day
 // must start at 01:00 instead. Santiago skips midnight on the first Sunday of
-// September; the test is skipped if the zone database ever stops doing so.
+// September. If the zone database ever stops doing so, this test fails rather
+// than skip (the other tests built on this day skip, and the property tests
+// pass either way): pick another day that skips midnight.
 func TestStartOfDaySkippedMidnight(t *testing.T) {
 	loc := load(t, "America/Santiago")
 	if d := time.Date(2027, 9, 5, 0, 0, 0, 0, loc).Day(); d == 5 {
-		t.Skip("this zone database does not skip midnight on 2027-09-05 in Santiago")
+		t.Fatal("this zone database no longer skips midnight on 2027-09-05 in Santiago: pin another such day")
 	}
 	got := StartOfDay(2027, 9, 5, loc)
 	if l := got.In(loc).Format("2006-01-02 15:04"); l != "2027-09-05 01:00" {
@@ -309,5 +311,16 @@ func TestEndedWeeks(t *testing.T) {
 				t.Fatalf("EndedWeeks() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestStartOfDayOfASkippedDay checks a day skipped as a whole: Samoa jumped
+// from 2011-12-29 to 2011-12-31. Its start is the start of the next day that
+// exists.
+func TestStartOfDayOfASkippedDay(t *testing.T) {
+	loc := load(t, "Pacific/Apia")
+	got := StartOfDay(2011, 12, 30, loc)
+	if l := got.In(loc).Format("2006-01-02 15:04"); l != "2011-12-31 00:00" {
+		t.Fatalf("starts at %s local, want 2011-12-31 00:00", l)
 	}
 }
