@@ -451,3 +451,45 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		}
 	})
 }
+
+// TestCloseWeeksWhereMidnightIsSkipped runs the closure on a challenge of 3
+// weeks in Santiago that starts on 2027-09-05, a day whose midnight is skipped
+// (SC-API-079): it starts at 01:00 and its weeks end at local midnight. The
+// stored window must still count 3 weeks: weeks 1 and 2 are closed, the last
+// one is left to the finalization, and a second run changes nothing.
+func TestCloseWeeksWhereMidnightIsSkipped(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Date(2027, 9, 5, 0, 0, 0, 0, loc).Day() == 5 {
+		t.Skip("this zone database does not skip midnight on 2027-09-05 in Santiago")
+	}
+	start := scoring.StartOfDay(2027, 9, 5, loc)
+	end := scoring.StartOfDay(2027, 9, 26, loc)
+	creator := s.user("creator")
+	var id string
+	s.scan(&id, `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Spring', 'public', 'America/Santiago', $1, $2, $3) RETURNING id`, start, end, creator)
+	s.exec(`INSERT INTO categories (challenge_id, type, position) VALUES ($1, 'cumulative_time', 1), ($1, 'cumulative_distance', 2)`, id)
+	s.exec(`INSERT INTO categories (challenge_id, type, position, params)
+		VALUES ($1, 'run_elimination', 3, '{"sport": "run", "step_meters": 2000}')`, id)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, id, creator, start)
+
+	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(end), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if _, err := service.CloseWeeks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if weeks := s.closedWeeks(id); !reflect.DeepEqual(weeks, []int{1, 2}) {
+		t.Fatalf("closed weeks = %v, want [1 2]", weeks)
+	}
+	if got, err := service.CloseWeeks(t.Context()); err != nil || got != (Result{}) {
+		t.Fatalf("second run: result = %+v, err = %v, want nothing", got, err)
+	}
+}

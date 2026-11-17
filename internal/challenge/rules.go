@@ -11,6 +11,7 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/textx"
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 var errInvalidTimezone = errors.New("invalid time zone")
@@ -64,10 +65,12 @@ type Window struct {
 
 // Validate checks draft against the challenge rules, at the instant now
 // (from platform/clock), with distanceSports the sports of the catalogue that
-// have a distance. It returns the window of the challenge: from local
-// midnight of the first day, for a whole number of weeks counted in local
-// days (AddDate: a week across a time change lasts 167 or 169 hours). A
-// broken rule gives 400 validation_failed listing the fields, sorted.
+// have a distance. It returns the window of the challenge: from the first
+// instant of the first local day (midnight, or the end of the skipped hour
+// where a time change skips midnight: scoring.StartOfDay), for a whole number
+// of weeks counted in local days (a week across a time change lasts 167 or
+// 169 hours). A broken rule gives 400 validation_failed listing the fields,
+// sorted.
 func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Window, error) {
 	var fields []string
 
@@ -100,16 +103,16 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 	var window Window
 	// "Today or later" needs both the day and the time zone.
 	if locErr == nil && dayErr == nil {
-		start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+		start := scoring.StartOfDay(day.Year(), day.Month(), day.Day(), loc)
 		y, m, d := now.In(loc).Date()
-		today := time.Date(y, m, d, 0, 0, 0, 0, loc)
+		today := scoring.StartOfDay(y, m, d, loc)
 		// At most a year ahead: the same day next year, in local days.
-		if start.Before(today) || start.After(today.AddDate(1, 0, 0)) {
+		if start.Before(today) || start.After(scoring.StartOfDay(y+1, m, d, loc)) {
 			fields = append(fields, "start_date")
 		}
 		window = Window{
-			StartsAt: start.UTC(),
-			EndsAt:   start.AddDate(0, 0, 7*draft.Weeks).UTC(),
+			StartsAt: start,
+			EndsAt:   scoring.StartOfDay(day.Year(), day.Month(), day.Day()+7*draft.Weeks, loc),
 		}
 	}
 

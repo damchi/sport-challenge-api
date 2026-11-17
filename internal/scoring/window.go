@@ -9,9 +9,9 @@ import "time"
 // zone that cuts it into weeks and the current instant (from the clock).
 // Location must be set: it is the challenge's, validated at creation.
 //
-// The weeks are counted in local days of the time zone (AddDate), never as
-// fixed 7 × 24 h durations: a week across a time change lasts 167 or 169
-// hours.
+// The weeks are counted in local days of the time zone, never as fixed
+// 7 × 24 h durations: a week across a time change lasts 167 or 169 hours.
+// Each bound is the first instant of a local day (StartOfDay).
 type Window struct {
 	Start    time.Time
 	End      time.Time
@@ -27,9 +27,11 @@ func (w Window) Contains(t time.Time) bool {
 // WeekBounds returns week n as [start, end) in UTC. n starts at 1 and must
 // stay within the window: outside, the bounds mean nothing.
 func (w Window) WeekBounds(n int) (time.Time, time.Time) {
-	local := w.Start.In(w.Location)
-	start := local.AddDate(0, 0, 7*(n-1)).UTC()
-	end := local.AddDate(0, 0, 7*n).UTC()
+	// From the local date, not from the start instant: a challenge that starts
+	// at 01:00 because midnight was skipped still has its next weeks at 00:00.
+	y, m, d := w.Start.In(w.Location).Date()
+	start := StartOfDay(y, m, d+7*(n-1), w.Location)
+	end := StartOfDay(y, m, d+7*n, w.Location)
 	// A window holds whole weeks, but its end stays the limit.
 	if end.After(w.End) {
 		end = w.End.UTC()
@@ -89,4 +91,22 @@ func (w Window) EndedWeeks() int {
 func (w Window) RegistrationDeadline() time.Time {
 	_, end := w.WeekBounds(1)
 	return end
+}
+
+// StartOfDay returns the first instant of the local day year-month-day in
+// loc, in UTC. The date is normalized like time.Date (February 31 is March
+// 3). It is local midnight, except where a time change skips midnight (Chile,
+// Egypt, Lebanon...): the day then starts at the first instant that exists,
+// the end of the skipped hour (README §2.1). time.Date picks either side of
+// such a gap, sometimes 23:00 the day before. A day skipped as a whole (Apia,
+// 2011-12-30) gives the start of the next day that exists.
+func StartOfDay(year int, month time.Month, day int, loc *time.Location) time.Time {
+	y, m, d := time.Date(year, month, day, 12, 0, 0, 0, time.UTC).Date()
+	t := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	if ty, tm, td := t.Date(); ty != y || tm != m || td != d {
+		// Midnight was skipped and t fell back on the day before: the day
+		// starts where the zone in effect at t ends, at the time change.
+		_, t = t.ZoneBounds()
+	}
+	return t.UTC()
 }

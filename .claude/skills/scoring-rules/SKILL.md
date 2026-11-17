@@ -21,9 +21,9 @@ Coefficients **suggérés** par le catalogue (`sports.suggested_factor`) : cours
 
 ## Fenêtre et semaines
 
-- Début = minuit local du premier jour (entre aujourd'hui et un an plus tard), fin = début + N × 7 jours **locaux** (`AddDate`), avec N entier de 2 à 52 : pas de semaine partielle. Le tout dans le **fuseau du challenge**, stocké en UTC (`challenge/rules.go`).
+- Début = premier instant du premier jour local (minuit, ou la fin de l'heure sautée si un changement d'heure saute minuit : `scoring.StartOfDay`), entre aujourd'hui et un an plus tard ; fin = début + N × 7 jours **locaux**, avec N entier de 2 à 52 : pas de semaine partielle. Le tout dans le **fuseau du challenge**, stocké en UTC (`challenge/rules.go`).
 - Une activité compte si `started_at ∈ [début, fin)`.
-- Semaines : `début.In(fuseau).AddDate(0, 0, 7*(n-1))`. **Jamais** `7*24*time.Hour` (changement d'heure). Toutes les semaines sont complètes.
+- Semaines : la semaine n commence à `scoring.StartOfDay` de la date locale de début + 7 × (n-1) jours (`Window.WeekBounds`), calculée depuis la **date** et non depuis l'instant de début (qui peut être 01:00). **Jamais** `7*24*time.Hour` (changement d'heure). Toutes les semaines sont complètes.
 
 ## Élimination
 
