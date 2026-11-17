@@ -122,10 +122,10 @@ runs:
             --image="$IMAGE_REPOSITORY:$SHORT_SHA"
         done
 
-    # Cloud Run answers /healthz itself on the run.app URL (a 404 that never
-    # reaches the API), so the deployed commit is read from the revision that
-    # serves all the traffic (the latest one, and ready), then /readyz checks
-    # that the API and its database answer.
+    # The deployed commit is read from the revision that serves all the traffic
+    # (the latest one, and ready), then /ready checks that the API and its
+    # database answer. The probes have no trailing "z": Cloud Run reserves some
+    # paths ending in z (/healthz) and answers them itself on the run.app URL.
     - name: Smoke test
       shell: bash
       env:
@@ -169,12 +169,12 @@ runs:
         url=$(gcloud run services describe "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
           --format='value(status.url)')
         for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-          if curl -fsS --max-time 10 "$url/readyz" > /dev/null; then
+          if curl -fsS --max-time 10 "$url/ready" > /dev/null; then
             echo "the API runs $SHORT_SHA and is ready"
             exit 0
           fi
-          echo "attempt $attempt: $url/readyz does not answer yet"
+          echo "attempt $attempt: $url/ready does not answer yet"
           sleep 10
         done
-        echo "::error::$url/readyz does not answer"
+        echo "::error::$url/ready does not answer"
         exit 1

@@ -347,8 +347,8 @@ func newRouter(logger *slog.Logger, opts routerOptions, handler api.StrictServer
 	// The only routes served without an access token. Keep it in line with
 	// the "security: []" of api/openapi.yaml.
 	public := []string{
-		"GET /healthz",
-		"GET /readyz",
+		"GET /health",
+		"GET /ready",
 	}
 	router := httpx.NewRouter(logger)
 	if err := router.SetTrustedProxies(opts.trustedProxies); err != nil {
@@ -379,7 +379,7 @@ func newRouter(logger *slog.Logger, opts routerOptions, handler api.StrictServer
 }
 
 // pingDatabase only warns when the database does not answer at startup: the
-// API still starts and /readyz reports 503 until the database is back.
+// API still starts and /ready reports 503 until the database is back.
 func pingDatabase(ctx context.Context, logger *slog.Logger, ping func(context.Context) error) {
 	ctx, cancel := context.WithTimeout(ctx, startupPingTimeout)
 	defer cancel()

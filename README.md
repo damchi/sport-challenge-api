@@ -277,7 +277,7 @@ sport-challenge-api/
 │   │                                implémentation vide des opérations des autres modules
 │   │
 │   ├── health/
-│   │   └── handler.go               GET /healthz (vivant, version du build), GET /readyz (la base répond)
+│   │   └── handler.go               GET /health (vivant, version du build), GET /ready (la base répond)
 │   │
 │   ├── user/
 │   │   ├── model.go                 entité User
@@ -398,7 +398,7 @@ flowchart TD
 | `badge` (V1.1) | `GET /me/badges`, `GET /challenges/{id}/badges`, `POST /challenges/{id}/badges` (créateur), `PATCH` et `DELETE /challenges/{id}/badges/{badgeId}` (créateur, tant que personne ne l'a gagné) |
 | uploads (V1.1) | `POST /uploads/avatar` (URL signée) |
 | `integration` (V2) | `GET /integrations`, `POST /integrations/{provider}/connect`, `DELETE /integrations/{provider}`, `POST /webhooks/{provider}` (public) |
-| `health` | `GET /healthz`, `GET /readyz` (à la racine, hors `/api/v1`) |
+| `health` | `GET /health`, `GET /ready` (à la racine, hors `/api/v1`) |
 
 **Tâches du worker**
 
@@ -478,7 +478,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | 10 | `RequestValidator` | Par route du contrat, juste avant le handler : vérifie la requête contre `api/openapi.yaml` (400 `validation_failed`) |
 
 **Groupes de routes**
-- Publiques, sans jeton : `GET /healthz` et `GET /readyz` (sondes de Cloud Run), et les pré-requêtes `OPTIONS` (CORS).
+- Publiques, sans jeton : `GET /health` et `GET /ready` (sondes de Cloud Run), et les pré-requêtes `OPTIONS` (CORS).
 - Protégées (tout le reste, dont `/api/v1`) : middlewares 1 à 10 ; les routes publiques passent par tous sauf 7 à 9. **Protégé par défaut** : `cmd/api` applique `Authenticate` puis `CurrentUser` à toute route absente d'une liste explicite de routes publiques, et `api/openapi.yaml` exige `bearerAuth` au niveau global (seules les sondes le surchargent avec `security: []`). Une nouvelle route est donc protégée sans rien ajouter ; un test parcourt les routes enregistrées pour le vérifier.
 - ✅ Connexion **obligatoire** pour toutes les routes, y compris la lecture des challenges publics (V1). Pas de middleware `OptionalAuth` pour l'instant.
 - V2 : `POST /webhooks/{provider}` n'utilise pas le jeton utilisateur mais un middleware de **vérification de signature** du fournisseur.
@@ -577,8 +577,8 @@ Le détail ticket par ticket (67 tickets, critères d'acceptation, commits propo
 | Phase | Contenu | Points à ne pas oublier |
 |---|---|---|
 | 0 | Fondations minimales et CI | `go.mod` ; `Makefile` limité au nécessaire, avec garde-fou : les migrations ne s'appliquent que sur la base locale ; `docker-compose` (PostgreSQL) ; lint ; CI GitHub Actions ; relecture des pull requests par Claude |
-| 1 | Serveur minimal | `config` réduite aux variables utilisées, `slog`, middlewares `Recovery`, `RequestID`, `Logger`, `GET /healthz` et `/readyz`. Le reste du socle (**`apperr`**, §5.8, `clock` injectable, transactions, pagination, `CORS`) arrive avec la première fonctionnalité qui l'utilise |
-| 2 | Utilisateur et **Auth0** | Middlewares `Authenticate`, `CORS`, `CurrentUser` (la limitation de débit par IP et par utilisateur vient en phase 9, avant l'exposition publique) ; interface `TokenVerifier` ; **access token** de l'API (pas l'ID token) ; tenant Auth0 par environnement (région Canada, code à usage unique par e-mail) ; création de l'utilisateur au premier login, idempotente ; connexion **obligatoire** partout sauf `/healthz` et `/readyz` |
+| 1 | Serveur minimal | `config` réduite aux variables utilisées, `slog`, middlewares `Recovery`, `RequestID`, `Logger`, `GET /health` et `/ready`. Le reste du socle (**`apperr`**, §5.8, `clock` injectable, transactions, pagination, `CORS`) arrive avec la première fonctionnalité qui l'utilise |
+| 2 | Utilisateur et **Auth0** | Middlewares `Authenticate`, `CORS`, `CurrentUser` (la limitation de débit par IP et par utilisateur vient en phase 9, avant l'exposition publique) ; interface `TokenVerifier` ; **access token** de l'API (pas l'ID token) ; tenant Auth0 par environnement (région Canada, code à usage unique par e-mail) ; création de l'utilisateur au premier login, idempotente ; connexion **obligatoire** partout sauf `/health` et `/ready` |
 | 3 | Catalogue de sports | Données de référence idempotentes ; coefficients copiés dans le challenge à sa création |
 | 4 | Challenges et catégories | **`policy.go`** (matrice des droits §5.7) ; **aucune autorisation dans un middleware** ; 3 catégories figées ; inscription jusqu'à la fin de la semaine 1 ; plusieurs créateurs ; titre et description seuls modifiables ; test « interdit » pour chaque règle |
 | 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine terminée verrouillée** ; modification et suppression tant que sa semaine n'est terminée dans aucun challenge où elle compte ; route de détail des activités des participants (visible des seuls participants du challenge) |

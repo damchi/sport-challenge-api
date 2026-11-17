@@ -60,7 +60,7 @@ func CurrentUser(resolve UserIDResolver, logger *slog.Logger) gin.HandlerFunc {
 // Protect runs the handlers (Authenticate then CurrentUser) on every request
 // except OPTIONS requests matching no route (CORS preflights, answered by the
 // CORS middleware placed before Protect) and the routes of public, written
-// "METHOD /path" as registered ("GET /healthz"). Everything else is protected,
+// "METHOD /path" as registered ("GET /health"). Everything else is protected,
 // including routes added later and unknown paths: a route is public only when
 // it is listed. The handlers must not call c.Next: they would serve the route
 // before the next handler of the list.

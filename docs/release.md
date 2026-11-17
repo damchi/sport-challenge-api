@@ -24,12 +24,12 @@ Les règles sont testées par `.github/scripts/next-version_test.sh`, lancé par
 
 ## Retrouver ce qui tourne
 
-- **L'API en marche** : `GET <url>/healthz` (sans jeton) répond `{"status":"ok","version":"v1.2.3","commit":"<sha complet>"}`. Une version `dev` et un commit `unknown` indiquent un build qui ne vient pas d'une release.
+- **L'API en marche** : `GET <url>/health` (sans jeton) répond `{"status":"ok","version":"v1.2.3","commit":"<sha complet>"}`. Une version `dev` et un commit `unknown` indiquent un build qui ne vient pas d'une release.
 - **Les journaux** : la ligne `server started` de l'API et la ligne `worker started` de chaque exécution du worker portent `version` et `commit`.
 - **L'image** : les étiquettes `org.opencontainers.image.version`, `.revision` (le commit) et `.created` : `docker image inspect <image>`.
 - **Le code** : `git show <sha>` ou `git checkout v1.2.3`.
 
-En production, c'est donc `/healthz` qui dit quel commit tourne, sans accès à GCP.
+En production, c'est donc `/health` qui dit quel commit tourne, sans accès à GCP. Les sondes n'ont pas de « z » final (`/healthz`, `/readyz`) : Cloud Run réserve certains chemins qui finissent par `z` et y répond lui-même (404) sur l'URL `run.app`, sans que la requête atteigne l'API (SC-API-106).
 
 ## À savoir
 

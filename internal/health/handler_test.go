@@ -56,9 +56,9 @@ func serveWithLogs(t *testing.T, db Pinger, path string, logs io.Writer) *httpte
 	return rec
 }
 
-func TestGetHealthz(t *testing.T) {
+func TestGetHealth(t *testing.T) {
 	// Liveness does not depend on the database.
-	rec := serve(t, fakePinger{err: errors.New("down")}, "/healthz")
+	rec := serve(t, fakePinger{err: errors.New("down")}, "/health")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -74,7 +74,7 @@ func TestGetHealthz(t *testing.T) {
 	}
 }
 
-func TestGetReadyz(t *testing.T) {
+func TestGetReady(t *testing.T) {
 	tests := []struct {
 		name       string
 		pingErr    error
@@ -91,7 +91,7 @@ func TestGetReadyz(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := serve(t, fakePinger{err: tt.pingErr}, "/readyz")
+			rec := serve(t, fakePinger{err: tt.pingErr}, "/ready")
 
 			if rec.Code != tt.wantStatus || rec.Body.String() != tt.wantBody {
 				t.Fatalf("got %d %q, want %d %q", rec.Code, rec.Body, tt.wantStatus, tt.wantBody)
@@ -100,22 +100,22 @@ func TestGetReadyz(t *testing.T) {
 	}
 }
 
-func TestGetReadyzLogsWhyItIsNotReady(t *testing.T) {
+func TestGetReadyLogsWhyItIsNotReady(t *testing.T) {
 	var logs bytes.Buffer
-	serveWithLogs(t, fakePinger{err: errors.New("connection refused")}, "/readyz", &logs)
+	serveWithLogs(t, fakePinger{err: errors.New("connection refused")}, "/ready", &logs)
 
 	if !strings.Contains(logs.String(), "database not ready") || !strings.Contains(logs.String(), "connection refused") {
 		t.Fatalf("logs = %s, want the ping error", logs.String())
 	}
 }
 
-func TestGetReadyzBoundsThePing(t *testing.T) {
+func TestGetReadyBoundsThePing(t *testing.T) {
 	var deadline bool
 	db := pingerFunc(func(ctx context.Context) error {
 		_, deadline = ctx.Deadline()
 		return nil
 	})
-	serve(t, db, "/readyz")
+	serve(t, db, "/ready")
 
 	if !deadline {
 		t.Fatal("ping context has no deadline")
