@@ -12,6 +12,10 @@ const (
 	corsAllowedMethods = "GET, POST, PUT, PATCH, DELETE"
 	// corsAllowedHeaders are the request headers a web client may send.
 	corsAllowedHeaders = "Authorization, Content-Type, Idempotency-Key, " + RequestIDHeader
+	// corsExposedHeaders are the response headers a web client may read
+	// besides the safelisted ones: the delay of a 429, the challenge of a 401
+	// and the request identifier of every response.
+	corsExposedHeaders = "Retry-After, WWW-Authenticate, " + RequestIDHeader
 	// corsMaxAge lets the browser reuse a preflight answer for 10 minutes.
 	corsMaxAge = 600
 )
@@ -25,8 +29,9 @@ const (
 // with 204, without authentication: it must sit before Authenticate. A
 // refused origin gets the 204 without any CORS header, so the browser blocks
 // the call. Other requests go on; an allowed origin gets its
-// Access-Control-Allow-Origin, a refused one gets none and the browser hides
-// the response.
+// Access-Control-Allow-Origin and Access-Control-Expose-Headers, set before
+// the next middlewares so a 429 of the rate limit carries them too; a refused
+// one gets none and the browser hides the response.
 func CORS(allowedOrigins []string) gin.HandlerFunc {
 	allowed := make(map[string]bool, len(allowedOrigins))
 	for _, o := range allowedOrigins {
@@ -47,6 +52,9 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 		}
 
 		if c.Request.Method != http.MethodOptions || c.GetHeader("Access-Control-Request-Method") == "" {
+			if ok {
+				h.Set("Access-Control-Expose-Headers", corsExposedHeaders)
+			}
 			return
 		}
 		h.Add("Vary", "Access-Control-Request-Method, Access-Control-Request-Headers")
