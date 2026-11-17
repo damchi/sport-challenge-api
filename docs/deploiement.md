@@ -43,6 +43,27 @@ Comptes de service et droits (tous au niveau du projet) :
 
 Les variables d'environnement de l'API et des jobs sont celles que lit `internal/platform/config` (`ENV=production`, `PORT` posé par Cloud Run pour l'API, `LOG_LEVEL`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_MGMT_CLIENT_ID`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, plus les deux secrets). `CLOCK_OFFSET` n'est accepté qu'avec `ENV=local` : la production le refuse.
 
+### Connexion à la base
+
+L'API, le worker et les migrations joignent `sc-db` **uniquement par le connecteur Cloud SQL**, jamais par son adresse IP (vérifié le 2026-11-17) :
+
+- L'API et les quatre jobs déclarent le connecteur dans l'annotation `run.googleapis.com/cloudsql-instances: sport-challenge-prod:northamerica-northeast1:sc-db`. Cloud Run ouvre alors un socket Unix local `/cloudsql/sport-challenge-prod:northamerica-northeast1:sc-db`.
+- La dernière version du secret `database-url-ca` passe par ce socket (`host=/cloudsql/…`), sans adresse IP ni `sslmode`. pgx ne chiffre pas un socket Unix, qui reste local au conteneur : c'est le connecteur qui chiffre la liaison jusqu'à `sc-db` (TLS, certificat de l'instance vérifié) et qui autorise le compte `sc-run` par IAM (`roles/cloudsql.client`).
+- `sc-db` a une IP publique, mais **aucun réseau autorisé** et `ENCRYPTED_ONLY` : une connexion directe à cette IP est refusée.
+
+Une nouvelle version de `database-url-ca` (rotation du mot de passe, `docs/runbook.md`) doit garder le socket, par exemple : `postgres://<utilisateur>:<mot de passe encodé>@/<base>?host=/cloudsql/sport-challenge-prod:northamerica-northeast1:sc-db`.
+
+Vérifier la forme **sans afficher la valeur** : la valeur reste dans un pipe, seuls oui ou non s'affichent.
+
+```
+gcloud secrets versions access latest --secret=database-url-ca --project=sport-challenge-prod \
+  | grep -q '/cloudsql/sport-challenge-prod:northamerica-northeast1:sc-db' && echo socket || echo "PAS le socket"
+gcloud run services describe sc-api --region=northamerica-northeast1 --project=sport-challenge-prod \
+  --format='value(spec.template.metadata.annotations."run.googleapis.com/cloudsql-instances")'
+gcloud sql instances describe sc-db --project=sport-challenge-prod \
+  --format='value(settings.ipConfiguration.sslMode,settings.ipConfiguration.authorizedNetworks.len())'
+```
+
 ## Ce qui se passe
 
 | Événement | Production |
