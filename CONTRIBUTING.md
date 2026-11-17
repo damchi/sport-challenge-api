@@ -7,7 +7,7 @@
 
 ## Intégration continue
 
-Le workflow `.github/workflows/ci.yml` s'exécute sur chaque pull request et sur chaque push vers `main` : `make fmt` (aucune différence attendue), `make openapi-lint`, `make generate` (le code généré doit être identique à celui du dépôt), `make lint`, `make vuln` (`govulncheck` : échoue sur une vulnérabilité connue que le code atteint), `make test`. Les étapes s'ajoutent au fil des tickets (migrations, tests d'intégration, build de l'image).
+Le workflow `.github/workflows/ci.yml` s'exécute sur chaque pull request et sur chaque push vers `main` : `make fmt` (aucune différence attendue), `make openapi-lint`, `make generate` (le code généré doit être identique à celui du dépôt), `make lint`, `make vuln` (`govulncheck` : échoue sur une vulnérabilité connue que le code atteint), `make test`. D'autres tâches tournent en parallèle : migrations appliquées, annulées puis réappliquées sur une base PostgreSQL vide (`migrations up, down, up`), tests d'intégration contre PostgreSQL (`integration tests`) et build de l'image (`docker image`).
 
 ## Ajouter ou modifier une route
 
@@ -20,7 +20,7 @@ L'API est **spec-first** : le contrat `api/openapi.yaml` est la source, le code 
 5. **Validation** : chaque requête est vérifiée contre le contrat (paramètres, corps, types, motifs, énumérations, `null` et champs inconnus refusés) par `httpx.RequestValidator`, avant le handler : une requête non conforme répond 400 `validation_failed`, avec les champs fautifs dans `params.fields`. Décris donc les contraintes dans le contrat ; le service garde les règles métier (par exemple le format du pseudo) et celles qui demandent la base (unicité).
 6. **Tests** : le serveur de test embarque le handler du module à côté de `apitest.Others`, qui complète l'interface avec les autres opérations (une nouvelle opération s'y ajoute une seule fois) ; le test de la route appelle `apitest.ValidateResponse` (`internal/api/apitest`), qui vérifie que la réponse réelle (statut, en-têtes, corps) correspond au contrat.
 
-Chemin d'une requête : middlewares (`RequestID`, `Logger`, `Recovery`, puis `Authenticate` et `CurrentUser` sauf pour les routes publiques listées dans `newRouter`) → route générée → validation contre le contrat → lecture des paramètres → handler strict généré → ton handler → réponse typée écrite par le code généré. Avec `LOG_LEVEL=debug`, l'API journalise au démarrage la liste des routes enregistrées.
+Chemin d'une requête : middlewares (`SecurityHeaders`, `RequestID`, `Logger`, `Recovery`, `CORS`, `RateLimitIP`, puis `Authenticate`, `CurrentUser` et `RateLimitUser` sauf pour les routes publiques listées dans `newRouter` ; ordre détaillé au README §5.7) → route générée → validation contre le contrat → lecture des paramètres → handler strict généré → ton handler → réponse typée écrite par le code généré. Avec `LOG_LEVEL=debug`, l'API journalise au démarrage la liste des routes enregistrées.
 
 ## Protection de `main` (réglage GitHub, à faire une fois)
 
