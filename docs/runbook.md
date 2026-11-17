@@ -2,7 +2,7 @@
 
 Ce document rassemble les gestes d'exploitation de la production et la liste de contrôle avant l'ouverture au public. Il renvoie aux documents de détail plutôt que de les répéter.
 
-> **Notations.** Les commandes nomment la production telle qu'elle est (projet `sport-challenge-prod`, région `northamerica-northeast1`, ressources Cloud Run préfixées `sc`) : elles se copient sans rien remplacer, sauf les paramètres propres à chaque incident, entre chevrons (`<révision>`, `<sha court précédent>`, `<version>`, `<secret>`, `<utilisateur>`, `<suffixe>`). L'infrastructure est décrite dans `docs/deploiement.md`.
+> **Notations.** Les commandes nomment la production telle qu'elle est (projet `sport-challenge-prod`, région `northamerica-northeast1`, ressources Cloud Run préfixées `sc`) : elles se copient sans rien remplacer (le préfixe `sc` vaut tant que la variable `CLOUD_RUN_NAME_PREFIX` du dépôt n'est pas redéfinie), sauf les paramètres propres à chaque incident, entre chevrons (`<révision>`, `<sha court précédent>`, `<version>`, `<secret>`, `<utilisateur>`, `<suffixe>`). L'infrastructure est décrite dans `docs/deploiement.md`.
 >
 > Toute commande qui modifie la production (base, secrets, révisions, ressources GCP) se fait à deux : une personne lance, une autre relit. Rien n'est lancé sur la production sans accord explicite.
 
