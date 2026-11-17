@@ -98,7 +98,7 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
    | Secret Manager | Contenu |
    |---|---|
    | `auth0-mgmt-client-id` | Client ID de l'application machine à machine |
-   | `auth0-mgmt-client-secret` | Client Secret de l'application machine à machine |
+   | `auth0-mgmt-client-secret-ca` | Client Secret de l'application machine à machine |
 
    Accès aux deux secrets réservé au compte de service Cloud Run de l'API : rôle `roles/secretmanager.secretAccessor` donné **sur chaque secret**, pas sur le projet. L'API les lit dans `AUTH0_MGMT_CLIENT_ID` et `AUTH0_MGMT_CLIENT_SECRET`, obligatoires dans tous les environnements (le démarrage échoue sans elles) ; en développement local, elles vont seulement dans `.env` (ignoré par git), avec l'application machine à machine du tenant de développement.
 6. Si le secret a été exposé : **Credentials → Rotate** dans Auth0, nouvelle version dans Secret Manager, puis **désactivation** de l'ancienne version.
@@ -126,7 +126,7 @@ Par environnement, une fois la procédure terminée :
 | `AUTH0_AUDIENCE` | non | configuration de l'API (Cloud Run) et du frontend |
 | Client ID de la SPA | non | configuration du frontend |
 | Client ID de l'application machine à machine | à traiter comme secret | Secret Manager : `auth0-mgmt-client-id`, lu par l'API dans `AUTH0_MGMT_CLIENT_ID` |
-| Client Secret de l'application machine à machine | **oui** | Secret Manager : `auth0-mgmt-client-secret`, lu par l'API dans `AUTH0_MGMT_CLIENT_SECRET` |
+| Client Secret de l'application machine à machine | **oui** | Secret Manager : `auth0-mgmt-client-secret-ca`, lu par l'API dans `AUTH0_MGMT_CLIENT_SECRET` |
 
 `AUTH0_DOMAIN` et `AUTH0_AUDIENCE` seront ajoutées à la configuration de l'API et à `.env.example` par le ticket SC-API-017.
 

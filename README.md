@@ -545,6 +545,7 @@ La V2 (synchronisations) a peu d'impact sur la V1 si ces choix, presque gratuits
 - ✅ Les activités détaillées d'un participant sont visibles par les autres participants du challenge : l'app l'indique **avant** de rejoindre, et la politique de confidentialité le mentionne.
 - 🟡 Ne stocker que les **résumés d'activité** (distance, durée, type, date), pas les traces GPS.
 - Tenir un **inventaire des sous-traitants** (Auth, notifications, analytics, fournisseurs sportifs) avec la région de chacun.
+- **Emplacement des données de production** (relevé du 2026-11-16, détail dans `docs/deploiement.md`) : la base, les journaux et les secrets sont à Montréal (`northamerica-northeast1`), et les sauvegardes y sont stockées depuis ce jour. Exception : les journaux d'audit d'administration de GCP (espace `_Required`) restent en emplacement mondial ; ils concernent les administrateurs, pas les utilisateurs. Les sauvegardes prises aux États-Unis avant ce jour : l'automatique expire d'elle-même (7 sauvegardes conservées), une sauvegarde à la demande ne s'efface qu'à la main.
 - Respecter les conditions d'usage de chaque API sportive (affichage, marque, quotas).
 
 ---
