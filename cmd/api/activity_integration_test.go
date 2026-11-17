@@ -339,6 +339,49 @@ func TestListParticipantActivitiesVisibility(t *testing.T) {
 	}
 }
 
+// TestListActivitiesOfAnAbandonedParticipant pins the decision of SC-API-080
+// (README §5.7): the activities of a participant who abandoned stay visible to
+// the participants of the challenge, within its window, both before and after
+// the abandonment (those no longer count there); an activity outside the
+// window never shows. An exclusion is stored as an abandonment (status and
+// abandoned_at, abandonParticipation), so it is covered too.
+func TestListActivitiesOfAnAbandonedParticipant(t *testing.T) {
+	r := newRecording(t)
+	c := r.challenge([3]int{2026, 6, 1}, 3, "abandoned", false)
+	// The creator abandoned on 2026-06-08, in the middle of the window.
+	if _, err := r.pool.Exec(t.Context(), "UPDATE participants SET abandoned_at = $1 WHERE challenge_id = $2 AND user_id = $3",
+		toronto(t, 2026, 6, 8, 12), c, r.user); err != nil {
+		t.Fatal(err)
+	}
+	runner := r.newUser("runner3")
+	r.join(c, runner, "active")
+	var want []string
+	for _, at := range []time.Time{toronto(t, 2026, 6, 10, 7), toronto(t, 2026, 6, 3, 7)} { // after, then before the abandonment
+		recorded, err := r.record(at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, recorded.ID)
+	}
+	if _, err := r.record(toronto(t, 2026, 5, 20, 7)); err != nil { // before the window
+		t.Fatal(err)
+	}
+	page, err := r.activities.OfParticipant(t.Context(), runner, c, r.user, 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, item := range page.Items {
+		if len(item.ChallengeIDs) != 0 {
+			t.Fatalf("activity %s counts in %v, want nowhere: its author abandoned", item.ID, item.ChallengeIDs)
+		}
+		got = append(got, item.ID)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("activities %v, want %v: after and before the abandonment, most recent first, not the one outside the window", got, want)
+	}
+}
+
 func TestListMyActivities(t *testing.T) {
 	r := newRecording(t)
 	c := r.challenge([3]int{2026, 6, 1}, 3, "active", false)

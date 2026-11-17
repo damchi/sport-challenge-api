@@ -119,7 +119,7 @@ Ne jamais coller un secret dans un ticket, un message ou un journal. Un secret e
 ### Confidentialité et conformité
 
 - [ ] **Politique de confidentialité** publiée en **français et en anglais**, qui mentionne :
-  - que les activités détaillées d'un participant sont **visibles par les autres participants** du challenge (l'application le dit aussi avant de rejoindre) ;
+  - que les activités détaillées d'un participant sont **visibles par les autres participants** du challenge (l'application le dit aussi avant de rejoindre), **y compris après avoir quitté le challenge ou en avoir été exclu**, pour toutes les activités datées de sa fenêtre (README §5.7) ;
   - les données conservées (résumés d'activité), leur lieu (Canada, Montréal) et leur durée de conservation (à décider : la purge des challenges supprimés est une question ouverte, README §8) ;
   - l'effet d'une suppression de compte (anonymisation, résultats des challenges terminés conservés sous un nom neutre) ;
   - la personne responsable de la protection des renseignements personnels et comment la joindre.
