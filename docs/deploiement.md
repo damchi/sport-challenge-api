@@ -17,11 +17,11 @@ Aucun secret ici : les valeurs sensibles sont dans Secret Manager, seuls leurs n
 | Jobs du worker | `sc-worker-close-weeks`, `sc-worker-finalize-challenges`, `sc-worker-retry-auth0-deletions` | commande `worker <tâche>`, compte `sc-run`, connecteur Cloud SQL |
 | Planifications Cloud Scheduler | `close-weeks` (`0 * * * *`), `finalize-challenges` (`10 * * * *`), `retry-auth0-deletions` (`20 * * * *`) | fuseau `America/Toronto`, `POST` sur l'API Cloud Run `…/jobs/<job>:run`, jeton OAuth du compte `sc-scheduler`, délai de 180 s |
 | Base de données | Cloud SQL `sc-db` (connexion `sport-challenge-prod:northamerica-northeast1:sc-db`) | PostgreSQL 16, `db-f1-micro`, zonale ; IP publique **sans aucun réseau autorisé** (seul le connecteur Cloud SQL, authentifié par IAM, y entre), connexions chiffrées obligatoires (`ENCRYPTED_ONLY`) ; sauvegarde quotidienne à 00:00 UTC, 7 conservées, **stockées à Montréal** (`northamerica-northeast1`), restauration à un instant donné (journaux de transactions dans Cloud Storage, emplacement non vérifié) ; une sauvegarde à la demande prend **son propre** emplacement : toujours `--location=northamerica-northeast1`, sinon elle part dans la multirégion `us` ; protection contre la suppression |
-| Secrets (Secret Manager) | `database-url-ca`, `auth0-mgmt-client-secret-ca` | réplication gérée, à Montréal seulement (la réplication d'un secret ne se change pas après sa création : d'où le suffixe `-ca`) ; les anciens `database-url` et `auth0-mgmt-client-secret` (réplication automatique) ont été supprimés le 2026-11-17 ; `sc-run` les lit grâce à son rôle sur le projet, **temporairement** : SC-API-102 (#169) le limite à ces deux secrets ; injectés comme variables `DATABASE_URL` et `AUTH0_MGMT_CLIENT_SECRET` dans l'API et les jobs du worker, `DATABASE_URL` seulement dans `sc-migrate` |
+| Secrets (Secret Manager) | `database-url-ca`, `auth0-mgmt-client-secret-ca` | réplication gérée, à Montréal seulement (la réplication d'un secret ne se change pas après sa création : d'où le suffixe `-ca`) ; les anciens `database-url` et `auth0-mgmt-client-secret` (réplication automatique) ont été supprimés le 2026-11-17 ; `sc-run` les lit grâce à `roles/secretmanager.secretAccessor` donné sur chacun des deux (et sur rien d'autre, depuis le 2026-11-17) ; injectés comme variables `DATABASE_URL` et `AUTH0_MGMT_CLIENT_SECRET` dans l'API et les jobs du worker, `DATABASE_URL` seulement dans `sc-migrate` |
 | Hors de Montréal (état du 2026-11-17) | — | journaux d'audit de la plateforme GCP (espace `_Required`, mondial, sans données des utilisateurs) ; journaux écrits avant le 2026-11-16, dont les adresses IP des clients, dans l'ancien espace `_Default` (mondial) jusqu'à leur expiration vers le 2026-12-16 ; les deux sauvegardes prises dans `us` le 2026-11-16, gardées par décision de l'utilisateur (l'automatique expire d'elle-même, celle à la demande `1794873476304` ne s'efface qu'à la main) ; Error Reporting, service mondial |
 | Journaux (Cloud Logging) | espace `default-montreal`, récepteur `_Default` | les journaux du projet (requêtes de Cloud Run avec l'adresse IP du client, journaux de l'API) sont écrits à Montréal, 30 jours. Error Reporting, service mondial, garde ses propres regroupements d'erreurs : son emplacement n'est pas vérifié. L'espace `_Required` (journaux d'audit d'administration, 400 jours) reste en `global`, comme l'ancien espace `_Default` (vidé après 30 jours, plus rien n'y est écrit) : le projet n'a pas d'organisation, donc pas d'emplacement par défaut réglable |
 | Images | Artifact Registry `sport-challenge` (Docker) | image `…/sport-challenge/api`, taguée `<sha court>` et `<version>` |
-| Fédération GitHub | pool Workload Identity `github-prod`, fournisseur `github-provider` | émetteur `https://token.actions.githubusercontent.com` ; condition : dépôt `damchi/sport-challenge-api` **et** branche `main` |
+| Fédération GitHub | pool Workload Identity `github-prod`, fournisseur `github-provider` | émetteur `https://token.actions.githubusercontent.com` ; condition : identifiant numérique du dépôt (`1438448292`), nom `damchi/sport-challenge-api`, branche `main` **et** Environment `production` ; `sc-deploy` n'est lié qu'au sujet `repo:damchi@38217786/sport-challenge-api@1438448292:environment:production` (le dépôt utilise les sujets OIDC **immuables** de GitHub : propriétaire et dépôt suivis de leur identifiant numérique ; `gh api repos/damchi/sport-challenge-api/actions/oidc/customization/sub` le montre) |
 | Budget | « sport challenge », sur le compte de facturation du projet | 20 CAD par mois, **sur tout le compte de facturation** (pas filtré sur `sport-challenge-prod` : les autres projets du compte comptent aussi) ; avertissements à 50 %, 90 % et 100 %, envoyés par courriel aux administrateurs du compte de facturation. Un budget ne bloque aucune dépense : il prévient seulement |
 | Alertes Cloud Monitoring | canal « Production : courriel » ; politiques « API : erreurs 5xx », « Job Cloud Run en échec », « close-weeks : aucune exécution réussie depuis 3 heures » | courriel vers une adresse lue (gardée dans la console, jamais dans le dépôt) ; détail et fichiers de politique dans « Alertes » ci-dessous |
 
@@ -33,13 +33,13 @@ gcloud billing budgets list --billing-account=<compte de facturation> --billing-
 
 Le compte de facturation se lit avec `gcloud billing projects describe sport-challenge-prod --format='value(billingAccountName)'`.
 
-Comptes de service et droits (tous au niveau du projet) :
+Comptes de service et droits, donnés ressource par ressource depuis le 2026-11-17 (SC-API-102) ; seul `roles/cloudsql.client` reste au niveau du projet, faute de liaison par instance :
 
 | Compte | Rôle dans l'application | Droits |
 |---|---|---|
-| `sc-run` | exécute l'API, le worker et les migrations | `roles/cloudsql.client`, `roles/secretmanager.secretAccessor` |
-| `sc-scheduler` | lance les jobs du worker | `roles/run.invoker` |
-| `sc-deploy` | utilisé par le workflow de déploiement (fédération GitHub) | `roles/artifactregistry.writer`, `roles/run.admin`, `roles/iam.serviceAccountUser` ; pris par les jetons du dépôt (`roles/iam.workloadIdentityUser`) |
+| `sc-run` | exécute l'API, le worker et les migrations | `roles/cloudsql.client` (projet) ; `roles/secretmanager.secretAccessor` sur `database-url-ca` et `auth0-mgmt-client-secret-ca` seulement |
+| `sc-scheduler` | lance les jobs du worker | `roles/run.invoker` sur les trois jobs `sc-worker-*` seulement (pas sur `sc-migrate`) |
+| `sc-deploy` | utilisé par le workflow de déploiement (fédération GitHub) | `roles/run.developer` sur `sc-api`, `sc-migrate` et les trois `sc-worker-*` ; `roles/iam.serviceAccountUser` sur `sc-run` seulement ; `roles/artifactregistry.writer` sur le dépôt `sport-challenge` ; pris seulement par les jetons du job de l'Environment `production` (`roles/iam.workloadIdentityUser`, sujet ci-dessus) |
 
 Les variables d'environnement de l'API et des jobs sont celles que lit `internal/platform/config` (`ENV=production`, `PORT` posé par Cloud Run pour l'API, `LOG_LEVEL`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_MGMT_CLIENT_ID`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, plus les deux secrets). `CLOCK_OFFSET` n'est accepté qu'avec `ENV=local` : la production le refuse.
 
@@ -211,6 +211,59 @@ Une version taguée part en production après l'approbation, même si `main` a a
 
 Le code de déploiement (l'action) vient toujours de `main`, y compris pour un retour arrière : le commit à déployer n'est que ce dont l'image est construite.
 
+### Droits : les refaire
+
+Commandes appliquées le 2026-11-17 (SC-API-102). Ordre à respecter pour ne jamais casser le déploiement : ajouter le droit sur la ressource, puis retirer celui du projet ; changer la fédération **hors** d'un déploiement en cours (un déploiement lancé avant perd son jeton au renouvellement suivant).
+
+```
+P=sport-challenge-prod; R=northamerica-northeast1; PN=<numéro du projet>
+POOL=projects/$PN/locations/global/workloadIdentityPools/github-prod
+DEPLOY=serviceAccount:sc-deploy@$P.iam.gserviceaccount.com
+RUN=serviceAccount:sc-run@$P.iam.gserviceaccount.com
+SCH=serviceAccount:sc-scheduler@$P.iam.gserviceaccount.com
+
+# Fédération : le seul job de l'Environment production, sur main, de ce dépôt
+gcloud iam workload-identity-pools providers update-oidc github-provider --workload-identity-pool=github-prod \
+  --location=global --project=$P --attribute-condition="assertion.repository_id == '1438448292' && \
+assertion.repository == 'damchi/sport-challenge-api' && assertion.ref == 'refs/heads/main' && \
+assertion.environment == 'production'"
+gcloud iam service-accounts add-iam-policy-binding sc-deploy@$P.iam.gserviceaccount.com --project=$P \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principal://iam.googleapis.com/$POOL/subject/repo:damchi@38217786/sport-challenge-api@1438448292:environment:production"
+
+# sc-deploy
+gcloud run services add-iam-policy-binding sc-api --project=$P --region=$R --member=$DEPLOY --role=roles/run.developer
+for j in sc-migrate sc-worker-close-weeks sc-worker-finalize-challenges sc-worker-retry-auth0-deletions; do
+  gcloud run jobs add-iam-policy-binding $j --project=$P --region=$R --member=$DEPLOY --role=roles/run.developer
+done
+gcloud iam service-accounts add-iam-policy-binding sc-run@$P.iam.gserviceaccount.com --project=$P \
+  --member=$DEPLOY --role=roles/iam.serviceAccountUser
+gcloud artifacts repositories add-iam-policy-binding sport-challenge --location=$R --project=$P \
+  --member=$DEPLOY --role=roles/artifactregistry.writer
+
+# sc-run : les deux secrets seulement
+for s in database-url-ca auth0-mgmt-client-secret-ca; do
+  gcloud secrets add-iam-policy-binding $s --project=$P --member=$RUN --role=roles/secretmanager.secretAccessor
+done
+
+# sc-scheduler : les trois jobs du worker seulement
+for j in sc-worker-close-weeks sc-worker-finalize-challenges sc-worker-retry-auth0-deletions; do
+  gcloud run jobs add-iam-policy-binding $j --project=$P --region=$R --member=$SCH --role=roles/run.invoker
+done
+
+# Puis seulement : retirer les droits du projet (et l'ancienne liaison au dépôt entier)
+gcloud iam service-accounts remove-iam-policy-binding sc-deploy@$P.iam.gserviceaccount.com --project=$P \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/$POOL/attribute.repository/damchi/sport-challenge-api"
+for r in roles/run.admin roles/iam.serviceAccountUser roles/artifactregistry.writer; do
+  gcloud projects remove-iam-policy-binding $P --member=$DEPLOY --role=$r --condition=None
+done
+gcloud projects remove-iam-policy-binding $P --member=$RUN --role=roles/secretmanager.secretAccessor --condition=None
+gcloud projects remove-iam-policy-binding $P --member=$SCH --role=roles/run.invoker --condition=None
+```
+
+Vérifier : `gcloud projects get-iam-policy $P` ne montre plus, pour ces trois comptes, que `roles/cloudsql.client` de `sc-run`.
+
 ## Ajouter une tâche du worker
 
 Chaque job du worker doit exister avant qu'un déploiement le mette à jour : le job d'une nouvelle tâche, et sa planification Cloud Scheduler, se créent dans le projet **avant** la fusion du code qui ajoute la tâche à `WORKER_TASKS` (`.github/actions/deploy/action.yml`), sinon l'étape 4 échoue. Le plus sûr est de copier un job existant, par exemple pour `retry-auth0-deletions` :
@@ -230,7 +283,14 @@ gcloud run jobs execute sc-worker-retry-auth0-deletions --project=$P --region=$R
 ```
 
 - Avant le `replace`, le `grep` doit montrer le nouveau nom et `- retry-auth0-deletions` comme dernier argument, et plus aucun `close-weeks`.
-- Les droits (lancement par `sc-scheduler`, mise à jour par `sc-deploy`) sont donnés au niveau du projet : le nouveau job en hérite, rien à copier.
+- Les droits sont donnés job par job : `replace` ne les copie pas. Les ajouter au nouveau job, sinon la planification et le déploiement échouent :
+
+  ```
+  gcloud run jobs add-iam-policy-binding sc-worker-retry-auth0-deletions --project=$P --region=$R \
+    --member=serviceAccount:sc-scheduler@$P.iam.gserviceaccount.com --role=roles/run.invoker
+  gcloud run jobs add-iam-policy-binding sc-worker-retry-auth0-deletions --project=$P --region=$R \
+    --member=serviceAccount:sc-deploy@$P.iam.gserviceaccount.com --role=roles/run.developer
+  ```
 - Les planifications sont dans le fuseau `America/Toronto` ; pour une tâche horaire, le fuseau ne change rien.
 - Les lignes terminées par `\` se collent d'un bloc : un espace après le `\` coupe la commande.
 
@@ -246,7 +306,7 @@ gcloud run jobs execute sc-worker-retry-auth0-deletions --project=$P --region=$R
    | `GCP_DEPLOY_SERVICE_ACCOUNT` | `sc-deploy@sport-challenge-prod.iam.gserviceaccount.com` |
    | `CLOUD_RUN_NAME_PREFIX` | facultatif : `sc` par défaut |
 
-   **Deployment branches = Selected branches, `main` seulement**, et **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity refuse un jeton qui ne vient pas de `main`, mais il ne vérifie **ni l'Environment** `production` **ni l'identifiant numérique du dépôt** : tout workflow de `main` qui demande `id-token: write` peut prendre `sc-deploy`. L'approbation repose donc sur les règles GitHub (protection de `main`, reviewers de l'Environment). Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
+   **Deployment branches = Selected branches, `main` seulement**, et **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity n'accepte que le jeton d'un job de l'Environment `production`, sur `main`, venant de ce dépôt (identifiant numérique compris : un dépôt recréé sous le même nom est refusé) ; un autre workflow de `main` qui demande `id-token: write` ne peut plus prendre `sc-deploy`. L'approbation elle-même repose sur les reviewers de l'Environment, réglés côté GitHub. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
 2. **Variable du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elle ne vaut pas `true`, le job est ignoré.
    ```
    gh variable set DEPLOY_PRODUCTION --body true   # après avoir créé l'Environment production et ses reviewers
