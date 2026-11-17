@@ -241,68 +241,79 @@ flowchart LR
 
 ### 5.2 Structure détaillée du dépôt backend
 
-> Cette structure est la **cible**. Chaque dossier et chaque fichier sont créés par le premier ticket qui les utilise (pas de squelette vide ni de code écrit d'avance), voir `TASKS.md`.
+> Cette arborescence décrit le **dépôt actuel** (V1). Les entrées marquées *(cible, V1.1)* ou *(cible, V2+)* n'existent pas encore : chaque dossier et chaque fichier sont créés par le premier ticket qui les utilise (pas de squelette vide ni de code écrit d'avance), voir `TASKS.md`. Les tests (`*_test.go`, unitaires et `*_integration_test.go`) sont à côté du code et ne sont pas listés.
 
 ```
-sportchallenge-api/
+sport-challenge-api/
 ├── cmd/
 │   ├── api/
 │   │   └── main.go                  assemble config, base, services, routes et lance le serveur HTTP
-│   └── worker/
-│       └── main.go                  sous-commandes : close-weeks, finalize-challenges, retry-auth0-deletions (V2 : sync, refresh-tokens)
+│   ├── worker/
+│   │   └── main.go                  tâches : close-weeks, finalize-challenges, retry-auth0-deletions (V2 : sync, refresh-tokens) ;
+│   │                                appelle directement closure.Service et user.Service
+│   └── migrate/
+│       └── main.go                  applique les migrations embarquées (up, down, force) : job lancé avant chaque déploiement
 ├── internal/
 │   ├── platform/                    socle technique, importé par tous les modules
 │   │   ├── config/                  lecture et validation des variables d'environnement
-│   │   ├── db/                      connexion PostgreSQL, helper de transactions
-│   │   ├── httpx/                   middlewares Gin : auth, identifiant de requête, logs, recovery, CORS,
-│   │   │                            limitation de débit ; conversion des erreurs en réponses JSON
-│   │   ├── auth/                    interface TokenVerifier (JWKS), middlewares Authenticate et CurrentUser
-│   │   ├── storage/                 interface de stockage + implémentation Cloud Storage (URL signées)
+│   │   ├── db/                      connexion PostgreSQL (pgx, GORM), transactions (WithTx, InTx) ;
+│   │   │   └── testdb/              une base PostgreSQL par test d'intégration, construite par les migrations
+│   │   ├── httpx/                   routeur Gin et middlewares : en-têtes de sécurité, identifiant de requête, logs,
+│   │   │                            recovery, CORS, limitation de débit, validation des requêtes contre le contrat ;
+│   │   │                            curseurs de pagination ; conversion des erreurs en réponses JSON
+│   │   ├── auth/                    validation des JWT (JWKS Auth0), middlewares Authenticate et CurrentUser,
+│   │   │                            client de l'API Management d'Auth0 (suppression de compte)
 │   │   ├── clock/                   interface Clock : horloge réelle, horloge décalable (tests, `CLOCK_OFFSET`)
 │   │   ├── apperr/                  erreurs métier avec code stable (traduit côté client)
-│   │   └── textx/                   règles des textes libres : caractères cachés refusés, longueur visible
+│   │   ├── textx/                   règles des textes libres : caractères cachés refusés, longueur visible
+│   │   ├── logging/                 logger slog structuré commun à l'API et au worker
+│   │   ├── buildinfo/               version, commit et date du build (fixés à l'édition des liens)
+│   │   └── storage/                 (cible, V1.1) stockage Cloud Storage, URL signées des avatars
 │   │
 │   ├── api/
 │   │   ├── api.gen.go               généré par oapi-codegen depuis api/openapi.yaml (make generate) : routes Gin,
 │   │   │                            types de requête et de réponse, interface StrictServerInterface ; jamais modifié à la main
-│   │   └── apitest/                 helper de test : valide une réponse réelle contre le contrat (kin-openapi)
+│   │   └── apitest/                 helpers de test : valide une réponse réelle contre le contrat (kin-openapi),
+│   │                                implémentation vide des opérations des autres modules
 │   │
 │   ├── health/
-│   │   └── handler.go               GET /healthz (implémente l'interface générée)
+│   │   └── handler.go               GET /healthz (vivant, version du build), GET /readyz (la base répond)
 │   │
 │   ├── user/
 │   │   ├── model.go                 entité User
-│   │   ├── service.go               création au premier login, profil, suppression (anonymisation)
+│   │   ├── profile.go               règles du profil : pseudo, langue
+│   │   ├── service.go               création au premier login, profil, suppression (anonymisation), reprise
+│   │   │                            des suppressions Auth0 échouées
 │   │   ├── repository.go            accès base (GORM)
-│   │   ├── handler.go               routes /me
-│   │   └── service_test.go
+│   │   └── handler.go               routes /me
 │   │
 │   ├── challenge/
 │   │   ├── model.go                 Challenge, Category, Participant, CreatorLink
 │   │   ├── rules.go                 validation pure : fuseau, dates, paramètres de catégories
+│   │   ├── status.go                statut (à venir, en cours, terminé) déduit des dates
 │   │   ├── policy.go                qui peut faire quoi (fonctions pures, testées sans base)
 │   │   ├── service.go               création, modification limitée, rejoindre, abandonner, exclure, supprimer
 │   │   ├── repository.go
-│   │   ├── handler.go
-│   │   └── rules_test.go
+│   │   └── handler.go
 │   │
 │   ├── invitation/
-│   │   ├── model.go · service.go · repository.go · handler.go
+│   │   └── model.go · service.go · repository.go · handler.go
 │   │                                liens d'invitation, règle « les participants peuvent inviter »
 │   │
-│   ├── sport/
-│   │   ├── catalog.go               catalogue : code, mode de distance, coefficient suggéré
-│   │   ├── service.go               lecture du catalogue, copie des coefficients dans le challenge
+│   ├── sport/                       le catalogue lui-même est dans la migration 000003 (données de référence)
+│   │   ├── model.go                 Sport : code, mode de distance, coefficient suggéré
+│   │   ├── repository.go            lecture de la table sports
+│   │   ├── service.go               lecture du catalogue, coefficients suggérés, mode de distance d'un sport
 │   │   └── handler.go               GET /sports
 │   │
 │   ├── activity/
 │   │   ├── model.go                 Activity (source, identifiant externe, sport, durée, distance)
-│   │   ├── limits.go                bornes techniques (durée et distance positives, valeurs maximales raisonnables) ; vitesse calculée
+│   │   ├── rules.go                 validation pure : bornes techniques (durée et distance positives, valeurs
+│   │   │                            maximales raisonnables), distance selon le sport ; vitesse calculée
 │   │   ├── policy.go                qui peut saisir, modifier, supprimer (auteur, semaine terminée verrouillée)
-│   │   ├── service.go               validation, fenêtre du challenge, idempotence
+│   │   ├── service.go               point d'entrée unique : validation, fenêtre du challenge, idempotence
 │   │   ├── repository.go
-│   │   ├── handler.go
-│   │   └── limits_test.go
+│   │   └── handler.go
 │   │
 │   ├── scoring/                     Go pur, sans dépendance : testé sans base de données
 │   │   ├── types.go                 Activity, Window, Entry, interface Scorer
@@ -310,40 +321,44 @@ sportchallenge-api/
 │   │   ├── distance.go              catégorie 2 : distance cumulée (coefficients)
 │   │   ├── duration.go              catégorie durée
 │   │   ├── elimination.go           catégorie à élimination
-│   │   ├── ranks.go                 classement ex aequo (1, 1, 3)
-│   │   └── *_test.go
+│   │   └── ranks.go                 classement ex aequo (1, 1, 3)
 │   │
 │   ├── leaderboard/
+│   │   ├── model.go                 challenge et catégories lus, classement par catégorie
+│   │   ├── repository.go            participants et activités de la fenêtre (SQL brut, lecture seule)
 │   │   ├── service.go               charge participants et activités, appelle les scorers
 │   │   └── handler.go               GET /challenges/{id}/leaderboard
 │   │
-│   ├── closure/
-│   │   ├── service.go               clôture de semaine, éliminations, gel des résultats
-│   │   └── jobs.go                  points d'entrée appelés par le worker
+│   ├── closure/                     sans handler : appelé par le worker
+│   │   ├── model.go                 challenges à clore, résultats, instantanés
+│   │   ├── repository.go            clôtures de semaine, éliminations, result_snapshot (SQL brut)
+│   │   └── service.go               clôture de semaine, éliminations, gel des résultats
 │   │
-│   ├── badge/
+│   ├── badge/                       (cible, V1.1)
 │   │   ├── model.go                 BadgeDefinition (par challenge, règle en JSON), BadgeAward
 │   │   ├── rules.go                 évaluation pure d'une condition de badge (sans base de données) ; testée
-│   │   ├── service.go · repository.go · handler.go
+│   │   └── service.go · repository.go · handler.go
 │   │
-│   ├── integration/                 V2 et suivantes
+│   ├── integration/                 (cible, V2+)
 │   │   ├── provider.go              interface Provider commune
 │   │   ├── connection/              connexions OAuth, jetons chiffrés, renouvellement
 │   │   ├── webhook/                 route publique, vérification de signature
 │   │   ├── dedupe/                  règle de fusion des doublons entre marques
-│   │   ├── strava/ · polar/ · garmin/ · coros/     un adaptateur par marque
+│   │   └── strava/ · polar/ · garmin/ · coros/     un adaptateur par marque
 │   │
-│   └── notification/                V3 : FCM et APNs
+│   └── notification/                (cible, V3) FCM et APNs
 │
-├── migrations/                      000001_init.up.sql / .down.sql, 000002_… (golang-migrate, appliqué par la CI)
+├── migrations/                      000001_init_utils.up.sql / .down.sql, 000002_create_users… (golang-migrate) ;
+│                                    migrations.go les embarque dans le binaire migrate
 ├── api/
 │   ├── openapi.yaml                 spécification de l'API : source du code serveur généré et du client TypeScript
 │   └── oapi-codegen.yaml            configuration de la génération du code serveur (internal/api)
 ├── deploy/
-│   ├── Dockerfile                   build multi-stage, image minimale
+│   ├── Dockerfile                   build multi-stage, image minimale (api, worker, migrate)
 │   └── docker-compose.yml           local : PostgreSQL (émulateur de stockage en V1.1)
+├── docs/                            déploiement, exploitation, migrations, publication, Auth0, ADR
 ├── .github/workflows/               ci.yml, release.yml, deploy.yml, claude-review.yml
-├── Makefile                         raccourcis : test, lint, migrate, run
+├── Makefile                         raccourcis : run, worker, test, lint, fmt, migrate, generate, docker (make help)
 ├── go.mod
 └── README.md
 ```
@@ -359,7 +374,7 @@ flowchart TD
   LB --> AC[activity]
   LB --> SC
   CL[closure] --> LB
-  CL --> BG[badge]
+  CL -.->|V1.1| BG[badge]
   PL[platform] -.-> H & S & R
 ```
 
@@ -380,10 +395,10 @@ flowchart TD
 | `leaderboard` | `GET /challenges/{id}/leaderboard` (filtre par catégorie) |
 | `activity` | `POST /activities`, `GET /me/activities`, `GET /challenges/{id}/participants/{userId}/activities` (participants du challenge), `PATCH` et `DELETE /activities/{id}` (auteur, tant que la semaine n'est pas terminée dans aucun challenge où l'activité compte) |
 | `sport` | `GET /sports` |
-| `badge` | `GET /me/badges`, `GET /challenges/{id}/badges`, `POST /challenges/{id}/badges` (créateur), `PATCH` et `DELETE /challenges/{id}/badges/{badgeId}` (créateur, tant que personne ne l'a gagné) |
-| uploads | `POST /uploads/avatar` (URL signée) |
+| `badge` (V1.1) | `GET /me/badges`, `GET /challenges/{id}/badges`, `POST /challenges/{id}/badges` (créateur), `PATCH` et `DELETE /challenges/{id}/badges/{badgeId}` (créateur, tant que personne ne l'a gagné) |
+| uploads (V1.1) | `POST /uploads/avatar` (URL signée) |
 | `integration` (V2) | `GET /integrations`, `POST /integrations/{provider}/connect`, `DELETE /integrations/{provider}`, `POST /webhooks/{provider}` (public) |
-| `health` | `GET /healthz` (à la racine, hors `/api/v1`) |
+| `health` | `GET /healthz`, `GET /readyz` (à la racine, hors `/api/v1`) |
 
 **Tâches du worker**
 
@@ -440,7 +455,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 ### 5.6 API
 
 - ✅ REST sous `/api/v1`, spécification OpenAPI (génération du client TypeScript).
-- Ressources principales : `me`, `challenges`, `challenges/{id}/categories`, `challenges/{id}/participants`, `challenges/{id}/leaderboard`, `challenges/{id}/invitations`, `activities`, `sports`, `badges`, `uploads` (URL signées).
+- Ressources principales : `me`, `challenges` (le détail d'un challenge contient ses catégories), `challenges/{id}/participants`, `challenges/{id}/leaderboard`, `challenges/{id}/invitations`, `invitations`, `activities`, `sports` ; en V1.1 : `badges`, `uploads` (URL signées).
 - 🟡 Les erreurs renvoient un **code stable** (traduit côté client en français ou en anglais), pas un texte.
 - 🟡 Les créations d'activité acceptent une **clé d'idempotence** (utile pour le hors-ligne et les futures synchronisations).
 - 🟡 Pagination par curseur sur les listes.
