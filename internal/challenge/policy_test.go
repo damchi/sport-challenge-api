@@ -573,6 +573,20 @@ func TestActivitiesRefusal(t *testing.T) {
 	}
 }
 
+func TestDeletionRefusal(t *testing.T) {
+	if err := DeletionRefusal(nil); err != nil {
+		t.Fatalf("no challenge: DeletionRefusal() = %v, want nil", err)
+	}
+	err := DeletionRefusal([]string{"b-challenge", "a-challenge"})
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeLastCreator {
+		t.Fatalf("last creator: DeletionRefusal() = %v, want last_creator", err)
+	}
+	if got := appErr.Params[apperr.ChallengesParam]; got != "a-challenge,b-challenge" {
+		t.Fatalf("challenges = %q, want the ids sorted", got)
+	}
+}
+
 func TestDeletionAbandons(t *testing.T) {
 	endsAt := time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC)
 	tests := []struct {

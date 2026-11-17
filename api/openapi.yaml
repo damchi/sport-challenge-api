@@ -153,12 +153,24 @@ paths:
         with this identity never creates a new account. The client asks for confirmation first.
         A 500 may come after the account is deleted: retrying then answers
         401 `account_deleted`, which the client treats as done.
+        Refused (422 `last_creator`) while the account is the last creator
+        with an account of a challenge not finished: the user first adds
+        another creator, or deletes the challenge; `params.challenges` lists
+        their ids, comma-separated. Nothing is deleted then.
       tags: [me]
       responses:
         "204":
           description: Deleted.
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: |
+            The account is the last creator of challenges not finished
+            (`last_creator`); `params.challenges` lists them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
@@ -1218,6 +1230,7 @@ components:
         - challenge_ended
         - cannot_exclude_creator
         - not_active_participant
+        - last_creator
         - distance_required
         - distance_not_allowed
         - week_locked

@@ -245,6 +245,49 @@ func TestGetInvited(t *testing.T) {
 	}
 }
 
+// TestGetInvitedByADeletedAccount checks that the links of a deleted account
+// are cancelled (README §2.2): a guest linked to the invitation of a creator
+// whose account is then deleted is no longer invited.
+func TestGetInvitedByADeletedAccount(t *testing.T) {
+	pseudo := "marie_92"
+	_, pool, creatorID := setup(t, &pseudo)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, clock.NewFake(now))
+	c, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Visibility = VisibilityPrivate }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	author := insertTestUser(t, pool, "email|co_creator")
+	guest := insertTestUser(t, pool, "email|guest")
+	var invitation string
+	if _, err := pool.Exec(t.Context(), "INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", c.ID, author); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at)
+		VALUES ($1, $2, sha256('t'::bytea), $3, $4) RETURNING id`, c.ID, author, time.Date(2026, 3, 11, 4, 0, 0, 0, time.UTC), now).Scan(&invitation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO invitation_recipients VALUES ($1, $2, $3)", invitation, guest, now); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := svc.Get(t.Context(), guest, c.ID); err != nil || d.Role != RoleInvited {
+		t.Fatalf("author's account active: %+v, %v, want invited", d.Role, err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", author); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Get(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("author's account deleted: error = %v, want challenge_not_found", err)
+	}
+	// Joining reads the same membership, under the lock: refused too.
+	if _, err := svc.Join(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("join, author's account deleted: error = %v, want challenge_not_found", err)
+	}
+}
+
 // TestJoinWithAValidInvitation: a user linked to a valid invitation joins
 // the private challenge, judged under the lock like any join.
 func TestJoinWithAValidInvitation(t *testing.T) {
