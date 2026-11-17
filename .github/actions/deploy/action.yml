@@ -143,13 +143,19 @@ runs:
         fi
         image=$(gcloud run revisions describe "$serving" --project="$PROJECT" --region="$REGION" \
           --format='value(spec.containers[0].image)')
-        # Cloud Run may record the image by its tag or by its digest.
+        # Cloud Run may record the image by its tag or by its digest. Docker with
+        # the containerd image store (ubuntu-26.04 runners) pushes an index, the
+        # image and its provenance attestation: Cloud Run then records the digest
+        # of the linux/amd64 image, not the one of the index.
         expected=$(gcloud artifacts docker images describe "$IMAGE_REPOSITORY:$SHORT_SHA" \
           --format='value(image_summary.digest)')
+        gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+        platform=$(docker buildx imagetools inspect --raw "$IMAGE_REPOSITORY:$SHORT_SHA" |
+          jq -r '.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest')
         case "$image" in
-          "$IMAGE_REPOSITORY:$SHORT_SHA" | "$IMAGE_REPOSITORY@$expected") ;;
+          "$IMAGE_REPOSITORY:$SHORT_SHA" | "$IMAGE_REPOSITORY@$expected" | "$IMAGE_REPOSITORY@$platform") ;;
           *)
-            echo "::error::the API runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA ($expected)"
+            echo "::error::the API runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA ($expected${platform:+, linux/amd64 $platform})"
             exit 1
             ;;
         esac
