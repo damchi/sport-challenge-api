@@ -16,7 +16,10 @@ concurrency:
 jobs:
   # Documentation-only changes (docs/, Markdown, .claude/) skip the four jobs
   # below: a skipped job counts as passed for the required checks of main, and
-  # the Actions minutes of this private repository go to the code.
+  # the Actions minutes of this private repository go to the code. They are
+  # skipped only when this job succeeded and said code=false: if it fails or
+  # says nothing, they run (a failed dependency would otherwise skip them, and
+  # a skipped job passes).
   changes:
     name: what changed
     runs-on: ubuntu-latest
@@ -29,8 +32,10 @@ jobs:
           fetch-depth: 0 # both ends of the diff
           persist-credentials: false
 
+      # bash -eo pipefail: a failure of the script fails the step, despite tee.
       - name: Diff
         id: diff
+        shell: bash
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -39,7 +44,7 @@ jobs:
   check:
     name: fmt, lint, test
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -101,7 +106,7 @@ jobs:
   migrations:
     name: migrations up, down, up
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -159,7 +164,7 @@ jobs:
   integration:
     name: integration tests
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -195,7 +200,7 @@ jobs:
   image:
     name: docker image
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The API starts against a database (its /healthz is read below).
