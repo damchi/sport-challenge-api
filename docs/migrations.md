@@ -2,12 +2,12 @@
 
 Les migrations (golang-migrate, dossier `migrations/`) s'appliquent par un **job Cloud Run dédié**, `sc-migrate`, lancé **avant** le déploiement de la nouvelle version. L'API ne touche jamais au schéma en démarrant.
 
-Qui peut lancer `down` et `force` : quiconque a, **au niveau du projet**, un rôle qui permet de lancer un job avec d'autres arguments (`roles/run.developer`, `roles/run.admin` ou propriétaire) ; à limiter, en prod, à deux personnes. Ces exécutions sont tracées dans les journaux d'audit. Les droits de la production étant donnés au niveau du projet (`docs/deploiement.md`) :
+Qui peut lancer `down` et `force` : quiconque a, sur le projet ou sur le job `sc-migrate`, un rôle qui permet de lancer un job avec d'autres arguments (`roles/run.developer`, `roles/run.jobsExecutorWithOverrides`, `roles/run.admin`, `roles/editor` ou propriétaire) ; à limiter, en prod, à deux personnes. Ces exécutions sont tracées dans les journaux d'audit. Côté comptes de service (`docs/deploiement.md`, droits donnés ressource par ressource depuis le 2026-11-17) :
 
-- le compte `sc-scheduler` (`roles/run.invoker`) **peut lancer** `sc-migrate` tel quel (`migrate up`), mais pas avec d'autres arguments, donc ni `down` ni `force` ; aucune planification ne le fait aujourd'hui ;
-- le compte de déploiement `sc-deploy` (`roles/run.admin`) lance `migrate up` ; son script ne lance jamais `down` ni `force`, mais ce n'est qu'une convention : ses droits le permettraient. Ce qui l'en empêche est l'accès à ce compte : côté GCP, seuls les jetons d'un workflow du dépôt sur `main` l'obtiennent ; l'approbation de l'Environment `production` est une protection **côté GitHub seulement** (GCP ne la vérifie pas).
+- le compte `sc-scheduler` n'a `roles/run.invoker` que sur les jobs du worker : il **ne peut pas** lancer `sc-migrate` ;
+- le compte de déploiement `sc-deploy` (`roles/run.developer` sur `sc-migrate`) lance `migrate up` ; son script ne lance jamais `down` ni `force`, mais ce n'est qu'une convention : ses droits le permettraient, et plus largement ils permettent de changer l'image ou les arguments du job, ou de le supprimer, et de faire tourner une image sous l'identité de `sc-run` (les deux secrets, la base). Ce qui l'en empêche est l'accès à ce compte : côté GCP, seul le jeton du job de l'Environment `production`, sur `main`, de ce dépôt l'obtient ; l'approbation elle-même (reviewers de l'Environment) se règle côté GitHub.
 
-Le job utilise la même image que l'API et le worker, avec la commande `migrate` : les fichiers SQL sont embarqués dans le binaire, donc le schéma correspond toujours à la version du code. Il ne reçoit que la variable `DATABASE_URL` (son compte, `sc-run`, peut cependant lire tous les secrets du projet), et une migration en échec n'est jamais relancée automatiquement.
+Le job utilise la même image que l'API et le worker, avec la commande `migrate` : les fichiers SQL sont embarqués dans le binaire, donc le schéma correspond toujours à la version du code. Il ne reçoit que la variable `DATABASE_URL` (son compte, `sc-run`, peut aussi lire `auth0-mgmt-client-secret-ca`, partagé avec l'API et le worker ; des comptes distincts par charge n'ont pas été jugés utiles pour l'instant), et une migration en échec n'est jamais relancée automatiquement.
 
 | Commande | Effet |
 |---|---|
