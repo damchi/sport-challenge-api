@@ -143,14 +143,27 @@ runs:
         fi
         image=$(gcloud run revisions describe "$serving" --project="$PROJECT" --region="$REGION" \
           --format='value(spec.containers[0].image)')
-        # Cloud Run may record the image by its tag or by its digest.
+        # Cloud Run may record the image by its tag or by its digest. Docker with
+        # the containerd image store (ubuntu-26.04 runners) pushes an index, the
+        # image and its provenance attestation: Cloud Run then records the digest
+        # of the linux/amd64 image, not the one of the index.
         expected=$(gcloud artifacts docker images describe "$IMAGE_REPOSITORY:$SHORT_SHA" \
           --format='value(image_summary.digest)')
         case "$image" in
           "$IMAGE_REPOSITORY:$SHORT_SHA" | "$IMAGE_REPOSITORY@$expected") ;;
           *)
-            echo "::error::the API runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA ($expected)"
-            exit 1
+            # The index is read only here. Docker is configured again because a
+            # rollback skips the build step.
+            gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+            if ! raw=$(docker buildx imagetools inspect --raw "$IMAGE_REPOSITORY:$SHORT_SHA"); then
+              echo "::error::cannot read the manifest of $IMAGE_REPOSITORY:$SHORT_SHA to check the image '$image'"
+              exit 1
+            fi
+            platform=$(jq -r '.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest' <<<"$raw")
+            if [ -z "$platform" ] || [ "$image" != "$IMAGE_REPOSITORY@$platform" ]; then
+              echo "::error::the API runs the image '$image', expected $IMAGE_REPOSITORY:$SHORT_SHA ($expected${platform:+, linux/amd64 $platform})"
+              exit 1
+            fi
             ;;
         esac
         url=$(gcloud run services describe "$API_SERVICE" --project="$PROJECT" --region="$REGION" \
