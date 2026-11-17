@@ -954,7 +954,12 @@ paths:
         user is an active participant and whose window holds `started_at`
         (`challenge_ids`, possibly empty). An activity outside every window
         is recorded all the same. It is refused (`week_locked`) when its week
-        has ended in one of those challenges, finished ones included. The
+        has ended in one of those challenges, finished ones included. Its end
+        (`started_at` plus `duration_seconds`) is never in the future (5
+        minutes of tolerance) and `started_at` never before 2000-01-01
+        (`validation_failed`). It never overlaps another activity of the user
+        (`activity_overlap`); activities one after the other (a triathlon)
+        are fine, the end of one being the start of the next. The
         speed is computed, never sent. With `Idempotency-Key`, a valid
         request sent again with the same key answers 200 with the activity
         recorded first, as it is now (replaced since, maybe), even if the
@@ -998,7 +1003,8 @@ paths:
           description: |
             The profile is incomplete (`profile_incomplete`), the sport needs
             a distance (`distance_required`) or takes none
-            (`distance_not_allowed`), or the week of `started_at` has ended
+            (`distance_not_allowed`), the activity overlaps another of the
+            user (`activity_overlap`), or the week of `started_at` has ended
             in a challenge where the activity counts (`week_locked`).
           content:
             application/json:
@@ -1027,7 +1033,9 @@ paths:
         (`sport_label`, `distance_meters`). The source and the
         `Idempotency-Key` of the creation stay. It is refused
         (`week_locked`) when the week of the current `started_at`, or of the
-        new one, has ended in a challenge where the activity counts.
+        new one, has ended in a challenge where the activity counts, and
+        (`activity_overlap`) when it would overlap another activity of the
+        user.
       tags: [activities]
       requestBody:
         required: true
@@ -1051,9 +1059,10 @@ paths:
         "422":
           description: |
             The sport needs a distance (`distance_required`) or takes none
-            (`distance_not_allowed`), or the week of the current or the new
-            `started_at` has ended in a challenge where the activity counts
-            (`week_locked`).
+            (`distance_not_allowed`), it would overlap another activity of
+            the user (`activity_overlap`), or the week of the current or the
+            new `started_at` has ended in a challenge where the activity
+            counts (`week_locked`).
           content:
             application/json:
               schema:
@@ -1234,6 +1243,7 @@ components:
         - distance_required
         - distance_not_allowed
         - week_locked
+        - activity_overlap
         - rate_limited
         - not_found
         - validation_failed
@@ -1820,7 +1830,11 @@ components:
         started_at:
           type: string
           format: date-time
-          description: Start of the activity; never in the future (5 minutes of tolerance).
+          description: |
+            Start of the activity; never before 2000-01-01T00:00:00Z, and the
+            activity is entered once done: its end (`started_at` plus
+            `duration_seconds`) is never in the future either (5 minutes of
+            tolerance).
         duration_seconds:
           type: integer
           minimum: 1

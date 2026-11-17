@@ -49,6 +49,9 @@ const (
 	// CodeWeekLocked refuses writing an activity whose week has ended in a
 	// challenge where it counts (ADR 0001).
 	CodeWeekLocked Code = "week_locked"
+	// CodeActivityOverlap refuses an activity that overlaps another of its
+	// author (README §2.5).
+	CodeActivityOverlap Code = "activity_overlap"
 	// CodeFieldNotEditable refuses a change to a field frozen at creation.
 	CodeFieldNotEditable Code = "field_not_editable"
 	// CodeChallengeNotFound also answers a private challenge the user may
@@ -107,6 +110,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "Distance not allowed"}, true
 	case CodeWeekLocked:
 		return definition{http.StatusUnprocessableEntity, "Week locked"}, true
+	case CodeActivityOverlap:
+		return definition{http.StatusUnprocessableEntity, "Activity overlaps another"}, true
 	case CodeFieldNotEditable:
 		return definition{http.StatusUnprocessableEntity, "Field not editable"}, true
 	case CodeChallengeNotFound:

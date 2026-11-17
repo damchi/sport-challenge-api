@@ -97,6 +97,10 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ Pendant la semaine en cours, un participant peut modifier ou supprimer ses propres activités ; une fois la semaine terminée, plus rien ne change (voir §2.3).
 - ✅ Toutes les activités ont une **durée** ; la distance n'est demandée que pour les sports qui en produisent (pas le yoga, par exemple).
 - ✅ La **vitesse (ou l'allure) n'est jamais saisie** : elle est calculée automatiquement à partir de la durée et de la distance.
+- ✅ **Activités cohérentes** (SC-API-084) :
+  - deux activités d'un même utilisateur ne se **chevauchent jamais** (`activity_overlap`), chacune occupant l'intervalle [début, début + durée) ; des activités **à la suite** restent permises (un triathlon : natation, puis vélo, puis course, la fin de l'une étant le début de la suivante) ; une activité supprimée ne compte plus ; la modification d'une activité ne revérifie le chevauchement que si son début ou sa durée change ;
+  - une activité se saisit une fois **finie** : sa fin (début + durée) n'est jamais dans le futur, avec la même tolérance de 5 minutes que pour le début ;
+  - le début n'est jamais antérieur au **1er janvier 2000 à 00:00 UTC** (borne technique contre les erreurs de saisie).
 - 🟡 Les activités saisies à la main sont marquées « manuelle » (surtout utile à partir de la V2, quand des activités synchronisées s'ajoutent).
 - ❓ Aucun plafond de vitesse en V1 par défaut (seulement des bornes techniques : durée et distance positives, valeurs maximales raisonnables). À revoir si des abus apparaissent.
 - ✅ Un **catalogue de sports** définit, pour chaque sport : si la distance est obligatoire, interdite ou facultative (« autre »), et son coefficient suggéré (§2.4).

@@ -298,6 +298,8 @@ func storageError(err error) error {
 		return apperr.New(apperr.CodeActivityNotFound, nil)
 	case errors.Is(err, errAccountDeleted):
 		return apperr.New(apperr.CodeAccountDeleted, nil)
+	case errors.Is(err, errActivityOverlap):
+		return apperr.New(apperr.CodeActivityOverlap, nil)
 	}
 	return err
 }
