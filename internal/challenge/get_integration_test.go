@@ -282,6 +282,10 @@ func TestGetInvitedByADeletedAccount(t *testing.T) {
 	if _, err := svc.Get(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("author's account deleted: error = %v, want challenge_not_found", err)
 	}
+	// Joining reads the same membership, under the lock: refused too.
+	if _, err := svc.Join(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("join, author's account deleted: error = %v, want challenge_not_found", err)
+	}
 }
 
 // TestJoinWithAValidInvitation: a user linked to a valid invitation joins

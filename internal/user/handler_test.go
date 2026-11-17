@@ -209,6 +209,10 @@ func TestDeleteMeLastCreator(t *testing.T) {
 	if res.status != http.StatusUnprocessableEntity || res.code != "last_creator" {
 		t.Fatalf("got %d %s, want 422 last_creator", res.status, res.code)
 	}
+	params, _ := res.body["error"].(map[string]any)["params"].(map[string]any)
+	if params[apperr.ChallengesParam] != "c1,c2" {
+		t.Fatalf("params = %v, want challenges c1,c2", params)
+	}
 	if *repo.deleted != "" || identities.deleted != "" {
 		t.Fatalf("deleted %q, at the auth provider %q, want nothing", *repo.deleted, identities.deleted)
 	}
