@@ -26,8 +26,10 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# env files: only the example is versioned
 .env
+.env.*
+!.env.example
 
 # Local Claude instructions
 CLAUDE.local.md
@@ -36,3 +38,26 @@ CLAUDE.local.md
 .idea/
 # .vscode/
 
+# Secrets and credentials: never versioned (the repository is public).
+# Keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+# GCP credentials: service account keys, gcloud ADC, files written by the
+# google-github-actions/auth action in the workspace
+*credentials*.json
+service-account*.json
+gha-creds-*.json
+# Terraform state and variables (state files hold secrets in clear text)
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
+
+# Local Claude settings (personal permissions, never shared)
+.claude/settings.local.json
+
+# Security audits: they describe the weaknesses of the API, kept out of the
+# public repository (findings go to the issues instead)
+docs/audit-*.md
