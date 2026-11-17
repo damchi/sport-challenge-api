@@ -339,6 +339,30 @@ func TestListParticipantActivitiesVisibility(t *testing.T) {
 	}
 }
 
+// TestListActivitiesOfAnAbandonedParticipant pins the decision of SC-API-080
+// (README §5.7): the activities of a participant who abandoned (or was
+// excluded) stay visible to the participants of the challenge, within its
+// window, even those recorded after the abandonment, which no longer count
+// there.
+func TestListActivitiesOfAnAbandonedParticipant(t *testing.T) {
+	r := newRecording(t)
+	// The creator abandoned at the start of the window (2026-06-01).
+	c := r.challenge([3]int{2026, 6, 1}, 3, "abandoned", false)
+	runner := r.newUser("runner3")
+	r.join(c, runner, "active")
+	after, err := r.record(toronto(t, 2026, 6, 10, 7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := r.activities.OfParticipant(t.Context(), runner, c, r.user, 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != after.ID || len(page.Items[0].ChallengeIDs) != 0 {
+		t.Fatalf("items %+v, want the activity recorded after the abandonment, counting nowhere", page.Items)
+	}
+}
+
 func TestListMyActivities(t *testing.T) {
 	r := newRecording(t)
 	c := r.challenge([3]int{2026, 6, 1}, 3, "active", false)
