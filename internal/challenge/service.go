@@ -30,6 +30,7 @@ type repository interface {
 	Delete(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error
 	Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error)
 	ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error)
+	LastCreatorChallenges(ctx context.Context, userID string, now time.Time) ([]string, error)
 	Memberships(ctx context.Context, userID string) ([]UserChallenge, error)
 }
 
@@ -376,11 +377,21 @@ func (s *Service) Abandon(ctx context.Context, actorID, id string) (Detail, erro
 // AbandonAll makes userID abandon every challenge not finished where they
 // are an active participant, for the deletion of their account
 // (DeletionAbandons): each under the lock of its challenge, like an abandon,
-// at the clock's now once locked. Called in the transaction of the account
-// deletion (ctx carries it), so everything commits or nothing does. It checks
-// no actor: never expose it on a route, only user.Service.Delete calls it.
+// at the clock's now once locked. It first refuses (422 last_creator,
+// DeletionRefusal) while userID is the last creator with an account of a
+// challenge not finished. Called in the transaction of the account deletion
+// (ctx carries it), so everything commits or nothing does. It checks no
+// actor: never expose it on a route, only user.Service.Delete calls it.
 func (s *Service) AbandonAll(ctx context.Context, userID string) error {
-	ids, err := s.repo.ActiveParticipations(ctx, userID, s.clock.Now())
+	now := s.clock.Now()
+	last, err := s.repo.LastCreatorChallenges(ctx, userID, now)
+	if err != nil {
+		return fmt.Errorf("abandon all: %w", err)
+	}
+	if err := DeletionRefusal(last); err != nil {
+		return err
+	}
+	ids, err := s.repo.ActiveParticipations(ctx, userID, now)
 	if err != nil {
 		return fmt.Errorf("abandon all: %w", err)
 	}

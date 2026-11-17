@@ -26,6 +26,7 @@ func TestNew(t *testing.T) {
 		{CodeRegistrationClosed, http.StatusUnprocessableEntity},
 		{CodeChallengeEnded, http.StatusUnprocessableEntity},
 		{CodeCannotExcludeCreator, http.StatusUnprocessableEntity},
+		{CodeLastCreator, http.StatusUnprocessableEntity},
 		{CodeNotActiveParticipant, http.StatusUnprocessableEntity},
 		{CodeDistanceRequired, http.StatusUnprocessableEntity},
 		{CodeDistanceNotAllowed, http.StatusUnprocessableEntity},

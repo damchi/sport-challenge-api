@@ -1,6 +1,8 @@
 package challenge
 
 import (
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -249,6 +251,21 @@ func AbandonRefusal(m Membership, visibility string, now, endsAt time.Time) (noo
 // keeps its results, under the neutral name of the anonymized account.
 func DeletionAbandons(m Membership, now, endsAt time.Time) bool {
 	return m.Participant == ParticipantActive && now.Before(endsAt)
+}
+
+// DeletionRefusal is the rule of the last creator (README §2.2): an account
+// may not be deleted while it is the last creator with an account of
+// challenges not finished, lastCreatorOf (their ids), or nobody could manage
+// them. The user first adds another creator or deletes the challenge: 422
+// last_creator, listing the ids sorted. Nil when lastCreatorOf is empty.
+func DeletionRefusal(lastCreatorOf []string) error {
+	if len(lastCreatorOf) == 0 {
+		return nil
+	}
+	ids := slices.Sorted(slices.Values(lastCreatorOf))
+	err := apperr.New(apperr.CodeLastCreator, nil)
+	err.Params = map[string]string{apperr.ChallengesParam: strings.Join(ids, ",")}
+	return err
 }
 
 // CanExclude reports whether role may exclude a participant (README §5.7):

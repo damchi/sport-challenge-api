@@ -39,6 +39,9 @@ type fakeRepository struct {
 	// active serves ActiveParticipations; activeErr fails it.
 	active    []string
 	activeErr error
+	// lastCreator serves LastCreatorChallenges; lastCreatorErr fails it.
+	lastCreator    []string
+	lastCreatorErr error
 	// memberships serve Memberships; membershipsErr fails it.
 	memberships    []UserChallenge
 	membershipsErr error
@@ -51,6 +54,10 @@ type fakeRepository struct {
 
 func (f *fakeRepository) ActiveParticipations(context.Context, string, time.Time) ([]string, error) {
 	return f.active, f.activeErr
+}
+
+func (f *fakeRepository) LastCreatorChallenges(context.Context, string, time.Time) ([]string, error) {
+	return f.lastCreator, f.lastCreatorErr
 }
 
 func (f *fakeRepository) Memberships(context.Context, string) ([]UserChallenge, error) {
@@ -1124,6 +1131,7 @@ func TestServiceAbandonAllFailures(t *testing.T) {
 		{name: "challenge deleted meanwhile", repo: &fakeRepository{active: []string{"c"}}},
 		{name: "listing failure", repo: &fakeRepository{activeErr: storageErr}, wantErr: storageErr},
 		{name: "abandon failure", repo: &fakeRepository{active: []string{"c"}, err: storageErr}, wantErr: storageErr},
+		{name: "last creator check failure", repo: &fakeRepository{lastCreatorErr: storageErr}, wantErr: storageErr},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1132,6 +1140,20 @@ func TestServiceAbandonAllFailures(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestServiceAbandonAllRefusesTheLastCreator checks the rule of the last
+// creator (README §2.2): the deletion is refused before anything is abandoned.
+func TestServiceAbandonAllRefusesTheLastCreator(t *testing.T) {
+	repo := &fakeRepository{challenge: stored(VisibilityPrivate), membership: Membership{Participant: ParticipantActive}, active: []string{"c"}, lastCreator: []string{"c"}}
+	err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).AbandonAll(t.Context(), actor)
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeLastCreator || appErr.Params[apperr.ChallengesParam] != "c" {
+		t.Fatalf("error = %v, want last_creator listing c", err)
+	}
+	if !repo.abandonedAt.IsZero() {
+		t.Fatalf("abandoned at %s, want nothing abandoned", repo.abandonedAt)
 	}
 }
 

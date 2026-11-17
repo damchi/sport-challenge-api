@@ -121,9 +121,10 @@ var errChallengeNotFound = errors.New("challenge not found")
 
 // membershipQuery reads challenge @id unless deleted, with the membership of
 // @actor, invited when an invitation of the challenge linked to @actor is
-// valid at @now: not expired, not revoked, and its author may still invite
-// (CanInvite: a creator, or an active participant when members may invite),
-// so the links of an excluded or abandoned participant give nothing. The
+// valid at @now: not expired, not revoked, its author's account not deleted
+// (README §2.2), and its author may still invite (CanInvite: a creator, or an
+// active participant when members may invite), so the links of an excluded or
+// abandoned participant, or of a deleted account, give nothing. The
 // token never reaches this query: only the link, recorded when the user
 // opened the invitation, counts. It never takes a lock: under READ COMMITTED, a statement that
 // waits for a lock keeps the snapshot taken before the wait, so its
@@ -134,6 +135,7 @@ const membershipQuery = `SELECT c.*,
 	(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant,
 	EXISTS (SELECT 1 FROM invitation_recipients r JOIN invitations i ON i.id = r.invitation_id
 		WHERE r.user_id = @actor AND i.challenge_id = c.id AND i.revoked_at IS NULL AND i.expires_at > @now
+		AND EXISTS (SELECT 1 FROM users WHERE id = i.invited_by AND anonymized_at IS NULL)
 		AND (EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = i.invited_by)
 			OR (c.members_can_invite AND EXISTS (SELECT 1 FROM participants
 				WHERE challenge_id = c.id AND user_id = i.invited_by AND status = 'active')))) AS invited
@@ -181,6 +183,44 @@ func (r *Repository) ActiveParticipations(ctx context.Context, userID string, no
 		ORDER BY c.id`, userID, now).Scan(&ids).Error
 	if err != nil {
 		return nil, fmt.Errorf("list active participations: %w", err)
+	}
+	return ids, nil
+}
+
+// LastCreatorChallenges returns the challenges, not deleted and not finished
+// at now, where userID is a creator and no other creator has an account (not
+// anonymized), by id: those the deletion of userID's account would leave
+// without anybody to manage them. It runs in the transaction of ctx (account
+// deletion) and first locks, in one statement ordered by id, every challenge
+// not finished the deletion touches: those userID creates, so that two
+// creators deleting their accounts at once cannot both leave, and those where
+// userID is an active participant, which the deletion then abandons. Locking
+// both sets in one global order means two deletions never wait for each other
+// in a cycle. The creators are read after the lock, in a new statement (see
+// membershipQuery).
+func (r *Repository) LastCreatorChallenges(ctx context.Context, userID string, now time.Time) ([]string, error) {
+	tx := db.Conn(ctx, r.db)
+	var locked []string
+	err := tx.Raw(`SELECT c.id FROM challenges c
+		WHERE c.deleted_at IS NULL AND c.ends_at > @now
+			AND (c.id IN (SELECT challenge_id FROM challenge_creators WHERE user_id = @user)
+				OR c.id IN (SELECT challenge_id FROM participants WHERE user_id = @user AND status = 'active'))
+		ORDER BY c.id FOR UPDATE`, map[string]any{"user": userID, "now": now}).Scan(&locked).Error
+	if err != nil {
+		return nil, fmt.Errorf("lock challenges of the account: %w", err)
+	}
+	// Required: IN with an empty list is not valid SQL.
+	if len(locked) == 0 {
+		return nil, nil
+	}
+	var ids []string
+	err = tx.Raw(`SELECT c.id FROM challenges c WHERE c.id IN @locked
+		AND EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @user)
+		AND NOT EXISTS (SELECT 1 FROM challenge_creators o JOIN users u ON u.id = o.user_id
+			WHERE o.challenge_id = c.id AND o.user_id <> @user AND u.anonymized_at IS NULL)
+		ORDER BY c.id`, map[string]any{"locked": locked, "user": userID}).Scan(&ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("list last creator challenges: %w", err)
 	}
 	return ids, nil
 }

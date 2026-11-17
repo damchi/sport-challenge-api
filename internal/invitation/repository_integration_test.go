@@ -157,6 +157,7 @@ func TestRepositoryLinkAuthorMayStillInvite(t *testing.T) {
 		creator          bool
 		status           string // empty: never joined
 		membersCanInvite bool
+		deleted          bool // the author's account is deleted (anonymized)
 		valid            bool
 	}{
 		{name: "creator", creator: true, status: "active", valid: true},
@@ -165,6 +166,9 @@ func TestRepositoryLinkAuthorMayStillInvite(t *testing.T) {
 		{name: "active participant, members may not invite", status: "active"},
 		{name: "abandoned or excluded participant", status: "abandoned", membersCanInvite: true},
 		{name: "never joined", membersCanInvite: true},
+		// README §2.2: the links of a deleted account are cancelled.
+		{name: "creator whose account is deleted", creator: true, status: "active", deleted: true},
+		{name: "participant whose account is deleted, members may invite", status: "abandoned", membersCanInvite: true, deleted: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -177,6 +181,11 @@ func TestRepositoryLinkAuthorMayStillInvite(t *testing.T) {
 			}
 			if tt.status != "" {
 				join(t, pool, challenge, author, tt.status)
+			}
+			if tt.deleted {
+				if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", author); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err := pool.Exec(t.Context(), "UPDATE challenges SET members_can_invite = $1 WHERE id = $2", tt.membersCanInvite, challenge); err != nil {
 				t.Fatal(err)

@@ -5,8 +5,11 @@ package challenge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -208,8 +211,11 @@ func TestAccountDeletionRaces(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	if deleteErr != nil {
-		t.Fatalf("delete: %v", deleteErr)
+	// The challenge the member creates may commit first: the account is then
+	// its last creator, and its deletion is refused (README §2.2).
+	lastCreator := errors.Is(deleteErr, apperr.New(apperr.CodeLastCreator, nil))
+	if deleteErr != nil && !lastCreator {
+		t.Fatalf("delete: %v, want done or last_creator", deleteErr)
 	}
 	if excludeErr != nil {
 		t.Fatalf("exclude: %v, want done or nothing to do", excludeErr)
@@ -237,7 +243,195 @@ func TestAccountDeletionRaces(t *testing.T) {
 	if !refusedOrDone(createErr, apperr.CodeAccountDeleted, apperr.CodeNotFound) {
 		t.Fatalf("create: %v, want nil, account_deleted or not_found", createErr)
 	}
+	if lastCreator {
+		if createErr != nil {
+			t.Fatalf("deletion refused as last creator, but the creation failed: %v", createErr)
+		}
+		if n := count(t, pool, "SELECT count(*) FROM users WHERE id = $1 AND anonymized_at IS NULL", member); n != 1 {
+			t.Fatal("deletion refused, but the account is anonymized")
+		}
+		return
+	}
 	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1 AND status = 'active'", member); n != 0 {
 		t.Fatalf("%d active participations left to the anonymized account, want 0", n)
+	}
+}
+
+// TestAccountDeletionOfTheLastCreator follows the rule of the last creator
+// (README §2.2): the deletion of an account that is the last creator, with an
+// account, of a challenge not finished is refused (last_creator, listing it)
+// and changes nothing; once another creator is added, it goes through.
+// Finished and deleted challenges never block it, and a co-creator whose
+// account is deleted does not count.
+func TestAccountDeletionOfTheLastCreator(t *testing.T) {
+	svc, _, pool, _ := joinFixture(t)
+	member := insertProfile(t, pool, "last_creator")
+	other := insertProfile(t, pool, "other_creator")
+	gone := insertProfile(t, pool, "gone_creator")
+	create := func(creators ...string) string {
+		t.Helper()
+		c, err := svc.Create(t.Context(), member, valid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range creators {
+			if _, err := pool.Exec(t.Context(), "INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", c.ID, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return c.ID
+	}
+	quitter := insertProfile(t, pool, "quitter_creator")
+	alone := create()
+	upcoming, err := svc.Create(t.Context(), member, with(func(d *Draft) { d.StartDate = "2026-04-01" }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withGone := create(gone)
+	// A co-creator who abandoned keeps the rights of a creator (README §5.7).
+	withQuitter := create(quitter)
+	if _, err := pool.Exec(t.Context(), "INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $3)", withQuitter, quitter, now); err != nil {
+		t.Fatal(err)
+	}
+	// Finished at the very instant of the deletion: it no longer blocks.
+	endingNow := create()
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET starts_at = $2::timestamptz - interval '7 days', ends_at = $2 WHERE id = $1", endingNow, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", gone); err != nil {
+		t.Fatal(err)
+	}
+	finished := create()
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET starts_at = starts_at - interval '1 year', ends_at = ends_at - interval '1 year' WHERE id = $1", finished); err != nil {
+		t.Fatal(err)
+	}
+	deleted := create()
+	if err := svc.Delete(t.Context(), member, deleted); err != nil {
+		t.Fatal(err)
+	}
+	users := accounts(t, pool, svc)
+
+	err = users.Delete(t.Context(), member)
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeLastCreator {
+		t.Fatalf("delete: %v, want last_creator", err)
+	}
+	want := []string{alone, upcoming.ID, withGone}
+	slices.Sort(want)
+	if got := appErr.Params[apperr.ChallengesParam]; got != strings.Join(want, ",") {
+		t.Fatalf("challenges = %q, want %q (not the finished, ending, deleted ones nor the one with a co-creator who abandoned)", got, strings.Join(want, ","))
+	}
+	if n := count(t, pool, "SELECT count(*) FROM users WHERE id = $1 AND anonymized_at IS NULL", member); n != 1 {
+		t.Fatal("refused, but the account is anonymized")
+	}
+	if status, _ := statusOf(t, pool, alone, member); status != "active" {
+		t.Fatalf("refused, but the participation is %s", status)
+	}
+
+	// Another creator with an account in each: the deletion goes through.
+	for _, id := range []string{alone, upcoming.ID, withGone} {
+		if _, err := pool.Exec(t.Context(), "INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", id, other); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := users.Delete(t.Context(), member); err != nil {
+		t.Fatalf("delete with another creator: %v", err)
+	}
+	if status, _ := statusOf(t, pool, alone, member); status != "abandoned" {
+		t.Fatalf("deleted, but the participation is %s, want abandoned", status)
+	}
+}
+
+// TestAccountDeletionOfTwoLastCreatorsAtOnce: the only two creators with an
+// account of a challenge delete their accounts at the same time. The lock on
+// the challenge makes one wait for the other: exactly one deletion goes
+// through, the other is refused (last_creator), so the challenge always keeps
+// a creator with an account.
+func TestAccountDeletionOfTwoLastCreatorsAtOnce(t *testing.T) {
+	svc, _, pool, _ := joinFixture(t)
+	first := insertProfile(t, pool, "first_creator")
+	second := insertProfile(t, pool, "second_creator")
+	c, err := svc.Create(t.Context(), first, valid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", c.ID, second); err != nil {
+		t.Fatal(err)
+	}
+	users := accounts(t, pool, svc)
+
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i, id := range []string{first, second} {
+		wg.Go(func() { <-start; errs[i] = users.Delete(t.Context(), id) })
+	}
+	close(start)
+	wg.Wait()
+
+	var done, refused int
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			done++
+		case errors.Is(err, apperr.New(apperr.CodeLastCreator, nil)):
+			refused++
+		default:
+			t.Fatalf("delete: %v, want done or last_creator", err)
+		}
+	}
+	if done != 1 || refused != 1 {
+		t.Fatalf("%d deleted, %d refused, want exactly one of each", done, refused)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM challenge_creators cc JOIN users u ON u.id = cc.user_id
+		WHERE cc.challenge_id = $1 AND u.anonymized_at IS NULL`, c.ID); n != 1 {
+		t.Fatalf("%d creators with an account left, want 1", n)
+	}
+}
+
+// TestAccountDeletionsCrossedNeverDeadlock: a creates x and joined z, b
+// creates z and joined x, and both delete their accounts at once (each
+// challenge keeps another creator, so neither is refused). Locking the
+// challenges each deletion touches in one global order means they never wait
+// for each other in a cycle: both go through, none fails with a deadlock.
+func TestAccountDeletionsCrossedNeverDeadlock(t *testing.T) {
+	svc, _, pool, _ := joinFixture(t)
+	keeper := insertProfile(t, pool, "keeper")
+	for round := range 5 {
+		a := insertProfile(t, pool, fmt.Sprintf("cross_a%d", round))
+		b := insertProfile(t, pool, fmt.Sprintf("cross_b%d", round))
+		x, err := svc.Create(t.Context(), a, valid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		z, err := svc.Create(t.Context(), b, valid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []string{x.ID, z.ID} {
+			if _, err := pool.Exec(t.Context(), "INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", id, keeper); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := svc.Join(t.Context(), a, z.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Join(t.Context(), b, x.ID); err != nil {
+			t.Fatal(err)
+		}
+		users := accounts(t, pool, svc)
+		errs := make([]error, 2)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i, id := range []string{a, b} {
+			wg.Go(func() { <-start; errs[i] = users.Delete(t.Context(), id) })
+		}
+		close(start)
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("round %d, delete %d: %v, want done", round, i, err)
+			}
+		}
 	}
 }

@@ -36,6 +36,9 @@ const (
 	CodeNotActiveParticipant Code = "not_active_participant"
 	// CodeCannotExcludeCreator refuses excluding a creator of the challenge.
 	CodeCannotExcludeCreator Code = "cannot_exclude_creator"
+	// CodeLastCreator refuses the deletion of an account that is the last
+	// creator of challenges not finished (ChallengesParam lists them).
+	CodeLastCreator Code = "last_creator"
 	// CodeChallengeEnded refuses a change to a finished challenge.
 	CodeChallengeEnded Code = "challenge_ended"
 	// CodeDistanceRequired refuses an activity without distance for a sport
@@ -94,6 +97,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "Not an active participant"}, true
 	case CodeCannotExcludeCreator:
 		return definition{http.StatusUnprocessableEntity, "A creator cannot be excluded"}, true
+	case CodeLastCreator:
+		return definition{http.StatusUnprocessableEntity, "Last creator of a challenge"}, true
 	case CodeChallengeEnded:
 		return definition{http.StatusUnprocessableEntity, "Challenge ended"}, true
 	case CodeDistanceRequired:
@@ -151,6 +156,10 @@ func New(code Code, cause error) *Error {
 // FieldsParam is the parameter of validation_failed listing the invalid
 // fields, comma-separated ("pseudo,language").
 const FieldsParam = "fields"
+
+// ChallengesParam is the parameter of last_creator listing the challenges,
+// comma-separated ids.
+const ChallengesParam = "challenges"
 
 // InvalidFields returns validation_failed with fields in params.fields (no
 // parameter when fields is empty). Fields are names of the contract, never

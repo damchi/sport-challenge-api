@@ -35,13 +35,15 @@ func (r *Repository) Create(ctx context.Context, inv Invitation) (Invitation, er
 
 // linkQuery finds the invitation of @hash valid at @now and links @user to
 // it, in one statement. Valid: not expired, not revoked, its challenge not
-// deleted, and its author may still invite (a creator, or an active
-// participant when members may invite), the same rule as the membership
-// query of module challenge. Both parts see the same snapshot, so a link is
-// never made to an invitation the statement found invalid.
+// deleted, its author's account not deleted, and its author may still invite
+// (a creator, or an active participant when members may invite), the same
+// rule as the membership query of module challenge. Both parts see the same
+// snapshot, so a link is never made to an invitation the statement found
+// invalid.
 const linkQuery = `WITH valid AS (
 	SELECT i.id, i.challenge_id FROM invitations i JOIN challenges c ON c.id = i.challenge_id
 	WHERE i.token_hash = @hash AND i.revoked_at IS NULL AND i.expires_at > @now AND c.deleted_at IS NULL
+		AND EXISTS (SELECT 1 FROM users WHERE id = i.invited_by AND anonymized_at IS NULL)
 		AND (EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = i.invited_by)
 			OR (c.members_can_invite AND EXISTS (SELECT 1 FROM participants
 				WHERE challenge_id = c.id AND user_id = i.invited_by AND status = 'active')))

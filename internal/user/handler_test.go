@@ -14,6 +14,7 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/api/apitest"
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
 )
@@ -193,6 +194,23 @@ func TestDeleteMe(t *testing.T) {
 	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{}, identities, discard)), http.MethodDelete, "")
 	if res.status != http.StatusNoContent || *repo.deleted != meID {
 		t.Fatalf("got %d, deleted %q, want 204 for the user of the token", res.status, *repo.deleted)
+	}
+}
+
+// TestDeleteMeLastCreator checks the refusal of the rule of the last creator
+// (README §2.2) as the contract describes it: 422 last_creator, the account
+// left untouched and nothing deleted at the auth provider.
+func TestDeleteMeLastCreator(t *testing.T) {
+	refusal := apperr.New(apperr.CodeLastCreator, nil)
+	refusal.Params = map[string]string{apperr.ChallengesParam: "c1,c2"}
+	repo := fakeRepository{user: User{ID: meID, AuthSubject: "email|123"}, deleted: new(string)}
+	identities := &fakeIdentities{}
+	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{err: refusal}, identities, discard)), http.MethodDelete, "")
+	if res.status != http.StatusUnprocessableEntity || res.code != "last_creator" {
+		t.Fatalf("got %d %s, want 422 last_creator", res.status, res.code)
+	}
+	if *repo.deleted != "" || identities.deleted != "" {
+		t.Fatalf("deleted %q, at the auth provider %q, want nothing", *repo.deleted, identities.deleted)
 	}
 }
 
