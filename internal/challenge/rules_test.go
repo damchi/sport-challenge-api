@@ -63,6 +63,18 @@ func TestValidate(t *testing.T) {
 		{name: "escape in the description", draft: with(func(d *Draft) { s := "a\x1bb"; d.Description = &s }), wantFields: "description"},
 		{name: "lines and tabs in the description", draft: with(func(d *Draft) { s := "Line 1\r\n\tLine 2"; d.Description = &s })},
 
+		// Format characters: refused, they hide or turn the text around; the
+		// zero width joiner of emojis stays.
+		{name: "right-to-left override in the title", draft: with(func(d *Draft) { d.Title = "Spring \u202enur" }), wantFields: "title"},
+		{name: "zero width space in the title", draft: with(func(d *Draft) { d.Title = "Spring\u200brun" }), wantFields: "title"},
+		{name: "right-to-left override in the description", draft: with(func(d *Draft) { s := "a\u202eb"; d.Description = &s }), wantFields: "description"},
+		{name: "zero width space in the description", draft: with(func(d *Draft) { s := "a\u200bb"; d.Description = &s }), wantFields: "description"},
+		{name: "emoji joined in the title and the description", draft: with(func(d *Draft) {
+			d.Title = "Team \U0001F468\u200d\U0001F469\u200d\U0001F467"
+			s := "Go \U0001F3C3\u200d\u2640\ufe0f"
+			d.Description = &s
+		})},
+
 		// Description: optional, 2000 characters at most.
 		{name: "description of 2000 characters", draft: with(func(d *Draft) { d.Description = desc(2000) })},
 		{name: "description of 2001 characters", draft: with(func(d *Draft) { d.Description = desc(2001) }), wantFields: "description"},
@@ -302,6 +314,8 @@ func TestValidateText(t *testing.T) {
 		{name: "description removed", changes: TextChanges{Description: str("")}},
 		{name: "title too short", changes: TextChanges{Title: str(" ab ")}, wantFields: "title"},
 		{name: "title with a control character", changes: TextChanges{Title: str("ab\x00cd")}, wantFields: "title"},
+		{name: "title with a right-to-left override", changes: TextChanges{Title: str("ab\u202ecd")}, wantFields: "title"},
+		{name: "description with a zero width space", changes: TextChanges{Description: str("ab\u200bcd")}, wantFields: "description"},
 		{name: "description too long", changes: TextChanges{Description: str(strings.Repeat("é", 2001))}, wantFields: "description"},
 		{name: "both invalid, sorted", changes: TextChanges{Title: str("x"), Description: str("a\x1bb")}, wantFields: "description,title"},
 	}

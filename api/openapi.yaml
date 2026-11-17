@@ -1327,12 +1327,19 @@ components:
           type: string
           description: |
             3 to 80 characters once surrounding spaces are removed; checked by
-            the service, not by the schema, which would count those spaces.
+            the service, not by the schema, which would count those spaces. No
+            control character, no invisible or
+            bidirectional formatting character (Unicode Cf) but U+200D, which
+            joins emojis.
           example: Spring run
         description:
           type: string
           maxLength: 2000
-          description: 2000 characters at most; an empty string means no description.
+          description: |
+            2000 characters at most; an empty string means no description. No
+            control character but line breaks and tabs, no invisible or
+            bidirectional formatting character (Unicode Cf) but U+200D, which
+            joins emojis.
         visibility:
           type: string
           enum: [public, private]
@@ -1688,11 +1695,17 @@ components:
           type: string
           description: |
             3 to 80 characters once surrounding spaces are removed; checked by
-            the service.
+            the service. No control character, no invisible or
+            bidirectional formatting character (Unicode Cf) but U+200D, which
+            joins emojis.
         description:
           type: string
           maxLength: 2000
-          description: 2000 characters at most; an empty string removes the description.
+          description: |
+            2000 characters at most; an empty string removes the description.
+            No control character but line breaks and tabs, no invisible or
+            bidirectional formatting character (Unicode Cf) but U+200D, which
+            joins emojis.
         visibility:
           description: Frozen at creation; sending it answers 422 `field_not_editable`.
         members_can_invite:
@@ -1766,7 +1779,9 @@ components:
           description: |
             Free label of the sport `other`, required for it and refused for
             the others: 2 to 40 characters once spaces are cleaned, no
-            control character.
+            control character, no invisible or
+            bidirectional formatting character (Unicode Cf) but U+200D, which
+            joins emojis.
         started_at:
           type: string
           format: date-time

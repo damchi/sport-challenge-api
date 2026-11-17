@@ -121,14 +121,14 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 }
 
 // validTitle checks a title, at creation and on edit: 3 to 80 characters
-// once surrounding spaces are removed, no control character.
+// once surrounding spaces are removed, no control or format character.
 func validTitle(title string) bool {
 	n := utf8.RuneCountInString(strings.TrimSpace(title))
 	return n >= minTitle && n <= maxTitle && !hasControl(title, "")
 }
 
 // validDescription checks a description: 2000 characters at most, no
-// control character but line breaks and tabs.
+// control character but line breaks and tabs, no format character.
 func validDescription(d string) bool {
 	return utf8.RuneCountInString(d) <= maxDescription && !hasControl(d, "\n\r\t")
 }
@@ -163,13 +163,22 @@ func ValidateText(changes TextChanges) (TextChanges, error) {
 }
 
 // hasControl reports whether s holds a control character other than those
-// of allowed. PostgreSQL refuses NUL in a text column, and the other control
-// characters have no place in a title or a description.
+// of allowed, or a format character (Unicode Cf) other than the zero width
+// joiner. PostgreSQL refuses NUL in a text column, the other control
+// characters have no place in a title or a description, and the format ones
+// hide text or turn it around (U+200B, U+202E): a title could pass for
+// another. The joiner stays, it builds the emojis made of several.
 func hasControl(s, allowed string) bool {
 	return strings.ContainsFunc(s, func(r rune) bool {
-		return unicode.IsControl(r) && !strings.ContainsRune(allowed, r)
+		if unicode.IsControl(r) {
+			return !strings.ContainsRune(allowed, r)
+		}
+		return unicode.Is(unicode.Cf, r) && r != zeroWidthJoiner
 	})
 }
+
+// zeroWidthJoiner joins emojis into one (family, profession).
+const zeroWidthJoiner = '\u200d'
 
 // location loads an IANA time zone. It refuses the empty name and "Local",
 // which time.LoadLocation turns into UTC and the server's zone.
