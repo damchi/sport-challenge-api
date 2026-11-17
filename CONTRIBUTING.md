@@ -7,7 +7,7 @@
 
 ## Intégration continue
 
-Le workflow `.github/workflows/ci.yml` s'exécute sur chaque pull request et sur chaque push vers `main` : `make fmt` (aucune différence attendue), `make openapi-lint`, `make generate` (le code généré doit être identique à celui du dépôt), `make lint`, `make test`. Les étapes s'ajoutent au fil des tickets (migrations, tests d'intégration, build de l'image).
+Le workflow `.github/workflows/ci.yml` s'exécute sur chaque pull request et sur chaque push vers `main` : `make fmt` (aucune différence attendue), `make openapi-lint`, `make generate` (le code généré doit être identique à celui du dépôt), `make lint`, `make vuln` (`govulncheck` : échoue sur une vulnérabilité connue que le code atteint), `make test`. Les étapes s'ajoutent au fil des tickets (migrations, tests d'intégration, build de l'image).
 
 ## Ajouter ou modifier une route
 

@@ -21,6 +21,7 @@ MIGRATE_VERSION       := v4.20.1
 GOLANGCI_LINT_VERSION := v2.15.0
 GOFUMPT_VERSION       := v0.12.0
 OAPI_CODEGEN_VERSION  := v2.8.1
+GOVULNCHECK_VERSION   := v1.9.0
 
 REDOCLY_IMAGE    := redocly/cli:2.72.1@sha256:d39a229ebd8250fea62f44c377ddb04797e8a155140eda49db17f1caaa9334ff
 SWAGGER_UI_IMAGE := swaggerapi/swagger-ui:v5.34.0@sha256:58c1fbf5f5cf6d2ae857e4d1296cb02192fa5de472c1cd76f58b2be99523e1d0
@@ -30,6 +31,7 @@ MIGRATE       := $(TOOLS_BIN)/migrate
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOFUMPT       := $(TOOLS_BIN)/gofumpt
 OAPI_CODEGEN  := $(TOOLS_BIN)/oapi-codegen
+GOVULNCHECK   := $(TOOLS_BIN)/govulncheck
 
 # Tools are built with the Go version of go.mod: bumping it rebuilds them
 # (golangci-lint refuses to lint code newer than the Go that built it).
@@ -39,6 +41,7 @@ MIGRATE_STAMP       := $(TOOLS_BIN)/.migrate-$(MIGRATE_VERSION)-go$(GO_VERSION)
 GOLANGCI_LINT_STAMP := $(TOOLS_BIN)/.golangci-lint-$(GOLANGCI_LINT_VERSION)-go$(GO_VERSION)
 GOFUMPT_STAMP       := $(TOOLS_BIN)/.gofumpt-$(GOFUMPT_VERSION)-go$(GO_VERSION)
 OAPI_CODEGEN_STAMP  := $(TOOLS_BIN)/.oapi-codegen-$(OAPI_CODEGEN_VERSION)-go$(GO_VERSION)
+GOVULNCHECK_STAMP   := $(TOOLS_BIN)/.govulncheck-$(GOVULNCHECK_VERSION)-go$(GO_VERSION)
 
 # Lint and test are skipped only while the repository has no Go file at all.
 GO_FILES := $(shell find . -name '*.go' -not -path './bin/*' -print -quit)
@@ -48,7 +51,7 @@ LOCAL_DB_HOSTS := localhost 127.0.0.1 postgres
 
 .DEFAULT_GOAL := help
 
-.PHONY: help run worker build tools fmt lint test test-integration check generate openapi-lint doc \
+.PHONY: help run worker build tools fmt lint vuln test test-integration check generate openapi-lint doc \
 	migrate-new migrate-up migrate-down migrate-version \
 	docker-up docker-down docker-build guard-local-db
 
@@ -65,7 +68,7 @@ worker: ## Run a worker task locally: make worker TASK=close-weeks
 build: ## Build the binaries into bin/
 	go build -o $(TOOLS_BIN)/ ./cmd/...
 
-tools: $(MIGRATE_STAMP) $(GOLANGCI_LINT_STAMP) $(GOFUMPT_STAMP) $(OAPI_CODEGEN_STAMP) ## Install pinned dev tools into bin/
+tools: $(MIGRATE_STAMP) $(GOLANGCI_LINT_STAMP) $(GOFUMPT_STAMP) $(OAPI_CODEGEN_STAMP) $(GOVULNCHECK_STAMP) ## Install pinned dev tools into bin/
 
 # Stamp files carry the tool and Go versions: changing either reinstalls the tool.
 $(MIGRATE_STAMP):
@@ -84,6 +87,10 @@ $(OAPI_CODEGEN_STAMP):
 	GOBIN=$(TOOLS_BIN) go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
 	@touch $@
 
+$(GOVULNCHECK_STAMP):
+	GOBIN=$(TOOLS_BIN) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	@touch $@
+
 fmt: $(GOFUMPT_STAMP) ## Format the code (gofumpt, a stricter gofmt)
 	$(GOFUMPT) -w .
 
@@ -93,6 +100,12 @@ ifeq ($(GO_FILES),)
 else
 	$(GOLANGCI_LINT) run ./...
 endif
+
+# Fails only on a known vulnerability that the code reaches (in a module or
+# in the standard library of the Go of go.mod): an unused one is listed, not
+# fatal.
+vuln: $(GOVULNCHECK_STAMP) ## Scan the dependencies for known vulnerabilities (govulncheck)
+	$(GOVULNCHECK) ./...
 
 test: ## Run unit tests
 ifeq ($(GO_FILES),)
