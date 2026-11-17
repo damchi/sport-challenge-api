@@ -11,8 +11,9 @@ import (
 )
 
 // NewRouter returns a Gin engine with the base middlewares, outermost first:
-// request identifier, request log, then panic recovery (so a recovered panic
-// is logged as a 500 with its request identifier). Unknown routes answer
+// security headers (on every response, errors included), request
+// identifier, request log, then panic recovery (so a recovered panic is
+// logged as a 500 with its request identifier). Unknown routes answer
 // 404 not_found in the API error format.
 //
 // RedirectTrailingSlash is off: Gin answers that redirect before any
@@ -38,6 +39,7 @@ func NewRouter(logger *slog.Logger) *gin.Engine {
 	_ = r.SetTrustedProxies(nil)
 	r.RemoteIPHeaders = []string{"X-Forwarded-For"}
 	r.Use(
+		SecurityHeaders(),
 		RequestIDMiddleware(),
 		LoggerMiddleware(logger),
 		RecoveryMiddleware(logger),

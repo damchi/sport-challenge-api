@@ -110,7 +110,7 @@ func TestGetSportsEmptyCatalogueIsAnEmptyList(t *testing.T) {
 
 func TestGetSportsStorageFailure(t *testing.T) {
 	rec := getSports(t, fakeRepository{err: errors.New("connection refused")})
-	if rec.Code != http.StatusInternalServerError || rec.Header().Get("Cache-Control") != "" {
-		t.Fatalf("got %d, Cache-Control %q, want 500 without cache", rec.Code, rec.Header().Get("Cache-Control"))
+	if rec.Code != http.StatusInternalServerError || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("got %d, Cache-Control %q, want 500 with no-store", rec.Code, rec.Header().Get("Cache-Control"))
 	}
 }
