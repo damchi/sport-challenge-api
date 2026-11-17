@@ -173,13 +173,15 @@ var discard = slog.New(slog.NewJSONHandler(io.Discard, nil))
 func TestServiceProfile(t *testing.T) {
 	storageErr := errors.New("connection reset")
 	tests := []struct {
-		name       string
-		repo       fakeRepository
-		wantStatus int
-		wantErr    error
+		name     string
+		repo     fakeRepository
+		wantCode apperr.Code
+		wantErr  error
 	}{
 		{name: "found", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie")}}},
-		{name: "not found", repo: fakeRepository{err: fmt.Errorf("read user: %w", errUserNotFound)}, wantStatus: http.StatusNotFound},
+		// The actor comes from the token, so their row exists: missing, it was
+		// anonymized after the middleware read it (deletion racing the request).
+		{name: "account deleted meanwhile", repo: fakeRepository{err: fmt.Errorf("read user: %w", errUserNotFound)}, wantCode: apperr.CodeAccountDeleted},
 		{name: "storage error", repo: fakeRepository{err: storageErr}, wantErr: storageErr},
 	}
 	for _, tt := range tests {
@@ -187,9 +189,9 @@ func TestServiceProfile(t *testing.T) {
 			got, err := NewService(tt.repo, nil, nil, discard).Profile(t.Context(), "u-1")
 			var appErr *apperr.Error
 			switch {
-			case tt.wantStatus != 0:
-				if !errors.As(err, &appErr) || appErr.Status != tt.wantStatus {
-					t.Fatalf("error = %v, want status %d", err, tt.wantStatus)
+			case tt.wantCode != "":
+				if !errors.As(err, &appErr) || appErr.Code != tt.wantCode || appErr.Status != http.StatusUnauthorized {
+					t.Fatalf("error = %v, want 401 %s", err, tt.wantCode)
 				}
 			case tt.wantErr != nil:
 				if !errors.Is(err, tt.wantErr) || errors.As(err, &appErr) {
@@ -219,7 +221,7 @@ func TestServiceUpdateProfile(t *testing.T) {
 		{name: "invalid pseudo and language", changes: ProfileChanges{Pseudo: ptr("é"), Language: ptr("de")}, wantStatus: http.StatusBadRequest, wantFields: "language,pseudo"},
 		{name: "invalid language only", changes: ProfileChanges{Pseudo: ptr("marie"), Language: ptr("FR")}, wantStatus: http.StatusBadRequest, wantFields: "language"},
 		{name: "pseudo taken", changes: ProfileChanges{Pseudo: ptr("marie")}, repoErr: fmt.Errorf("update user: %w", errPseudoTaken), wantStatus: http.StatusConflict, wantFields: "pseudo", wantWritten: true},
-		{name: "user gone", changes: ProfileChanges{Language: ptr("en")}, repoErr: fmt.Errorf("update user: %w", errUserNotFound), wantStatus: http.StatusNotFound, wantWritten: true},
+		{name: "account deleted meanwhile", changes: ProfileChanges{Language: ptr("en")}, repoErr: fmt.Errorf("update user: %w", errUserNotFound), wantStatus: http.StatusUnauthorized, wantWritten: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -243,13 +245,16 @@ func TestServiceUpdateProfile(t *testing.T) {
 			if !errors.As(err, &appErr) || appErr.Status != tt.wantStatus || appErr.Params[apperr.FieldsParam] != tt.wantFields {
 				t.Fatalf("error = %+v, want status %d with fields %q", appErr, tt.wantStatus, tt.wantFields)
 			}
+			// Several codes answer 401: a deleted account must be told apart.
+			if tt.wantStatus == http.StatusUnauthorized && appErr.Code != apperr.CodeAccountDeleted {
+				t.Fatalf("code = %s, want %s", appErr.Code, apperr.CodeAccountDeleted)
+			}
 		})
 	}
 }
 
 func TestServiceProfileComplete(t *testing.T) {
 	storageErr := errors.New("connection reset")
-	deletedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name     string
 		repo     fakeRepository
@@ -260,8 +265,9 @@ func TestServiceProfileComplete(t *testing.T) {
 		{name: "pseudo set", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie")}}, want: true},
 		{name: "no pseudo", repo: fakeRepository{user: User{ID: "u-1"}}},
 		// Anonymization clears the pseudo: a deleted account is deleted, not
-		// incomplete (a request racing the deletion).
-		{name: "anonymized account", repo: fakeRepository{user: User{ID: "u-1", AnonymizedAt: &deletedAt}}, wantErr: true, wantCode: apperr.CodeAccountDeleted},
+		// incomplete (a request racing the deletion). The repository never
+		// returns an anonymized row: it answers errUserNotFound.
+		{name: "account deleted meanwhile", repo: fakeRepository{err: fmt.Errorf("read user: %w", errUserNotFound)}, wantErr: true, wantCode: apperr.CodeAccountDeleted},
 		{name: "storage error", repo: fakeRepository{err: storageErr}, wantErr: true},
 	}
 	for _, tt := range tests {
