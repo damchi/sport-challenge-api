@@ -66,10 +66,13 @@ func (s *Service) GetOrCreateBySubject(ctx context.Context, subject string) (Use
 
 // Profile returns the profile of user actorID. Each user only reads their
 // own profile: the ID comes from the access token, never from the request.
+// The actor's row exists (CurrentUser created it), so a missing one was
+// anonymized after the middleware read it: 401 account_deleted, as the
+// client must log the user out.
 func (s *Service) Profile(ctx context.Context, actorID string) (User, error) {
 	u, err := s.repo.GetByID(ctx, actorID)
 	if errors.Is(err, errUserNotFound) {
-		return User{}, apperr.New(apperr.CodeNotFound, err)
+		return User{}, apperr.New(apperr.CodeAccountDeleted, err)
 	}
 	if err != nil {
 		return User{}, fmt.Errorf("get profile: %w", err)
@@ -80,7 +83,8 @@ func (s *Service) Profile(ctx context.Context, actorID string) (User, error) {
 // UpdateProfile changes the pseudo and the language of user actorID. Invalid
 // fields answer 400 validation_failed; a pseudo already taken, regardless of
 // case, answers 409 validation_failed, both listing the fields in
-// params.fields.
+// params.fields; an account deleted meanwhile answers 401 account_deleted
+// (as Profile).
 func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes ProfileChanges) (User, error) {
 	if fields := invalidProfileFields(changes); len(fields) > 0 {
 		return User{}, apperr.InvalidFields(nil, fields...)
@@ -93,7 +97,7 @@ func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes Pro
 		e.Status = http.StatusConflict
 		return User{}, e
 	case errors.Is(err, errUserNotFound):
-		return User{}, apperr.New(apperr.CodeNotFound, err)
+		return User{}, apperr.New(apperr.CodeAccountDeleted, err)
 	case err != nil:
 		return User{}, fmt.Errorf("update profile: %w", err)
 	}
@@ -101,16 +105,14 @@ func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes Pro
 }
 
 // ProfileComplete reports whether the profile of user id is complete (pseudo
-// set): creating or joining a challenge requires it. An anonymized account
-// answers account_deleted, not an incomplete profile: anonymization clears
-// the pseudo, and a request racing the deletion may read it.
+// set): creating or joining a challenge requires it. An account deleted
+// meanwhile answers account_deleted (Profile), not an incomplete profile:
+// anonymization clears the pseudo, and a request racing the deletion may
+// come after it.
 func (s *Service) ProfileComplete(ctx context.Context, id string) (bool, error) {
 	u, err := s.Profile(ctx, id)
 	if err != nil {
 		return false, err
-	}
-	if u.AnonymizedAt != nil {
-		return false, apperr.New(apperr.CodeAccountDeleted, nil)
 	}
 	return u.ProfileComplete(), nil
 }

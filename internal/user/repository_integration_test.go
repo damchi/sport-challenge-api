@@ -119,6 +119,38 @@ func TestServiceRefusesAnAnonymizedAccount(t *testing.T) {
 	}
 }
 
+// A request authenticated before the account deletion reaches the service
+// after it: the profile reads and the profile change answer account_deleted,
+// never not_found, so the client logs the user out (SC-API-087).
+func TestServiceAnswersAccountDeletedAfterTheDeletion(t *testing.T) {
+	repo, pool := newRepository(t)
+	u := newUser(t, repo, "email|racing")
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1", u.ID); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, nil, nil, discard)
+	deleted := apperr.New(apperr.CodeAccountDeleted, nil)
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{name: "profile", call: func() error { _, err := service.Profile(t.Context(), u.ID); return err }},
+		{name: "profile change", call: func() error {
+			_, err := service.UpdateProfile(t.Context(), u.ID, ProfileChanges{Language: ptr("en")})
+			return err
+		}},
+		{name: "profile completeness", call: func() error { _, err := service.ProfileComplete(t.Context(), u.ID); return err }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.call(); !errors.Is(err, deleted) {
+				t.Fatalf("error = %v, want account_deleted", err)
+			}
+		})
+	}
+}
+
 func newUser(t *testing.T, repo *Repository, subject string) User {
 	t.Helper()
 	u, err := repo.GetOrCreateBySubject(t.Context(), subject)
