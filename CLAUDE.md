@@ -30,7 +30,7 @@ make migrate-new NAME=x   crée une paire de migrations
 make migrate-up           applique les migrations (base locale)
 make migrate-down         annule la dernière migration (base locale)
 make generate             régénère le code depuis openapi.yaml
-make docker-up / docker-down   PostgreSQL + émulateur de stockage
+make docker-up / docker-down   PostgreSQL (émulateur de stockage en V1.1)
 ```
 
 **Avant de dire qu'une tâche est terminée** : `make fmt && make lint && make test` passent. Lance aussi `make test-integration` si tu as touché au SQL ou aux migrations.
