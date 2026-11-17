@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/textx"
 )
 
 var errInvalidTimezone = errors.New("invalid time zone")
@@ -121,16 +121,18 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 }
 
 // validTitle checks a title, at creation and on edit: 3 to 80 characters
-// once surrounding spaces are removed, no control or format character.
+// once surrounding spaces are removed, 3 of them visible (textx.VisibleLen),
+// no hidden character (textx).
 func validTitle(title string) bool {
-	n := utf8.RuneCountInString(strings.TrimSpace(title))
-	return n >= minTitle && n <= maxTitle && !hasControl(title, "")
+	trimmed := strings.TrimSpace(title)
+	return textx.VisibleLen(trimmed) >= minTitle && utf8.RuneCountInString(trimmed) <= maxTitle &&
+		!textx.HasHidden(title, "")
 }
 
 // validDescription checks a description: 2000 characters at most, no
-// control character but line breaks and tabs, no format character.
+// hidden character (textx) but line breaks and tabs.
 func validDescription(d string) bool {
-	return utf8.RuneCountInString(d) <= maxDescription && !hasControl(d, "\n\r\t")
+	return utf8.RuneCountInString(d) <= maxDescription && !textx.HasHidden(d, "\n\r\t\u2028\u2029")
 }
 
 // TextChanges are the fields of a challenge its creators may edit at any
@@ -161,24 +163,6 @@ func ValidateText(changes TextChanges) (TextChanges, error) {
 	}
 	return changes, nil
 }
-
-// hasControl reports whether s holds a control character other than those
-// of allowed, or a format character (Unicode Cf) other than the zero width
-// joiner. PostgreSQL refuses NUL in a text column, the other control
-// characters have no place in a title or a description, and the format ones
-// hide text or turn it around (U+200B, U+202E): a title could pass for
-// another. The joiner stays, it builds the emojis made of several.
-func hasControl(s, allowed string) bool {
-	return strings.ContainsFunc(s, func(r rune) bool {
-		if unicode.IsControl(r) {
-			return !strings.ContainsRune(allowed, r)
-		}
-		return unicode.Is(unicode.Cf, r) && r != zeroWidthJoiner
-	})
-}
-
-// zeroWidthJoiner joins emojis into one (family, profession).
-const zeroWidthJoiner = '\u200d'
 
 // location loads an IANA time zone. It refuses the empty name and "Local",
 // which time.LoadLocation turns into UTC and the server's zone.

@@ -67,10 +67,14 @@ func TestValidate(t *testing.T) {
 		// zero width joiner of emojis stays.
 		{name: "right-to-left override in the title", draft: with(func(d *Draft) { d.Title = "Spring \u202enur" }), wantFields: "title"},
 		{name: "zero width space in the title", draft: with(func(d *Draft) { d.Title = "Spring\u200brun" }), wantFields: "title"},
+		{name: "title of joiners only", draft: with(func(d *Draft) { d.Title = "\u200d\u200d\u200d\u200d" }), wantFields: "title"},
+		{name: "title of 2 letters and marks", draft: with(func(d *Draft) { d.Title = "ab\u200e\u200f" }), wantFields: "title"},
+		{name: "line separator in the title", draft: with(func(d *Draft) { d.Title = "Spring\u2028run" }), wantFields: "title"},
+		{name: "separators in the description", draft: with(func(d *Draft) { s := "Line 1\u2028Line 2\u2029"; d.Description = &s })},
 		{name: "right-to-left override in the description", draft: with(func(d *Draft) { s := "a\u202eb"; d.Description = &s }), wantFields: "description"},
 		{name: "zero width space in the description", draft: with(func(d *Draft) { s := "a\u200bb"; d.Description = &s }), wantFields: "description"},
-		{name: "emoji joined in the title and the description", draft: with(func(d *Draft) {
-			d.Title = "Team \U0001F468\u200d\U0001F469\u200d\U0001F467"
+		{name: "emojis and flags in the title and the description", draft: with(func(d *Draft) {
+			d.Title = "Team \U0001F468\u200d\U0001F469\u200d\U0001F467 \U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F"
 			s := "Go \U0001F3C3\u200d\u2640\ufe0f"
 			d.Description = &s
 		})},

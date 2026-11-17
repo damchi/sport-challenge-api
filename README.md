@@ -259,7 +259,8 @@ sportchallenge-api/
 │   │   ├── auth/                    interface TokenVerifier (JWKS), middlewares Authenticate et CurrentUser
 │   │   ├── storage/                 interface de stockage + implémentation Cloud Storage (URL signées)
 │   │   ├── clock/                   interface Clock : horloge réelle, horloge décalable (tests, `CLOCK_OFFSET`)
-│   │   └── apperr/                  erreurs métier avec code stable (traduit côté client)
+│   │   ├── apperr/                  erreurs métier avec code stable (traduit côté client)
+│   │   └── textx/                   règles des textes libres : caractères cachés refusés, longueur visible
 │   │
 │   ├── api/
 │   │   ├── api.gen.go               généré par oapi-codegen depuis api/openapi.yaml (make generate) : routes Gin,

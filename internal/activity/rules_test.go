@@ -87,6 +87,8 @@ func TestValidate(t *testing.T) {
 		{name: "tab in the label", draft: other("Ski\tde fond"), mode: "optional", wantCode: apperr.CodeValidationFailed, wantFields: "sport_label"},
 		{name: "right-to-left override in the label", draft: other("Pa\u202edel"), mode: "optional", wantCode: apperr.CodeValidationFailed, wantFields: "sport_label"},
 		{name: "zero width space in the label", draft: other("Pa\u200bdel"), mode: "optional", wantCode: apperr.CodeValidationFailed, wantFields: "sport_label"},
+		{name: "label of joiners only", draft: other("\u200d\u200d\u200d"), mode: "optional", wantCode: apperr.CodeValidationFailed, wantFields: "sport_label"},
+		{name: "line separator in the label", draft: other("Ski\u2028de fond"), mode: "optional", wantCode: apperr.CodeValidationFailed, wantFields: "sport_label"},
 		{name: "emoji joined in the label", draft: other("Yoga \U0001F9D8\u200d\u2640\ufe0f"), mode: "optional", wantLabel: "Yoga \U0001F9D8\u200d\u2640\ufe0f"},
 		{name: "label for a sport of the catalogue", draft: with(func(d *Draft) { d.SportLabel = ptr("Trail") }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "sport_label"},
 

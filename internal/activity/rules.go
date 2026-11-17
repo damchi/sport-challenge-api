@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/textx"
 )
 
 // Technical limits of ticket SC-API-042 (README §2.5: "reasonable maximum
@@ -89,29 +89,20 @@ func Validate(draft Draft, distanceMode string, now time.Time) (Draft, error) {
 
 // sportLabel checks the label of a sport: required for "other", refused
 // otherwise. It returns it cleaned (surrounding spaces removed, inner runs
-// of spaces made one); 2 to 40 characters once cleaned, no control
-// character and no format character (Unicode Cf) but the zero width joiner
-// of emojis: U+200B or U+202E would hide or turn the label around. The label
-// is shown as plain text, never interpreted.
+// of spaces made one); 2 to 40 characters once cleaned, 2 of them visible
+// (textx.VisibleLen), no hidden character (textx). The label is shown as plain text, never interpreted.
 func sportLabel(sportCode string, label *string) (*string, bool) {
 	if sportCode != otherSport {
 		return nil, label == nil
 	}
-	if label == nil || strings.ContainsFunc(*label, hidden) {
+	if label == nil || textx.HasHidden(*label, "") {
 		return nil, false
 	}
 	cleaned := strings.Join(strings.Fields(*label), " ")
-	n := utf8.RuneCountInString(cleaned)
-	if n < minSportLabel || n > maxSportLabel {
+	if textx.VisibleLen(cleaned) < minSportLabel || utf8.RuneCountInString(cleaned) > maxSportLabel {
 		return nil, false
 	}
 	return &cleaned, true
-}
-
-// hidden reports whether r is a control character, or a format character
-// (Unicode Cf) other than the zero width joiner of emojis.
-func hidden(r rune) bool {
-	return unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && r != '\u200d')
 }
 
 // Velocity is the speed of an activity and its pace, its inverse.
