@@ -14,8 +14,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Documentation-only changes (docs/, Markdown, .claude/) skip the four jobs
+  # below: a skipped job counts as passed for the required checks of main, and
+  # the Actions minutes of this private repository go to the code.
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # both ends of the diff
+          persist-credentials: false
+
+      - name: Diff
+        id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: .github/scripts/code-changed.sh "$BASE" "$HEAD" | tee -a "$GITHUB_OUTPUT"
+
   check:
     name: fmt, lint, test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -70,8 +94,14 @@ jobs:
           .github/scripts/plan-deploy_test.sh
           .github/scripts/newer-versions_test.sh
 
+      # The rule that skips this CI for documentation-only changes.
+      - name: Changed files script
+        run: .github/scripts/code-changed_test.sh
+
   migrations:
     name: migrations up, down, up
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -128,6 +158,8 @@ jobs:
 
   integration:
     name: integration tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -162,6 +194,8 @@ jobs:
 
   image:
     name: docker image
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The API starts against a database (its /healthz is read below).
