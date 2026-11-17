@@ -1326,13 +1326,25 @@ components:
         title:
           type: string
           description: |
-            3 to 80 characters once surrounding spaces are removed; checked by
-            the service, not by the schema, which would count those spaces.
+            3 to 80 characters once surrounding spaces are removed, 3 of them
+            visible (the kept formatting characters below do not count); checked
+            by the service, not by the schema, which would count those spaces. No
+            control character, no line or
+            paragraph separator (U+2028, U+2029), no invisible or bidirectional
+            formatting character (Unicode Cf, such as U+200B or U+202E) but
+            U+200C, U+200D, U+200E, U+200F and the tags of flags (U+E0020 to
+            U+E007F).
           example: Spring run
         description:
           type: string
           maxLength: 2000
-          description: 2000 characters at most; an empty string means no description.
+          description: |
+            2000 characters at most; an empty string means no description. No
+            control character but line breaks and tabs, no line or
+            paragraph separator (U+2028, U+2029), no invisible or bidirectional
+            formatting character (Unicode Cf, such as U+200B or U+202E) but
+            U+200C, U+200D, U+200E, U+200F and the tags of flags (U+E0020 to
+            U+E007F).
         visibility:
           type: string
           enum: [public, private]
@@ -1687,12 +1699,23 @@ components:
         title:
           type: string
           description: |
-            3 to 80 characters once surrounding spaces are removed; checked by
-            the service.
+            3 to 80 characters once surrounding spaces are removed, 3 of them
+            visible (the kept formatting characters below do not count); checked
+            by the service. No control character, no line or
+            paragraph separator (U+2028, U+2029), no invisible or bidirectional
+            formatting character (Unicode Cf, such as U+200B or U+202E) but
+            U+200C, U+200D, U+200E, U+200F and the tags of flags (U+E0020 to
+            U+E007F).
         description:
           type: string
           maxLength: 2000
-          description: 2000 characters at most; an empty string removes the description.
+          description: |
+            2000 characters at most; an empty string removes the description.
+            No control character but line breaks and tabs, no line or
+            paragraph separator (U+2028, U+2029), no invisible or bidirectional
+            formatting character (Unicode Cf, such as U+200B or U+202E) but
+            U+200C, U+200D, U+200E, U+200F and the tags of flags (U+E0020 to
+            U+E007F).
         visibility:
           description: Frozen at creation; sending it answers 422 `field_not_editable`.
         members_can_invite:
@@ -1765,8 +1788,13 @@ components:
           maxLength: 200
           description: |
             Free label of the sport `other`, required for it and refused for
-            the others: 2 to 40 characters once spaces are cleaned, no
-            control character.
+            the others: 2 to 40 characters once spaces are cleaned, 2 of them
+            visible (the kept formatting characters below do not count), no
+            control character, no line or
+            paragraph separator (U+2028, U+2029), no invisible or bidirectional
+            formatting character (Unicode Cf, such as U+200B or U+202E) but
+            U+200C, U+200D, U+200E, U+200F and the tags of flags (U+E0020 to
+            U+E007F).
         started_at:
           type: string
           format: date-time

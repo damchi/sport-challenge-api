@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/textx"
 )
 
 var errInvalidTimezone = errors.New("invalid time zone")
@@ -121,16 +121,18 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 }
 
 // validTitle checks a title, at creation and on edit: 3 to 80 characters
-// once surrounding spaces are removed, no control character.
+// once surrounding spaces are removed, 3 of them visible (textx.VisibleLen),
+// no hidden character (textx).
 func validTitle(title string) bool {
-	n := utf8.RuneCountInString(strings.TrimSpace(title))
-	return n >= minTitle && n <= maxTitle && !hasControl(title, "")
+	trimmed := strings.TrimSpace(title)
+	return textx.VisibleLen(trimmed) >= minTitle && utf8.RuneCountInString(trimmed) <= maxTitle &&
+		!textx.HasHidden(title, "")
 }
 
 // validDescription checks a description: 2000 characters at most, no
-// control character but line breaks and tabs.
+// hidden character (textx) but line breaks and tabs.
 func validDescription(d string) bool {
-	return utf8.RuneCountInString(d) <= maxDescription && !hasControl(d, "\n\r\t")
+	return utf8.RuneCountInString(d) <= maxDescription && !textx.HasHidden(d, "\n\r\t\u2028\u2029")
 }
 
 // TextChanges are the fields of a challenge its creators may edit at any
@@ -160,15 +162,6 @@ func ValidateText(changes TextChanges) (TextChanges, error) {
 		return TextChanges{}, apperr.InvalidFields(nil, fields...)
 	}
 	return changes, nil
-}
-
-// hasControl reports whether s holds a control character other than those
-// of allowed. PostgreSQL refuses NUL in a text column, and the other control
-// characters have no place in a title or a description.
-func hasControl(s, allowed string) bool {
-	return strings.ContainsFunc(s, func(r rune) bool {
-		return unicode.IsControl(r) && !strings.ContainsRune(allowed, r)
-	})
 }
 
 // location loads an IANA time zone. It refuses the empty name and "Local",
