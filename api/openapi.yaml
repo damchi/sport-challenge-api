@@ -11,6 +11,11 @@ info:
     Every route requires an Auth0 access token (`bearerAuth`), declared once
     below: a new route is protected without adding anything. Only the health
     probes opt out with `security: []`.
+
+    Every response, errors included, carries `X-Content-Type-Options: nosniff`
+    and `Cache-Control: no-store` (the responses hold personal data). A route
+    whose response can be kept declares its own `Cache-Control`, which
+    replaces it (`GET /api/v1/sports`).
   license:
     name: Proprietary
     url: https://github.com/damchi/sport-challenge-api

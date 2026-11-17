@@ -232,6 +232,89 @@ func TestProtectedRouteResolvesTheCurrentUser(t *testing.T) {
 	}
 }
 
+// sportCatalogue is the storage of the sport catalogue in the tests of the
+// router.
+type sportCatalogue []sport.Sport
+
+func (s sportCatalogue) List(context.Context) ([]sport.Sport, error) { return s, nil }
+
+func TestSecurityHeaders(t *testing.T) {
+	handlers := testHandlers()
+	handlers.sportHandler = sport.NewHandler(sport.NewService(sportCatalogue{{Code: "run", DistanceMode: "required"}}))
+	opts := routerOptions{allowedOrigins: []string{webOrigin}, ipLimiter: testLimiter(1000), userLimiter: testLimiter(1000)}
+	r := newTestRouterWith(t, opts, handlers, acceptingVerifier{}, func(context.Context, string) (string, error) {
+		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
+	})
+	r.GET("/api/v1/probe", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"pseudo": "runner"}) })
+	r.GET("/api/v1/panic", func(*gin.Context) { panic("boom") })
+
+	tests := []struct {
+		name         string
+		path         string
+		token        bool
+		wantStatus   int
+		wantCacheCtl string
+	}{
+		{name: "protected route", path: "/api/v1/probe", token: true, wantStatus: http.StatusOK, wantCacheCtl: "no-store"},
+		{name: "refused without a token", path: "/api/v1/probe", wantStatus: http.StatusUnauthorized, wantCacheCtl: "no-store"},
+		{name: "recovered panic", path: "/api/v1/panic", token: true, wantStatus: http.StatusInternalServerError, wantCacheCtl: "no-store"},
+		{name: "unknown route", path: "/api/v1/unknown", token: true, wantStatus: http.StatusNotFound, wantCacheCtl: "no-store"},
+		{name: "sports keep their own cache", path: "/api/v1/sports", token: true, wantStatus: http.StatusOK, wantCacheCtl: "private, max-age=300"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			if tt.token {
+				req.Header.Set("Authorization", "Bearer some.access.token")
+			}
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
+			}
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			if got := rec.Header().Values("Cache-Control"); len(got) != 1 || got[0] != tt.wantCacheCtl {
+				t.Errorf("Cache-Control = %q, want %q", got, tt.wantCacheCtl)
+			}
+		})
+	}
+}
+
+// TestSecurityHeadersBeforeEarlyAnswers checks the answers given before
+// authentication: a preflight and a refused flood carry the headers too.
+func TestSecurityHeadersBeforeEarlyAnswers(t *testing.T) {
+	preflight := httptest.NewRequest(http.MethodOptions, "/api/v1/me", nil)
+	preflight.Header.Set("Origin", webOrigin)
+	preflight.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	flooded := routerOptions{allowedOrigins: []string{webOrigin}, ipLimiter: testLimiter(0), userLimiter: testLimiter(1000)}
+	tests := []struct {
+		name       string
+		router     *gin.Engine
+		req        *http.Request
+		wantStatus int
+	}{
+		{name: "preflight", router: newTestRouter(t, rejectingVerifier{t}, nil), req: preflight, wantStatus: http.StatusNoContent},
+		{name: "rate limited", router: newTestRouterWith(t, flooded, testHandlers(), rejectingVerifier{t}, nil), req: httptest.NewRequest(http.MethodGet, "/api/v1/me", nil), wantStatus: http.StatusTooManyRequests},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			tt.router.ServeHTTP(rec, tt.req)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", got)
+			}
+		})
+	}
+}
+
 func TestPreflightSkipsAuthentication(t *testing.T) {
 	r := newTestRouter(t, rejectingVerifier{t}, func(context.Context, string) (string, error) {
 		t.Error("user resolved for a preflight")
