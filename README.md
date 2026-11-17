@@ -415,7 +415,7 @@ flowchart TD
 | `challenge_creators` | challenge, utilisateur |
 | `categories` | challenge, type (temps cumulé, distance cumulée, course avec élimination), position, paramètres figés (`params`) ; le nom est traduit par le frontend |
 | `participants` | challenge, utilisateur, statut (actif ou abandonné), date d'inscription, date d'abandon |
-| `invitation` | challenge, invité par, empreinte du jeton (jamais le jeton), expiration (fin de la semaine 1), révocation ; les personnes qui ont ouvert le lien (`invitation_recipients`) |
+| `invitation` | challenge, invité par, empreinte du jeton (jamais le jeton), expiration (fin de la semaine 1), date de révocation (`revoked_at`, prévue par le schéma : aucune route ne révoque une invitation pour l'instant) ; les personnes qui ont ouvert le lien (`invitation_recipients`) |
 | `sports` | code, mode de distance (obligatoire, interdite, facultative), coefficient suggéré (libellés traduits par le frontend) |
 | `activity` | utilisateur, sport, libellé du sport (si « autre »), date de début (UTC), durée, distance, source (manuelle ou fournisseur), identifiant externe, clé d'idempotence |
 | `week_closure` | challenge, numéro de semaine, date de clôture |
