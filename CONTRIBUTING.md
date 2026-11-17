@@ -7,7 +7,7 @@
 
 ## Intégration continue
 
-Le workflow `.github/workflows/ci.yml` s'exécute sur chaque pull request et sur chaque push vers `main` : `make fmt` (aucune différence attendue), `make openapi-lint`, `make generate` (le code généré doit être identique à celui du dépôt), `make lint`, `make vuln` (`govulncheck` : échoue sur une vulnérabilité connue que le code atteint), `make test`. D'autres tâches tournent en parallèle : migrations appliquées, annulées puis réappliquées sur une base PostgreSQL vide (`migrations up, down, up`), tests d'intégration contre PostgreSQL (`integration tests`) et build de l'image (`docker image`).
+Le workflow `.github/workflows/ci.yml` s'exécute sur chaque pull request et sur chaque push vers `main`. Un premier job (`what changed`, script `.github/scripts/code-changed.sh`) regarde les fichiers modifiés : si seule la documentation change (`docs/`, fichiers `*.md`, `.claude/`), les quatre jobs ci-dessous sont **sautés**, ce qui compte comme réussi pour les vérifications obligatoires et économise les minutes d'Actions du dépôt privé ; dans le doute, ou si ce premier job échoue, tout tourne. Sinon : `make fmt` (aucune différence attendue), `make openapi-lint`, `make generate` (le code généré doit être identique à celui du dépôt), `make lint`, `make vuln` (`govulncheck` : échoue sur une vulnérabilité connue que le code atteint), `make test`. D'autres tâches tournent en parallèle : migrations appliquées, annulées puis réappliquées sur une base PostgreSQL vide (`migrations up, down, up`), tests d'intégration contre PostgreSQL (`integration tests`) et build de l'image (`docker image`).
 
 ## Ajouter ou modifier une route
 
