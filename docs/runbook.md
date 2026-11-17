@@ -60,7 +60,7 @@ Détail : `docs/migrations.md`.
   gcloud sql backups create --instance=sc-db --location=northamerica-northeast1 --project=<projet>
   ```
 
-- `down` et `force` ne se lancent qu'à la main, par les personnes qui ont `roles/run.developer`, `roles/run.admin` ou le rôle propriétaire sur le projet : deux au plus (`docs/migrations.md`).
+- `down` et `force` ne se lancent qu'à la main, par les personnes qui ont, sur le projet ou sur le job `sc-migrate`, un rôle qui permet de lancer un job avec d'autres arguments (`roles/run.developer`, `roles/run.admin`, propriétaire…) : deux au plus (`docs/migrations.md`).
 
 ## 4. Relance du worker
 
