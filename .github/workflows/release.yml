@@ -55,6 +55,14 @@ jobs:
             exit 0
           fi
           last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude 'v*-*' "$SHA" 2>/dev/null || true)
+          # Only documentation (docs/, Markdown, .claude/) since the last version:
+          # no version, so no deployment either (plan-deploy.sh deploys a tagged
+          # commit only). The next merge with code releases it all. Without a
+          # previous version, or when in doubt, the release goes on.
+          if [ -n "$last" ] && [ "$(.github/scripts/code-changed.sh "$last" "$SHA")" = "code=false" ]; then
+            echo "only documentation since $last: no new version"
+            exit 0
+          fi
           next=$(.github/scripts/next-version.sh "$last")
           echo "version: ${last:-none} -> $next"
           echo "version=$next" >> "$GITHUB_OUTPUT"
