@@ -1326,8 +1326,9 @@ components:
         title:
           type: string
           description: |
-            3 to 80 characters once surrounding spaces are removed; checked by
-            the service, not by the schema, which would count those spaces. No
+            3 to 80 characters once surrounding spaces are removed, 3 of them
+            visible (the kept formatting characters below do not count); checked
+            by the service, not by the schema, which would count those spaces. No
             control character, no line or
             paragraph separator (U+2028, U+2029), no invisible or bidirectional
             formatting character (Unicode Cf, such as U+200B or U+202E) but
@@ -1698,8 +1699,9 @@ components:
         title:
           type: string
           description: |
-            3 to 80 characters once surrounding spaces are removed; checked by
-            the service. No control character, no line or
+            3 to 80 characters once surrounding spaces are removed, 3 of them
+            visible (the kept formatting characters below do not count); checked
+            by the service. No control character, no line or
             paragraph separator (U+2028, U+2029), no invisible or bidirectional
             formatting character (Unicode Cf, such as U+200B or U+202E) but
             U+200C, U+200D, U+200E, U+200F and the tags of flags (U+E0020 to
@@ -1786,7 +1788,8 @@ components:
           maxLength: 200
           description: |
             Free label of the sport `other`, required for it and refused for
-            the others: 2 to 40 characters once spaces are cleaned, no
+            the others: 2 to 40 characters once spaces are cleaned, 2 of them
+            visible (the kept formatting characters below do not count), no
             control character, no line or
             paragraph separator (U+2028, U+2029), no invisible or bidirectional
             formatting character (Unicode Cf, such as U+200B or U+202E) but
