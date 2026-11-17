@@ -213,7 +213,7 @@ Le code de déploiement (l'action) vient toujours de `main`, y compris pour un r
 
 ### Droits : les refaire
 
-Commandes appliquées le 2026-11-17 (SC-API-102). Ordre à respecter pour ne jamais casser le déploiement : ajouter le droit sur la ressource, puis retirer celui du projet ; changer la fédération **hors** d'un déploiement en cours (un déploiement lancé avant perd son jeton au renouvellement suivant).
+Commandes appliquées le 2026-11-17 (SC-API-102). Ordre à respecter pour ne jamais casser le déploiement : ne rien changer pendant un déploiement ; ajouter le droit sur la ressource, **attendre quelques minutes** (propagation des droits IAM), puis seulement retirer celui du projet. Les jetons d'accès déjà émis restent valides jusqu'à une heure après un retrait. Le sujet de la liaison doit être exactement celui des jetons (sujet immuable, voir le tableau) : le 2026-11-17, une première liaison au format `repo:damchi/sport-challenge-api:environment:production` ne correspondait à aucun jeton, et un déploiement en cours a échoué au push de l'image, sans rien déployer. Les retraits ci-dessous ne visent que les rôles listés, sans condition (`--condition=None`) : la vérification finale montre tout autre rôle resté sur le projet.
 
 ```
 P=sport-challenge-prod; R=northamerica-northeast1; PN=<numéro du projet>
@@ -262,7 +262,13 @@ gcloud projects remove-iam-policy-binding $P --member=$RUN --role=roles/secretma
 gcloud projects remove-iam-policy-binding $P --member=$SCH --role=roles/run.invoker --condition=None
 ```
 
-Vérifier : `gcloud projects get-iam-policy $P` ne montre plus, pour ces trois comptes, que `roles/cloudsql.client` de `sc-run`.
+Vérifier :
+
+- `gcloud projects get-iam-policy $P` ne montre plus, pour ces trois comptes, que `roles/cloudsql.client` de `sc-run` ;
+- un déploiement passe encore : `gh workflow run deploy.yml --ref main -f ref=<tag déjà en production>` (retour arrière sur la même version : mise à jour de l'API et des jobs, lecture de la révision, test de fumée), puis le premier déploiement complet après une fusion (push de l'image, `sc-migrate`) ;
+- chaque planification lance encore son job : `gcloud scheduler jobs run <tâche> --project=$P --location=$R`, puis la dernière exécution du job est réussie.
+
+Ce que `sc-deploy` peut faire avec ces droits : `roles/run.developer` met à jour, lance (y compris avec d'autres arguments) et supprime le service et les jobs, mais ne change pas leur IAM (`sc-deploy` ne peut ni rendre l'API publique ni se donner d'autres droits) ; avec `iam.serviceAccountUser` sur `sc-run`, il peut faire tourner n'importe quelle image sous l'identité de `sc-run` (les deux secrets, la base). C'est le pouvoir normal d'un compte de déploiement : la protection est l'accès au compte (fédération limitée au job de l'Environment `production`, reviewers de l'Environment). `roles/artifactregistry.writer` pousse des images mais n'en supprime pas.
 
 ## Ajouter une tâche du worker
 
@@ -275,6 +281,11 @@ gcloud run jobs describe sc-worker-close-weeks --project=$P --region=$R --format
 sed 's/sc-worker-close-weeks/sc-worker-retry-auth0-deletions/; s/- close-weeks$/- retry-auth0-deletions/' close-weeks.yaml > job.yaml
 grep -nE 'name: sc-worker|- worker|- retry-auth0|close-weeks' job.yaml
 gcloud run jobs replace job.yaml --project=$P --region=$R
+# Droits donnés job par job : replace ne les copie pas
+gcloud run jobs add-iam-policy-binding sc-worker-retry-auth0-deletions --project=$P --region=$R \
+  --member=serviceAccount:sc-scheduler@$P.iam.gserviceaccount.com --role=roles/run.invoker
+gcloud run jobs add-iam-policy-binding sc-worker-retry-auth0-deletions --project=$P --region=$R \
+  --member=serviceAccount:sc-deploy@$P.iam.gserviceaccount.com --role=roles/run.developer
 gcloud scheduler jobs create http retry-auth0-deletions --project=$P --location=$R \
   --schedule="20 * * * *" --time-zone="America/Toronto" --attempt-deadline=180s --http-method=POST \
   --uri="https://run.googleapis.com/v2/projects/$P/locations/$R/jobs/sc-worker-retry-auth0-deletions:run" \
@@ -283,14 +294,7 @@ gcloud run jobs execute sc-worker-retry-auth0-deletions --project=$P --region=$R
 ```
 
 - Avant le `replace`, le `grep` doit montrer le nouveau nom et `- retry-auth0-deletions` comme dernier argument, et plus aucun `close-weeks`.
-- Les droits sont donnés job par job : `replace` ne les copie pas. Les ajouter au nouveau job, sinon la planification et le déploiement échouent :
-
-  ```
-  gcloud run jobs add-iam-policy-binding sc-worker-retry-auth0-deletions --project=$P --region=$R \
-    --member=serviceAccount:sc-scheduler@$P.iam.gserviceaccount.com --role=roles/run.invoker
-  gcloud run jobs add-iam-policy-binding sc-worker-retry-auth0-deletions --project=$P --region=$R \
-    --member=serviceAccount:sc-deploy@$P.iam.gserviceaccount.com --role=roles/run.developer
-  ```
+- Les droits sont donnés job par job : `replace` ne les copie pas, d'où les deux `add-iam-policy-binding` juste après lui ; sans eux, la planification et le déploiement échouent (403).
 - Les planifications sont dans le fuseau `America/Toronto` ; pour une tâche horaire, le fuseau ne change rien.
 - Les lignes terminées par `\` se collent d'un bloc : un espace après le `\` coupe la commande.
 
@@ -306,7 +310,7 @@ gcloud run jobs execute sc-worker-retry-auth0-deletions --project=$P --region=$R
    | `GCP_DEPLOY_SERVICE_ACCOUNT` | `sc-deploy@sport-challenge-prod.iam.gserviceaccount.com` |
    | `CLOUD_RUN_NAME_PREFIX` | facultatif : `sc` par défaut |
 
-   **Deployment branches = Selected branches, `main` seulement**, et **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity n'accepte que le jeton d'un job de l'Environment `production`, sur `main`, venant de ce dépôt (identifiant numérique compris : un dépôt recréé sous le même nom est refusé) ; un autre workflow de `main` qui demande `id-token: write` ne peut plus prendre `sc-deploy`. L'approbation elle-même repose sur les reviewers de l'Environment, réglés côté GitHub. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
+   **Deployment branches = Selected branches, `main` seulement**, et **Required reviewers** (une ou deux personnes). Sans reviewers, le déploiement en production partirait sans approbation. Côté GCP, le fournisseur Workload Identity n'accepte que le jeton d'un job de l'Environment `production`, sur `main`, venant de ce dépôt (identifiant numérique compris : un dépôt recréé sous le même nom est refusé) ; un autre workflow de `main` qui demande `id-token: write` ne peut plus prendre `sc-deploy`. L'approbation elle-même repose sur les reviewers de l'Environment, réglés côté GitHub : décocher **Allow administrators to bypass configured protection rules** et, si possible, cocher **Prevent self-review**, sinon un administrateur approuve seul. Idéalement, protéger aussi les tags `v*` (Settings > Rules) pour que seuls les mainteneurs en posent.
 2. **Variable du dépôt** (Settings > Secrets and variables > Actions > Variables) : `DEPLOY_PRODUCTION=true` quand l'Environment `production` a ses reviewers. Tant qu'elle ne vaut pas `true`, le job est ignoré.
    ```
    gh variable set DEPLOY_PRODUCTION --body true   # après avoir créé l'Environment production et ses reviewers
