@@ -245,8 +245,6 @@ func TestGetInvited(t *testing.T) {
 	}
 }
 
-// TestJoinWithAValidInvitation: a user linked to a valid invitation joins
-// the private challenge, judged under the lock like any join.
 // TestGetInvitedByADeletedAccount checks that the links of a deleted account
 // are cancelled (README §2.2): a guest linked to the invitation of a creator
 // whose account is then deleted is no longer invited.
@@ -286,6 +284,8 @@ func TestGetInvitedByADeletedAccount(t *testing.T) {
 	}
 }
 
+// TestJoinWithAValidInvitation: a user linked to a valid invitation joins
+// the private challenge, judged under the lock like any join.
 func TestJoinWithAValidInvitation(t *testing.T) {
 	pseudo := "marie_92"
 	svc, pool, creatorID := setup(t, &pseudo)
