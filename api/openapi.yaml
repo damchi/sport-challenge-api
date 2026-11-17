@@ -1785,8 +1785,11 @@ components:
       properties:
         sport_code:
           type: string
-          description: Code of a sport of the catalogue (`GET /api/v1/sports`).
-          pattern: "^[a-z_]{1,32}$"
+          description: |
+            Code of a sport of the catalogue (`GET /api/v1/sports`): a
+            lowercase letter, then lowercase letters, digits or `_`, as the
+            catalogue allows (constraint `sports_code_check`).
+          pattern: "^[a-z][a-z0-9_]{0,31}$"
           example: run
         sport_label:
           type: string
