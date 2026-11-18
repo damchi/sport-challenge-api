@@ -235,6 +235,9 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 			// Optional distance left empty (a sport typed by hand needs its label).
 			s.exec(`INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ($1, 'other', 'Padel', $2, 600)`, u, from.Add(70*time.Hour))
 			s.activity(u, "run", from.Add(90*time.Hour), 900, km(7000), i == 2) // deleted for u3
+			if i == 0 {                                                         // u1 runs 3 km more each week: never eliminated
+				s.activity(u, "run", from.Add(110*time.Hour), 900, km(3000*n), false)
+			}
 		}
 	}
 	s.activity(users[0], "run", start.Add(-time.Second), 3600, km(99000), false) // before the window
@@ -272,22 +275,50 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	if len(totals) >= len(raw) {
 		t.Fatalf("%d totals for %d raw activities, want fewer rows", len(totals), len(raw))
 	}
-	scorers := map[string]scoring.Scorer{
-		"time":        scoring.Duration{},
-		"distance":    scoring.Distance{Factors: map[string]float64{"run": 1, "ride": 0.3, "other": 1}},
-		"elimination": scoring.Elimination{Sport: "run", StepMeters: 1500},
+	// Without an elimination category, nothing is summed per week.
+	noWeekly, err := repo.Activities(t.Context(), challengeID, w, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for name, scorer := range scorers {
-		for n := 1; n <= 4; n++ {
-			_, weekEnd := w.WeekBounds(n)
-			for _, now := range []time.Time{weekEnd.Add(-time.Second), weekEnd} {
-				w.Now = now
-				want, got := scorer.Score(w, participants, raw), scorer.Score(w, participants, totals)
-				if !reflect.DeepEqual(got, want) {
-					t.Fatalf("%s at %s: totals give %+v, raw activities %+v", name, now, got, want)
-				}
+	elimination := scoring.Elimination{Sport: "run", StepMeters: 1500}
+	scorers := []struct {
+		name   string
+		scorer scoring.Scorer
+		totals []scoring.Activity
+	}{
+		{"time", scoring.Duration{}, totals},
+		{"distance", scoring.Distance{Factors: map[string]float64{"run": 1, "ride": 0.3, "other": 1}}, totals},
+		{"elimination", elimination, totals},
+		{"time, no elimination category", scoring.Duration{}, noWeekly},
+		{"distance, no elimination category", scoring.Distance{Factors: map[string]float64{"run": 1, "ride": 0.3, "other": 1}}, noWeekly},
+	}
+	instants := []time.Time{start.Add(-time.Hour), end, end.Add(24 * time.Hour)}
+	for n := 1; n <= 4; n++ {
+		from, weekEnd := w.WeekBounds(n)
+		instants = append(instants, from.Add(3*24*time.Hour), weekEnd.Add(-time.Second), weekEnd)
+	}
+	for _, sc := range scorers {
+		for _, now := range instants {
+			w.Now = now
+			want, got := sc.scorer.Score(w, participants, raw), sc.scorer.Score(w, participants, sc.totals)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s at %s: totals give %+v, raw activities %+v", sc.name, now, got, want)
 			}
 		}
+	}
+	// The data set must judge something: at the end, someone is eliminated
+	// and someone is not.
+	w.Now = end
+	var eliminated, survivors int
+	for _, e := range elimination.Score(w, participants, raw) {
+		if e.Progress != nil && e.Progress.Status == scoring.StatusEliminated {
+			eliminated++
+		} else {
+			survivors++
+		}
+	}
+	if eliminated == 0 || survivors == 0 {
+		t.Fatalf("%d eliminated, %d survivors: want both, or the comparison proves little", eliminated, survivors)
 	}
 }
 
