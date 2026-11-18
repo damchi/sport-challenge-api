@@ -28,6 +28,8 @@ func NewRepository(gdb *gorm.DB) *Repository {
 // left to the finalization of the challenge), each with its run elimination
 // category (the frozen settings are in categories.params). A window holds a
 // whole number of weeks; rounding the number of weeks absorbs a time change.
+// Only the closures of the weeks before the last one count: the finalization
+// may have closed the last week while an earlier one is still open.
 func (r *Repository) ClosableChallenges(ctx context.Context, now time.Time) ([]Challenge, error) {
 	var rows []struct {
 		ID         string
@@ -45,7 +47,8 @@ func (r *Repository) ClosableChallenges(ctx context.Context, now time.Time) ([]C
 		FROM challenges c
 		JOIN categories cat ON cat.challenge_id = c.id AND cat.type = 'run_elimination'
 		WHERE c.deleted_at IS NULL AND c.starts_at <= @now
-			AND (SELECT count(*) FROM week_closure wc WHERE wc.challenge_id = c.id)
+			AND (SELECT count(*) FROM week_closure wc WHERE wc.challenge_id = c.id
+					AND wc.week_number < round(extract(epoch FROM c.ends_at - c.starts_at) / 604800))
 				< round(extract(epoch FROM c.ends_at - c.starts_at) / 604800) - 1
 		ORDER BY c.starts_at, c.id`,
 		map[string]any{"now": now},

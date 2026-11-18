@@ -518,3 +518,36 @@ func TestCloseWeeksWhereMidnightIsSkipped(t *testing.T) {
 		t.Fatalf("second run: result = %+v, err = %v, want nothing", got, err)
 	}
 }
+
+// TestCloseWeeksAfterTheFinalization: the worker fell behind (weeks 1 and 2
+// closed, not 3) when the finalization closed the last week (4). close-weeks
+// must still close week 3: the closure of the last week does not count among
+// the weeks it has to close.
+func TestCloseWeeksAfterTheFinalization(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, 28).UTC()
+	a := s.user("a")
+	challengeID, _ := s.challenge(a, start, false)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, challengeID, a, start)
+	s.exec(`INSERT INTO week_closure (challenge_id, week_number, closed_at) VALUES ($1, 1, $2), ($1, 2, $2)`, challengeID, end)
+	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(end.Add(time.Hour)), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if _, err := service.FinalizeChallenges(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CloseWeeks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if weeks := s.closedWeeks(challengeID); !reflect.DeepEqual(weeks, []int{1, 2, 3, 4}) {
+		t.Fatalf("closed weeks = %v, want [1 2 3 4]: week 3 left behind", weeks)
+	}
+}
