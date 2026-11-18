@@ -1119,7 +1119,6 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Auth0 access token of a user (audience of the API); machine-to-machine tokens are refused.
-  parameters:
   responses:
     Unauthorized:
       description: |
