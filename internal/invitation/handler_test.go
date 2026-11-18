@@ -337,16 +337,33 @@ func TestInvitationRoutesRequireAuthentication(t *testing.T) {
 	}
 }
 
-// TestInvitationTokenMissing: the body must carry a token (400
-// validation_failed), and the token is never read from the URL.
+// TestInvitationTokenMissing: the body must carry a token, and only it (400
+// validation_failed); a token in the query string is never read; no answer
+// carries the token.
 func TestInvitationTokenMissing(t *testing.T) {
-	_, hash := validToken()
+	token, hash := validToken()
+	tests := []struct {
+		name, query, body string
+	}{
+		{name: "no body", body: ""},
+		{name: "empty object", body: `{}`},
+		{name: "empty token", body: `{"token":""}`},
+		{name: "malformed JSON", body: `{"token":`},
+		{name: "unknown property", body: `{"token":"` + token + `","extra":1}`},
+		{name: "token in the query string only", query: "?token=" + token, body: ""},
+	}
 	for _, target := range []string{openTarget, acceptTarget} {
-		for _, body := range []string{`{}`, `{"token":""}`} {
-			rec, out := serve(t, NewService(fakeChallenges{}, &fakeRepository{valid: hash}, clock.NewFake(now)), http.MethodPost, target, body, true)
-			if rec.Code != http.StatusBadRequest || code(out) != "validation_failed" {
-				t.Fatalf("POST %s %s: got %d %v, want 400 validation_failed", target, body, rec.Code, out)
-			}
+		for _, tt := range tests {
+			t.Run(target+" "+tt.name, func(t *testing.T) {
+				repo := &fakeRepository{valid: hash}
+				rec, out := serve(t, NewService(fakeChallenges{}, repo, clock.NewFake(now)), http.MethodPost, target+tt.query, tt.body, true)
+				if rec.Code != http.StatusBadRequest || code(out) != "validation_failed" {
+					t.Fatalf("got %d %v, want 400 validation_failed", rec.Code, out)
+				}
+				if repo.linkedUser != "" || strings.Contains(rec.Body.String(), token) {
+					t.Fatalf("linked %q, answer %s: want nothing linked and no token in the answer", repo.linkedUser, rec.Body)
+				}
+			})
 		}
 	}
 }

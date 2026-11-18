@@ -51,10 +51,8 @@ func (h *Handler) OpenInvitation(ctx context.Context, req api.OpenInvitationRequ
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	// The contract requires the body; the validator refuses a request without.
-	if req.Body == nil {
-		return nil, apperr.InvalidFields(nil, "token")
-	}
+	// The contract requires the body: the validator refuses a request
+	// without one before this handler runs.
 	c, err := h.service.Preview(ctx, actorID, req.Body.Token)
 	if err != nil {
 		return nil, err
@@ -74,9 +72,6 @@ func (h *Handler) AcceptInvitation(ctx context.Context, req api.AcceptInvitation
 	actorID, ok := auth.UserID(ctx)
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
-	}
-	if req.Body == nil {
-		return nil, apperr.InvalidFields(nil, "token")
 	}
 	challengeID, err := h.service.Accept(ctx, actorID, req.Body.Token)
 	if err != nil {
