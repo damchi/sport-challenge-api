@@ -89,6 +89,8 @@ type fakeData struct {
 	participants []scoring.Participant
 	activities   []scoring.Activity
 	loads        int
+	// weekly is the sport the activities were asked to sum per week.
+	weekly string
 }
 
 func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant, error) {
@@ -96,8 +98,9 @@ func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant,
 	return f.participants, nil
 }
 
-func (f *fakeData) Activities(context.Context, string, scoring.Window, string) ([]scoring.Activity, error) {
+func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport string) ([]scoring.Activity, error) {
 	f.loads++
+	f.weekly = weeklySport
 	return f.activities, nil
 }
 
@@ -160,6 +163,9 @@ func TestCloseWeeks(t *testing.T) {
 		}
 		if at := repo.closedAt["c1/2"]; !at.Equal(weekEnd(2)) {
 			t.Fatalf("closed at %v, want the instant of the clock", at)
+		}
+		if data.weekly != "run" {
+			t.Fatalf("weekly sport = %q, want run, the sport of the elimination category", data.weekly)
 		}
 	})
 
@@ -403,9 +409,13 @@ func TestFinalizeChallenges(t *testing.T) {
 		repo := newFakeRepo()
 		repo.ended = []EndedChallenge{c}
 		keepUp := append(runs("a", 5000, 7000, 9000, 11000), runs("b", 5000, 7000, 9000, 11000)...)
-		svc := NewService(repo, &fakeData{participants: participants, activities: keepUp}, clock.NewFake(end), discard())
+		data := &fakeData{participants: participants, activities: keepUp}
+		svc := NewService(repo, data, clock.NewFake(end), discard())
 		if _, err := svc.FinalizeChallenges(t.Context()); err != nil {
 			t.Fatal(err)
+		}
+		if data.weekly != "run" {
+			t.Fatalf("weekly sport = %q, want run, the sport of the elimination category", data.weekly)
 		}
 		if want := (LastWeek{Number: 4, CategoryID: "cat3"}); !reflect.DeepEqual(repo.last, want) {
 			t.Fatalf("last week = %+v, want %+v", repo.last, want)
@@ -495,4 +505,14 @@ type staleRepo struct{ *fakeRepo }
 
 func (s staleRepo) EndedChallenges(context.Context, time.Time) ([]EndedChallenge, error) {
 	return s.ended, nil
+}
+
+func TestEliminationSport(t *testing.T) {
+	with := []Category{{Type: categoryCumulativeTime}, {Type: categoryRunElimination, Sport: "run"}}
+	if got := eliminationSport(with); got != "run" {
+		t.Fatalf("with an elimination category: %q, want run", got)
+	}
+	if got := eliminationSport(with[:1]); got != "" {
+		t.Fatalf("without an elimination category: %q, want empty", got)
+	}
 }
