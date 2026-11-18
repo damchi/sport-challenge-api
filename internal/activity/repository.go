@@ -14,6 +14,10 @@ import (
 // errAccountDeleted means the author's account was deleted (anonymized).
 var errAccountDeleted = errors.New("account deleted")
 
+// errActivityOverlap means the activity would overlap another activity of
+// its author (README §2.5).
+var errActivityOverlap = errors.New("activity overlaps another")
+
 // errActivityNotFound means no activity has this id, or a deleted one.
 var errActivityNotFound = errors.New("activity not found")
 
@@ -45,6 +49,9 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 		if err := lockUser(tx, a.UserID); err != nil {
 			return err
 		}
+		if err := lockActivities(tx, a.UserID); err != nil {
+			return err
+		}
 		if a.IdempotencyKey != nil {
 			found, ok, err := byKey(tx, a.UserID, *a.IdempotencyKey)
 			if err != nil || ok {
@@ -53,6 +60,9 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 			}
 		}
 		if err := decide(ctx); err != nil {
+			return err
+		}
+		if err := refuseOverlap(tx, a, nil); err != nil {
 			return err
 		}
 		var ids []string
@@ -100,6 +110,16 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 func (r *Repository) Update(ctx context.Context, actorID, id string, a Activity, decide func(ctx context.Context, current Activity) error) (Activity, error) {
 	var out Activity
 	err := r.change(ctx, actorID, id, decide, func(tx *gorm.DB, current Activity) error {
+		// Only a new interval can create an overlap: an activity that keeps
+		// its start and duration (an older one maybe recorded before this
+		// rule) can still have its sport or distance changed.
+		if !a.StartedAt.Equal(current.StartedAt) || a.DurationSeconds != current.DurationSeconds {
+			changed := current
+			changed.StartedAt, changed.DurationSeconds = a.StartedAt, a.DurationSeconds
+			if err := refuseOverlap(tx, changed, &id); err != nil {
+				return err
+			}
+		}
 		err := tx.Exec(`UPDATE activities
 			SET sport_code = ?, sport_label = ?, started_at = ?, duration_seconds = ?, distance_meters = ?
 			WHERE id = ?`,
@@ -142,6 +162,9 @@ func (r *Repository) change(ctx context.Context, actorID, id string, decide func
 	return db.InTx(ctx, r.db, func(ctx context.Context) error {
 		tx := db.Conn(ctx, r.db)
 		if err := lockUser(tx, actorID); err != nil {
+			return err
+		}
+		if err := lockActivities(tx, actorID); err != nil {
 			return err
 		}
 		var rows []Activity
@@ -217,6 +240,47 @@ func lockUser(tx *gorm.DB, id string) error {
 	}
 	if len(anonymized) == 0 || anonymized[0] {
 		return errAccountDeleted
+	}
+	return nil
+}
+
+// lockActivities serializes the writes of the activities of userID (record,
+// update, delete) until the end of the transaction, so that two of them
+// never both pass the overlap check (refuseOverlap). The row lock of
+// lockUser is shared and cannot do it; a transaction-scoped advisory lock on
+// the user's id holds no row and is released at commit or rollback. Writes of
+// different users never wait for each other (barring a hash collision, which
+// only serializes them).
+func lockActivities(tx *gorm.DB, userID string) error {
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", "activities:"+userID).Error; err != nil {
+		return fmt.Errorf("lock activities: %w", err)
+	}
+	return nil
+}
+
+// refuseOverlap gives errActivityOverlap when a, from its start for its
+// duration, overlaps another activity of its author, not deleted (except, the
+// activity being replaced, when set). Intervals are [start, end): an activity
+// starting exactly when another ends is the next one, not an overlap (a
+// triathlon). Run under lockActivities.
+func refuseOverlap(tx *gorm.DB, a Activity, except *string) error {
+	end := a.StartedAt.Add(time.Duration(a.DurationSeconds) * time.Second)
+	var overlap []bool
+	err := tx.Raw(`SELECT EXISTS (SELECT 1 FROM activities
+		WHERE user_id = @user AND deleted_at IS NULL AND (CAST(@except AS uuid) IS NULL OR id <> CAST(@except AS uuid))
+			AND started_at < @end AND started_at > @earliest
+			AND started_at + make_interval(secs => duration_seconds) > @start)`,
+		map[string]any{
+			"user": a.UserID, "except": except, "start": a.StartedAt, "end": end,
+			// No activity lasts more than maxDurationSeconds: the bound lets
+			// the index on (user_id, started_at) find the candidates.
+			"earliest": a.StartedAt.Add(-maxDurationSeconds * time.Second),
+		}).Scan(&overlap).Error
+	if err != nil {
+		return fmt.Errorf("check overlap: %w", err)
+	}
+	if len(overlap) > 0 && overlap[0] {
+		return errActivityOverlap
 	}
 	return nil
 }

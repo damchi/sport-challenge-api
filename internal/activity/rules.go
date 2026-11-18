@@ -21,11 +21,16 @@ const (
 	maxDistanceMeters  = 1_000_000
 	minSportLabel      = 2
 	maxSportLabel      = 40
-	// futureTolerance absorbs the clock drift of the client's device.
+	// futureTolerance absorbs the clock drift of the client's device, for
+	// the start and the end of an activity.
 	futureTolerance = 5 * time.Minute
 	// otherSport is the sport typed by hand, the only one with a label.
 	otherSport = "other"
 )
+
+// earliestStart is the technical lower bound of a start (SC-API-084): no
+// real activity is older, so an earlier date is an input error.
+var earliestStart = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // Distance modes of the catalogue (sports.distance_mode).
 const (
@@ -46,6 +51,11 @@ type Draft struct {
 	DistanceMeters *int
 }
 
+// End is the instant the activity of draft ends: its start plus its duration.
+func (d Draft) End() time.Time {
+	return d.StartedAt.Add(time.Duration(d.DurationSeconds) * time.Second)
+}
+
 // Validate checks draft at the instant now (from platform/clock), with
 // distanceMode the distance mode of its sport in the catalogue. It returns
 // the draft normalized (label cleaned). An invalid field gives 400
@@ -64,8 +74,15 @@ func Validate(draft Draft, distanceMode string, now time.Time) (Draft, error) {
 	if d := draft.DistanceMeters; d != nil && (*d <= 0 || *d > maxDistanceMeters) {
 		fields = append(fields, "distance_meters")
 	}
-	if draft.StartedAt.IsZero() || draft.StartedAt.After(now.Add(futureTolerance)) {
+	if draft.StartedAt.IsZero() || draft.StartedAt.Before(earliestStart) || draft.StartedAt.After(now.Add(futureTolerance)) {
 		fields = append(fields, "started_at")
+	}
+	// An activity is entered once done: its end is never in the future
+	// either (README §2.5). Both fields make it, unless the start alone is
+	// already wrong.
+	if !slices.Contains(fields, "started_at") && draft.DurationSeconds > 0 && draft.End().After(now.Add(futureTolerance)) {
+		fields = append(fields, "duration_seconds", "started_at")
+		fields = slices.Compact(slices.Sorted(slices.Values(fields)))
 	}
 	label, ok := sportLabel(draft.SportCode, draft.SportLabel)
 	if !ok {

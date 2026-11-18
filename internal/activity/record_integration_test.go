@@ -102,8 +102,11 @@ func TestRecordStoresTheActivity(t *testing.T) {
 		t.Fatalf("again %+v, %d rows, want the first activity and one row", again, f.count())
 	}
 
-	// Without a key, the same body is another activity.
-	if _, err := svc.Record(t.Context(), f.user, nil, run(toronto(t, 2026, 6, 10, 7))); err != nil || f.count() != 2 {
+	// Without a key, the same body would be another activity, at the same
+	// time: an overlap, refused (SC-API-084). The one right after is another.
+	_, err = svc.Record(t.Context(), f.user, nil, run(toronto(t, 2026, 6, 10, 7)))
+	wantCode(t, err, apperr.CodeActivityOverlap)
+	if _, err := svc.Record(t.Context(), f.user, nil, run(got.StartedAt.Add(time.Duration(got.DurationSeconds)*time.Second))); err != nil || f.count() != 2 {
 		t.Fatalf("error %v, %d rows, want a second activity", err, f.count())
 	}
 }

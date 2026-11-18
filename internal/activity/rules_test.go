@@ -49,10 +49,10 @@ func TestValidate(t *testing.T) {
 
 		// Duration: required, strictly positive, 24 h at most.
 		{name: "duration of 1 second", draft: with(func(d *Draft) { d.DurationSeconds = 1 }), mode: "required"},
-		{name: "duration of 24 h", draft: with(func(d *Draft) { d.DurationSeconds = 86_400 }), mode: "required"},
+		{name: "duration of 24 h", draft: with(func(d *Draft) { d.StartedAt = now.Add(-25 * time.Hour); d.DurationSeconds = 86_400 }), mode: "required"},
 		{name: "duration missing", draft: with(func(d *Draft) { d.DurationSeconds = 0 }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "duration_seconds"},
 		{name: "negative duration", draft: with(func(d *Draft) { d.DurationSeconds = -1 }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "duration_seconds"},
-		{name: "duration of 24 h and 1 second", draft: with(func(d *Draft) { d.DurationSeconds = 86_401 }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "duration_seconds"},
+		{name: "duration of 24 h and 1 second", draft: with(func(d *Draft) { d.StartedAt = now.Add(-25 * time.Hour); d.DurationSeconds = 86_401 }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "duration_seconds"},
 
 		// Distance: strictly positive, 1000 km at most.
 		{name: "distance of 1 meter", draft: with(func(d *Draft) { d.DistanceMeters = ptr(1) }), mode: "required"},
@@ -93,10 +93,22 @@ func TestValidate(t *testing.T) {
 		{name: "label for a sport of the catalogue", draft: with(func(d *Draft) { d.SportLabel = ptr("Trail") }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "sport_label"},
 
 		// Start: never in the future, 5 minutes of tolerance.
-		{name: "starts now", draft: with(func(d *Draft) { d.StartedAt = now }), mode: "required"},
-		{name: "starts in 5 minutes", draft: with(func(d *Draft) { d.StartedAt = now.Add(5 * time.Minute) }), mode: "required"},
+		{name: "starts now, a minute long", draft: with(func(d *Draft) { d.StartedAt = now; d.DurationSeconds = 60 }), mode: "required"},
+		{name: "starts in 4 minutes, a minute long", draft: with(func(d *Draft) { d.StartedAt = now.Add(4 * time.Minute); d.DurationSeconds = 60 }), mode: "required"},
 		{name: "starts in 5 minutes and 1 second", draft: with(func(d *Draft) { d.StartedAt = now.Add(5*time.Minute + time.Second) }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "started_at"},
 		{name: "start missing", draft: with(func(d *Draft) { d.StartedAt = time.Time{} }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "started_at"},
+
+		// End (start + duration): never in the future either, with the same
+		// tolerance (README §2.5, SC-API-084): an activity is entered once done.
+		{name: "ends now", draft: with(func(d *Draft) { d.StartedAt = now.Add(-time.Hour); d.DurationSeconds = 3600 }), mode: "required"},
+		{name: "ends in 5 minutes", draft: with(func(d *Draft) { d.StartedAt = now.Add(-time.Hour); d.DurationSeconds = 3600 + 300 }), mode: "required"},
+		{name: "ends in 5 minutes and 1 second", draft: with(func(d *Draft) { d.StartedAt = now.Add(-time.Hour); d.DurationSeconds = 3600 + 301 }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "duration_seconds,started_at"},
+		{name: "starts now and lasts an hour", draft: with(func(d *Draft) { d.StartedAt = now }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "duration_seconds,started_at"},
+
+		// Lower bound of the start: 2000-01-01 UTC (SC-API-084).
+		{name: "starts on 2000-01-01 at midnight UTC", draft: with(func(d *Draft) { d.StartedAt = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC) }), mode: "required"},
+		{name: "starts the second before 2000", draft: with(func(d *Draft) { d.StartedAt = time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC) }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "started_at"},
+		{name: "starts in 1500", draft: with(func(d *Draft) { d.StartedAt = time.Date(1500, 6, 1, 8, 0, 0, 0, time.UTC) }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "started_at"},
 
 		{
 			name:     "every invalid field, sorted",

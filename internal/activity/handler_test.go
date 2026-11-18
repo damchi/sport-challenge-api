@@ -3,6 +3,7 @@ package activity
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -176,6 +177,8 @@ func TestCreateActivityRefusals(t *testing.T) {
 		{name: "source sent", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"distance_meters":5000,"source":"strava"}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "duration missing", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","distance_meters":5000}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "duration zero", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":0,"distance_meters":5000}`, status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "ends in the future", body: `{"sport_code":"run","started_at":"2026-06-11T15:50:00Z","duration_seconds":1500,"distance_meters":5000}`, status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "starts before 2000", body: `{"sport_code":"run","started_at":"1999-12-31T23:59:59Z","duration_seconds":1500,"distance_meters":5000}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "key with a space", body: runBody, headers: map[string]string{"Idempotency-Key": "a key"}, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "key too long", body: runBody, headers: map[string]string{"Idempotency-Key": strings.Repeat("k", 129)}, status: http.StatusBadRequest, code: "validation_failed"},
 	}
@@ -225,6 +228,22 @@ func TestDeleteActivityDeletes(t *testing.T) {
 	rec, _ := serve(t, newService(t, repo, fakeParticipations{}), http.MethodDelete, activityTarget, "", nil)
 	if rec.Code != http.StatusNoContent || repo.deleted != activityID {
 		t.Fatalf("status %d (%s), deleted %q, want 204 and the activity deleted", rec.Code, rec.Body, repo.deleted)
+	}
+}
+
+// TestActivityOverlap checks the 422 activity_overlap of the storage on POST
+// and PATCH, as the contract describes it.
+func TestActivityOverlap(t *testing.T) {
+	overlap := fmt.Errorf("record activity: %w", errActivityOverlap)
+	svc := NewService(&fakeRepository{err: overlap}, fakeProfiles{complete: true}, catalogue, fakeParticipations{t: t}, nil, clock.NewFake(recordNow))
+	rec, body := postActivity(t, svc, runBody, nil)
+	if rec.Code != http.StatusUnprocessableEntity || errorCode(body) != "activity_overlap" {
+		t.Fatalf("POST: got %d %v, want 422 activity_overlap", rec.Code, body)
+	}
+	repo := &fakeRepository{stored: map[string]Activity{activityID: storedRun(t)}, err: overlap}
+	rec, body = serve(t, newService(t, repo, fakeParticipations{}), http.MethodPatch, activityTarget, runBody, nil)
+	if rec.Code != http.StatusUnprocessableEntity || errorCode(body) != "activity_overlap" {
+		t.Fatalf("PATCH: got %d %v, want 422 activity_overlap", rec.Code, body)
 	}
 }
 
