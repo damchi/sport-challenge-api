@@ -338,7 +338,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 	inWeek := func(n int) time.Time { return start.AddDate(0, 0, 7*(n-1)).Add(time.Hour) }
 
 	a, b, quitter := s.user("a"), s.user("b"), s.user("quitter")
-	challengeID, _ := s.challenge(a, start, false)
+	challengeID, categoryID := s.challenge(a, start, false)
 	deletedID, _ := s.challenge(a, start, true)
 	runningID, _ := s.challenge(a, start.AddDate(0, 0, 7), false)
 	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $4), ($1, $3, $4), ($5, $2, $4), ($6, $2, $4)`,
@@ -387,8 +387,26 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		if !reflect.DeepEqual(snaps[2].Payload, want) {
 			t.Fatalf("elimination ranking = %+v, want %+v", snaps[2].Payload, want)
 		}
+		// The last week is closed with the results (SC-API-089): its closure
+		// and its eliminations, a in week 4 (10000 run, 11000 needed), as
+		// close-weeks records the others (not run here: nothing else).
+		if weeks := s.closedWeeks(challengeID); !reflect.DeepEqual(weeks, []int{4}) {
+			t.Fatalf("closed weeks = %v, want [4]", weeks)
+		}
+		wantLast := []recordedElimination{{User: a, Week: 4, Run: 10000, Min: 11000}}
+		if got := s.eliminations(challengeID); !reflect.DeepEqual(got, wantLast) {
+			t.Fatalf("eliminations = %+v, want %+v", got, wantLast)
+		}
+		var category string
+		s.scan(&category, "SELECT category_id FROM elimination WHERE challenge_id = $1 AND week_number = 4", challengeID)
+		if category != categoryID {
+			t.Fatalf("elimination of week 4 in category %s, want the run elimination one %s", category, categoryID)
+		}
 		if got := s.snapshots(deletedID); len(got) != 0 {
 			t.Fatalf("deleted challenge has %d snapshots, want none", len(got))
+		}
+		if weeks := s.closedWeeks(deletedID); len(weeks) != 0 {
+			t.Fatalf("deleted challenge has closed weeks %v, want none", weeks)
 		}
 		if got := s.snapshots(runningID); len(got) != 0 {
 			t.Fatalf("challenge not over has %d snapshots, want none", len(got))
@@ -437,17 +455,24 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		if after := s.snapshots(challengeID); !reflect.DeepEqual(after, before) {
 			t.Fatalf("snapshots changed: %+v, want %+v", after, before)
 		}
+		if weeks, elims := s.closedWeeks(challengeID), s.eliminations(challengeID); !reflect.DeepEqual(weeks, []int{4}) || len(elims) != 1 {
+			t.Fatalf("closed weeks %v, %d eliminations, want [4] and 1: nothing written twice", weeks, len(elims))
+		}
 	})
 
 	t.Run("a run that lost the race records nothing", func(t *testing.T) {
 		repo := NewRepository(gdb)
 		taken := s.snapshots(challengeID)[0]
-		done, err := repo.SaveSnapshots(t.Context(), challengeID, end, []Snapshot{{CategoryID: taken.Category, Type: taken.Type, Payload: []byte(`{"entries": []}`)}})
+		last := LastWeek{Number: 4, CategoryID: categoryID, Eliminated: []scoring.Eliminated{{UserID: b, Week: 4, RunMeters: 1, MinimumMeters: 2}}}
+		done, err := repo.SaveSnapshots(t.Context(), challengeID, end, []Snapshot{{CategoryID: taken.Category, Type: taken.Type, Payload: []byte(`{"entries": []}`)}}, last)
 		if err != nil || done {
 			t.Fatalf("done = %v, err = %v, want false: the category already has its snapshot", done, err)
 		}
 		if after := s.snapshots(challengeID)[0]; !reflect.DeepEqual(after, taken) {
 			t.Fatalf("snapshot changed: %+v, want %+v", after, taken)
+		}
+		if elims := s.eliminations(challengeID); len(elims) != 1 || elims[0].User != a {
+			t.Fatalf("eliminations = %+v, want only a's: the lost run wrote nothing", elims)
 		}
 	})
 }

@@ -410,7 +410,7 @@ flowchart TD
 
 - `close-weeks` : clôt les semaines terminées (fin de semaine atteinte), enregistre les éliminations, évalue les badges de type « plusieurs semaines de suite ».
 - `retry-auth0-deletions` : rejoue la suppression chez Auth0 des utilisateurs dont l'appel a échoué.
-- `finalize-challenges` : fige les résultats des challenges terminés (statut « terminé », classements enregistrés).
+- `finalize-challenges` : fige les résultats des challenges terminés (statut « terminé », classements enregistrés) et clôt leur **dernière semaine**, laissée par `close-weeks` : sa clôture et ses éliminations sont enregistrées dans la même transaction que les classements figés.
 - 🟡 Cloud Scheduler les lance **toutes les heures**, car les semaines se terminent à des heures différentes selon le fuseau de chaque challenge. Chaque tâche est **idempotente** : la relancer ne change rien si le travail est déjà fait.
 
 ### 5.3 Responsabilités des modules
@@ -454,7 +454,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 2. **Saisie d'une activité** (point d'entrée unique) : validation (aucune semaine terminée dans les challenges où l'activité compte : une semaine terminée est verrouillée, ADR 0001) → stockage avec source « manuelle » → aucun recalcul stocké.
 3. **Lecture du classement** (au rafraîchissement) : chargement des participants et des activités de la fenêtre → un scorer par catégorie → classement ex aequo renvoyé au client. Le calcul se fait toujours depuis les activités brutes.
 4. **Clôture hebdomadaire** : Cloud Scheduler lance le worker → pour chaque challenge actif dont une semaine est terminée → éliminations (catégorie à élimination) enregistrées → badges « semaines de suite » évalués.
-5. **Fin de challenge** : à l'instant de fin → statut « terminé », `result_snapshot` enregistré. Plus aucune activité datée de sa fenêtre ne peut être ajoutée (sa dernière semaine est terminée, donc verrouillée).
+5. **Fin de challenge** : à l'instant de fin → statut « terminé », `result_snapshot` enregistré, avec la clôture (`week_closure`) et les éliminations (`elimination`) de la dernière semaine, comme pour les autres semaines. Plus aucune activité datée de sa fenêtre ne peut être ajoutée (sa dernière semaine est terminée, donc verrouillée).
 6. **Abandon d'un participant** : statut « abandonné » (volontairement, ou après l'exclusion par un créateur), éliminé de toutes les catégories, apparaît comme « a abandonné ».
 7. **Badges** : après l'enregistrement d'une activité, évaluation des badges du challenge pour son auteur ; attribution immédiate et idempotente (unique par badge et utilisateur). Les conditions « plusieurs semaines de suite » sont évaluées à la fin de chaque semaine par le worker.
 

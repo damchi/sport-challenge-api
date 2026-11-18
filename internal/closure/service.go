@@ -32,10 +32,10 @@ type repository interface {
 	// EndedChallenges lists the challenges not deleted that are over at now
 	// and have no result snapshot.
 	EndedChallenges(ctx context.Context, now time.Time) ([]EndedChallenge, error)
-	// SaveSnapshots records the snapshots of a challenge in one transaction.
-	// It reports false, and records nothing, when they were already taken (by
-	// a run at the same time).
-	SaveSnapshots(ctx context.Context, challengeID string, createdAt time.Time, snapshots []Snapshot) (bool, error)
+	// SaveSnapshots records the snapshots of a challenge and the closure of
+	// its last week in one transaction. It reports false, and records
+	// nothing, when they were already taken (by a run at the same time).
+	SaveSnapshots(ctx context.Context, challengeID string, createdAt time.Time, snapshots []Snapshot, last LastWeek) (bool, error)
 }
 
 // Category types, as the challenge module stores them (categories.type).
@@ -166,8 +166,10 @@ func openWeeks(ended int, closed []int) []int {
 // FinalizeChallenges freezes the results of every challenge that is over and
 // has none: the final ranking of each category, computed from the raw
 // activities by the scorer of the category, is recorded in one transaction
-// per challenge. It can be run again and again: a challenge with its
-// snapshots is not listed, and a run at the same time records nothing. Who
+// per challenge, with the closure of its last week and the eliminations
+// judged in it (as close-weeks records the other weeks). It can be run again
+// and again: a challenge with its snapshots is not listed, and a run at the
+// same time records nothing. Who
 // is abandoned is read as of the run, which changes nothing after the end:
 // nobody can abandon or be excluded from a challenge that is over, and the
 // activities of a week that ended are locked. Challenges deleted get no
@@ -210,11 +212,21 @@ func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now t
 		return false, err
 	}
 	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
+	last := LastWeek{Number: w.Weeks()}
 	snapshots := make([]Snapshot, len(c.Categories))
 	for i, cat := range c.Categories {
 		scorer, err := scorerOf(cat)
 		if err != nil {
 			return false, err
+		}
+		if cat.Type == categoryRunElimination {
+			last.CategoryID = cat.ID
+			e := scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters}
+			for _, out := range e.Eliminations(w, participants, activities) {
+				if out.Week == last.Number {
+					last.Eliminated = append(last.Eliminated, out)
+				}
+			}
 		}
 		payload, err := json.Marshal(newPayload(scorer.Score(w, participants, activities)))
 		if err != nil {
@@ -222,7 +234,7 @@ func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now t
 		}
 		snapshots[i] = Snapshot{CategoryID: cat.ID, Type: cat.Type, Payload: payload}
 	}
-	done, err := s.repo.SaveSnapshots(ctx, c.ID, now, snapshots)
+	done, err := s.repo.SaveSnapshots(ctx, c.ID, now, snapshots, last)
 	if err != nil {
 		return false, fmt.Errorf("save snapshots: %w", err)
 	}

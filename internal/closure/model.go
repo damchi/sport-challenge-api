@@ -3,6 +3,8 @@ package closure
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 // Challenge is a challenge whose weeks can be closed: not deleted and
@@ -55,6 +57,16 @@ type Snapshot struct {
 	CategoryID string
 	Type       string
 	Payload    json.RawMessage
+}
+
+// LastWeek is the closure of the last week of a challenge, recorded with its
+// snapshots: the week ends with the challenge, so close-weeks leaves it to
+// the finalization. Eliminated are the eliminations judged that week in
+// category CategoryID, the run elimination one.
+type LastWeek struct {
+	Number     int
+	CategoryID string
+	Eliminated []scoring.Eliminated
 }
 
 // FinalizeResult counts what a run of the finalization did, for the log.

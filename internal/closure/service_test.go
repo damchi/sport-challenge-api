@@ -27,6 +27,8 @@ type fakeRepo struct {
 	ended      []EndedChallenge
 	snapshots  map[string][]Snapshot // by challenge
 	snapshotAt time.Time
+	// last is the closure of the last week given with the snapshots.
+	last LastWeek
 }
 
 func newFakeRepo(cs ...Challenge) *fakeRepo {
@@ -70,7 +72,7 @@ func (f *fakeRepo) EndedChallenges(_ context.Context, now time.Time) ([]EndedCha
 	return out, nil
 }
 
-func (f *fakeRepo) SaveSnapshots(_ context.Context, id string, at time.Time, snapshots []Snapshot) (bool, error) {
+func (f *fakeRepo) SaveSnapshots(_ context.Context, id string, at time.Time, snapshots []Snapshot, last LastWeek) (bool, error) {
 	if id == f.failOn {
 		return false, errors.New("database down")
 	}
@@ -79,6 +81,7 @@ func (f *fakeRepo) SaveSnapshots(_ context.Context, id string, at time.Time, sna
 	}
 	f.snapshots[id] = snapshots
 	f.snapshotAt = at
+	f.last = last
 	return true, nil
 }
 
@@ -372,6 +375,12 @@ func TestFinalizeChallenges(t *testing.T) {
 		if !repo.snapshotAt.Equal(end) {
 			t.Fatalf("snapshot at %v, want the instant of the clock", repo.snapshotAt)
 		}
+		// The last week is closed with the results (SC-API-089): only its
+		// eliminations, in the run elimination category.
+		wantLast := LastWeek{Number: 4, CategoryID: "cat3", Eliminated: []scoring.Eliminated{{UserID: "a", Week: 4, RunMeters: 10000, MinimumMeters: 11000}}}
+		if !reflect.DeepEqual(repo.last, wantLast) {
+			t.Fatalf("last week = %+v, want %+v", repo.last, wantLast)
+		}
 		for i, cat := range c.Categories {
 			if s := repo.snapshots["c1"][i]; s.CategoryID != cat.ID || s.Type != cat.Type {
 				t.Fatalf("snapshot %d = %s %s, want %s %s", i, s.CategoryID, s.Type, cat.ID, cat.Type)
@@ -387,6 +396,19 @@ func TestFinalizeChallenges(t *testing.T) {
 		}
 		if got := payloadOf(t, repo, "cat1"); len(got.Entries) != 3 || got.Entries[0].Rank != 1 {
 			t.Fatalf("time ranking = %+v, want 3 entries from rank 1", got)
+		}
+	})
+
+	t.Run("a last week without elimination is closed all the same", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		keepUp := append(runs("a", 5000, 7000, 9000, 11000), runs("b", 5000, 7000, 9000, 11000)...)
+		svc := NewService(repo, &fakeData{participants: participants, activities: keepUp}, clock.NewFake(end), discard())
+		if _, err := svc.FinalizeChallenges(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if want := (LastWeek{Number: 4, CategoryID: "cat3"}); !reflect.DeepEqual(repo.last, want) {
+			t.Fatalf("last week = %+v, want %+v", repo.last, want)
 		}
 	})
 
