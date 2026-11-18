@@ -579,7 +579,7 @@ La V2 (synchronisations) a peu d'impact sur la V1 si ces choix, presque gratuits
 
 ### V1, phase par phase (même ordre que le skill `bootstrap`)
 
-Le détail ticket par ticket (67 tickets, critères d'acceptation, commits proposés) est dans [`TASKS.md`](TASKS.md) (importé en issues GitHub, voir « Les tickets vivent dans GitHub »).
+Le détail ticket par ticket (69 tickets, critères d'acceptation, commits proposés) est dans [`TASKS.md`](TASKS.md) (importé en issues GitHub, voir « Les tickets vivent dans GitHub »).
 
 | Phase | Contenu | Points à ne pas oublier |
 |---|---|---|
@@ -594,7 +594,7 @@ Le détail ticket par ticket (67 tickets, critères d'acceptation, commits propo
 | 8 | Invitations (badges reportés en V1.1) | Invitations avec la règle « les participants peuvent inviter » ; les badges (conditions structurées, évaluation après chaque activité) viennent en V1.1 |
 | 9 | Limitation de débit et déploiement | `RateLimitIP` et `RateLimitUser`, Docker, compléments de CI/CD, infrastructure de production (configurée à la main), alerte de budget ; jamais de modification de l'infrastructure sans demande |
 
-**À chaque phase** : `make check` passe ; chaque nouvelle route a ses tests d'autorisation (autorisé, interdit, inexistant) ; les erreurs ont un code stable ; aucune donnée personnelle dans les logs ; une paire de migrations par changement de schéma ; les agents de relecture sont lancés ; **aucun commit ni push sans validation explicite**.
+**À chaque phase** : `make check` passe ; chaque nouvelle route a ses tests d'autorisation (autorisé, interdit, inexistant) ; les erreurs ont un code stable ; aucune donnée personnelle dans les logs ; une paire de migrations par changement de schéma ; les agents de relecture sont lancés ; **commit et push sur la branche du ticket une fois ces vérifications passées ; pull request, fusion et push sur `main` uniquement sur demande**.
 
 ### V1.1 (après la V1)
 
