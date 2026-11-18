@@ -398,7 +398,7 @@ flowchart TD
 |---|---|
 | `user` | `GET /me`, `PATCH /me`, `DELETE /me` |
 | `challenge` | `POST /challenges`, `GET /challenges` (publics et les miens), `GET /challenges/{id}`, `PATCH /challenges/{id}` (titre, description), `POST /challenges/{id}/join`, `POST /challenges/{id}/abandon`, `GET /challenges/{id}/participants`, `DELETE /challenges/{id}/participants/{userId}` (exclure), `POST /challenges/{id}/creators`, `DELETE /challenges/{id}` (créateurs : supprimer le challenge) |
-| `invitation` | `POST /challenges/{id}/invitations`, `GET /invitations/{token}`, `POST /invitations/{token}/accept` |
+| `invitation` | `POST /challenges/{id}/invitations`, `POST /invitations/open`, `POST /invitations/accept` (le jeton dans le corps, jamais dans l'URL) |
 | `leaderboard` | `GET /challenges/{id}/leaderboard` (les 3 catégories ensemble, sans filtre ni pagination) |
 | `activity` | `POST /activities`, `GET /me/activities`, `GET /challenges/{id}/participants/{userId}/activities` (participants du challenge), `PATCH` et `DELETE /activities/{id}` (auteur, tant que la semaine n'est pas terminée dans aucun challenge où l'activité compte) |
 | `sport` | `GET /sports` |
@@ -505,7 +505,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Action | Qui peut |
 |---|---|
 | Voir un challenge public et son classement | tout utilisateur connecté (✅) |
-| Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅). Une invitation est un **lien réutilisable** jusqu'à la fin de la semaine 1 : toute personne connectée qui l'ouvre devient invitée, tant que l'invitation reste valide ; connaître le jeton sans l'avoir ouvert ne donne rien (✅) |
+| Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅). Une invitation est un **lien réutilisable** jusqu'à la fin de la semaine 1 : toute personne connectée qui l'ouvre devient invitée, tant que l'invitation reste valide ; connaître le jeton sans l'avoir ouvert ne donne rien (✅). Le jeton voyage dans le **corps** de `POST /invitations/open` et `POST /invitations/accept`, jamais dans l'URL : les journaux de requêtes de la plateforme enregistrent les URL complètes, et ouvrir un lien est une écriture, qui ne doit pas se faire par un `GET` (un préchargement suffirait) (✅, SC-API-086) |
 | Rejoindre un challenge public | tout utilisateur connecté, jusqu'à la fin de la semaine 1 (✅) |
 | Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) ; une invitation n'est valide que tant que son auteur est encore créateur ou participant actif, et que son compte n'est pas supprimé. Exclure un participant (ou qu'il abandonne) n'exclut pas les personnes qu'il a invitées : celles qui ont déjà rejoint restent participantes ; seul son lien est annulé, pour les personnes invitées qui n'ont pas encore rejoint (✅) |
 | Inviter | créateurs ; participants seulement si le créateur l'a autorisé à la création (✅) |

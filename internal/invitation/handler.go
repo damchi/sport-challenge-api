@@ -43,14 +43,15 @@ func (h *Handler) CreateInvitation(ctx context.Context, req api.CreateInvitation
 	return api.CreateInvitation201JSONResponse{Token: token, ExpiresAt: inv.ExpiresAt.UTC()}, nil
 }
 
-// GetInvitation opens an invitation link for the authenticated user and
-// answers the preview of its challenge.
-func (h *Handler) GetInvitation(ctx context.Context, req api.GetInvitationRequestObject) (api.GetInvitationResponseObject, error) {
+// OpenInvitation opens an invitation link for the authenticated user and
+// answers the preview of its challenge. The token comes in the body, never
+// in the URL (README §5.7).
+func (h *Handler) OpenInvitation(ctx context.Context, req api.OpenInvitationRequestObject) (api.OpenInvitationResponseObject, error) {
 	actorID, ok := auth.UserID(ctx)
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	c, err := h.service.Preview(ctx, actorID, req.Token)
+	c, err := h.service.Preview(ctx, actorID, req.Body.Token)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +59,7 @@ func (h *Handler) GetInvitation(ctx context.Context, req api.GetInvitationReques
 	if err != nil {
 		return nil, fmt.Errorf("challenge id %q: %w", c.ID, err)
 	}
-	return api.GetInvitation200JSONResponse{ChallengeId: id, Title: c.Title, StartsAt: c.StartsAt.UTC(), EndsAt: c.EndsAt.UTC()}, nil
+	return api.OpenInvitation200JSONResponse{ChallengeId: id, Title: c.Title, StartsAt: c.StartsAt.UTC(), EndsAt: c.EndsAt.UTC()}, nil
 }
 
 // AcceptInvitation makes the authenticated user a participant of the
@@ -70,7 +71,7 @@ func (h *Handler) AcceptInvitation(ctx context.Context, req api.AcceptInvitation
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	challengeID, err := h.service.Accept(ctx, actorID, req.Token)
+	challengeID, err := h.service.Accept(ctx, actorID, req.Body.Token)
 	if err != nil {
 		return nil, err
 	}
