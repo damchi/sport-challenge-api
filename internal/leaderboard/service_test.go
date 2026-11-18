@@ -35,8 +35,10 @@ type fakeRepo struct {
 	snapshotsErr error
 	err          error
 	calls        int
-	// from and to are the window the activities were asked for.
+	// from and to are the window the activities were asked for, weekly the
+	// sport summed per week.
 	from, to time.Time
+	weekly   string
 }
 
 func (f *fakeRepo) Participants(context.Context, string) ([]scoring.Participant, error) {
@@ -44,9 +46,9 @@ func (f *fakeRepo) Participants(context.Context, string) ([]scoring.Participant,
 	return f.participants, f.err
 }
 
-func (f *fakeRepo) Activities(_ context.Context, _ string, from, to time.Time) ([]scoring.Activity, error) {
+func (f *fakeRepo) Activities(_ context.Context, _ string, w scoring.Window, weeklySport string) ([]scoring.Activity, error) {
 	f.calls++
-	f.from, f.to = from, to
+	f.from, f.to, f.weekly = w.Start, w.End, weeklySport
 	return f.activities, f.err
 }
 
@@ -138,6 +140,19 @@ func TestGetRanksEveryCategory(t *testing.T) {
 	}
 	if !repo.from.Equal(c.StartsAt) || !repo.to.Equal(c.EndsAt) {
 		t.Fatalf("activities asked for [%s, %s), want the window [%s, %s)", repo.from, repo.to, c.StartsAt, c.EndsAt)
+	}
+	// The totals per week are those of the elimination sport (SC-API-082).
+	if repo.weekly != "run" {
+		t.Fatalf("weekly sport = %q, want run, the sport of the elimination category", repo.weekly)
+	}
+}
+
+func TestWeeklySport(t *testing.T) {
+	if got := weeklySport(twoWeeks(t).Categories); got != "run" {
+		t.Fatalf("with an elimination category: %q, want run", got)
+	}
+	if got := weeklySport([]Category{{Type: CategoryCumulativeTime}, {Type: CategoryCumulativeDistance}}); got != "" {
+		t.Fatalf("without an elimination category: %q, want empty", got)
 	}
 }
 

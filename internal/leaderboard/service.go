@@ -17,9 +17,10 @@ import (
 // repository is what the service needs from the storage.
 type repository interface {
 	Participants(ctx context.Context, challengeID string) ([]scoring.Participant, error)
-	// Activities gives, in one query, the activities of the active
-	// participants of the challenge started in [from, to).
-	Activities(ctx context.Context, challengeID string, from, to time.Time) ([]scoring.Activity, error)
+	// Activities gives, in one query, the totals of the activities of the
+	// active participants started in w: per participant and week for
+	// weeklySport, per participant and sport for the others.
+	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string) ([]scoring.Activity, error)
 	// Snapshots gives the frozen results of the challenge by category type,
 	// and when they were frozen; none until the worker has finalized it.
 	Snapshots(ctx context.Context, challengeID string) (map[string]json.RawMessage, time.Time, error)
@@ -92,7 +93,8 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 	if err != nil {
 		return Leaderboard{}, err
 	}
-	activities, err := s.repo.Activities(ctx, id, c.StartsAt, c.EndsAt)
+	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
+	activities, err := s.repo.Activities(ctx, id, w, weeklySport(c.Categories))
 	if err != nil {
 		return Leaderboard{}, err
 	}
@@ -105,7 +107,6 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 		return Leaderboard{}, fmt.Errorf("read pseudos: %w", err)
 	}
 
-	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
 	board := Leaderboard{ComputedAt: now, Categories: make([]CategoryRanking, len(c.Categories))}
 	for i, cat := range c.Categories {
 		entries := scorers[i].Score(w, participants, activities)
@@ -203,4 +204,15 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
 	}
 	return board, true, nil
+}
+
+// weeklySport is the sport of the elimination category, the only one the
+// scorers count week by week; empty without such a category.
+func weeklySport(categories []Category) string {
+	for _, cat := range categories {
+		if cat.Type == CategoryRunElimination {
+			return cat.Sport
+		}
+	}
+	return ""
 }

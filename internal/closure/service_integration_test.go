@@ -426,7 +426,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		}
 		board := func(repo interface {
 			Participants(context.Context, string) ([]scoring.Participant, error)
-			Activities(context.Context, string, time.Time, time.Time) ([]scoring.Activity, error)
+			Activities(context.Context, string, scoring.Window, string) ([]scoring.Activity, error)
 			Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
 		},
 		) leaderboard.Leaderboard {
