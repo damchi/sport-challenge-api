@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -47,24 +48,47 @@ func (r *Repository) Participants(ctx context.Context, challengeID string) ([]sc
 	return out, nil
 }
 
-// Activities returns, in one query, the activities not deleted of the active
-// participants of challenge challengeID started in [from, to): those of an
-// abandoned participant no longer count.
-func (r *Repository) Activities(ctx context.Context, challengeID string, from, to time.Time) ([]scoring.Activity, error) {
+// Activities returns, in one query, what the scorers need of the activities
+// not deleted of the active participants of a challenge, started in the
+// window w (those of an abandoned participant no longer count): totals, never
+// each activity. The activities of weeklySport, the sport of the elimination
+// category, are summed per participant and week, each total as one activity
+// starting at the start of its week; those of the other sports per
+// participant and sport, as one activity starting at the start of the window.
+// The scorers only sum durations and distances, per participant and sport
+// (time, distance) and per week for the elimination sport, so the rankings are
+// those of the raw activities, still computed from them (never stored). The
+// weeks are cut in Go (Window.WeekBounds) and given to the database as their
+// starts: one rule for both.
+func (r *Repository) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string) ([]scoring.Activity, error) {
+	starts := make([]time.Time, w.Weeks())
+	literal := make([]string, len(starts))
+	for n := range starts {
+		starts[n], _ = w.WeekBounds(n + 1)
+		literal[n] = starts[n].Format(time.RFC3339Nano)
+	}
 	var rows []struct {
 		UserID          string
 		SportCode       string
-		StartedAt       time.Time
+		Week            int
 		DurationSeconds int
 		DistanceMeters  *int
 	}
+	// width_bucket gives the week: the number of starts at or before the
+	// activity. SUM of a distance is null when none of the group has one.
 	err := r.db.WithContext(ctx).Raw(
-		`SELECT a.user_id, a.sport_code, a.started_at, a.duration_seconds, a.distance_meters
+		`SELECT a.user_id, a.sport_code,
+			CASE WHEN a.sport_code = @weekly THEN width_bucket(a.started_at, CAST(@starts AS timestamptz[])) ELSE 1 END AS week,
+			SUM(a.duration_seconds) AS duration_seconds, SUM(a.distance_meters) AS distance_meters
 		FROM participants p
 		JOIN activities a ON a.user_id = p.user_id
 		WHERE p.challenge_id = @id AND p.status = 'active'
-			AND a.deleted_at IS NULL AND a.started_at >= @from AND a.started_at < @to`,
-		map[string]any{"id": challengeID, "from": from, "to": to},
+			AND a.deleted_at IS NULL AND a.started_at >= @from AND a.started_at < @to
+		GROUP BY a.user_id, a.sport_code, week`,
+		map[string]any{
+			"id": challengeID, "from": w.Start, "to": w.End, "weekly": weeklySport,
+			"starts": "{" + strings.Join(literal, ",") + "}",
+		},
 	).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("read activities: %w", err)
@@ -72,7 +96,7 @@ func (r *Repository) Activities(ctx context.Context, challengeID string, from, t
 	out := make([]scoring.Activity, len(rows))
 	for i, row := range rows {
 		out[i] = scoring.Activity{
-			UserID: row.UserID, SportCode: row.SportCode, StartedAt: row.StartedAt.UTC(),
+			UserID: row.UserID, SportCode: row.SportCode, StartedAt: starts[row.Week-1],
 			DurationSeconds: row.DurationSeconds, DistanceMeters: row.DistanceMeters,
 		}
 	}

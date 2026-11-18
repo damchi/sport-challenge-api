@@ -44,9 +44,9 @@ func (f *fakeRepo) Participants(context.Context, string) ([]scoring.Participant,
 	return f.participants, f.err
 }
 
-func (f *fakeRepo) Activities(_ context.Context, _ string, from, to time.Time) ([]scoring.Activity, error) {
+func (f *fakeRepo) Activities(_ context.Context, _ string, w scoring.Window, _ string) ([]scoring.Activity, error) {
 	f.calls++
-	f.from, f.to = from, to
+	f.from, f.to = w.Start, w.End
 	return f.activities, f.err
 }
 

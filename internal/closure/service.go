@@ -46,11 +46,12 @@ const (
 )
 
 // Activities gives the participants of a challenge and, in one query, the
-// activities of its active participants started in [from, to) (module
-// leaderboard, which ranks from the same data).
+// totals of the activities of its active participants started in the window,
+// per participant and week for weeklySport, per participant and sport for the
+// others (module leaderboard, which ranks from the same data).
 type Activities interface {
 	Participants(ctx context.Context, challengeID string) ([]scoring.Participant, error)
-	Activities(ctx context.Context, challengeID string, from, to time.Time) ([]scoring.Activity, error)
+	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string) ([]scoring.Activity, error)
 }
 
 // Service holds the use cases of the closure.
@@ -122,7 +123,7 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 	if err != nil {
 		return 0, 0, err
 	}
-	activities, err := s.data.Activities(ctx, c.ID, c.StartsAt, c.EndsAt)
+	activities, err := s.data.Activities(ctx, c.ID, w, c.Sport)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -207,11 +208,11 @@ func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now t
 	if err != nil {
 		return false, err
 	}
-	activities, err := s.data.Activities(ctx, c.ID, c.StartsAt, c.EndsAt)
+	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
+	activities, err := s.data.Activities(ctx, c.ID, w, eliminationSport(c.Categories))
 	if err != nil {
 		return false, err
 	}
-	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
 	last := LastWeek{Number: w.Weeks()}
 	snapshots := make([]Snapshot, len(c.Categories))
 	for i, cat := range c.Categories {
@@ -239,6 +240,17 @@ func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now t
 		return false, fmt.Errorf("save snapshots: %w", err)
 	}
 	return done, nil
+}
+
+// eliminationSport is the sport of the run elimination category, the only one
+// counted week by week; empty without such a category.
+func eliminationSport(categories []Category) string {
+	for _, cat := range categories {
+		if cat.Type == categoryRunElimination {
+			return cat.Sport
+		}
+	}
+	return ""
 }
 
 // scorerOf returns the scorer of a category, from the type and the settings

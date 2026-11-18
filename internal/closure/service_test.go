@@ -96,7 +96,7 @@ func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant,
 	return f.participants, nil
 }
 
-func (f *fakeData) Activities(context.Context, string, time.Time, time.Time) ([]scoring.Activity, error) {
+func (f *fakeData) Activities(context.Context, string, scoring.Window, string) ([]scoring.Activity, error) {
 	f.loads++
 	return f.activities, nil
 }

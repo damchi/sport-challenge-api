@@ -196,3 +196,169 @@ func TestGetServesTheSnapshotsOfAnEndedChallenge(t *testing.T) {
 		t.Fatalf("value = %d at %s, want the snapshot 3600 at %s", v, at, frozenAt)
 	}
 }
+
+// TestActivitiesGiveTheRankingsOfTheRawActivities checks that the totals of
+// Activities (per participant, sport and week, SC-API-082) rank exactly as the
+// raw activities do, for the three scorers, at every instant that matters: a
+// varied data set over 4 weeks across the spring time change in Toronto, with
+// several activities per week and sport, sports with and without distance,
+// an optional distance left empty, a deleted activity and the first and last
+// instants of each week.
+func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc := toronto(t)
+	start := scoring.StartOfDay(2026, 3, 2, loc) // the time changes on March 8, in week 1
+	end := scoring.StartOfDay(2026, 3, 30, loc)
+	users := []string{s.user("u1"), s.user("u2"), s.user("u3"), s.user("u4")}
+	var challengeID string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Spring', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, end, users[0]).Scan(&challengeID); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range users {
+		s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", challengeID, u, start)
+	}
+	w := scoring.Window{Start: start, End: end, Location: loc}
+	km := func(m int) *int { return &m }
+	for i, u := range users {
+		for n := 1; n <= 4; n++ {
+			from, to := w.WeekBounds(n)
+			s.activity(u, "run", from, 1800+i, km(5000+1000*n+i), false)              // first instant of the week
+			s.activity(u, "run", to.Add(-time.Second), 1200, km(2000*(i+1)), false)   // last instant of the week
+			s.activity(u, "ride", from.Add(30*time.Hour), 3600, km(20000+i*n), false) // another sport
+			s.activity(u, "yoga", from.Add(50*time.Hour), 2700, nil, false)           // no distance
+			// Optional distance left empty (a sport typed by hand needs its label).
+			s.exec(`INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ($1, 'other', 'Padel', $2, 600)`, u, from.Add(70*time.Hour))
+			s.activity(u, "run", from.Add(90*time.Hour), 900, km(7000), i == 2) // deleted for u3
+		}
+	}
+	s.activity(users[0], "run", start.Add(-time.Second), 3600, km(99000), false) // before the window
+	s.activity(users[1], "run", end, 3600, km(99000), false)                     // at the end, outside
+
+	repo := NewRepository(gdb)
+	participants, err := repo.Participants(t.Context(), challengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The raw activities, as Activities read them before SC-API-082.
+	rows, err := pool.Query(t.Context(), `SELECT a.user_id, a.sport_code, a.started_at, a.duration_seconds, a.distance_meters
+		FROM participants p JOIN activities a ON a.user_id = p.user_id
+		WHERE p.challenge_id = $1 AND p.status = 'active' AND a.deleted_at IS NULL AND a.started_at >= $2 AND a.started_at < $3`,
+		challengeID, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw []scoring.Activity
+	for rows.Next() {
+		var a scoring.Activity
+		if err := rows.Scan(&a.UserID, &a.SportCode, &a.StartedAt, &a.DurationSeconds, &a.DistanceMeters); err != nil {
+			t.Fatal(err)
+		}
+		a.StartedAt = a.StartedAt.UTC()
+		raw = append(raw, a)
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
+	}
+	totals, err := repo.Activities(t.Context(), challengeID, w, "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(totals) >= len(raw) {
+		t.Fatalf("%d totals for %d raw activities, want fewer rows", len(totals), len(raw))
+	}
+	scorers := map[string]scoring.Scorer{
+		"time":        scoring.Duration{},
+		"distance":    scoring.Distance{Factors: map[string]float64{"run": 1, "ride": 0.3, "other": 1}},
+		"elimination": scoring.Elimination{Sport: "run", StepMeters: 1500},
+	}
+	for name, scorer := range scorers {
+		for n := 1; n <= 4; n++ {
+			_, weekEnd := w.WeekBounds(n)
+			for _, now := range []time.Time{weekEnd.Add(-time.Second), weekEnd} {
+				w.Now = now
+				want, got := scorer.Score(w, participants, raw), scorer.Score(w, participants, totals)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s at %s: totals give %+v, raw activities %+v", name, now, got, want)
+				}
+			}
+		}
+	}
+}
+
+// BenchmarkActivities5000 measures what one leaderboard read loads for a
+// challenge of 5 000 participants over 12 weeks, 5 activities a week each
+// (300 000 activities), as SC-API-082 asks: the raw activities, as before,
+// and the totals (per week for the runs, per sport for the rest). Run on demand:
+//
+//	go test -tags integration -run '^$' -bench Activities5000 -benchtime 10x ./internal/leaderboard/
+func BenchmarkActivities5000(b *testing.B) {
+	pool := testdb.New(b)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		b.Fatal(err)
+	}
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		b.Fatal(err)
+	}
+	start := scoring.StartOfDay(2026, 3, 2, loc)
+	end := scoring.StartOfDay(2026, 5, 25, loc)
+	var challengeID string
+	if err := pool.QueryRow(b.Context(), `WITH u AS (
+			INSERT INTO users (auth_subject, pseudo) SELECT 'bench|' || g, 'bench_' || g FROM generate_series(1, 5000) g RETURNING id)
+		INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		SELECT 'Bench', 'public', 'America/Toronto', $1, $2, (SELECT id FROM u LIMIT 1) RETURNING id`, start, end).Scan(&challengeID); err != nil {
+		b.Fatal(err)
+	}
+	if _, err := pool.Exec(b.Context(), `INSERT INTO participants (challenge_id, user_id, joined_at) SELECT $1::uuid, id, $2::timestamptz FROM users`, challengeID, start); err != nil {
+		b.Fatal(err)
+	}
+	// 5 activities a week per participant: 3 runs, a ride and a yoga session.
+	if _, err := pool.Exec(b.Context(), `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters)
+		SELECT u.id, s.sport, $1::timestamptz + (w * 7 + s.day) * interval '1 day' + interval '7 hours', 1800,
+			CASE WHEN s.sport = 'yoga' THEN NULL ELSE 5000 + w * 100 END
+		FROM users u, generate_series(0, 11) w,
+			(VALUES ('run', 0), ('run', 2), ('run', 4), ('ride', 1), ('yoga', 3)) AS s(sport, day)`, start); err != nil {
+		b.Fatal(err)
+	}
+	if _, err := pool.Exec(b.Context(), `ANALYZE`); err != nil {
+		b.Fatal(err)
+	}
+	repo := NewRepository(gdb)
+	w := scoring.Window{Start: start, End: end, Location: loc}
+	// As Activities read them before SC-API-082, through GORM.
+	b.Run("raw activities", func(b *testing.B) {
+		for b.Loop() {
+			var rows []struct {
+				UserID          string
+				SportCode       string
+				StartedAt       time.Time
+				DurationSeconds int
+				DistanceMeters  *int
+			}
+			err := gdb.WithContext(b.Context()).Raw(`SELECT a.user_id, a.sport_code, a.started_at, a.duration_seconds, a.distance_meters
+				FROM participants p JOIN activities a ON a.user_id = p.user_id
+				WHERE p.challenge_id = @id AND p.status = 'active' AND a.deleted_at IS NULL AND a.started_at >= @from AND a.started_at < @to`,
+				map[string]any{"id": challengeID, "from": start, "to": end}).Scan(&rows).Error
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportMetric(float64(len(rows)), "rows")
+		}
+	})
+	b.Run("totals per week", func(b *testing.B) {
+		for b.Loop() {
+			totals, err := repo.Activities(b.Context(), challengeID, w, "run")
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportMetric(float64(len(totals)), "rows")
+		}
+	})
+}
