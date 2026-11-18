@@ -868,21 +868,26 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
-  /api/v1/invitations/{token}:
-    get:
-      operationId: getInvitation
+  /api/v1/invitations/open:
+    post:
+      operationId: openInvitation
       summary: Open an invitation link
       description: |
-        A limited preview of the challenge of the invitation. Opening the
-        link makes the user invited: while the invitation is valid, they
-        read the challenge (`GET /challenges/{challengeId}`) and may join
-        it. Opening it again changes nothing. An unknown or malformed token,
-        an expired or revoked invitation, one whose author may no longer
-        invite, and one to a deleted challenge answer the same 404
-        `invitation_invalid`.
+        A limited preview of the challenge of the invitation whose token is
+        in the body (never in the URL: the logs of the platform record the
+        URLs). Opening the link makes the user invited: while the invitation
+        is valid, they read the challenge (`GET /challenges/{challengeId}`)
+        and may join it. Opening it again changes nothing. An unknown or
+        malformed token, an expired or revoked invitation, one whose author
+        may no longer invite (or whose account is deleted), and one to a
+        deleted challenge answer the same 404 `invitation_invalid`.
       tags: [invitations]
-      parameters:
-        - $ref: "#/components/parameters/InvitationToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationTokenRequest"
       responses:
         "200":
           description: The preview of the challenge.
@@ -890,6 +895,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvitationPreview"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -898,21 +905,25 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
-  /api/v1/invitations/{token}/accept:
+  /api/v1/invitations/accept:
     post:
       operationId: acceptInvitation
       summary: Accept an invitation
       description: |
-        Opens the link, then joins its challenge under the rules of
-        `POST /challenges/{challengeId}/join`: never twice
+        Opens the link whose token is in the body, then joins its challenge
+        under the rules of `POST /challenges/{challengeId}/join`: never twice
         (`already_participant`), never after an abandon
         (`participation_abandoned`), with a complete profile
         (`profile_incomplete`). An invitation expires at the end of week 1,
         when joining closes: from that instant the answer is 404
         `invitation_invalid`, as for every invalid token.
       tags: [invitations]
-      parameters:
-        - $ref: "#/components/parameters/InvitationToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationTokenRequest"
       responses:
         "201":
           description: Joined; the challenge as the user now sees it.
@@ -920,6 +931,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChallengeDetail"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -1106,16 +1119,6 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Auth0 access token of a user (audience of the API); machine-to-machine tokens are refused.
-  parameters:
-    InvitationToken:
-      name: token
-      in: path
-      required: true
-      description: |
-        The token of an invitation link. No format is checked here: a
-        malformed token is an invalid invitation (404), never a 400.
-      schema:
-        type: string
   responses:
     Unauthorized:
       description: |
@@ -1781,11 +1784,23 @@ components:
       properties:
         token:
           type: string
-          description: The token of the link, to put in `/invitations/{token}`. Never answered again.
+          description: The token of the link, to send in the body of `POST /invitations/open` and `POST /invitations/accept`. Never answered again.
         expires_at:
           type: string
           format: date-time
           description: End of week 1 of the challenge, when the invitation expires.
+    InvitationTokenRequest:
+      description: |
+        The token of an invitation link, in the body so that no URL carries
+        it. No format is checked: a malformed token is an invalid invitation
+        (404), never a 400; a missing or empty one is a 400.
+      type: object
+      required: [token]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          minLength: 1
     InvitationPreview:
       type: object
       required: [challenge_id, title, starts_at, ends_at]

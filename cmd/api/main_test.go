@@ -197,6 +197,14 @@ func TestEveryRouteIsProtectedByDefault(t *testing.T) {
 			t.Errorf("GET %s got %d %q without a token, want 401 unauthenticated", path, status, code)
 		}
 	}
+	// The token of an invitation was in the path (SC-API-086): those routes
+	// are gone, and an old client falls to the protected default too.
+	const oldPathToken = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg" // #nosec G101 -- a fake token for a test
+	for method, path := range map[string]string{http.MethodGet: "/api/v1/invitations/" + oldPathToken, http.MethodPost: "/api/v1/invitations/" + oldPathToken + "/accept"} {
+		if status, code := serve(t, r, httptest.NewRequest(method, path, nil)); status != http.StatusUnauthorized || code != "unauthenticated" {
+			t.Errorf("%s %s got %d %q without a token, want 401 unauthenticated", method, path, status, code)
+		}
+	}
 	for name := range public {
 		if !slices.ContainsFunc(r.Routes(), func(ri gin.RouteInfo) bool { return ri.Method+" "+ri.Path == name }) {
 			t.Errorf("public route %s is not registered", name)

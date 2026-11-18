@@ -54,18 +54,19 @@ func (f fakeDetails) ChallengeDetail(_ context.Context, _, id string) (api.Chall
 // serve serves a request as cmd/api does (authentication, contract
 // validation, handler) and checks the response against the contract. No
 // access token is sent when authenticated is false.
-func serve(t *testing.T, svc *Service, method, target string, authenticated bool) (*httptest.ResponseRecorder, map[string]any) {
+func serve(t *testing.T, svc *Service, method, target, body string, authenticated bool) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
-	return serveWith(t, NewHandler(svc, fakeDetails{}), method, target, authenticated)
+	return serveWith(t, NewHandler(svc, fakeDetails{}), method, target, body, authenticated)
 }
 
-func serveWith(t *testing.T, h *Handler, method, target string, authenticated bool) (*httptest.ResponseRecorder, map[string]any) {
+func serveWith(t *testing.T, h *Handler, method, target, body string, authenticated bool) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
-	return serveLogged(t, h, io.Discard, method, target, authenticated)
+	return serveLogged(t, h, io.Discard, method, target, body, authenticated)
 }
 
-// serveLogged is serveWith with the server logs written to logs.
-func serveLogged(t *testing.T, h *Handler, logs io.Writer, method, target string, authenticated bool) (*httptest.ResponseRecorder, map[string]any) {
+// serveLogged is serveWith with the server logs written to logs. An empty
+// body sends none.
+func serveLogged(t *testing.T, h *Handler, logs io.Writer, method, target, body string, authenticated bool) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -92,12 +93,21 @@ func serveLogged(t *testing.T, h *Handler, logs io.Writer, method, target string
 	})
 
 	req := httptest.NewRequest(method, target, nil)
+	if body != "" {
+		req = httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if authenticated {
 		req.Header.Set("Authorization", "Bearer some.access.token")
 	}
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
-	apitest.ValidateResponse(t, httptest.NewRequest(method, target, nil), rec)
+	check := httptest.NewRequest(method, target, nil)
+	if body != "" {
+		check = httptest.NewRequest(method, target, strings.NewReader(body))
+		check.Header.Set("Content-Type", "application/json")
+	}
+	apitest.ValidateResponse(t, check, rec)
 
 	var out map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -105,6 +115,15 @@ func serveLogged(t *testing.T, h *Handler, logs io.Writer, method, target string
 	}
 	return rec, out
 }
+
+// The routes of a token (README §5.7: in the body, never in the URL).
+const (
+	openTarget   = "/api/v1/invitations/open"
+	acceptTarget = "/api/v1/invitations/accept"
+)
+
+// tokenBody is the body that carries token.
+func tokenBody(token string) string { return `{"token":"` + token + `"}` }
 
 func code(out map[string]any) any {
 	e, _ := out["error"].(map[string]any)
@@ -127,7 +146,7 @@ func TestCreateInvitation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{}
-			rec, out := serve(t, NewService(fakeChallenges{err: tt.refusal}, repo, clock.NewFake(now)), http.MethodPost, target, true)
+			rec, out := serve(t, NewService(fakeChallenges{err: tt.refusal}, repo, clock.NewFake(now)), http.MethodPost, target, "", true)
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
 			}
@@ -145,10 +164,10 @@ func TestCreateInvitation(t *testing.T) {
 	}
 }
 
-func TestGetInvitation(t *testing.T) {
+func TestOpenInvitation(t *testing.T) {
 	token, hash := validToken()
 	repo := &fakeRepository{valid: hash}
-	rec, out := serve(t, NewService(fakeChallenges{}, repo, clock.NewFake(now)), http.MethodGet, "/api/v1/invitations/"+token, true)
+	rec, out := serve(t, NewService(fakeChallenges{}, repo, clock.NewFake(now)), http.MethodPost, openTarget, tokenBody(token), true)
 	want := map[string]any{"challenge_id": challengeID, "title": "Spring run", "starts_at": "2026-03-02T05:00:00Z", "ends_at": "2026-04-13T04:00:00Z"}
 	if rec.Code != 200 || !reflect.DeepEqual(out, want) {
 		t.Fatalf("got %d %v, want 200 %v", rec.Code, out, want)
@@ -158,20 +177,20 @@ func TestGetInvitation(t *testing.T) {
 	}
 }
 
-// TestGetInvitationHiddenAfterTheLink: a challenge deleted right after the
+// TestOpenInvitationHiddenAfterTheLink: a challenge deleted right after the
 // link answers as any invalid invitation, never about the challenge.
-func TestGetInvitationHiddenAfterTheLink(t *testing.T) {
+func TestOpenInvitationHiddenAfterTheLink(t *testing.T) {
 	token, hash := validToken()
 	svc := NewService(fakeChallenges{previewErr: apperr.New(apperr.CodeChallengeNotFound, nil)}, &fakeRepository{valid: hash}, clock.NewFake(now))
-	rec, out := serve(t, svc, http.MethodGet, "/api/v1/invitations/"+token, true)
+	rec, out := serve(t, svc, http.MethodPost, openTarget, tokenBody(token), true)
 	if rec.Code != http.StatusNotFound || code(out) != "invitation_invalid" {
 		t.Fatalf("got %d %s, want 404 invitation_invalid", rec.Code, rec.Body)
 	}
 }
 
-// TestTokenIsNeverLoggedNorAnswered: the token is a bearer secret in the
-// path. Neither the logs nor the bodies carry it, on a success, a 404 and a
-// 500.
+// TestTokenIsNeverLoggedNorAnswered: the token is a bearer secret, sent in
+// the body. Neither the logs nor the answers carry it, on a success, a 404
+// and a 500.
 func TestTokenIsNeverLoggedNorAnswered(t *testing.T) {
 	token, hash := validToken()
 	unknown := "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg"
@@ -192,15 +211,15 @@ func TestTokenIsNeverLoggedNorAnswered(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			h := NewHandler(NewService(fakeChallenges{}, tt.repo, clock.NewFake(now)), tt.details)
-			get, _ := serveLogged(t, h, &logs, http.MethodGet, "/api/v1/invitations/"+tt.token, true)
-			accept, _ := serveLogged(t, h, &logs, http.MethodPost, "/api/v1/invitations/"+tt.token+"/accept", true)
+			get, _ := serveLogged(t, h, &logs, http.MethodPost, openTarget, tokenBody(tt.token), true)
+			accept, _ := serveLogged(t, h, &logs, http.MethodPost, acceptTarget, tokenBody(tt.token), true)
 			if get.Code != tt.wantStatus && accept.Code != tt.wantStatus {
 				t.Fatalf("statuses %d and %d, want a %d", get.Code, accept.Code, tt.wantStatus)
 			}
 			if logs.Len() == 0 {
 				t.Fatal("nothing logged: the test reads no log")
 			}
-			for where, text := range map[string]string{"logs": logs.String(), "GET body": get.Body.String(), "accept body": accept.Body.String()} {
+			for where, text := range map[string]string{"logs": logs.String(), "open answer": get.Body.String(), "accept answer": accept.Body.String()} {
 				if strings.Contains(text, tt.token) {
 					t.Fatalf("the token is in the %s: %s", where, text)
 				}
@@ -215,22 +234,20 @@ func TestInvalidInvitationIsTheSameAnswer(t *testing.T) {
 	_, hash := validToken()
 	unknown := "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg"
 	var bodies []map[string]any
-	for _, target := range []string{"/api/v1/invitations/" + unknown, "/api/v1/invitations/not-a-token", "/api/v1/invitations/" + unknown + "/accept", "/api/v1/invitations/not-a-token/accept"} {
-		method := http.MethodGet
-		if len(bodies) >= 2 {
-			method = http.MethodPost
+	for _, target := range []string{openTarget, acceptTarget} {
+		for _, token := range []string{unknown, "not-a-token"} {
+			var joined [2]string
+			rec, out := serve(t, NewService(fakeChallenges{joined: &joined}, &fakeRepository{valid: hash}, clock.NewFake(now)), http.MethodPost, target, tokenBody(token), true)
+			if rec.Code != http.StatusNotFound || code(out) != "invitation_invalid" {
+				t.Fatalf("%s with %s: got %d %v, want 404 invitation_invalid", target, token, rec.Code, out)
+			}
+			if joined != [2]string{} {
+				t.Fatalf("%s with %s: joined despite the invalid invitation", target, token)
+			}
+			e, _ := out["error"].(map[string]any)
+			delete(e, "request_id")
+			bodies = append(bodies, out)
 		}
-		var joined [2]string
-		rec, out := serve(t, NewService(fakeChallenges{joined: &joined}, &fakeRepository{valid: hash}, clock.NewFake(now)), method, target, true)
-		if rec.Code != http.StatusNotFound || code(out) != "invitation_invalid" {
-			t.Fatalf("%s %s: got %d %v, want 404 invitation_invalid", method, target, rec.Code, out)
-		}
-		if joined != [2]string{} {
-			t.Fatalf("%s %s: joined despite the invalid invitation", method, target)
-		}
-		e, _ := out["error"].(map[string]any)
-		delete(e, "request_id")
-		bodies = append(bodies, out)
 	}
 	for _, b := range bodies[1:] {
 		if !reflect.DeepEqual(bodies[0], b) {
@@ -241,7 +258,6 @@ func TestInvalidInvitationIsTheSameAnswer(t *testing.T) {
 
 func TestAcceptInvitation(t *testing.T) {
 	token, hash := validToken()
-	target := "/api/v1/invitations/" + token + "/accept"
 	tests := []struct {
 		name       string
 		refusal    error
@@ -258,7 +274,7 @@ func TestAcceptInvitation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var joined [2]string
 			svc := NewService(fakeChallenges{joinErr: tt.refusal, joined: &joined}, &fakeRepository{valid: hash}, clock.NewFake(now))
-			rec, out := serve(t, svc, http.MethodPost, target, true)
+			rec, out := serve(t, svc, http.MethodPost, acceptTarget, tokenBody(token), true)
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
 			}
@@ -282,7 +298,7 @@ func TestAcceptInvitationDetailFails(t *testing.T) {
 	var joined [2]string
 	svc := NewService(fakeChallenges{joined: &joined}, &fakeRepository{valid: hash}, clock.NewFake(now))
 	h := NewHandler(svc, fakeDetails{err: errors.New("connection refused")})
-	rec, out := serveWith(t, h, http.MethodPost, "/api/v1/invitations/"+token+"/accept", true)
+	rec, out := serveWith(t, h, http.MethodPost, acceptTarget, tokenBody(token), true)
 	if rec.Code != http.StatusInternalServerError || code(out) != "internal_error" || strings.Contains(rec.Body.String(), "connection refused") {
 		t.Fatalf("got %d %s, want 500 internal_error without the cause", rec.Code, rec.Body)
 	}
@@ -293,7 +309,7 @@ func TestAcceptInvitationDetailFails(t *testing.T) {
 	// The challenge deleted right after the join: never an answer about a
 	// challenge on a route of an invitation.
 	h = NewHandler(svc, fakeDetails{err: apperr.New(apperr.CodeChallengeNotFound, nil)})
-	rec, out = serveWith(t, h, http.MethodPost, "/api/v1/invitations/"+token+"/accept", true)
+	rec, out = serveWith(t, h, http.MethodPost, acceptTarget, tokenBody(token), true)
 	if rec.Code != http.StatusNotFound || code(out) != "invitation_invalid" {
 		t.Fatalf("got %d %s, want 404 invitation_invalid", rec.Code, rec.Body)
 	}
@@ -304,19 +320,50 @@ func TestAcceptInvitationDetailFails(t *testing.T) {
 func TestInvitationRoutesRequireAuthentication(t *testing.T) {
 	token, hash := validToken()
 	routes := map[string]string{
-		"/api/v1/challenges/" + challengeID + "/invitations": http.MethodPost,
-		"/api/v1/invitations/" + token:                       http.MethodGet,
-		"/api/v1/invitations/" + token + "/accept":           http.MethodPost,
+		"/api/v1/challenges/" + challengeID + "/invitations": "",
+		openTarget:   tokenBody(token),
+		acceptTarget: tokenBody(token),
 	}
-	for target, method := range routes {
+	for target, body := range routes {
 		var joined [2]string
 		repo := &fakeRepository{valid: hash}
-		rec, out := serve(t, NewService(fakeChallenges{joined: &joined}, repo, clock.NewFake(now)), method, target, false)
+		rec, out := serve(t, NewService(fakeChallenges{joined: &joined}, repo, clock.NewFake(now)), http.MethodPost, target, body, false)
 		if rec.Code != http.StatusUnauthorized || code(out) != "unauthenticated" {
-			t.Fatalf("%s %s: got %d %v, want 401 unauthenticated", method, target, rec.Code, out)
+			t.Fatalf("POST %s: got %d %v, want 401 unauthenticated", target, rec.Code, out)
 		}
 		if repo.created != nil || repo.linkedUser != "" || joined != [2]string{} {
-			t.Fatalf("%s %s: something was written without authentication", method, target)
+			t.Fatalf("POST %s: something was written without authentication", target)
+		}
+	}
+}
+
+// TestInvitationTokenMissing: the body must carry a token, and only it (400
+// validation_failed); a token in the query string is never read; no answer
+// carries the token.
+func TestInvitationTokenMissing(t *testing.T) {
+	token, hash := validToken()
+	tests := []struct {
+		name, query, body string
+	}{
+		{name: "no body", body: ""},
+		{name: "empty object", body: `{}`},
+		{name: "empty token", body: `{"token":""}`},
+		{name: "malformed JSON", body: `{"token":`},
+		{name: "unknown property", body: `{"token":"` + token + `","extra":1}`},
+		{name: "token in the query string only", query: "?token=" + token, body: ""},
+	}
+	for _, target := range []string{openTarget, acceptTarget} {
+		for _, tt := range tests {
+			t.Run(target+" "+tt.name, func(t *testing.T) {
+				repo := &fakeRepository{valid: hash}
+				rec, out := serve(t, NewService(fakeChallenges{}, repo, clock.NewFake(now)), http.MethodPost, target+tt.query, tt.body, true)
+				if rec.Code != http.StatusBadRequest || code(out) != "validation_failed" {
+					t.Fatalf("got %d %v, want 400 validation_failed", rec.Code, out)
+				}
+				if repo.linkedUser != "" || strings.Contains(rec.Body.String(), token) {
+					t.Fatalf("linked %q, answer %s: want nothing linked and no token in the answer", repo.linkedUser, rec.Body)
+				}
+			})
 		}
 	}
 }

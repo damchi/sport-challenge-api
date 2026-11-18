@@ -120,7 +120,7 @@ func (unimplemented) CreateInvitation(context.Context, api.CreateInvitationReque
 	return nil, errNotImplemented
 }
 
-func (unimplemented) GetInvitation(context.Context, api.GetInvitationRequestObject) (api.GetInvitationResponseObject, error) {
+func (unimplemented) OpenInvitation(context.Context, api.OpenInvitationRequestObject) (api.OpenInvitationResponseObject, error) {
 	return nil, errNotImplemented
 }
 
