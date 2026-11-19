@@ -19,6 +19,7 @@ import (
 // listFixture holds two users and challenges around now (2026-03-04 15:00
 // UTC), inserted directly to control their dates.
 type listFixture struct {
+	pool      *pgxpool.Pool
 	svc       *Service
 	me, other string
 }
@@ -31,6 +32,7 @@ func newListFixture(t *testing.T) listFixture {
 		t.Fatal(err)
 	}
 	f := listFixture{
+		pool:  pool,
 		svc:   NewService(NewRepository(gdb), nil, nil, clock.NewFake(now)),
 		me:    insertTestUser(t, pool, "email|me"),
 		other: insertTestUser(t, pool, "email|other"),
@@ -166,6 +168,80 @@ func TestListCountsAndMyStatus(t *testing.T) {
 		if s.MyStatus != nil || s.ParticipantCount != 0 {
 			t.Errorf("%s = %d participants, my status %v, want none", s.Title, s.ParticipantCount, s.MyStatus)
 		}
+	}
+}
+
+// TestListRoleAndStatus gives every role and status in the list, the same
+// as the detail of each challenge at the same instant.
+func TestListRoleAndStatus(t *testing.T) {
+	f := newListFixture(t)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.pool.Exec(t.Context(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const (
+		g = "00000000-0000-0000-0000-000000000010"
+		b = "00000000-0000-0000-0000-0000000000b0"
+		a = "00000000-0000-0000-0000-0000000000a1"
+	)
+	// Me creator of B, a participant of G; invited to A by its creator.
+	exec("INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", b, f.me)
+	exec("INSERT INTO participants (challenge_id, user_id, status, joined_at) VALUES ($1, $2, 'active', $3)", g, f.me, now.Add(-40*24*time.Hour))
+	exec("INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", a, f.other)
+	var invitation string
+	if err := f.pool.QueryRow(t.Context(), `INSERT INTO invitations (challenge_id, invited_by, token_hash, expires_at, created_at)
+		VALUES ($1, $2, sha256('t'::bytea), $3, $4) RETURNING id`, a, f.other, now.Add(24*time.Hour), now).Scan(&invitation); err != nil {
+		t.Fatal(err)
+	}
+	exec("INSERT INTO invitation_recipients VALUES ($1, $2, $3)", invitation, f.me, now)
+
+	type want struct {
+		role   Role
+		status string
+	}
+	tests := []struct {
+		scope string
+		want  map[string]want
+	}{
+		{scope: ScopePublic, want: map[string]want{
+			"G finished long ago":          {RoleParticipant, StatusFinished},
+			"E finished":                   {RoleOutsider, StatusFinished},
+			"E2 finished, same start as E": {RoleOutsider, StatusFinished},
+			"B ongoing, mine":              {RoleCreator, StatusOngoing},
+			"A upcoming":                   {RoleInvited, StatusUpcoming},
+			"H upcoming, same start as A":  {RoleOutsider, StatusUpcoming},
+		}},
+		{scope: ScopeMine, want: map[string]want{
+			"G finished long ago":    {RoleParticipant, StatusFinished},
+			"B ongoing, mine":        {RoleCreator, StatusOngoing},
+			"D private, I abandoned": {RoleAbandoned, StatusUpcoming},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.scope, func(t *testing.T) {
+			page, err := f.svc.List(t.Context(), f.me, tt.scope, "", 20, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Items) != len(tt.want) {
+				t.Fatalf("got %q, want %d challenges", titles(page.Items), len(tt.want))
+			}
+			for _, s := range page.Items {
+				w, ok := tt.want[s.Title]
+				if !ok || s.Role != w.role || s.Status != w.status {
+					t.Errorf("%s = role %v, status %q, want %+v", s.Title, s.Role, s.Status, w)
+				}
+				d, err := f.svc.Get(t.Context(), f.me, s.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if d.Role != s.Role || d.Status != s.Status {
+					t.Errorf("%s: detail role %v, status %q, list %v, %q", s.Title, d.Role, d.Status, s.Role, s.Status)
+				}
+			}
+		})
 	}
 }
 

@@ -156,6 +156,9 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 			StartsAt:         c.StartsAt.UTC(),
 			EndsAt:           c.EndsAt.UTC(),
 			ParticipantCount: c.ParticipantCount,
+			// Both schemas declare the same my_role enum (openapi.yaml).
+			MyRole: api.ChallengeSummaryMyRole(roleName(c.Role)),
+			Status: api.ChallengeSummaryStatus(c.Status),
 		}
 		if c.MyStatus != nil {
 			status := api.ChallengeSummaryMyStatus(*c.MyStatus)

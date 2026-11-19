@@ -140,6 +140,14 @@ type Summary struct {
 	ParticipantCount int
 	// MyStatus is the actor's participation, nil when not a participant.
 	MyStatus *string
+	// Creator and Invited are the rest of the actor's membership, read by
+	// the query; the service turns the membership into Role.
+	Creator bool
+	Invited bool
+	// Role and Status are computed by the service, Status at the instant of
+	// the request.
+	Role   Role   `gorm:"-"`
+	Status string `gorm:"-"`
 }
 
 // Page is a page of a listing; Next is nil on the last page.

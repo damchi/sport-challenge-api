@@ -59,11 +59,14 @@ func (r *Repository) Create(ctx context.Context, c Challenge, joinedAt time.Time
 }
 
 // listColumns are the columns of a Summary; participant_count counts every
-// participation, abandoned included.
+// participation, abandoned included. The membership of @actor is read as in
+// membershipQuery, so a summary gives the same role as the challenge itself.
 const listColumns = `
 SELECT c.id, c.title, c.visibility, c.timezone, c.starts_at, c.ends_at,
        (SELECT count(*) FROM participants p WHERE p.challenge_id = c.id) AS participant_count,
-       me.status AS my_status
+       me.status AS my_status,
+       EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
+       ` + invitedColumn + ` AS invited
 FROM challenges c
 LEFT JOIN participants me ON me.challenge_id = c.id AND me.user_id = @actor
 WHERE c.deleted_at IS NULL`
@@ -133,13 +136,17 @@ var errChallengeNotFound = errors.New("challenge not found")
 const membershipQuery = `SELECT c.*,
 	EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
 	(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant,
-	EXISTS (SELECT 1 FROM invitation_recipients r JOIN invitations i ON i.id = r.invitation_id
+	` + invitedColumn + ` AS invited
+	FROM challenges c WHERE c.id = @id AND c.deleted_at IS NULL`
+
+// invitedColumn tells whether @actor is invited to challenge c at @now (see
+// membershipQuery); List reads it too.
+const invitedColumn = `EXISTS (SELECT 1 FROM invitation_recipients r JOIN invitations i ON i.id = r.invitation_id
 		WHERE r.user_id = @actor AND i.challenge_id = c.id AND i.revoked_at IS NULL AND i.expires_at > @now
 		AND EXISTS (SELECT 1 FROM users WHERE id = i.invited_by AND anonymized_at IS NULL)
 		AND (EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = i.invited_by)
 			OR (c.members_can_invite AND EXISTS (SELECT 1 FROM participants
-				WHERE challenge_id = c.id AND user_id = i.invited_by AND status = 'active')))) AS invited
-	FROM challenges c WHERE c.id = @id AND c.deleted_at IS NULL`
+				WHERE challenge_id = c.id AND user_id = i.invited_by AND status = 'active'))))`
 
 // readWithMembership runs membershipQuery on gdb, the invitations judged at
 // now. A missing or deleted challenge gives errChallengeNotFound.
