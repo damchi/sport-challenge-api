@@ -77,7 +77,7 @@ func TestRecordStoresTheActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Created || !slices.Equal(got.ChallengeIDs, []string{"c1", "c2"}) {
+	if !got.Created || !slices.Equal(challengeIDs(got.Contributions), []string{"c1", "c2"}) {
 		t.Fatalf("Record() = %+v, want created, counting in both challenges", got)
 	}
 	var source string
@@ -98,7 +98,7 @@ func TestRecordStoresTheActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Created || again.ID != got.ID || !again.StartedAt.Equal(got.StartedAt) || !slices.Equal(again.ChallengeIDs, got.ChallengeIDs) || f.count() != 1 {
+	if again.Created || again.ID != got.ID || !again.StartedAt.Equal(got.StartedAt) || !slices.Equal(challengeIDs(again.Contributions), challengeIDs(got.Contributions)) || f.count() != 1 {
 		t.Fatalf("again %+v, %d rows, want the first activity and one row", again, f.count())
 	}
 

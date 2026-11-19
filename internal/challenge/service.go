@@ -431,10 +431,10 @@ func (s *Service) Memberships(ctx context.Context, userID string) ([]UserChallen
 	return ms, nil
 }
 
-// ActivitiesScope returns challenge id with the membership of userID in it,
-// for actorID to list the activities of userID there, once the rule
-// (ActivitiesRefusal) allows it. A missing or deleted challenge answers 404
-// challenge_not_found.
+// ActivitiesScope returns challenge id with the membership of userID in it
+// and its distance factors, for actorID to list the activities of userID
+// there, once the rule (ActivitiesRefusal) allows it. A missing or deleted
+// challenge answers 404 challenge_not_found.
 func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID string) (UserChallenge, error) {
 	now := s.clock.Now()
 	c, actor, err := s.repo.Get(ctx, id, actorID, now)
@@ -451,7 +451,18 @@ func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID strin
 	if err := ActivitiesRefusal(actor, target, c.Visibility); err != nil {
 		return UserChallenge{}, err
 	}
-	return UserChallenge{ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Membership: target}, nil
+	cats, err := s.repo.Categories(ctx, c.ID)
+	if err != nil {
+		return UserChallenge{}, fmt.Errorf("activities scope: %w", err)
+	}
+	out := UserChallenge{ID: c.ID, Title: c.Title, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Membership: target}
+	for _, cat := range cats {
+		if cat.Type == CategoryCumulativeDistance {
+			out.Factors = cat.Params.Factors
+			break
+		}
+	}
+	return out, nil
 }
 
 // Exclude makes targetID abandon challenge id on behalf of actorID, one of

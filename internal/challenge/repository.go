@@ -234,22 +234,28 @@ func (r *Repository) LastCreatorChallenges(ctx context.Context, userID string, n
 
 // Memberships returns the challenges, not deleted, finished ones included,
 // that userID joined, whatever the status of the participation, with their
-// membership, by start then id. It reads in the transaction of ctx, if any
-// (recording an activity).
+// membership and their distance factors, by start then id. It reads in the
+// transaction of ctx, if any (recording an activity). A challenge without a
+// cumulative distance category still appears, with no factors (outer join):
+// the week lock must see every challenge joined.
 func (r *Repository) Memberships(ctx context.Context, userID string) ([]UserChallenge, error) {
 	var rows []struct {
-		ID          string
-		Timezone    string
-		StartsAt    time.Time
-		EndsAt      time.Time
-		Creator     bool
-		Participant string
+		ID             string
+		Title          string
+		Timezone       string
+		StartsAt       time.Time
+		EndsAt         time.Time
+		Creator        bool
+		Participant    string
+		DistanceParams Params
 	}
-	err := db.Conn(ctx, r.db).Raw(`SELECT c.id, c.timezone, c.starts_at, c.ends_at, p.status AS participant,
-		EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = p.user_id) AS creator
+	err := db.Conn(ctx, r.db).Raw(`SELECT c.id, c.title, c.timezone, c.starts_at, c.ends_at, p.status AS participant,
+		EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = p.user_id) AS creator,
+		COALESCE(cat.params, '{}') AS distance_params
 		FROM participants p JOIN challenges c ON c.id = p.challenge_id
+		LEFT JOIN categories cat ON cat.challenge_id = c.id AND cat.type = ?
 		WHERE p.user_id = ? AND c.deleted_at IS NULL
-		ORDER BY c.starts_at, c.id`, userID).Scan(&rows).Error
+		ORDER BY c.starts_at, c.id`, CategoryCumulativeDistance, userID).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list memberships: %w", err)
 	}
@@ -257,9 +263,11 @@ func (r *Repository) Memberships(ctx context.Context, userID string) ([]UserChal
 	for _, row := range rows {
 		out = append(out, UserChallenge{
 			ID:         row.ID,
+			Title:      row.Title,
 			Timezone:   row.Timezone,
 			StartsAt:   row.StartsAt,
 			EndsAt:     row.EndsAt,
+			Factors:    row.DistanceParams.Factors,
 			Membership: Membership{Creator: row.Creator, Participant: ParticipantStatus(row.Participant)},
 		})
 	}

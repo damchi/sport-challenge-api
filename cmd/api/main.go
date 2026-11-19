@@ -220,9 +220,11 @@ func toParticipation(m challenge.UserChallenge) (activity.Participation, error) 
 	}
 	return activity.Participation{
 		ChallengeID: m.ID,
+		Title:       m.Title,
 		StartsAt:    m.StartsAt,
 		EndsAt:      m.EndsAt,
 		Location:    loc,
+		Factors:     m.Factors,
 		Active:      m.Participant == challenge.ParticipantActive,
 	}, nil
 }

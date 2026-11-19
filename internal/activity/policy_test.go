@@ -1,6 +1,8 @@
 package activity
 
 import (
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -145,7 +147,7 @@ func TestIsLocked(t *testing.T) {
 	}
 }
 
-func TestCountsIn(t *testing.T) {
+func TestContributions(t *testing.T) {
 	// Monday 2026-06-01 and Thursday 2026-06-04, 3 weeks each.
 	monday := participation(t, [3]int{2026, 6, 1}, 3)
 	monday.ChallengeID = "monday"
@@ -173,15 +175,67 @@ func TestCountsIn(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CountsIn(tt.startedAt, tt.challenges)
-			if len(got) != len(tt.want) {
-				t.Fatalf("CountsIn = %v, want %v", got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Fatalf("CountsIn = %v, want %v", got, tt.want)
-				}
+			got := challengeIDs(Contributions(Activity{SportCode: "run", StartedAt: tt.startedAt, DurationSeconds: 60}, tt.challenges))
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("Contributions in %v, want %v", got, tt.want)
 			}
 		})
 	}
+}
+
+// TestContributionsWeighDistance checks what an activity brings to each
+// challenge: its duration, and its distance weighted by the factor of the
+// challenge (scoring.Distance).
+func TestContributionsWeighDistance(t *testing.T) {
+	// Both from Monday 2026-06-01: an activity on Tuesday counts in both.
+	run := participation(t, [3]int{2026, 6, 1}, 3)
+	run.ChallengeID, run.Title = "run", "Défi 100 km"
+	run.Factors = map[string]float64{"run": 1, "ride": 0.3}
+	bike := participation(t, [3]int{2026, 6, 1}, 3)
+	bike.ChallengeID, bike.Title = "bike", "Vélo d'été"
+	bike.Factors = map[string]float64{"run": 1, "ride": 1}
+	at := toronto(t, 2026, 6, 2, 10)
+	m := func(v int) *int { return &v }
+
+	tests := []struct {
+		name     string
+		sport    string
+		distance *int
+		want     []Contribution
+	}{
+		{name: "ride ×0.3 in one, ×1 in the other", sport: "ride", distance: m(20000), want: []Contribution{
+			{ChallengeID: "run", ChallengeTitle: "Défi 100 km", DistanceMeters: m(6000), DurationSeconds: 3600},
+			{ChallengeID: "bike", ChallengeTitle: "Vélo d'été", DistanceMeters: m(20000), DurationSeconds: 3600},
+		}},
+		{name: "rounded to the meter", sport: "ride", distance: m(1001), want: []Contribution{
+			{ChallengeID: "run", ChallengeTitle: "Défi 100 km", DistanceMeters: m(300), DurationSeconds: 3600},
+			{ChallengeID: "bike", ChallengeTitle: "Vélo d'été", DistanceMeters: m(1001), DurationSeconds: 3600},
+		}},
+		{name: "sport without distance: duration only", sport: "yoga", want: []Contribution{
+			{ChallengeID: "run", ChallengeTitle: "Défi 100 km", DurationSeconds: 3600},
+			{ChallengeID: "bike", ChallengeTitle: "Vélo d'été", DurationSeconds: 3600},
+		}},
+		{name: "sport without a factor in the challenge", sport: "rowing", distance: m(5000), want: []Contribution{
+			{ChallengeID: "run", ChallengeTitle: "Défi 100 km", DurationSeconds: 3600},
+			{ChallengeID: "bike", ChallengeTitle: "Vélo d'été", DurationSeconds: 3600},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := Activity{SportCode: tt.sport, StartedAt: at, DurationSeconds: 3600, DistanceMeters: tt.distance}
+			got := Contributions(a, []Participation{run, bike})
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Contributions = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// challengeIDs are the challenges of contributions, nil for none.
+func challengeIDs(contributions []Contribution) []string {
+	var ids []string
+	for _, c := range contributions {
+		ids = append(ids, c.ChallengeID)
+	}
+	return ids
 }

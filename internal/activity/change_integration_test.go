@@ -61,7 +61,7 @@ func TestUpdateStoresTheActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != rec.ID || got.Source != SourceManual || got.IdempotencyKey == nil || len(got.ChallengeIDs) != 1 {
+	if got.ID != rec.ID || got.Source != SourceManual || got.IdempotencyKey == nil || len(got.Contributions) != 1 {
 		t.Fatalf("Update() = %+v, want the activity, manual, its key, counting in c1", got)
 	}
 	s := f.stored(rec.ID)

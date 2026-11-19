@@ -138,3 +138,53 @@ func TestDistanceScore(t *testing.T) {
 		})
 	}
 }
+
+func TestDistanceWeighted(t *testing.T) {
+	d := Distance{Factors: map[string]float64{"run": 1, "ride": 0.3, "rowing": 0.55}}
+	tests := []struct {
+		name     string
+		sport    string
+		distance *int
+		want     *int
+	}{
+		{name: "run ×1", sport: "run", distance: meters(8200), want: meters(8200)},
+		{name: "ride ×0.3", sport: "ride", distance: meters(20000), want: meters(6000)},
+		// 1001 × 0.3 = 300.3: rounded to the meter.
+		{name: "rounded down", sport: "ride", distance: meters(1001), want: meters(300)},
+		// 1 × 0.55 = 0.55: half up, as the ranking.
+		{name: "rounded half up", sport: "rowing", distance: meters(1), want: meters(1)},
+		{name: "sport without a factor", sport: "yoga", distance: meters(1000), want: nil},
+		{name: "no distance", sport: "run", distance: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := d.Weighted(tt.sport, tt.distance)
+			if (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+				t.Fatalf("Weighted = %v, want %v", deref(got), deref(tt.want))
+			}
+		})
+	}
+}
+
+// TestDistanceWeightedMatchesScore checks that the weighted distance of a
+// lone activity is its value in the ranking.
+func TestDistanceWeightedMatchesScore(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 2)
+	for _, sport := range []string{"run", "ride", "rowing", "roller"} {
+		for _, m := range []int{1, 5, 333, 1001, 8217, 42195} {
+			a := Activity{UserID: "a", SportCode: sport, StartedAt: w.Start, DurationSeconds: 60, DistanceMeters: meters(m)}
+			entries := Distance{Factors: suggested}.Score(w, []Participant{{UserID: "a"}}, []Activity{a})
+			got := Distance{Factors: suggested}.Weighted(sport, meters(m))
+			if got == nil || *got != entries[0].Value {
+				t.Errorf("%s %d m: weighted %v, ranking %d", sport, m, deref(got), entries[0].Value)
+			}
+		}
+	}
+}
+
+func deref(p *int) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}

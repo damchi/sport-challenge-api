@@ -199,19 +199,24 @@ func toAPI(rec Recorded) (api.Activity, error) {
 		DurationSeconds: rec.DurationSeconds,
 		DistanceMeters:  rec.DistanceMeters,
 		Source:          api.ActivitySource(rec.Source),
-		ChallengeIds:    make([]uuid.UUID, 0, len(rec.ChallengeIDs)),
+		Contributions:   make([]api.ActivityContribution, 0, len(rec.Contributions)),
 		Locked:          rec.Locked,
 	}
 	if rec.DistanceMeters != nil {
 		v := Speed(*rec.DistanceMeters, rec.DurationSeconds)
 		out.SpeedMps, out.PaceSecondsPerKm = &v.MetersPerSecond, &v.SecondsPerKilometer
 	}
-	for _, c := range rec.ChallengeIDs {
-		cid, err := uuid.Parse(c)
+	for _, c := range rec.Contributions {
+		cid, err := uuid.Parse(c.ChallengeID)
 		if err != nil {
 			return api.Activity{}, fmt.Errorf("challenge id: %w", err)
 		}
-		out.ChallengeIds = append(out.ChallengeIds, cid)
+		out.Contributions = append(out.Contributions, api.ActivityContribution{
+			ChallengeId:     cid,
+			ChallengeTitle:  c.ChallengeTitle,
+			DistanceMeters:  c.DistanceMeters,
+			DurationSeconds: c.DurationSeconds,
+		})
 	}
 	return out, nil
 }
