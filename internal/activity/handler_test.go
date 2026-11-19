@@ -156,6 +156,25 @@ func TestCreateActivityWithoutDistanceOrChallenge(t *testing.T) {
 	}
 }
 
+// A sport without a factor in the challenge brings its duration only: the
+// distance of the contribution is null, never left out.
+func TestCreateActivityContributionWithoutDistance(t *testing.T) {
+	c1 := challengeOf(t, "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b")
+	svc := newService(t, &fakeRepository{}, fakeParticipations{challenges: []Participation{c1}})
+	rec, body := postActivity(t, svc, `{"sport_code":"yoga","started_at":"2026-06-10T11:00:00Z","duration_seconds":3600}`, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d (%s), want 201", rec.Code, rec.Body)
+	}
+	cs, _ := body["contributions"].([]any)
+	if len(cs) != 1 {
+		t.Fatalf("contributions %v, want one", body["contributions"])
+	}
+	c, _ := cs[0].(map[string]any)
+	if d, present := c["distance_meters"]; !present || d != nil || c["duration_seconds"] != 3600.0 {
+		t.Fatalf("contribution %v, want distance_meters null and the duration", c)
+	}
+}
+
 func TestCreateActivityIdempotencyKey(t *testing.T) {
 	key := "1f0c6e2a-5b7d-4c9e-8a1b-3d5f7e9a0c2b"
 	repo := &fakeRepository{}
