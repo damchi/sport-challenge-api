@@ -125,12 +125,13 @@ Ne jamais coller un secret dans un ticket, un message ou un journal. Un secret e
   - l'effet d'une suppression de compte (anonymisation : pseudo, prénom, nom et e-mail effacés ; résultats des challenges terminés conservés sous un nom neutre) ;
   - la personne responsable de la protection des renseignements personnels et comment la joindre.
 - [ ] **Loi 25** : validation juridique faite (consentement, personne responsable désignée, registre des incidents ouvert, évaluation des facteurs relatifs à la vie privée du système, évaluation avant tout transfert hors Québec).
-- [ ] **Accord de traitement des données** signé avec **Auth0** (Okta), et région du tenant vérifiée (Canada).
+- [ ] **Accord de traitement des données** signé avec **Auth0** (Okta), et région du tenant vérifiée (Canada) ; ce tenant est unique, partagé avec le développement local (`docs/auth0-setup.md`).
 - [ ] **Inventaire des sous-traitants** tenu à jour, avec la région de chacun : GCP (Montréal), Auth0 (Canada), le fournisseur de courriel configuré dans Auth0 (il traite les adresses courriel, `docs/auth0-setup.md`), et tout ajout.
 
 ### Vérifications techniques
 
 - [ ] **Suppression de compte testée** en production avec un compte de test : anonymisation dans l'API, abandon des challenges à venir ou en cours, résultats des challenges terminés sous un nom neutre, **utilisateur supprimé chez Auth0** (et reprise par `retry-auth0-deletions` si Auth0 a échoué).
+- [ ] **Tenant Auth0 partagé** : `Sport Challenge Web` n'a que les URL de production (aucun `localhost`) et n'est autorisée que sur `https://api.sport-challenge` ; la SPA locale n'est autorisée que sur `https://api.local.sport-challenge` ; utilisateurs de test nettoyés du tenant (`docs/auth0-setup.md`, « Conséquences du tenant unique »).
 - [ ] **Sauvegardes testées** : restauration d'une sauvegarde (ou clone à un instant donné) vers une **instance séparée**, puis vérification des données ; durée de l'opération notée ici.
 - [ ] **Quotas** vérifiés : instances maximales de Cloud Run, connexions Cloud SQL, quotas de l'API de gestion Auth0 (suppressions) et du plan Auth0 (utilisateurs actifs).
 - [ ] **Budget** : alertes de budget actives (50 %, 90 %, 100 %) et reçues par une adresse lue ; coût fixe de Cloud SQL (`db-f1-micro`, zonale) connu.

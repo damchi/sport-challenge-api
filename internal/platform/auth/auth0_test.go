@@ -277,11 +277,11 @@ func TestVerifyLimitsRefreshesOnUnknownKeys(t *testing.T) {
 }
 
 func TestTenantOptions(t *testing.T) {
-	got := tenantOptions("sport-challenge-dev.ca.auth0.com", "https://api.dev.sport-challenge")
+	got := tenantOptions("sport-challenge-prod.ca.auth0.com", "https://api.sport-challenge")
 	want := verifierOptions{
-		jwksURL:                "https://sport-challenge-dev.ca.auth0.com/.well-known/jwks.json",
-		issuer:                 "https://sport-challenge-dev.ca.auth0.com/",
-		audience:               "https://api.dev.sport-challenge",
+		jwksURL:                "https://sport-challenge-prod.ca.auth0.com/.well-known/jwks.json",
+		issuer:                 "https://sport-challenge-prod.ca.auth0.com/",
+		audience:               "https://api.sport-challenge",
 		unknownKeyRefreshEvery: unknownKeyRefreshEvery,
 	}
 	if got != want {
