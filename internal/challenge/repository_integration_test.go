@@ -327,4 +327,25 @@ func TestMembershipsListsTheChallengesJoined(t *testing.T) {
 			t.Fatalf("membership %+v, want the title %q and the factors %v", m, created.Title, factors)
 		}
 	}
+
+	// Without a distance category (never the case of a challenge created by
+	// the API), a challenge is still listed, with no factors: the week lock
+	// reads every challenge joined.
+	if _, err := pool.Exec(t.Context(), "DELETE FROM categories WHERE challenge_id = $1 AND type = $2", joined.ID, CategoryCumulativeDistance); err != nil {
+		t.Fatal(err)
+	}
+	got, err = svc.Memberships(t.Context(), creatorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(got))
+	for _, m := range got {
+		ids = append(ids, m.ID)
+		if m.ID == joined.ID && m.Factors != nil {
+			t.Fatalf("membership %+v, want no factors without a distance category", m)
+		}
+	}
+	if !slices.Contains(ids, joined.ID) || len(got) != len(want) {
+		t.Fatalf("Memberships() = %v, want every challenge joined, %s included", ids, joined.ID)
+	}
 }

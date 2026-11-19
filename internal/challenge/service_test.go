@@ -1202,6 +1202,18 @@ func TestServiceMemberships(t *testing.T) {
 	}
 }
 
+// TestServiceActivitiesScopeWithoutDistanceCategory: no factors, never an
+// error, so an activity there brings its duration only.
+func TestServiceActivitiesScopeWithoutDistanceCategory(t *testing.T) {
+	c := stored(VisibilityPublic)
+	c.Categories = []Category{{Type: CategoryCumulativeTime, Position: 1}}
+	repo := &fakeRepository{challenge: c, membership: active}
+	got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor)
+	if err != nil || got.ID != c.ID || got.Factors != nil {
+		t.Fatalf("ActivitiesScope() = %+v, %v, want the challenge with no factors", got, err)
+	}
+}
+
 func TestServiceActivitiesScope(t *testing.T) {
 	const target = "22222222-2222-2222-2222-222222222222"
 	tests := []struct {

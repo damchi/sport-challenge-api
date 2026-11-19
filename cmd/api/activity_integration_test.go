@@ -154,9 +154,10 @@ func challengeIDs(contributions []activity.Contribution) []string {
 	return ids
 }
 
-// TestActivityContributions: a ride counting in two challenges brings each
-// its distance weighted by the factor of that challenge, and its duration; a
-// deleted challenge never appears. The challenge listing shows that
+// TestActivityContributions: a ride counting in several challenges brings
+// each its distance weighted by the factor of that challenge, and its
+// duration; a challenge without a distance category gets the duration only;
+// a deleted challenge never appears. The challenge listing shows that
 // challenge alone.
 func TestActivityContributions(t *testing.T) {
 	r := newRecording(t)
@@ -166,6 +167,9 @@ func TestActivityContributions(t *testing.T) {
 	r.distanceCategory(second, "Vélo d'été", `{"run": 1, "ride": 1}`)
 	deleted := r.challenge([3]int{2026, 6, 1}, 3, "active", true)
 	r.distanceCategory(deleted, "Supprimé", `{"ride": 1}`)
+	// Without a distance category (the fixtures of the lock tests have
+	// none either): the duration only. From Tuesday: listed second.
+	bare := r.challenge([3]int{2026, 6, 2}, 2, "active", false)
 
 	d := 20001
 	rec, err := r.activities.Record(t.Context(), r.user, nil, activity.Draft{SportCode: "ride", StartedAt: toronto(t, 2026, 6, 10, 7), DurationSeconds: 3600, DistanceMeters: &d})
@@ -176,11 +180,13 @@ func TestActivityContributions(t *testing.T) {
 	want := []activity.Contribution{
 		// 20001 × 0.3 = 6000.3: to the meter, as the ranking.
 		{ChallengeID: first, ChallengeTitle: "Défi 100 km", DistanceMeters: m(6000), DurationSeconds: 3600},
+		{ChallengeID: bare, ChallengeTitle: "Spring", DurationSeconds: 3600},
 		{ChallengeID: second, ChallengeTitle: "Vélo d'été", DistanceMeters: m(20001), DurationSeconds: 3600},
 	}
 	if !reflect.DeepEqual(rec.Contributions, want) {
 		t.Fatalf("Record() contributions %+v, want %+v", rec.Contributions, want)
 	}
+
 	mine, err := r.activities.Mine(t.Context(), r.user, activity.Period{}, 20, nil)
 	if err != nil || len(mine.Items) != 1 || !reflect.DeepEqual(mine.Items[0].Contributions, want) {
 		t.Fatalf("Mine() = %+v, %v, want contributions %+v", mine, err, want)
