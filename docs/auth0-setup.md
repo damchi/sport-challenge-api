@@ -117,14 +117,14 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
 
 **Raison** : les jetons sont gardés en mémoire (étape 3.8), donc perdus à chaque rechargement de la page. Le SDK rétablit alors la session sans afficher de page, avec un iframe vers le domaine Auth0 qui lit le cookie de session d'Auth0. Sur un domaine `*.auth0.com`, ce cookie est tiers. Safari et les navigateurs qui bloquent les cookies tiers ne l'envoient pas, et l'utilisateur repasse par la page de connexion Auth0 à chaque rechargement. Avec un domaine personnalisé sur le même site que le frontend, le cookie n'est plus tiers.
 
-**Prérequis côté API** : ce changement modifie l'émetteur des jetons, et `AUTH0_DOMAIN` doit alors être le domaine personnalisé. Or le client de suppression de compte (SC-API-039) construit l'adresse et l'audience de l'API de gestion à partir de `AUTH0_DOMAIN`, alors qu'elles restent sur le domaine du tenant. Avant d'activer le domaine personnalisé, l'API doit donc recevoir le domaine du tenant à part pour ce client : c'est un changement de code, ticket SC-API-114. Sans lui, la suppression de compte chez Auth0 échouerait. Voir « Domaine personnalisé » ci-dessous.
+**Réglage de l'API** : ce changement modifie l'émetteur des jetons, et `AUTH0_DOMAIN` doit alors être le domaine personnalisé. L'API de gestion, elle, reste sur le domaine du tenant : régler en même temps `AUTH0_MGMT_DOMAIN` sur le domaine du tenant (`sport-challenge-prod.ca.auth0.com`), dans la configuration de l'API et des jobs du worker (Cloud Run). Sans elle, `AUTH0_MGMT_DOMAIN` vaut `AUTH0_DOMAIN`, et la suppression de compte chez Auth0 échouerait. Voir « Domaine personnalisé » ci-dessous.
 
 En développement, on accepte de repasser par la page Auth0 : pas de domaine personnalisé.
 
 ## Points d'attention pour l'API (ticket SC-API-017)
 
 - **Jetons machine à machine** : refuser un access token dont `gty` vaut `client-credentials` ou dont `sub` se termine par `@clients`, en défense en profondeur de l'étape 2.5.
-- **Domaine personnalisé** (étape 7, prévu en production) : l'émetteur des jetons devient `https://<custom-domain>/`, et `AUTH0_DOMAIN` doit être ce domaine. L'API de gestion, elle, garde l'adresse et l'audience du domaine du tenant (`https://<tenant>.ca.auth0.com/api/v2/`). Le client de suppression (ticket SC-API-039) les construit aujourd'hui depuis `AUTH0_DOMAIN` : il devra recevoir le domaine du tenant à part **avant** l'activation du domaine personnalisé (ticket SC-API-114).
+- **Domaine personnalisé** (étape 7, prévu en production) : l'émetteur des jetons devient `https://<custom-domain>/`, et `AUTH0_DOMAIN` doit être ce domaine. L'API de gestion, elle, garde l'adresse et l'audience du domaine du tenant (`https://<tenant>.ca.auth0.com/api/v2/`) : le client de suppression (ticket SC-API-039) les construit depuis `AUTH0_MGMT_DOMAIN` (SC-API-114), qui vaut `AUTH0_DOMAIN` si elle est absente. Elle doit donc être réglée sur le domaine du tenant **en même temps** que `AUTH0_DOMAIN` passe au domaine personnalisé. La validation des jetons (émetteur, JWKS) reste sur `AUTH0_DOMAIN`.
 
 ## Valeurs à reporter
 
@@ -134,6 +134,7 @@ Par environnement, une fois la procédure terminée :
 |---|---|---|
 | `AUTH0_DOMAIN` | non | configuration de l'API (Cloud Run) et du frontend |
 | `AUTH0_AUDIENCE` | non | configuration de l'API (Cloud Run) et du frontend |
+| `AUTH0_MGMT_DOMAIN` | non | configuration de l'API et des jobs (Cloud Run), seulement avec un domaine personnalisé : le domaine du tenant (étape 7). Absente, elle vaut `AUTH0_DOMAIN` |
 | Client ID de la SPA | non | configuration du frontend |
 | Client ID de l'application machine à machine | non (seul, il ne donne aucun accès) | configuration de l'API et des jobs (Cloud Run), variable `AUTH0_MGMT_CLIENT_ID` |
 | Client Secret de l'application machine à machine | **oui** | Secret Manager : `auth0-mgmt-client-secret-ca`, lu par l'API dans `AUTH0_MGMT_CLIENT_SECRET` |
@@ -152,7 +153,7 @@ Pour chaque environnement :
 - [ ] Profil d'authentification en *Identifier First* ; seule la connexion par code e-mail est activée sur la SPA ; `google-oauth2` désactivée ; connexion par mot de passe supprimée.
 - [ ] Application machine à machine limitée à `delete:users`, grant *Client Credentials* seul, aucune connexion ; identifiants dans Secret Manager, accès réservé au compte de service de l'API.
 - [ ] Connexion de test réussie depuis le frontend (ou **Authentication → … → Try** dans le dashboard).
-- [ ] Production : domaine personnalisé Auth0 actif et `AUTH0_DOMAIN` réglé sur ce domaine, une fois que l'API reçoit à part le domaine du tenant pour le client de gestion (étape 7) ; suppression de compte testée ensuite.
+- [ ] Production : domaine personnalisé Auth0 actif, `AUTH0_DOMAIN` réglé sur ce domaine et `AUTH0_MGMT_DOMAIN` sur le domaine du tenant (étape 7) ; suppression de compte testée ensuite.
 
 ## V2 : application native
 

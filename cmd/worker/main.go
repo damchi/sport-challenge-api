@@ -108,7 +108,7 @@ func run(args []string) error {
 		return err
 	case taskRetryAuth0Deletions:
 		// Only the replay is used: no participations to abandon.
-		management := auth.NewAuth0Management(cfg.Auth0Domain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
+		management := auth.NewAuth0Management(cfg.Auth0MgmtDomain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
 		result, err := user.NewService(user.NewRepository(gdb), nil, management, logger).RetryAuth0Deletions(ctx)
 		logger.Info("task done", slog.String("task", task), slog.Int("deleted", result.Deleted), slog.Int("failed", result.Failed))
 		return err

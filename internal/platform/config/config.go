@@ -32,6 +32,10 @@ type Config struct {
 	// (sport-challenge-dev.ca.auth0.com); Auth0Audience is the API identifier.
 	Auth0Domain   string
 	Auth0Audience string
+	// Auth0MgmtDomain is the tenant host name of the Management API, which
+	// keeps it with a custom domain (then in Auth0Domain, the token issuer).
+	// AUTH0_DOMAIN unless AUTH0_MGMT_DOMAIN says otherwise.
+	Auth0MgmtDomain string
 	// Auth0MgmtClientID and Auth0MgmtClientSecret identify the machine to
 	// machine application that deletes users at Auth0 (Management API,
 	// delete:users only). Secrets: never log them.
@@ -129,6 +133,15 @@ func Load(getenv func(string) string) (Config, error) {
 		problems = append(problems, "AUTH0_DOMAIN is required")
 	} else if !hostName.MatchString(cfg.Auth0Domain) {
 		problems = append(problems, "AUTH0_DOMAIN must be a host name (letters, digits, hyphens and dots), without scheme, port or path")
+	}
+
+	cfg.Auth0MgmtDomain = cfg.Auth0Domain
+	if raw := strings.ToLower(get("AUTH0_MGMT_DOMAIN")); raw != "" {
+		if !hostName.MatchString(raw) {
+			problems = append(problems, "AUTH0_MGMT_DOMAIN must be a host name (letters, digits, hyphens and dots), without scheme, port or path")
+		} else {
+			cfg.Auth0MgmtDomain = raw
+		}
 	}
 
 	if cfg.Auth0Audience = get("AUTH0_AUDIENCE"); cfg.Auth0Audience == "" {

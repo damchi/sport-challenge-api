@@ -93,7 +93,7 @@ func run() error {
 	abandonAll := abandonAllFunc(func(ctx context.Context, userID string) error {
 		return challenges.AbandonAll(ctx, userID)
 	})
-	management := auth.NewAuth0Management(cfg.Auth0Domain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
+	management := auth.NewAuth0Management(cfg.Auth0MgmtDomain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
 	users := user.NewService(user.NewRepository(gdb), abandonAll, management, logger)
 
 	gin.SetMode(gin.ReleaseMode)
