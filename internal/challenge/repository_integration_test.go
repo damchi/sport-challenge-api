@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -316,9 +317,14 @@ func TestMembershipsListsTheChallengesJoined(t *testing.T) {
 	if len(got) != len(want) {
 		t.Fatalf("Memberships() = %+v, want %d challenges", got, len(want))
 	}
+	factors := created.Categories[1].Params.Factors
 	for _, m := range got {
 		if w, ok := want[m.ID]; !ok || m.Membership != w || m.Timezone != created.Timezone || !m.StartsAt.Equal(created.StartsAt) || !m.EndsAt.Equal(created.EndsAt) {
 			t.Fatalf("membership %+v, want %+v with the window of the challenge", m, w)
+		}
+		// The title and the factors of the distance category, frozen.
+		if m.Title != created.Title || len(factors) == 0 || !maps.Equal(m.Factors, factors) {
+			t.Fatalf("membership %+v, want the title %q and the factors %v", m, created.Title, factors)
 		}
 	}
 }

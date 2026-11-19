@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -126,8 +127,67 @@ func TestRecordCountsInTheChallengesJoined(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Memberships lists by start: monday first.
-	if !got.Created || !slices.Equal(got.ChallengeIDs, []string{monday, second}) {
+	if !got.Created || !slices.Equal(challengeIDs(got.Contributions), []string{monday, second}) {
 		t.Fatalf("Record() = %+v, want created, counting in both challenges", got)
+	}
+}
+
+// distanceCategory gives challenge id a title and its cumulative distance
+// category with factors.
+func (r recording) distanceCategory(id, title, factors string) {
+	r.t.Helper()
+	if _, err := r.pool.Exec(r.t.Context(), "UPDATE challenges SET title = $1 WHERE id = $2", title, id); err != nil {
+		r.t.Fatal(err)
+	}
+	if _, err := r.pool.Exec(r.t.Context(), `INSERT INTO categories (challenge_id, type, position, params)
+		VALUES ($1, 'cumulative_distance', 2, jsonb_build_object('factors', $2::jsonb))`, id, factors); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+// challengeIDs are the challenges of contributions, nil for none.
+func challengeIDs(contributions []activity.Contribution) []string {
+	var ids []string
+	for _, c := range contributions {
+		ids = append(ids, c.ChallengeID)
+	}
+	return ids
+}
+
+// TestActivityContributions: a ride counting in two challenges brings each
+// its distance weighted by the factor of that challenge, and its duration; a
+// deleted challenge never appears. The challenge listing shows that
+// challenge alone.
+func TestActivityContributions(t *testing.T) {
+	r := newRecording(t)
+	first := r.challenge([3]int{2026, 6, 1}, 3, "active", false)
+	r.distanceCategory(first, "Défi 100 km", `{"run": 1, "ride": 0.3}`)
+	second := r.challenge([3]int{2026, 6, 8}, 2, "active", false)
+	r.distanceCategory(second, "Vélo d'été", `{"run": 1, "ride": 1}`)
+	deleted := r.challenge([3]int{2026, 6, 1}, 3, "active", true)
+	r.distanceCategory(deleted, "Supprimé", `{"ride": 1}`)
+
+	d := 20001
+	rec, err := r.activities.Record(t.Context(), r.user, nil, activity.Draft{SportCode: "ride", StartedAt: toronto(t, 2026, 6, 10, 7), DurationSeconds: 3600, DistanceMeters: &d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := func(v int) *int { return &v }
+	want := []activity.Contribution{
+		// 20001 × 0.3 = 6000.3: to the meter, as the ranking.
+		{ChallengeID: first, ChallengeTitle: "Défi 100 km", DistanceMeters: m(6000), DurationSeconds: 3600},
+		{ChallengeID: second, ChallengeTitle: "Vélo d'été", DistanceMeters: m(20001), DurationSeconds: 3600},
+	}
+	if !reflect.DeepEqual(rec.Contributions, want) {
+		t.Fatalf("Record() contributions %+v, want %+v", rec.Contributions, want)
+	}
+	mine, err := r.activities.Mine(t.Context(), r.user, activity.Period{}, 20, nil)
+	if err != nil || len(mine.Items) != 1 || !reflect.DeepEqual(mine.Items[0].Contributions, want) {
+		t.Fatalf("Mine() = %+v, %v, want contributions %+v", mine, err, want)
+	}
+	page, err := r.activities.OfParticipant(t.Context(), r.user, first, r.user, 20, nil)
+	if err != nil || len(page.Items) != 1 || !reflect.DeepEqual(page.Items[0].Contributions, want[:1]) {
+		t.Fatalf("OfParticipant() = %+v, %v, want contributions %+v", page, err, want[:1])
 	}
 }
 
@@ -166,7 +226,7 @@ func TestRecordCountsNowhere(t *testing.T) {
 		"abandoned, deleted and not joined only": toronto(t, 2026, 5, 27, 7),
 	} {
 		got, err := r.record(startedAt)
-		if err != nil || !got.Created || len(got.ChallengeIDs) != 0 {
+		if err != nil || !got.Created || len(got.Contributions) != 0 {
 			t.Fatalf("%s: %+v, %v, want recorded, counting nowhere", name, got, err)
 		}
 	}
@@ -186,7 +246,7 @@ func TestChangeActivityLockedInAnyChallenge(t *testing.T) {
 	run := activity.Draft{SportCode: "run", DurationSeconds: 1500, DistanceMeters: &d}
 
 	rec, err := r.record(toronto(t, 2026, 6, 11, 7)) // week 2 of both
-	if err != nil || !slices.Equal(rec.ChallengeIDs, []string{first, second}) {
+	if err != nil || !slices.Equal(challengeIDs(rec.Contributions), []string{first, second}) {
 		t.Fatalf("Record() = %+v, %v, want it counting in both challenges", rec, err)
 	}
 	// Into week 1 of the second, ended; week 2 of the first, not ended.
@@ -206,7 +266,7 @@ func TestChangeActivityLockedInAnyChallenge(t *testing.T) {
 	wantLocked(t, r.activities.Delete(t.Context(), r.user, locked))
 
 	got, err := r.activities.Update(t.Context(), r.user, rec.ID, run)
-	if err != nil || !slices.Equal(got.ChallengeIDs, []string{first, second}) {
+	if err != nil || !slices.Equal(challengeIDs(got.Contributions), []string{first, second}) {
 		t.Fatalf("Update() = %+v, %v, want it counting in both challenges", got, err)
 	}
 	if err := r.activities.Delete(t.Context(), r.user, rec.ID); err != nil {
@@ -332,7 +392,7 @@ func TestListParticipantActivitiesVisibility(t *testing.T) {
 			}
 			// The window only; this challenge only, for where it counts and
 			// whether it is locked.
-			if len(page.Items) != 1 || page.Items[0].ID != in.ID || !slices.Equal(page.Items[0].ChallengeIDs, []string{tt.challenge}) || page.Items[0].Locked {
+			if len(page.Items) != 1 || page.Items[0].ID != in.ID || !slices.Equal(challengeIDs(page.Items[0].Contributions), []string{tt.challenge}) || page.Items[0].Locked {
 				t.Fatalf("items %+v, want the activity in the window, counting in %s only, unlocked there", page.Items, tt.challenge)
 			}
 		})
@@ -372,8 +432,8 @@ func TestListActivitiesOfAnAbandonedParticipant(t *testing.T) {
 	}
 	var got []string
 	for _, item := range page.Items {
-		if len(item.ChallengeIDs) != 0 {
-			t.Fatalf("activity %s counts in %v, want nowhere: its author abandoned", item.ID, item.ChallengeIDs)
+		if len(item.Contributions) != 0 {
+			t.Fatalf("activity %s counts in %v, want nowhere: its author abandoned", item.ID, challengeIDs(item.Contributions))
 		}
 		got = append(got, item.ID)
 	}
@@ -398,7 +458,7 @@ func TestListMyActivities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || page.Items[0].ID != week2.ID || page.Items[0].Locked || !slices.Equal(page.Items[0].ChallengeIDs, []string{c}) || page.Next == nil {
+	if len(page.Items) != 1 || page.Items[0].ID != week2.ID || page.Items[0].Locked || !slices.Equal(challengeIDs(page.Items[0].Contributions), []string{c}) || page.Next == nil {
 		t.Fatalf("first page %+v, want the run of week 2, unlocked, and a next page", page)
 	}
 	page, err = r.activities.Mine(t.Context(), r.user, activity.Period{}, 1, page.Next)

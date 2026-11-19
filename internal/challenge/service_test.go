@@ -1222,7 +1222,14 @@ func TestServiceActivitiesScope(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.actor, others: tt.others}
+			factors := map[string]float64{"run": 1, "ride": 0.3}
+			c := stored(tt.visibility)
+			c.Categories = []Category{
+				{Type: CategoryCumulativeTime, Position: 1},
+				{Type: CategoryCumulativeDistance, Position: 2, Params: Params{Factors: factors}},
+				{Type: CategoryRunElimination, Position: 3, Params: Params{Sport: "run", StepMeters: 1000}},
+			}
+			repo := &fakeRepository{challenge: c, membership: tt.actor, others: tt.others}
 			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", tt.userID)
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) {
@@ -1230,8 +1237,7 @@ func TestServiceActivitiesScope(t *testing.T) {
 				}
 				return
 			}
-			c := stored(tt.visibility)
-			want := UserChallenge{ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Membership: tt.wantMember}
+			want := UserChallenge{ID: c.ID, Title: c.Title, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Factors: factors, Membership: tt.wantMember}
 			if err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("ActivitiesScope() = %+v, %v, want %+v", got, err, want)
 			}

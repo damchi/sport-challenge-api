@@ -179,12 +179,16 @@ type ParticipantPage struct {
 }
 
 // UserChallenge is a challenge a user joined, with their membership in it:
-// what an activity of theirs needs to know where it counts.
+// what an activity of theirs needs to know where it counts, and how much.
 type UserChallenge struct {
 	ID       string
+	Title    string
 	Timezone string
 	StartsAt time.Time
 	EndsAt   time.Time
+	// Factors are those of the cumulative distance category: what an
+	// activity brings to it.
+	Factors map[string]float64
 	Membership
 }
 

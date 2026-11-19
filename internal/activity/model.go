@@ -20,11 +20,11 @@ type Activity struct {
 	IdempotencyKey *string
 }
 
-// Recorded is an activity once recorded, with the challenges where it
-// counts now (possibly none).
+// Recorded is an activity once recorded, with what it brings now to each
+// challenge where it counts (possibly none).
 type Recorded struct {
 	Activity
-	ChallengeIDs []string
+	Contributions []Contribution
 	// Created is false when the idempotency key gave an activity recorded
 	// before: nothing was written.
 	Created bool

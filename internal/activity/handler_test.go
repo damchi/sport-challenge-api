@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -92,6 +93,18 @@ func serve(t *testing.T, svc *Service, method, target, body string, headers map[
 	return rec, got
 }
 
+// contributionIDs are the challenge ids of the contributions of an activity
+// in a response.
+func contributionIDs(activity map[string]any) []any {
+	cs, _ := activity["contributions"].([]any)
+	ids := make([]any, 0, len(cs))
+	for _, c := range cs {
+		m, _ := c.(map[string]any)
+		ids = append(ids, m["challenge_id"])
+	}
+	return ids
+}
+
 func errorCode(body map[string]any) any {
 	e, _ := body["error"].(map[string]any)
 	return e["code"]
@@ -111,8 +124,10 @@ func TestCreateActivityRecords(t *testing.T) {
 	if body["source"] != "manual" || body["pace_seconds_per_km"] != 300.0 || body["speed_mps"] != 5000.0/1500 || body["sport_label"] != nil {
 		t.Fatalf("body %v, want a manual activity with its computed speed", body)
 	}
-	if ids, _ := body["challenge_ids"].([]any); len(ids) != 1 || ids[0] != c1.ChallengeID {
-		t.Fatalf("challenge_ids %v, want [%s]", body["challenge_ids"], c1.ChallengeID)
+	// 5 km of run, factor 1 in c1, and its 1500 s.
+	want := map[string]any{"challenge_id": c1.ChallengeID, "challenge_title": "Spring run", "distance_meters": 5000.0, "duration_seconds": 1500.0}
+	if cs, _ := body["contributions"].([]any); len(cs) != 1 || !reflect.DeepEqual(cs[0], want) {
+		t.Fatalf("contributions %v, want [%v]", body["contributions"], want)
 	}
 }
 
@@ -136,8 +151,8 @@ func TestCreateActivityWithoutDistanceOrChallenge(t *testing.T) {
 		t.Fatalf("body %v, want no distance and no speed", body)
 	}
 	// An empty list, never null.
-	if ids, ok := body["challenge_ids"].([]any); !ok || len(ids) != 0 {
-		t.Fatalf("challenge_ids %v, want []", body["challenge_ids"])
+	if cs, ok := body["contributions"].([]any); !ok || len(cs) != 0 {
+		t.Fatalf("contributions %v, want []", body["contributions"])
 	}
 }
 
@@ -218,8 +233,8 @@ func TestUpdateActivityReplaces(t *testing.T) {
 	if body["id"] != activityID || body["sport_code"] != "yoga" || body["distance_meters"] != nil || body["speed_mps"] != nil || body["source"] != "manual" {
 		t.Fatalf("body %v, want the activity replaced, its distance cleared", body)
 	}
-	if ids, _ := body["challenge_ids"].([]any); len(ids) != 1 || ids[0] != c1.ChallengeID {
-		t.Fatalf("challenge_ids %v, want [%s]", body["challenge_ids"], c1.ChallengeID)
+	if ids := contributionIDs(body); len(ids) != 1 || ids[0] != c1.ChallengeID {
+		t.Fatalf("contributions %v, want [%s]", body["contributions"], c1.ChallengeID)
 	}
 }
 
@@ -401,8 +416,8 @@ func TestListParticipantActivities(t *testing.T) {
 	items, _ := body["items"].([]any)
 	first, _ := items[0].(map[string]any)
 	// The other challenge of the participant is never shown.
-	if ids, _ := first["challenge_ids"].([]any); len(ids) != 1 || ids[0] != c1.ChallengeID {
-		t.Fatalf("challenge_ids %v, want [%s] only", first["challenge_ids"], c1.ChallengeID)
+	if ids := contributionIDs(first); len(ids) != 1 || ids[0] != c1.ChallengeID {
+		t.Fatalf("contributions %v, want [%s] only", first["contributions"], c1.ChallengeID)
 	}
 }
 

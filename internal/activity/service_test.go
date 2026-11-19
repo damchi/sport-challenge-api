@@ -146,7 +146,8 @@ var recordNow = time.Date(2026, 6, 11, 16, 0, 0, 0, time.UTC)
 func challengeOf(t *testing.T, id string) Participation {
 	t.Helper()
 	p := participation(t, [3]int{2026, 6, 1}, 3)
-	p.ChallengeID = id
+	p.ChallengeID, p.Title = id, "Spring run"
+	p.Factors = map[string]float64{"run": 1, "ride": 0.3}
 	return p
 }
 
@@ -186,7 +187,7 @@ func TestServiceRecord(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !got.Created || got.ID == "" || !reflect.DeepEqual(got.ChallengeIDs, tt.want) {
+			if !got.Created || got.ID == "" || !reflect.DeepEqual(challengeIDs(got.Contributions), tt.want) {
 				t.Fatalf("Record() = %+v, want created, counting in %v", got, tt.want)
 			}
 			r := repo.recorded
@@ -255,7 +256,7 @@ func TestServiceRecordIdempotencyKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Created || got.ID != existing.ID || got.DurationSeconds != 1200 || !reflect.DeepEqual(got.ChallengeIDs, []string{"c1"}) {
+	if got.Created || got.ID != existing.ID || got.DurationSeconds != 1200 || !reflect.DeepEqual(challengeIDs(got.Contributions), []string{"c1"}) {
 		t.Fatalf("Record() = %+v, want the existing activity, not created, counting in c1", got)
 	}
 	if repo.decided || repo.recorded != nil || calls != 1 {
@@ -366,7 +367,7 @@ func TestServiceUpdate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Created || got.ID != activityID || !reflect.DeepEqual(got.ChallengeIDs, tt.want) {
+			if got.Created || got.ID != activityID || !reflect.DeepEqual(challengeIDs(got.Contributions), tt.want) {
 				t.Fatalf("Update() = %+v, want activity %s counting in %v", got, activityID, tt.want)
 			}
 			u := repo.updated
@@ -602,8 +603,8 @@ func TestServiceMineCountsAndLocks(t *testing.T) {
 	}
 	for i, w := range want {
 		got := page.Items[i]
-		if !reflect.DeepEqual(got.ChallengeIDs, w.ids) || got.Locked != w.locked {
-			t.Errorf("item %d: challenges %v, locked %v, want %v, %v", i, got.ChallengeIDs, got.Locked, w.ids, w.locked)
+		if !reflect.DeepEqual(challengeIDs(got.Contributions), w.ids) || got.Locked != w.locked {
+			t.Errorf("item %d: challenges %v, locked %v, want %v, %v", i, challengeIDs(got.Contributions), got.Locked, w.ids, w.locked)
 		}
 	}
 }
@@ -675,13 +676,13 @@ func TestServiceOfParticipant(t *testing.T) {
 		t.Fatalf("%d items, next %v, want 3 items and a next page", len(page.Items), page.Next)
 	}
 	// The other challenges of the participant are never read: they could
-	// show through challenge_ids or locked.
+	// show through contributions or locked.
 	if calls != 0 {
 		t.Fatalf("participations of the participant read %d times, want never", calls)
 	}
 	for i, it := range page.Items {
-		if !reflect.DeepEqual(it.ChallengeIDs, []string{"c1"}) {
-			t.Errorf("item %d: challenges %v, want [c1]", i, it.ChallengeIDs)
+		if !reflect.DeepEqual(challengeIDs(it.Contributions), []string{"c1"}) {
+			t.Errorf("item %d: challenges %v, want [c1]", i, challengeIDs(it.Contributions))
 		}
 	}
 	if page.Items[0].Locked || page.Items[1].Locked || !page.Items[2].Locked {
@@ -700,7 +701,7 @@ func TestServiceOfParticipantAbandoned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || len(page.Items[0].ChallengeIDs) != 0 {
+	if len(page.Items) != 1 || len(page.Items[0].Contributions) != 0 {
 		t.Fatalf("items %+v, want one activity counting nowhere", page.Items)
 	}
 }

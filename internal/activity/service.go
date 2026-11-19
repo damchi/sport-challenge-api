@@ -114,10 +114,10 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 		}
 	}
 	return Recorded{
-		Activity:     stored,
-		ChallengeIDs: CountsIn(stored.StartedAt, challenges),
-		Created:      created,
-		Locked:       IsLocked(s.clock.Now(), stored.StartedAt, challenges),
+		Activity:      stored,
+		Contributions: Contributions(stored, challenges),
+		Created:       created,
+		Locked:        IsLocked(s.clock.Now(), stored.StartedAt, challenges),
 	}, nil
 }
 
@@ -159,9 +159,9 @@ func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (
 		return Recorded{}, storageError(err)
 	}
 	return Recorded{
-		Activity:     stored,
-		ChallengeIDs: CountsIn(stored.StartedAt, challenges),
-		Locked:       IsLocked(s.clock.Now(), stored.StartedAt, challenges),
+		Activity:      stored,
+		Contributions: Contributions(stored, challenges),
+		Locked:        IsLocked(s.clock.Now(), stored.StartedAt, challenges),
 	}, nil
 }
 
@@ -252,9 +252,9 @@ func (s *Service) page(ctx context.Context, q ListQuery, limit int, scope func(c
 	now := s.clock.Now()
 	for _, a := range rows {
 		page.Items = append(page.Items, Recorded{
-			Activity:     a,
-			ChallengeIDs: CountsIn(a.StartedAt, ps),
-			Locked:       IsLocked(now, a.StartedAt, ps),
+			Activity:      a,
+			Contributions: Contributions(a, ps),
+			Locked:        IsLocked(now, a.StartedAt, ps),
 		})
 	}
 	return page, nil

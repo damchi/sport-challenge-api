@@ -720,12 +720,13 @@ paths:
         may not see answers 404 `challenge_not_found`; a visible one the
         user never joined (a public challenge shows them its leaderboard
         only), or a `userId` who never joined it, answers 404 `not_found`.
-        `challenge_ids` and `locked` are read from this challenge only, never
-        from the other challenges of the participant: `challenge_ids` holds
+        `contributions` and `locked` are read from this challenge only, never
+        from the other challenges of the participant: `contributions` holds
         it when the activity counts in it (never for a participant who
         abandoned: empty), and `locked` is true once its week has ended in
-        it, where it counts (never for a participant who abandoned). The author's own listing (`/me/activities`) may still show an
-        activity locked by another challenge.
+        it, where it counts (never for a participant who abandoned). The
+        author's own listing (`/me/activities`) may still show an activity
+        locked by another challenge.
       tags: [activities]
       parameters:
         - name: challengeId
@@ -965,7 +966,7 @@ paths:
         complete profile (`profile_incomplete`). It belongs to the user, not
         to a challenge: it counts in every challenge, not deleted, where the
         user is an active participant and whose window holds `started_at`
-        (`challenge_ids`, possibly empty). An activity outside every window
+        (`contributions`, possibly empty). An activity outside every window
         is recorded all the same. It is refused (`week_locked`) when its week
         has ended in one of those challenges, finished ones included. Its end
         (`started_at` plus `duration_seconds`) is never in the future (5
@@ -1868,7 +1869,7 @@ components:
           description: Required or refused according to the sport's `distance_mode`.
     Activity:
       type: object
-      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, speed_mps, pace_seconds_per_km, challenge_ids, locked]
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, speed_mps, pace_seconds_per_km, contributions, locked]
       additionalProperties: false
       properties:
         id:
@@ -1901,17 +1902,41 @@ components:
           format: double
           nullable: true
           description: Pace in seconds per kilometer, computed; null without distance.
-        challenge_ids:
+        contributions:
           type: array
-          description: Challenges where the activity counts, now; possibly empty.
+          description: |
+            What the activity brings, now, to each challenge where it counts;
+            possibly empty. A deleted challenge never appears.
           items:
-            type: string
-            format: uuid
+            $ref: "#/components/schemas/ActivityContribution"
         locked:
           type: boolean
           description: |
             True once the week of the activity has ended in a challenge where
             it counts: it can no longer be changed nor deleted.
+    ActivityContribution:
+      type: object
+      required: [challenge_id, challenge_title, distance_meters, duration_seconds]
+      additionalProperties: false
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        challenge_title:
+          type: string
+        distance_meters:
+          type: integer
+          nullable: true
+          description: |
+            The distance brought to the cumulative distance category: the
+            distance times the factor of the sport in this challenge, rounded
+            to the meter (half up) as the ranking rounds a total. Null when
+            the sport has no factor in this challenge or the activity no
+            distance. The ranking rounds the total once, so it may differ by
+            a meter or so from the sum of these values.
+        duration_seconds:
+          type: integer
+          description: The duration brought to the cumulative time category.
     ActivityPage:
       type: object
       required: [items, next_cursor]

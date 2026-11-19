@@ -19,32 +19,53 @@ func CanChange(actorID, authorID string) bool {
 // one: the memberships are read without them.
 type Participation struct {
 	ChallengeID string
+	Title       string
 	StartsAt    time.Time
 	EndsAt      time.Time
 	Location    *time.Location
+	// Factors are those of the cumulative distance category of the
+	// challenge, frozen at its creation.
+	Factors map[string]float64
 	// Active is true when the author is an active participant: read from the
 	// participation status, never the role (a creator who abandoned no
 	// longer competes).
 	Active bool
 }
 
-// CountsIn returns the challenges, in the order of challenges, where an
-// activity started at startedAt counts (ADR 0001): finished ones included,
-// whose window holds startedAt and where the author is an active
-// participant. Never a reason to refuse an activity: it may count nowhere.
-func CountsIn(startedAt time.Time, challenges []Participation) []string {
-	var ids []string
+// Contribution is what an activity brings to a challenge where it counts:
+// its duration to the cumulative time, and its distance weighted by the
+// factor of its sport to the cumulative distance, nil when it brings none.
+type Contribution struct {
+	ChallengeID     string
+	ChallengeTitle  string
+	DistanceMeters  *int
+	DurationSeconds int
+}
+
+// Contributions returns what a brings to each challenge, in the order of
+// challenges, where it counts (ADR 0001): finished ones included, whose
+// window holds its start and where the author is an active participant.
+// The weighted distance is the one of the ranking (scoring.Distance). Never
+// a reason to refuse an activity: it may count nowhere.
+func Contributions(a Activity, challenges []Participation) []Contribution {
+	var out []Contribution
 	for _, c := range challenges {
-		if counts(c, startedAt) {
-			ids = append(ids, c.ChallengeID)
+		if !counts(c, a.StartedAt) {
+			continue
 		}
+		out = append(out, Contribution{
+			ChallengeID:     c.ChallengeID,
+			ChallengeTitle:  c.Title,
+			DistanceMeters:  scoring.Distance{Factors: c.Factors}.Weighted(a.SportCode, a.DistanceMeters),
+			DurationSeconds: a.DurationSeconds,
+		})
 	}
-	return ids
+	return out
 }
 
 // IsLocked reports whether an activity started at startedAt is locked at now
 // (from platform/clock, never the worker): its week has ended in at least
-// one challenge where it counts (CountsIn).
+// one challenge where it counts (Contributions).
 func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 	for _, c := range challenges {
 		if !counts(c, startedAt) {
