@@ -1051,11 +1051,11 @@ func TestParticipantsListing(t *testing.T) {
 			t.Fatalf("participant %d: %s %s, want %s %s in order of registration", i, p.UserID, p.Status, ids[i], wantStatus[i])
 		}
 	}
-	if p := got[1].Pseudo; p == nil || *p != "list_a" {
+	if p := got[1].Name.Pseudo; p == nil || *p != "list_a" {
 		t.Fatalf("abandoned participant pseudo %v, want list_a kept", p)
 	}
-	if got[2].Pseudo != nil {
-		t.Fatalf("anonymized participant pseudo %q, want none", *got[2].Pseudo)
+	if got[2].Name.Pseudo != nil {
+		t.Fatalf("anonymized participant pseudo %q, want none", *got[2].Name.Pseudo)
 	}
 	if !got[3].JoinedAt.Equal(now.Add(3 * time.Minute)) {
 		t.Fatalf("joined at %s, want the instant of the join", got[3].JoinedAt)

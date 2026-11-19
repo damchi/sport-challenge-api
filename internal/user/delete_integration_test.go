@@ -30,7 +30,7 @@ func noAbandon(context.Context) error { return nil }
 func TestDeleteAnonymizes(t *testing.T) {
 	repo, pool := newRepository(t)
 	u := namedUser(t, repo, "email|alice", "alice_1")
-	if _, err := pool.Exec(t.Context(), "UPDATE users SET avatar_key = 'avatars/alice.png' WHERE id = $1", u.ID); err != nil {
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET avatar_key = 'avatars/alice.png', first_name = 'Alice', last_name = 'Martin', email = 'alice@example.com' WHERE id = $1", u.ID); err != nil {
 		t.Fatal(err)
 	}
 	other := namedUser(t, repo, "email|bob", "bob_1")
@@ -40,14 +40,15 @@ func TestDeleteAnonymizes(t *testing.T) {
 		t.Fatalf("Delete() = %q, %v, want the former subject", subject, err)
 	}
 	var authSubject string
-	var pseudo, avatar *string
+	var pseudo, firstName, lastName, email, avatar *string
 	var anonymizedAt *time.Time
-	if err := pool.QueryRow(t.Context(), "SELECT auth_subject, pseudo, avatar_key, anonymized_at FROM users WHERE id = $1", u.ID).
-		Scan(&authSubject, &pseudo, &avatar, &anonymizedAt); err != nil {
+	if err := pool.QueryRow(t.Context(), "SELECT auth_subject, pseudo, first_name, last_name, email, avatar_key, anonymized_at FROM users WHERE id = $1", u.ID).
+		Scan(&authSubject, &pseudo, &firstName, &lastName, &email, &avatar, &anonymizedAt); err != nil {
 		t.Fatal(err)
 	}
-	if authSubject != "deleted|"+u.ID || pseudo != nil || avatar != nil || anonymizedAt == nil {
-		t.Fatalf("row %q %v %v %v, want the placeholder subject, no pseudo, no avatar, anonymized", authSubject, pseudo, avatar, anonymizedAt)
+	if authSubject != "deleted|"+u.ID || pseudo != nil || firstName != nil || lastName != nil || email != nil || avatar != nil || anonymizedAt == nil {
+		t.Fatalf("row %q, pseudo %v, names %v %v, email set %t, avatar %v, anonymized %v: want the placeholder subject, nothing personal left, anonymized",
+			authSubject, pseudo, firstName, lastName, email != nil, avatar, anonymizedAt)
 	}
 	// Only the fingerprint of the subject is kept, never the subject itself.
 	sum := sha256.Sum256([]byte("email|alice"))
@@ -75,7 +76,7 @@ func TestDeletedSubjectNeverLogsInAgain(t *testing.T) {
 	}
 
 	// The access token is still valid: the same subject logs in again.
-	_, err := svc.GetOrCreateBySubject(t.Context(), "email|carol")
+	_, err := svc.GetOrCreateBySubject(t.Context(), "email|carol", "")
 	if !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
 		t.Fatalf("error = %v, want account_deleted", err)
 	}
@@ -83,7 +84,7 @@ func TestDeletedSubjectNeverLogsInAgain(t *testing.T) {
 		t.Fatalf("%d users, want only the anonymized one: no account created", n)
 	}
 	// Another subject still gets its account.
-	if _, err := svc.GetOrCreateBySubject(t.Context(), "email|dave"); err != nil {
+	if _, err := svc.GetOrCreateBySubject(t.Context(), "email|dave", ""); err != nil {
 		t.Fatalf("new subject: %v", err)
 	}
 }

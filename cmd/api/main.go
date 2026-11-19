@@ -98,9 +98,9 @@ func run() error {
 
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
-	challenges = challenge.NewService(challenge.NewRepository(gdb), users, sports, clk)
+	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, clk)
 	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
-	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, users, leaderboard.NewRepository(gdb), clk, cfg.AtRiskThreshold)
+	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, cfg.AtRiskThreshold)
 	invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 	challengeHandler := challenge.NewHandler(challenges)
 	handlers := server{
@@ -118,8 +118,8 @@ func run() error {
 		ipLimiter:      httpx.NewRateLimiter(cfg.RateLimitIP.RPS, cfg.RateLimitIP.Burst, clock.Real{}),
 		userLimiter:    httpx.NewRateLimiter(cfg.RateLimitUser.RPS, cfg.RateLimitUser.Burst, clock.Real{}),
 	}
-	router, err := newRouter(logger, opts, handlers, verifier, func(ctx context.Context, subject string) (string, error) {
-		u, err := users.GetOrCreateBySubject(ctx, subject)
+	router, err := newRouter(logger, opts, handlers, verifier, func(ctx context.Context, claims auth.Claims) (string, error) {
+		u, err := users.GetOrCreateBySubject(ctx, claims.Subject, claims.Email)
 		return u.ID, err
 	})
 	if err != nil {
@@ -227,6 +227,49 @@ func toParticipation(m challenge.UserChallenge) (activity.Participation, error) 
 		Factors:     m.Factors,
 		Active:      m.Participant == challenge.ParticipantActive,
 	}, nil
+}
+
+// profiles is what challengeProfiles and leaderboardProfiles read from module
+// user.
+type profiles interface {
+	ProfileComplete(ctx context.Context, id string) (bool, error)
+	PublicNames(ctx context.Context, ids []string) (map[string]user.PublicName, error)
+}
+
+// challengeProfiles gives module challenge the profiles, as
+// challenge.Profiles.
+type challengeProfiles struct{ users profiles }
+
+func (c challengeProfiles) ProfileComplete(ctx context.Context, id string) (bool, error) {
+	return c.users.ProfileComplete(ctx, id)
+}
+
+func (c challengeProfiles) Names(ctx context.Context, ids []string) (map[string]challenge.Name, error) {
+	names, err := c.users.PublicNames(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]challenge.Name, len(names))
+	for id, n := range names {
+		out[id] = challenge.Name{Pseudo: n.Pseudo, FirstName: n.FirstName, LastName: n.LastName}
+	}
+	return out, nil
+}
+
+// leaderboardProfiles gives module leaderboard the public names, as
+// leaderboard.Profiles.
+type leaderboardProfiles struct{ users profiles }
+
+func (l leaderboardProfiles) Names(ctx context.Context, ids []string) (map[string]leaderboard.Name, error) {
+	names, err := l.users.PublicNames(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]leaderboard.Name, len(names))
+	for id, n := range names {
+		out[id] = leaderboard.Name{Pseudo: n.Pseudo, FirstName: n.FirstName, LastName: n.LastName}
+	}
+	return out, nil
 }
 
 // details is what leaderboardChallenges reads from module challenge.

@@ -59,6 +59,8 @@ func (h *Handler) PatchMe(ctx context.Context, req api.PatchMeRequestObject) (ap
 	var changes ProfileChanges
 	if req.Body != nil {
 		changes.Pseudo = req.Body.Pseudo
+		changes.FirstName = req.Body.FirstName
+		changes.LastName = req.Body.LastName
 		if req.Body.Language != nil {
 			lang := string(*req.Body.Language)
 			changes.Language = &lang
@@ -90,7 +92,14 @@ func toMe(u User) (api.Me, error) {
 	if err != nil {
 		return api.Me{}, fmt.Errorf("user id: %w", err)
 	}
-	me := api.Me{Id: id, Pseudo: u.Pseudo, ProfileComplete: u.ProfileComplete()}
+	me := api.Me{
+		Id:              id,
+		Pseudo:          u.Pseudo,
+		FirstName:       u.FirstName,
+		LastName:        u.LastName,
+		Email:           u.Email,
+		ProfileComplete: u.ProfileComplete(),
+	}
 	if u.Language != nil {
 		lang := api.Language(*u.Language)
 		me.Language = &lang

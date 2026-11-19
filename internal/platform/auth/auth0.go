@@ -108,6 +108,10 @@ type tokenClaims struct {
 	jwt.RegisteredClaims
 	Scope     string `json:"scope"`
 	GrantType string `json:"gty"`
+	// Email is the custom claim an Auth0 post-login Action adds with the
+	// user's e-mail (docs/auth0-setup.md): an access token has no "email"
+	// claim, and Auth0 only keeps custom claims with a namespace.
+	Email string `json:"https://sport-challenge/email"`
 }
 
 // Verify implements TokenVerifier.
@@ -130,6 +134,7 @@ func (v *Auth0Verifier) Verify(ctx context.Context, rawToken string) (Claims, er
 	}
 	return Claims{
 		Subject:   c.Subject,
+		Email:     c.Email,
 		ExpiresAt: c.ExpiresAt.Time,
 		Scopes:    strings.Fields(c.Scope),
 	}, nil

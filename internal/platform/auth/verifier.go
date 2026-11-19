@@ -21,7 +21,10 @@ var (
 // Claims are the only token claims exposed to the application.
 type Claims struct {
 	// Subject identifies the user at the provider (JWT "sub").
-	Subject   string
+	Subject string
+	// Email is the user's e-mail, set by the provider in a custom claim;
+	// empty when the token has none. Personal data: never log it.
+	Email     string
 	ExpiresAt time.Time
 	Scopes    []string
 }

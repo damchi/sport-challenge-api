@@ -15,7 +15,8 @@ type repository interface {
 	GetOrCreateBySubject(ctx context.Context, subject string) (User, error)
 	GetByID(ctx context.Context, id string) (User, error)
 	UpdateProfile(ctx context.Context, id string, changes ProfileChanges) (User, error)
-	Pseudos(ctx context.Context, ids []string) (map[string]string, error)
+	UpdateEmail(ctx context.Context, id, email string) error
+	PublicNames(ctx context.Context, ids []string) (map[string]PublicName, error)
 	Delete(ctx context.Context, id string, abandon func(ctx context.Context) error) (string, error)
 	AddPendingAuth0Deletion(ctx context.Context, subject string) error
 	PendingAuth0Deletions(ctx context.Context) ([]string, error)
@@ -46,11 +47,18 @@ func NewService(repo repository, participations Participations, identities Ident
 }
 
 // GetOrCreateBySubject returns the local user of an auth subject, created
-// with an empty profile (no pseudo) on first login. A row that is already
-// anonymized answers account_deleted. Anonymization replaces auth_subject, so
-// a deleted subject no longer matches that row: its fingerprint, checked
-// before any insert, answers account_deleted too, so the deletion is final.
-func (s *Service) GetOrCreateBySubject(ctx context.Context, subject string) (User, error) {
+// with an empty profile (no pseudo, no names) on first login. A row that is
+// already anonymized answers account_deleted. Anonymization replaces
+// auth_subject, so a deleted subject no longer matches that row: its
+// fingerprint, checked before any insert, answers account_deleted too, so
+// the deletion is final.
+//
+// email is the e-mail of the access token, empty when the token has none: it
+// is stored when it differs from the one kept, so a change at the auth
+// provider follows; a token without it leaves the stored one as is. Failing
+// to store it does not refuse the request: the e-mail is only displayed, and
+// the next request tries again.
+func (s *Service) GetOrCreateBySubject(ctx context.Context, subject, email string) (User, error) {
 	u, err := s.repo.GetOrCreateBySubject(ctx, subject)
 	if errors.Is(err, errAccountDeleted) {
 		return User{}, apperr.New(apperr.CodeAccountDeleted, nil)
@@ -60,6 +68,14 @@ func (s *Service) GetOrCreateBySubject(ctx context.Context, subject string) (Use
 	}
 	if u.AnonymizedAt != nil {
 		return User{}, apperr.New(apperr.CodeAccountDeleted, nil)
+	}
+	if email, ok := tokenEmail(email); ok && (u.Email == nil || *u.Email != email) {
+		if err := s.repo.UpdateEmail(ctx, u.ID, email); err != nil {
+			// Never the e-mail: the error of the repository does not carry it.
+			s.logger.WarnContext(ctx, "e-mail of the token not stored", slog.String("error", err.Error()))
+		} else {
+			u.Email = &email
+		}
 	}
 	return u, nil
 }
@@ -80,11 +96,11 @@ func (s *Service) Profile(ctx context.Context, actorID string) (User, error) {
 	return u, nil
 }
 
-// UpdateProfile changes the pseudo and the language of user actorID. Invalid
-// fields answer 400 validation_failed; a pseudo already taken, regardless of
-// case, answers 409 validation_failed, both listing the fields in
-// params.fields; an account deleted meanwhile answers 401 account_deleted
-// (as Profile).
+// UpdateProfile changes the pseudo, the names and the language of user
+// actorID. Invalid fields answer 400 validation_failed; a pseudo already
+// taken, regardless of case, answers 409 validation_failed, both listing the
+// fields in params.fields; an account deleted meanwhile answers 401
+// account_deleted (as Profile).
 func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes ProfileChanges) (User, error) {
 	if fields := invalidProfileFields(changes); len(fields) > 0 {
 		return User{}, apperr.InvalidFields(nil, fields...)
@@ -104,11 +120,11 @@ func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes Pro
 	return u, nil
 }
 
-// ProfileComplete reports whether the profile of user id is complete (pseudo
-// set): creating or joining a challenge requires it. An account deleted
-// meanwhile answers account_deleted (Profile), not an incomplete profile:
-// anonymization clears the pseudo, and a request racing the deletion may
-// come after it.
+// ProfileComplete reports whether the profile of user id is complete
+// (pseudo, first name and last name set): creating or joining a challenge
+// requires it. An account deleted meanwhile answers account_deleted
+// (Profile), not an incomplete profile: anonymization clears the pseudo and
+// the names, and a request racing the deletion may come after it.
 func (s *Service) ProfileComplete(ctx context.Context, id string) (bool, error) {
 	u, err := s.Profile(ctx, id)
 	if err != nil {
@@ -117,19 +133,20 @@ func (s *Service) ProfileComplete(ctx context.Context, id string) (bool, error) 
 	return u.ProfileComplete(), nil
 }
 
-// Pseudos returns the pseudo of each user of ids that has one; an anonymized
-// user has none, and the apps show a neutral name.
-func (s *Service) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {
+// PublicNames returns what the other users see of each user of ids: pseudo,
+// first name and last name, never the e-mail. An anonymized user is left
+// out, and the apps show a neutral name.
+func (s *Service) PublicNames(ctx context.Context, ids []string) (map[string]PublicName, error) {
 	if len(ids) == 0 {
-		return map[string]string{}, nil
+		return map[string]PublicName{}, nil
 	}
-	return s.repo.Pseudos(ctx, ids)
+	return s.repo.PublicNames(ctx, ids)
 }
 
 // Delete deletes the account of user actorID (README §6): in one
-// transaction, the account is anonymized (pseudo and avatar erased, subject
-// replaced, its fingerprint kept so that it never logs in again) and every
-// challenge not finished is abandoned. The user is then deleted at Auth0; if
+// transaction, the account is anonymized (pseudo, names, e-mail and avatar
+// erased, subject replaced, its fingerprint kept so that it never logs in
+// again) and every challenge not finished is abandoned. The user is then deleted at Auth0; if
 // that fails, the deletion is recorded for the worker to replay. Only a
 // failure to record it fails the call, the account being deleted already.
 func (s *Service) Delete(ctx context.Context, actorID string) error {

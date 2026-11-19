@@ -50,7 +50,7 @@ func newMeRouterFor(t *testing.T, svc *Service) *gin.Engine {
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
 		auth.Authenticate(acceptingVerifier{}, logger),
-		auth.CurrentUser(func(context.Context, string) (string, error) { return meID, nil }, logger),
+		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return meID, nil }, logger),
 	))
 	strict := api.NewStrictHandlerWithOptions(meHandlers{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
@@ -122,13 +122,25 @@ func TestGetMe(t *testing.T) {
 		wantComplete bool
 	}{
 		{name: "new user, empty profile", user: User{ID: meID}},
-		{name: "profile with pseudo", user: User{ID: meID, Pseudo: ptr("marie_92"), Language: ptr("fr")}, wantComplete: true},
+		{name: "pseudo without names", user: User{ID: meID, Pseudo: ptr("marie_92"), Language: ptr("fr")}},
+		{
+			name:         "complete profile",
+			user:         User{ID: meID, Pseudo: ptr("marie_92"), FirstName: ptr("Marie-Ève"), LastName: ptr("Tremblay"), Email: ptr("marie@example.com"), Language: ptr("fr")},
+			wantComplete: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			res := do(t, newMeRouter(t, fakeRepository{user: tt.user}), http.MethodGet, "")
 			if res.status != http.StatusOK || res.body["id"] != meID || res.body["profile_complete"] != tt.wantComplete || res.body["avatar"] != nil {
 				t.Fatalf("got %d %v, want 200 for %s with profile_complete %v", res.status, res.body, meID, tt.wantComplete)
+			}
+			// The owner reads their own names and e-mail.
+			for field, want := range map[string]*string{"first_name": tt.user.FirstName, "last_name": tt.user.LastName, "email": tt.user.Email} {
+				got, ok := res.body[field]
+				if !ok || (want == nil && got != nil) || (want != nil && got != *want) {
+					t.Fatalf("%s = %v, want %v", field, got, want)
+				}
 			}
 		})
 	}
@@ -144,8 +156,18 @@ func TestPatchMe(t *testing.T) {
 		wantCode   string
 		wantFields string
 		wantPseudo *string
+		wantFirst  *string
+		wantLast   *string
 	}{
 		{name: "pseudo and language", body: `{"pseudo":"marie_92","language":"en"}`, wantStatus: 200, wantPseudo: ptr("marie_92")},
+		{name: "first and last name", body: `{"first_name":"Marie-Ève","last_name":"D'Amours"}`, wantStatus: 200, wantFirst: ptr("Marie-Ève"), wantLast: ptr("D'Amours")},
+		{name: "null first name refused", body: `{"first_name":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "first_name"},
+		{name: "null last name refused", body: `{"last_name":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "last_name"},
+		{name: "empty last name refused", body: `{"last_name":""}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "last_name"},
+		{name: "first name with a leading space", body: `{"first_name":" Marie"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "first_name"},
+		{name: "last name with a digit", body: `{"last_name":"Tremblay2"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "last_name"},
+		{name: "last name over 50 characters", body: `{"last_name":"` + strings.Repeat("é", 51) + `"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "last_name"},
+		{name: "e-mail not editable", body: `{"email":"other@example.com"}`, wantStatus: 400, wantCode: "validation_failed"},
 		{name: "empty object changes nothing", body: `{}`, wantStatus: 200},
 		{name: "null pseudo refused", body: `{"pseudo":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "pseudo"},
 		{name: "invalid pseudo and language", body: `{"pseudo":"a b","language":"de"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "language,pseudo"},
@@ -170,6 +192,9 @@ func TestPatchMe(t *testing.T) {
 			}
 			if tt.wantPseudo != nil && (written.Pseudo == nil || *written.Pseudo != *tt.wantPseudo) {
 				t.Fatalf("pseudo written = %v, want %q", written.Pseudo, *tt.wantPseudo)
+			}
+			if tt.wantFirst != nil && (written.FirstName == nil || *written.FirstName != *tt.wantFirst || written.LastName == nil || *written.LastName != *tt.wantLast) {
+				t.Fatalf("names written = %v %v, want %q %q", written.FirstName, written.LastName, *tt.wantFirst, *tt.wantLast)
 			}
 		})
 	}

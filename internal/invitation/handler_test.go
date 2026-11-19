@@ -81,7 +81,7 @@ func serveLogged(t *testing.T, h *Handler, logs io.Writer, method, target, body 
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
 		auth.Authenticate(acceptingVerifier{}, logger),
-		auth.CurrentUser(func(context.Context, string) (string, error) { return actor, nil }, logger),
+		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return actor, nil }, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(invitationsOnly{Handler: h}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),

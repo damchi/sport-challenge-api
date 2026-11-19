@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -21,7 +22,10 @@ type fakeRepository struct {
 	err  error
 	// changes records the last UpdateProfile call, when set.
 	changes *ProfileChanges
-	pseudos map[string]string
+	names   map[string]PublicName
+	// email records the last UpdateEmail call, when set; emailErr fails it.
+	email    *string
+	emailErr error
 	// deleted records the user Delete anonymized, when set; deleteErr fails
 	// Delete, pending records AddPendingAuth0Deletion and pendingErr fails it.
 	deleted    *string
@@ -92,33 +96,84 @@ func (f fakeRepository) UpdateProfile(_ context.Context, _ string, changes Profi
 	return f.user, f.err
 }
 
-func (f fakeRepository) Pseudos(context.Context, []string) (map[string]string, error) {
-	return f.pseudos, f.err
+func (f fakeRepository) PublicNames(context.Context, []string) (map[string]PublicName, error) {
+	return f.names, f.err
 }
 
-func TestServicePseudos(t *testing.T) {
+func (f fakeRepository) UpdateEmail(_ context.Context, _, email string) error {
+	if f.emailErr != nil {
+		return f.emailErr
+	}
+	if f.email != nil {
+		*f.email = email
+	}
+	return nil
+}
+
+func TestServicePublicNames(t *testing.T) {
 	storageErr := errors.New("connection reset")
-	stored := map[string]string{"u1": "marie_92"}
+	stored := map[string]PublicName{"u1": {Pseudo: ptr("marie_92"), FirstName: ptr("Marie"), LastName: ptr("Tremblay")}}
 	tests := []struct {
 		name    string
 		repo    fakeRepository
 		ids     []string
-		want    map[string]string
+		want    map[string]PublicName
 		wantErr error
 	}{
 		// No user to look up: the database is not queried.
-		{name: "nobody", repo: fakeRepository{err: storageErr}, want: map[string]string{}},
-		{name: "some users", repo: fakeRepository{pseudos: stored}, ids: []string{"u1", "u2"}, want: stored},
+		{name: "nobody", repo: fakeRepository{err: storageErr}, want: map[string]PublicName{}},
+		{name: "some users", repo: fakeRepository{names: stored}, ids: []string{"u1", "u2"}, want: stored},
 		{name: "storage failure", repo: fakeRepository{err: storageErr}, ids: []string{"u1"}, wantErr: storageErr},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo, nil, nil, discard).Pseudos(t.Context(), tt.ids)
+			got, err := NewService(tt.repo, nil, nil, discard).PublicNames(t.Context(), tt.ids)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
-			if tt.wantErr == nil && (got == nil || len(got) != len(tt.want) || got["u1"] != tt.want["u1"]) {
-				t.Fatalf("Pseudos() = %v, want %v", got, tt.want)
+			if tt.wantErr == nil && !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("PublicNames() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestServiceGetOrCreateBySubjectKeepsTheEmail: the e-mail of the token is
+// stored when it differs from the one kept; a token without one, or with a
+// value that is no address, leaves it as is.
+func TestServiceGetOrCreateBySubjectKeepsTheEmail(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	tests := []struct {
+		name      string
+		stored    *string
+		token     string
+		emailErr  error
+		wantWrite string
+		wantEmail *string
+	}{
+		{name: "first token with an e-mail", token: "marie@example.com", wantWrite: "marie@example.com", wantEmail: ptr("marie@example.com")},
+		{name: "e-mail changed at the provider", stored: ptr("old@example.com"), token: "new@example.com", wantWrite: "new@example.com", wantEmail: ptr("new@example.com")},
+		{name: "same e-mail: no write", stored: ptr("marie@example.com"), token: "marie@example.com", wantEmail: ptr("marie@example.com")},
+		{name: "spaces around: trimmed, same e-mail", stored: ptr("marie@example.com"), token: " marie@example.com ", wantEmail: ptr("marie@example.com")},
+		{name: "token without e-mail keeps the stored one", stored: ptr("marie@example.com"), wantEmail: ptr("marie@example.com")},
+		{name: "not an address: ignored", token: "marie", wantEmail: nil},
+		{name: "too long: ignored", token: strings.Repeat("a", 250) + "@x.ca", wantEmail: nil},
+		// Failing to store it does not refuse the request: the stored one stays.
+		{name: "write failure", stored: ptr("old@example.com"), token: "marie@example.com", emailErr: storageErr, wantEmail: ptr("old@example.com")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var written string
+			repo := fakeRepository{user: User{ID: "u-1", Email: tt.stored}, email: &written, emailErr: tt.emailErr}
+			got, err := NewService(repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", tt.token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if written != tt.wantWrite {
+				t.Fatalf("written %q, want %q", written, tt.wantWrite)
+			}
+			if !reflect.DeepEqual(got.Email, tt.wantEmail) {
+				t.Fatalf("email %v, want %v", got.Email, tt.wantEmail)
 			}
 		})
 	}
@@ -142,7 +197,7 @@ func TestServiceGetOrCreateBySubject(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1")
+			got, err := NewService(tt.repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", "")
 
 			switch {
 			case tt.wantCode != "":
@@ -262,8 +317,11 @@ func TestServiceProfileComplete(t *testing.T) {
 		wantErr  bool
 		wantCode apperr.Code
 	}{
-		{name: "pseudo set", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie")}}, want: true},
-		{name: "no pseudo", repo: fakeRepository{user: User{ID: "u-1"}}},
+		{name: "pseudo and names set", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie"), FirstName: ptr("Marie"), LastName: ptr("Roy")}}, want: true},
+		{name: "no pseudo", repo: fakeRepository{user: User{ID: "u-1", FirstName: ptr("Marie"), LastName: ptr("Roy")}}},
+		// A profile from before the names: incomplete until they are set.
+		{name: "pseudo without names", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie")}}},
+		{name: "no last name", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie"), FirstName: ptr("Marie")}}},
 		// Anonymization clears the pseudo: a deleted account is deleted, not
 		// incomplete (a request racing the deletion). The repository never
 		// returns an anonymized row: it answers errUserNotFound.

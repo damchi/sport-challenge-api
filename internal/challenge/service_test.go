@@ -216,16 +216,21 @@ func (f *fakeRepository) Create(_ context.Context, c Challenge, joinedAt time.Ti
 type fakeProfiles struct {
 	complete  bool
 	err       error
-	pseudos   map[string]string
+	names     map[string]Name
 	pseudoErr error
 }
+
+// marie is the public name of a participant in the listings.
+var marie = Name{Pseudo: ptrTo("marie_92"), FirstName: ptrTo("Marie-Ève"), LastName: ptrTo("Tremblay")}
+
+func ptrTo(s string) *string { return &s }
 
 func (f fakeProfiles) ProfileComplete(context.Context, string) (bool, error) {
 	return f.complete, f.err
 }
 
-func (f fakeProfiles) Pseudos(context.Context, []string) (map[string]string, error) {
-	return f.pseudos, f.pseudoErr
+func (f fakeProfiles) Names(context.Context, []string) (map[string]Name, error) {
+	return f.names, f.pseudoErr
 }
 
 type fakeCatalogue struct {
@@ -1032,7 +1037,7 @@ func TestServiceParticipants(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic), participants: participants(tt.available)}
 			after := &ParticipantPosition{JoinedAt: now, UserID: "00000000-0000-0000-0000-000000000009"}
-			profiles := fakeProfiles{pseudos: map[string]string{"00000000-0000-0000-0000-000000000001": "marie_92"}}
+			profiles := fakeProfiles{names: map[string]Name{"00000000-0000-0000-0000-000000000001": marie}}
 			page, err := NewService(repo, profiles, fakeCatalogue{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, after)
 			if err != nil {
 				t.Fatal(err)
@@ -1050,12 +1055,12 @@ func TestServiceParticipants(t *testing.T) {
 			if q := repo.participantsAsked; q == nil || q.limit != tt.limit+1 || q.after != after {
 				t.Fatalf("query %+v, want limit %d after the cursor", q, tt.limit+1)
 			}
-			if p := page.Items[0].Pseudo; p == nil || *p != "marie_92" {
-				t.Fatalf("first pseudo %v, want marie_92", p)
+			if got := page.Items[0].Name; !reflect.DeepEqual(got, marie) {
+				t.Fatalf("first name %+v, want %+v", got, marie)
 			}
-			// No pseudo (anonymized account): left nil, for a neutral name.
-			if len(page.Items) > 1 && (page.Items[1].Pseudo != nil || page.Items[1].Status != ParticipantAbandoned) {
-				t.Fatalf("second item %+v, want abandoned without pseudo", page.Items[1])
+			// No name (anonymized account): left empty, for a neutral name.
+			if len(page.Items) > 1 && (page.Items[1].Name != Name{} || page.Items[1].Status != ParticipantAbandoned) {
+				t.Fatalf("second item %+v, want abandoned without name", page.Items[1])
 			}
 		})
 	}

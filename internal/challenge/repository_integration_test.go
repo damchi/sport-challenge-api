@@ -39,21 +39,22 @@ func (p sqlProfiles) ProfileComplete(ctx context.Context, id string) (bool, erro
 	return complete, nil
 }
 
-func (p sqlProfiles) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {
-	rows, err := p.pool.Query(ctx, "SELECT id::text, pseudo FROM users WHERE id = ANY($1::uuid[]) AND anonymized_at IS NULL AND pseudo IS NOT NULL", ids)
+func (p sqlProfiles) Names(ctx context.Context, ids []string) (map[string]Name, error) {
+	rows, err := p.pool.Query(ctx, "SELECT id::text, pseudo, first_name, last_name FROM users WHERE id = ANY($1::uuid[]) AND anonymized_at IS NULL", ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	pseudos := map[string]string{}
+	names := map[string]Name{}
 	for rows.Next() {
-		var id, pseudo string
-		if err := rows.Scan(&id, &pseudo); err != nil {
+		var id string
+		var n Name
+		if err := rows.Scan(&id, &n.Pseudo, &n.FirstName, &n.LastName); err != nil {
 			return nil, err
 		}
-		pseudos[id] = pseudo
+		names[id] = n
 	}
-	return pseudos, rows.Err()
+	return names, rows.Err()
 }
 
 type sqlCatalogue struct{ pool *pgxpool.Pool }

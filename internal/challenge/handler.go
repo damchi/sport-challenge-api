@@ -354,10 +354,12 @@ func (h *Handler) ListParticipants(ctx context.Context, req api.ListParticipants
 		}
 		// Avatar stays null in V1: the avatar upload comes with SC-API-023.
 		out.Items = append(out.Items, api.Participant{
-			UserId:   id,
-			Pseudo:   participant.Pseudo,
-			Status:   api.ParticipantStatus(participant.Status),
-			JoinedAt: participant.JoinedAt.UTC(),
+			UserId:    id,
+			Pseudo:    participant.Name.Pseudo,
+			FirstName: participant.Name.FirstName,
+			LastName:  participant.Name.LastName,
+			Status:    api.ParticipantStatus(participant.Status),
+			JoinedAt:  participant.JoinedAt.UTC(),
 		})
 	}
 	if page.Next != nil {

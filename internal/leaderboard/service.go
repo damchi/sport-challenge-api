@@ -33,10 +33,10 @@ type Challenges interface {
 	Challenge(ctx context.Context, actorID, challengeID string) (Challenge, error)
 }
 
-// Profiles gives the pseudo of each user of ids that has one; an anonymized
-// account has none (module user).
+// Profiles gives the public name of each user of ids; an anonymized account
+// has none (module user).
 type Profiles interface {
-	Pseudos(ctx context.Context, ids []string) (map[string]string, error)
+	Names(ctx context.Context, ids []string) (map[string]Name, error)
 }
 
 // Service holds the use cases of the leaderboard.
@@ -102,9 +102,9 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 	for i, p := range participants {
 		ids[i] = p.UserID
 	}
-	pseudos, err := s.profiles.Pseudos(ctx, ids)
+	names, err := s.profiles.Names(ctx, ids)
 	if err != nil {
-		return Leaderboard{}, fmt.Errorf("read pseudos: %w", err)
+		return Leaderboard{}, fmt.Errorf("read names: %w", err)
 	}
 
 	board := Leaderboard{ComputedAt: now, Categories: make([]CategoryRanking, len(c.Categories))}
@@ -113,9 +113,7 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 		ranked := make([]Ranked, len(entries))
 		for j, e := range entries {
 			ranked[j] = Ranked{Entry: e}
-			if p, ok := pseudos[e.UserID]; ok {
-				ranked[j].Pseudo = &p
-			}
+			ranked[j].Name = names[e.UserID]
 		}
 		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
 	}
@@ -149,7 +147,7 @@ type frozenRanking struct {
 }
 
 // frozen builds the leaderboard of a challenge that is over from its result
-// snapshots, and reports false when they are not all there yet. The pseudos
+// snapshots, and reports false when they are not all there yet. The names
 // are read now: an account anonymized since shows under a neutral name.
 func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, error) {
 	if len(c.Categories) == 0 {
@@ -179,9 +177,9 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 			}
 		}
 	}
-	pseudos, err := s.profiles.Pseudos(ctx, ids)
+	names, err := s.profiles.Names(ctx, ids)
 	if err != nil {
-		return Leaderboard{}, false, fmt.Errorf("read pseudos: %w", err)
+		return Leaderboard{}, false, fmt.Errorf("read names: %w", err)
 	}
 
 	board := Leaderboard{ComputedAt: createdAt, Categories: make([]CategoryRanking, len(c.Categories))}
@@ -197,9 +195,7 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 					ranked[j].Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
 				}
 			}
-			if p, ok := pseudos[e.UserID]; ok {
-				ranked[j].Pseudo = &p
-			}
+			ranked[j].Name = names[e.UserID]
 		}
 		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
 	}

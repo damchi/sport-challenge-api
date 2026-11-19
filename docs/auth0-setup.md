@@ -121,6 +121,25 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
 
 En développement, on accepte de repasser par la page Auth0 : pas de domaine personnalisé.
 
+## 8. Ajouter l'e-mail à l'access token (Action)
+
+L'API lit l'e-mail de l'utilisateur dans l'access token (SC-API-116) : un access token n'a pas de claim `email`, et Auth0 n'y garde une claim ajoutée que si son nom a un espace de noms. Une Action post-login l'ajoute sous `https://sport-challenge/email` ; l'API ignore une claim `email` sans espace de noms. Le tenant étant partagé, l'Action sert au local et à la production.
+
+1. **Actions** → Library (ancienne navigation : Actions → Library) → Create Action → Build from scratch : nom `Add e-mail to access token`, trigger **Login / Post Login**, runtime Node le plus récent proposé.
+2. Code :
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     // Only a verified address: the passwordless e-mail connection verifies it.
+     if (event.user.email && event.user.email_verified) {
+       api.accessToken.setCustomClaim('https://sport-challenge/email', event.user.email);
+     }
+   };
+   ```
+3. **Deploy**, puis **Actions** → Triggers → post-login : glisser l'Action dans le flux, **Apply**.
+4. Vérifier : se connecter depuis le frontend, puis `GET /api/v1/me` renvoie `email`. Un jeton obtenu avant l'ajout de l'Action n'a pas la claim : l'e-mail arrive au jeton suivant (rafraîchissement ou nouvelle connexion).
+
+L'e-mail est une donnée personnelle : l'API ne le journalise jamais et ne le renvoie qu'à son titulaire (README §2.8).
+
 ## Points d'attention pour l'API (ticket SC-API-017)
 
 - **Jetons machine à machine** : refuser un access token dont `gty` vaut `client-credentials` ou dont `sub` se termine par `@clients`, en défense en profondeur de l'étape 2.5.
@@ -153,6 +172,7 @@ Pour chaque environnement :
 - [ ] Profil d'authentification en *Identifier First* ; seule la connexion par code e-mail est activée sur la SPA ; `google-oauth2` désactivée ; connexion par mot de passe supprimée.
 - [ ] Application machine à machine limitée à `delete:users`, grant *Client Credentials* seul, aucune connexion ; identifiants dans Secret Manager, accès réservé au compte de service de l'API.
 - [ ] Connexion de test réussie depuis le frontend (ou **Authentication → … → Try** dans le dashboard).
+- [ ] Action `Add e-mail to access token` déployée et placée dans le flux post-login (étape 8) ; `GET /api/v1/me` renvoie l'e-mail.
 - [ ] Production : domaine personnalisé Auth0 actif, `AUTH0_DOMAIN` réglé sur ce domaine et `AUTH0_MGMT_DOMAIN` sur le domaine du tenant (étape 7) ; suppression de compte testée ensuite.
 
 ## V2 : application native

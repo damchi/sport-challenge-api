@@ -47,11 +47,11 @@ func newRecording(t *testing.T) recording {
 	clk := clock.NewFake(recordNow)
 	users := user.NewService(user.NewRepository(gdb), nil, nil, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
-	challenges := challenge.NewService(challenge.NewRepository(gdb), users, sports, clk)
+	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, clk)
 	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
 
 	var id string
-	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ('email|runner', 'runner') RETURNING id").Scan(&id); err != nil {
+	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ('email|runner', 'runner', 'Rose', 'Runner') RETURNING id").Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return recording{t: t, pool: pool, activities: activities, user: id}
@@ -307,7 +307,7 @@ func wantLocked(t *testing.T, err error) {
 func (r recording) newUser(pseudo string) string {
 	r.t.Helper()
 	var id string
-	if err := r.pool.QueryRow(r.t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ($1, $2) RETURNING id", "email|"+pseudo, pseudo).Scan(&id); err != nil {
+	if err := r.pool.QueryRow(r.t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ($1, $2, 'Test', 'User') RETURNING id", "email|"+pseudo, pseudo).Scan(&id); err != nil {
 		r.t.Fatal(err)
 	}
 	return id

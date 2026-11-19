@@ -59,7 +59,7 @@ func toEntry(r Ranked) (api.LeaderboardEntry, error) {
 	}
 	// Avatar stays null in V1: the avatar upload comes with SC-API-023.
 	entry := api.LeaderboardEntry{
-		User:      api.LeaderboardUser{Id: id, Pseudo: r.Pseudo},
+		User:      api.LeaderboardUser{Id: id, Pseudo: r.Name.Pseudo, FirstName: r.Name.FirstName, LastName: r.Name.LastName},
 		Abandoned: r.Abandoned,
 	}
 	if r.Abandoned {

@@ -21,3 +21,21 @@ func TestPseudoRuleMatchesTheContract(t *testing.T) {
 		t.Fatalf("contract pattern %q, service rule %q: keep them identical", got, want)
 	}
 }
+
+// TestNameRuleMatchesTheContract does the same for the first and last names.
+func TestNameRuleMatchesTheContract(t *testing.T) {
+	spec, err := api.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, ok := spec.Components.Schemas["PersonName"]
+	if !ok || ref.Value == nil {
+		t.Fatal("schema PersonName missing from the contract")
+	}
+	if got, want := ref.Value.Pattern, namePattern.String(); got != want {
+		t.Fatalf("contract pattern %q, service rule %q: keep them identical", got, want)
+	}
+	if ref.Value.MaxLength == nil || *ref.Value.MaxLength != maxNameLength {
+		t.Fatalf("contract maxLength %v, service rule %d: keep them identical", ref.Value.MaxLength, maxNameLength)
+	}
+}

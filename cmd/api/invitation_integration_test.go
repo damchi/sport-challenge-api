@@ -57,12 +57,12 @@ func TestInvitationValidityAgreesAcrossModules(t *testing.T) {
 			}
 			clk := clock.NewFake(recordNow)
 			users := user.NewService(user.NewRepository(gdb), nil, nil, logger)
-			challenges := challenge.NewService(challenge.NewRepository(gdb), users, sport.NewService(sport.NewRepository(gdb)), clk)
+			challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), clk)
 			invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 
 			insertUser := func(subject string) string {
 				var id string
-				if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ($1, $1) RETURNING id", subject).Scan(&id); err != nil {
+				if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ($1, $1, 'Test', 'User') RETURNING id", subject).Scan(&id); err != nil {
 					t.Fatal(err)
 				}
 				return id
@@ -129,13 +129,13 @@ func TestAcceptInvitation(t *testing.T) {
 	deadline := start.AddDate(0, 0, 7)
 	clk := clock.NewFake(start.Add(24 * time.Hour))
 	users := user.NewService(user.NewRepository(gdb), nil, nil, logger)
-	challenges := challenge.NewService(challenge.NewRepository(gdb), users, sport.NewService(sport.NewRepository(gdb)), clk)
+	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), clk)
 	invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 
 	insertUser := func(subject string) string {
 		t.Helper()
 		var id string
-		if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ($1, $1) RETURNING id", subject).Scan(&id); err != nil {
+		if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ($1, $1, 'Test', 'User') RETURNING id", subject).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id

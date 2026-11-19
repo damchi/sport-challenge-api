@@ -57,12 +57,12 @@ func (f *fakeRepo) Snapshots(context.Context, string) (map[string]json.RawMessag
 }
 
 type fakeProfiles struct {
-	pseudos map[string]string
-	err     error
+	names map[string]Name
+	err   error
 }
 
-func (f fakeProfiles) Pseudos(context.Context, []string) (map[string]string, error) {
-	return f.pseudos, f.err
+func (f fakeProfiles) Names(context.Context, []string) (map[string]Name, error) {
+	return f.names, f.err
 }
 
 func toronto(t *testing.T) *time.Location {
@@ -93,7 +93,12 @@ func twoWeeks(t *testing.T) Challenge {
 	}
 }
 
-var pseudos = fakeProfiles{pseudos: map[string]string{"a": "Ann", "b": "Bob"}}
+// annName and bobName are the public names of participants a and b.
+var (
+	annName = Name{Pseudo: pseudo("Ann"), FirstName: pseudo("Ann"), LastName: pseudo("Archer")}
+	bobName = Name{Pseudo: pseudo("Bob"), FirstName: pseudo("Bob"), LastName: pseudo("Bélanger")}
+	pseudos = fakeProfiles{names: map[string]Name{"a": annName, "b": bobName}}
+)
 
 func TestGetRanksEveryCategory(t *testing.T) {
 	c := twoWeeks(t)
@@ -120,18 +125,18 @@ func TestGetRanksEveryCategory(t *testing.T) {
 	// c is an anonymized account: no pseudo.
 	want := Leaderboard{ComputedAt: now, Categories: []CategoryRanking{
 		{Type: CategoryCumulativeTime, Entries: []Ranked{
-			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Pseudo: pseudo("Ann")},
-			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 3600}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 3600}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 		{Type: CategoryCumulativeDistance, Entries: []Ranked{
-			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Pseudo: pseudo("Ann")},
-			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 		{Type: CategoryRunElimination, Entries: []Ranked{
-			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Pseudo: pseudo("Ann")},
-			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 	}}
@@ -309,16 +314,16 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 	}
 	want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{
 		{Type: CategoryCumulativeTime, Entries: []Ranked{
-			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 		{Type: CategoryCumulativeDistance, Entries: []Ranked{
-			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Pseudo: pseudo("Ann")},
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 		{Type: CategoryRunElimination, Entries: []Ranked{
-			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Pseudo: pseudo("Ann")},
-			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Pseudo: pseudo("Bob")},
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 	}}
@@ -385,7 +390,7 @@ func TestGetFrozenFailures(t *testing.T) {
 	}
 }
 
-// TestGetFrozenNamesEveryCategory: the pseudos are asked for the participants
+// TestGetFrozenNamesEveryCategory: the names are asked for the participants
 // of all the categories, each once.
 func TestGetFrozenNamesEveryCategory(t *testing.T) {
 	c := twoWeeks(t)
@@ -401,10 +406,10 @@ func TestGetFrozenNamesEveryCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := []string{"a", "b"}; !reflect.DeepEqual(profiles.asked, want) {
-		t.Fatalf("pseudos asked for %v, want %v", profiles.asked, want)
+		t.Fatalf("names asked for %v, want %v", profiles.asked, want)
 	}
-	if p := got.Categories[2].Entries[0].Pseudo; p == nil || *p != "Bob" {
-		t.Fatalf("pseudo in the third category = %v, want Bob", p)
+	if n := got.Categories[2].Entries[0].Name; !reflect.DeepEqual(n, bobName) {
+		t.Fatalf("name in the third category = %+v, want %+v", n, bobName)
 	}
 }
 
@@ -414,7 +419,7 @@ type recordingProfiles struct {
 	asked []string
 }
 
-func (r *recordingProfiles) Pseudos(ctx context.Context, ids []string) (map[string]string, error) {
+func (r *recordingProfiles) Names(ctx context.Context, ids []string) (map[string]Name, error) {
 	r.asked = ids
-	return r.fakeProfiles.Pseudos(ctx, ids)
+	return r.fakeProfiles.Names(ctx, ids)
 }

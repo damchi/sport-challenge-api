@@ -14,10 +14,11 @@ import (
 
 type userIDKey struct{}
 
-// UserIDResolver returns the identifier of the local user of an auth
-// subject, creating the user on first login. An *apperr.Error (such as
-// account_deleted) is answered as is.
-type UserIDResolver func(ctx context.Context, subject string) (string, error)
+// UserIDResolver returns the identifier of the local user of the token's
+// claims (its subject, and its e-mail to keep up to date), creating the user
+// on first login. An *apperr.Error (such as account_deleted) is answered as
+// is.
+type UserIDResolver func(ctx context.Context, claims Claims) (string, error)
 
 // UserID returns the identifier of the local user CurrentUser put in the
 // request context. It works with the *gin.Context the generated handlers
@@ -39,7 +40,7 @@ func CurrentUser(resolve UserIDResolver, logger *slog.Logger) gin.HandlerFunc {
 			httpx.RespondError(c, logger, apperr.New(apperr.CodeUnauthenticated, nil))
 			return
 		}
-		id, err := resolve(c.Request.Context(), claims.Subject)
+		id, err := resolve(c.Request.Context(), claims)
 		switch {
 		case errors.Is(err, context.Canceled) && c.Request.Context().Err() != nil:
 			// Same exception as Authenticate: the client is gone. Any other

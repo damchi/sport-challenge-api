@@ -34,11 +34,11 @@ type repository interface {
 	Memberships(ctx context.Context, userID string) ([]UserChallenge, error)
 }
 
-// Profiles tells whether a user's profile is complete, and gives the pseudos
-// of users, none for an anonymized account (module user).
+// Profiles tells whether a user's profile is complete, and gives the public
+// names of users, none for an anonymized account (module user).
 type Profiles interface {
 	ProfileComplete(ctx context.Context, userID string) (bool, error)
-	Pseudos(ctx context.Context, userIDs []string) (map[string]string, error)
+	Names(ctx context.Context, userIDs []string) (map[string]Name, error)
 }
 
 // Catalogue gives the suggested factor of every sport with a distance
@@ -161,7 +161,7 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 // Participants returns a page of the participants of challenge id, visible
 // to whoever sees the challenge (ParticipantsRefusal): anyone else gets the
 // same 404 challenge_not_found as for a missing challenge. An anonymized
-// account has no pseudo.
+// account has no name.
 func (s *Service) Participants(ctx context.Context, actorID, id string, limit int, after *ParticipantPosition) (ParticipantPage, error) {
 	if limit < 1 {
 		return ParticipantPage{}, apperr.InvalidFields(nil, "limit")
@@ -191,14 +191,12 @@ func (s *Service) Participants(ctx context.Context, actorID, id string, limit in
 	for i, p := range page.Items {
 		ids[i] = p.UserID
 	}
-	pseudos, err := s.profiles.Pseudos(ctx, ids)
+	names, err := s.profiles.Names(ctx, ids)
 	if err != nil {
 		return ParticipantPage{}, fmt.Errorf("list participants: %w", err)
 	}
 	for i := range page.Items {
-		if pseudo, ok := pseudos[page.Items[i].UserID]; ok {
-			page.Items[i].Pseudo = &pseudo
-		}
+		page.Items[i].Name = names[page.Items[i].UserID]
 	}
 	return page, nil
 }

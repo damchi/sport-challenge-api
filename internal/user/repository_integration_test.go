@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -110,7 +111,7 @@ func TestServiceRefusesAnAnonymizedAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := NewService(repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|gone")
+	_, err := NewService(repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|gone", "")
 	if !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
 		t.Fatalf("error = %v, want account_deleted", err)
 	}
@@ -287,26 +288,84 @@ func TestUpdateProfileNeverWritesAnAnonymizedAccount(t *testing.T) {
 	}
 }
 
-func TestPseudos(t *testing.T) {
+func TestPublicNames(t *testing.T) {
 	repo, pool := newRepository(t)
 	named := newUser(t, repo, "email|named")
-	if _, err := repo.UpdateProfile(t.Context(), named.ID, ProfileChanges{Pseudo: ptr("marie_92")}); err != nil {
+	changes := ProfileChanges{Pseudo: ptr("marie_92"), FirstName: ptr("Marie-Ève"), LastName: ptr("Tremblay")}
+	if _, err := repo.UpdateProfile(t.Context(), named.ID, changes); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateEmail(t.Context(), named.ID, "marie@example.com"); err != nil {
 		t.Fatal(err)
 	}
 	unnamed := newUser(t, repo, "email|unnamed")
-	// An anonymized row that kept its pseudo: it is still never served.
+	// An anonymized row that kept its names: they are still never served.
 	var gone string
 	if err := pool.QueryRow(t.Context(),
-		"INSERT INTO users (auth_subject, pseudo, anonymized_at) VALUES ('anonymized|2', 'ghost', now()) RETURNING id").Scan(&gone); err != nil {
+		"INSERT INTO users (auth_subject, pseudo, first_name, anonymized_at) VALUES ('anonymized|2', 'ghost', 'Ghost', now()) RETURNING id").Scan(&gone); err != nil {
 		t.Fatal(err)
 	}
 	unknown := "00000000-0000-0000-0000-000000000000"
 
-	pseudos, err := repo.Pseudos(t.Context(), []string{named.ID, unnamed.ID, gone, unknown})
+	names, err := repo.PublicNames(t.Context(), []string{named.ID, unnamed.ID, gone, unknown})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pseudos) != 1 || pseudos[named.ID] != "marie_92" {
-		t.Fatalf("pseudos %v, want only %s: marie_92", pseudos, named.ID)
+	want := map[string]PublicName{
+		named.ID:   {Pseudo: ptr("marie_92"), FirstName: ptr("Marie-Ève"), LastName: ptr("Tremblay")},
+		unnamed.ID: {},
+	}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("names %v, want %v (never the anonymized one)", names, want)
+	}
+}
+
+// TestProfileFromBeforeTheNamesIsIncomplete: a user who only has a pseudo
+// (created before SC-API-116) is incomplete until the names are set.
+func TestProfileFromBeforeTheNamesIsIncomplete(t *testing.T) {
+	repo, pool := newRepository(t)
+	var id string
+	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ('email|old', 'old_1') RETURNING id").Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(repo, nil, nil, discard)
+	if complete, err := svc.ProfileComplete(t.Context(), id); err != nil || complete {
+		t.Fatalf("ProfileComplete() = %v, %v, want false", complete, err)
+	}
+	if _, err := svc.UpdateProfile(t.Context(), id, ProfileChanges{FirstName: ptr("Olive"), LastName: ptr("Ouellet")}); err != nil {
+		t.Fatal(err)
+	}
+	if complete, err := svc.ProfileComplete(t.Context(), id); err != nil || !complete {
+		t.Fatalf("ProfileComplete() = %v, %v, want true once the names are set", complete, err)
+	}
+}
+
+// TestUpdateEmail: the e-mail is written on an active account, never on an
+// anonymized one, and survives the user's next read.
+func TestUpdateEmail(t *testing.T) {
+	repo, pool := newRepository(t)
+	u := newUser(t, repo, "email|mail")
+	if err := repo.UpdateEmail(t.Context(), u.ID, "marie@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetOrCreateBySubject(t.Context(), "email|mail")
+	if err != nil || got.Email == nil || *got.Email != "marie@example.com" {
+		t.Fatalf("user %+v, %v, want the e-mail kept", got, err)
+	}
+
+	var gone string
+	if err := pool.QueryRow(t.Context(),
+		"INSERT INTO users (auth_subject, anonymized_at) VALUES ('anonymized|3', now()) RETURNING id").Scan(&gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateEmail(t.Context(), gone, "ghost@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	var email *string
+	if err := pool.QueryRow(t.Context(), "SELECT email FROM users WHERE id = $1", gone).Scan(&email); err != nil {
+		t.Fatal(err)
+	}
+	if email != nil {
+		t.Fatal("e-mail written on an anonymized account")
 	}
 }
