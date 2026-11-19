@@ -19,7 +19,7 @@ Procédure manuelle, à refaire à l'identique pour chaque environnement. Elle c
 | Développement ✅ | `sport-challenge-dev` | `sport-challenge-dev.ca.auth0.com` | `https://api.dev.sport-challenge` | `http://localhost:5173` |
 | Production | `sport-challenge-prod` | `sport-challenge-prod.ca.auth0.com` | `https://api.sport-challenge` | *à définir* |
 
-**État** : le tenant de développement est configuré (connexion par code testée). Le tenant de production sera créé avec cette procédure lors de la mise en place du déploiement (épopée E9), quand l'URL de son frontend sera connue. Un tenant de staging s'ajoutera si un staging est recréé.
+**État** : le tenant de développement est configuré (connexion par code testée) et vérifié conforme le 2026-11-19 : accès utilisateur de la SPA (étape 2.6) et consentement. Le tenant de production sera créé avec cette procédure lors de la mise en place du déploiement (épopée E9), quand l'URL de son frontend sera connue. Un tenant de staging s'ajoutera si un staging est recréé.
 
 Le domaine exact est affiché dans les réglages d'une application (**Applications → Applications → `Sport Challenge Web` → Settings → Domain**) : reporte-le ici s'il diffère de `<tenant>.ca.auth0.com`. Le `ca` du domaine (ou de l'adresse du dashboard, `manage.auth0.com/dashboard/ca/…`) confirme la région Canada. L'audience est un identifiant (une URI), pas une adresse appelée : elle ne se change pas après la création de l'API. Le port du frontend local (`5173`) est celui de Vite par défaut : adapte-le au dépôt du frontend.
 
@@ -40,9 +40,13 @@ Le domaine exact est affiché dans les réglages d'une application (**Applicatio
    - **Implicit / Hybrid Flow Access Token Lifetime** : `900` (sans effet puisque le grant *Implicit* est désactivé, mais aligné).
    - **Allow Offline Access** : activé (nécessaire aux refresh tokens).
    - **Enable RBAC** : désactivé (l'autorisation se fait dans les services de l'API, pas dans le jeton).
+   - **Allow Skipping User Consent** : activé. Sport Challenge Web est une application interne (*first-party*) : l'utilisateur n'a pas à autoriser l'accès à sa propre API. En local, l'écran de consentement reste affiché malgré ce réglage : Auth0 ne le saute jamais pour une application servie depuis `localhost`, faute de pouvoir vérifier son origine. Il suffit de l'accepter une fois par utilisateur de test.
 4. Aucune permission (*scope*) à créer pour l'instant.
 5. **Supprimer l'application de test** : Auth0 crée en général, avec l'API, une application machine à machine `Sport Challenge API (Test Application)` autorisée sur cette audience. Avec son secret, n'importe qui obtiendrait un jeton valide pour l'API (`sub` en `…@clients`). La supprimer (**Applications → Applications**), puis vérifier dans l'onglet **Machine To Machine Applications** de l'API qu'**aucune** application n'est autorisée.
-6. **À vérifier dans le dashboard** : si Auth0 propose un réglage qui limite les applications pouvant obtenir des jetons utilisateur pour cette API (politique d'accès des applications), n'y autoriser que la SPA.
+6. **Autoriser la SPA en accès utilisateur (obligatoire)**. Sans ce réglage, la connexion du frontend échoue avec `Client "<Client ID de la SPA>" is not authorized to access resource server "<audience>"`. À faire une fois la SPA créée (étape 3) :
+   - **Applications → APIs → Sport Challenge API → Settings → Application Access Policy → User-Delegated Access** : **Per-app authorization**. Seules les applications autorisées une à une obtiennent alors un jeton utilisateur pour l'API.
+   - Onglet **Application Access** → **Edit** sur `Sport Challenge Web` → **User-Delegated Access** : **Grant Access**, sans aucune permission (l'API n'en définit pas).
+   - Aucune autre application n'y a d'accès, ni utilisateur ni machine à machine (étape 2.5).
 
 ## 3. Créer l'application web (SPA)
 
@@ -64,6 +68,7 @@ Le domaine exact est affiché dans les réglages d'une application (**Applicatio
 6. Onglet **Connections** : **désactiver** `google-oauth2` (créée par défaut par Auth0) et toute autre connexion. La connexion `email` (code) n'apparaît ici qu'une fois créée dans le tenant : revenir l'activer après l'étape 4.
 7. Noter le **Client ID** : il n'est pas secret, il va dans la configuration du frontend.
 8. À transmettre au frontend : garder les jetons **en mémoire** (`cacheLocation: 'memory'` du SDK Auth0, jamais `localStorage`, à cause du risque XSS) et utiliser les refresh tokens (`useRefreshTokens: true`). La déconnexion par redirection (`/v2/logout`) ne révoque pas le refresh token : le révoquer explicitement à la déconnexion.
+9. Revenir à l'étape 2.6 : autoriser la SPA en accès utilisateur sur l'API.
 
 ## 4. Activer la connexion par code
 
@@ -106,6 +111,14 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
 - **Brute-force Protection** : activé.
 - Vérifier que ces limites couvrent l'envoi des courriels passwordless (pour empêcher d'inonder une adresse de liens de connexion).
 
+## 7. Domaine personnalisé (production)
+
+**À faire lors de la mise en place du déploiement**, une fois le domaine du frontend connu : ajouter un *Custom Domain* Auth0 (**Branding → Custom Domains**), par exemple `login.<domaine du frontend>`, avec le certificat géré par Auth0. Vérifier d'abord que le forfait le permet.
+
+**Raison** : les jetons sont gardés en mémoire (étape 3.8), donc perdus à chaque rechargement de la page. Le SDK rétablit alors la session sans afficher de page, avec un iframe vers le domaine Auth0 qui lit le cookie de session d'Auth0. Sur un domaine `*.auth0.com`, ce cookie est tiers. Safari et les navigateurs qui bloquent les cookies tiers ne l'envoient pas, et l'utilisateur repasse par la page de connexion Auth0 à chaque rechargement. Avec un domaine personnalisé sur le même site que le frontend, le cookie n'est plus tiers.
+
+Ce changement modifie l'émetteur des jetons : voir « Domaine personnalisé » ci-dessous. En développement, on accepte ce comportement : pas de domaine personnalisé.
+
 ## Points d'attention pour l'API (ticket SC-API-017)
 
 - **Jetons machine à machine** : refuser un access token dont `gty` vaut `client-credentials` ou dont `sub` se termine par `@clients`, en défense en profondeur de l'étape 2.5.
@@ -130,12 +143,14 @@ Par environnement, une fois la procédure terminée :
 Pour chaque environnement :
 
 - [ ] Tenant en région Canada (`ca` dans le domaine de l'application ou dans l'adresse du dashboard).
-- [ ] API en RS256, durée de vie des access tokens à 15 min, accès hors ligne activé.
+- [ ] API en RS256, durée de vie des access tokens à 15 min, accès hors ligne activé, *Allow Skipping User Consent* activé.
+- [ ] API en *Per-app authorization* ; `Sport Challenge Web` seule autorisée en accès utilisateur, sans permission (étape 2.6).
 - [ ] Application de test de l'API et Default App supprimées ; aucune application machine à machine autorisée sur l'API.
 - [ ] SPA : URL de rappel, de déconnexion et origines de l'environnement, sans joker ; rotation des refresh tokens activée ; grant *Implicit* décoché.
 - [ ] Profil d'authentification en *Identifier First* ; seule la connexion par code e-mail est activée sur la SPA ; `google-oauth2` désactivée ; connexion par mot de passe supprimée.
 - [ ] Application machine à machine limitée à `delete:users`, grant *Client Credentials* seul, aucune connexion ; identifiants dans Secret Manager, accès réservé au compte de service de l'API.
 - [ ] Connexion de test réussie depuis le frontend (ou **Authentication → … → Try** dans le dashboard).
+- [ ] Production : domaine personnalisé Auth0 actif, et `AUTH0_DOMAIN` réglé sur ce domaine (étape 7).
 
 ## V2 : application native
 
