@@ -117,12 +117,14 @@ Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime so
 
 **Raison** : les jetons sont gardés en mémoire (étape 3.8), donc perdus à chaque rechargement de la page. Le SDK rétablit alors la session sans afficher de page, avec un iframe vers le domaine Auth0 qui lit le cookie de session d'Auth0. Sur un domaine `*.auth0.com`, ce cookie est tiers. Safari et les navigateurs qui bloquent les cookies tiers ne l'envoient pas, et l'utilisateur repasse par la page de connexion Auth0 à chaque rechargement. Avec un domaine personnalisé sur le même site que le frontend, le cookie n'est plus tiers.
 
-Ce changement modifie l'émetteur des jetons : voir « Domaine personnalisé » ci-dessous. En développement, on accepte ce comportement : pas de domaine personnalisé.
+**Prérequis côté API** : ce changement modifie l'émetteur des jetons, et `AUTH0_DOMAIN` doit alors être le domaine personnalisé. Or le client de suppression de compte (SC-API-039) construit l'adresse et l'audience de l'API de gestion à partir de `AUTH0_DOMAIN`, alors qu'elles restent sur le domaine du tenant. Avant d'activer le domaine personnalisé, l'API doit donc recevoir le domaine du tenant à part pour ce client : c'est un changement de code, à faire dans un ticket dédié. Sans lui, la suppression de compte chez Auth0 échouerait. Voir « Domaine personnalisé » ci-dessous.
+
+En développement, on accepte de repasser par la page Auth0 : pas de domaine personnalisé.
 
 ## Points d'attention pour l'API (ticket SC-API-017)
 
 - **Jetons machine à machine** : refuser un access token dont `gty` vaut `client-credentials` ou dont `sub` se termine par `@clients`, en défense en profondeur de l'étape 2.5.
-- **Domaine personnalisé** : si un *Custom Domain* est ajouté plus tard, l'émetteur des jetons change (`https://<custom-domain>/`) : `AUTH0_DOMAIN` doit alors être ce domaine. L'API de gestion, elle, garde l'audience du domaine du tenant (`https://<tenant>.auth0.com/api/v2/`) : le client de suppression (ticket SC-API-039) construit son audience depuis `AUTH0_DOMAIN` et devra alors recevoir ce domaine à part.
+- **Domaine personnalisé** (étape 7, prévu en production) : l'émetteur des jetons devient `https://<custom-domain>/`, et `AUTH0_DOMAIN` doit être ce domaine. L'API de gestion, elle, garde l'adresse et l'audience du domaine du tenant (`https://<tenant>.ca.auth0.com/api/v2/`). Le client de suppression (ticket SC-API-039) les construit aujourd'hui depuis `AUTH0_DOMAIN` : il devra recevoir le domaine du tenant à part **avant** l'activation du domaine personnalisé.
 
 ## Valeurs à reporter
 
@@ -150,7 +152,7 @@ Pour chaque environnement :
 - [ ] Profil d'authentification en *Identifier First* ; seule la connexion par code e-mail est activée sur la SPA ; `google-oauth2` désactivée ; connexion par mot de passe supprimée.
 - [ ] Application machine à machine limitée à `delete:users`, grant *Client Credentials* seul, aucune connexion ; identifiants dans Secret Manager, accès réservé au compte de service de l'API.
 - [ ] Connexion de test réussie depuis le frontend (ou **Authentication → … → Try** dans le dashboard).
-- [ ] Production : domaine personnalisé Auth0 actif, et `AUTH0_DOMAIN` réglé sur ce domaine (étape 7).
+- [ ] Production : domaine personnalisé Auth0 actif et `AUTH0_DOMAIN` réglé sur ce domaine, une fois que l'API reçoit à part le domaine du tenant pour le client de gestion (étape 7) ; suppression de compte testée ensuite.
 
 ## V2 : application native
 
