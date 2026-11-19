@@ -278,6 +278,8 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 - [ ] Aucun secret dans le dépôt ; les valeurs sont notées pour Secret Manager.
 - [ ] Procédure rédigée dans `docs/auth0-setup.md`.
 
+**Remplacé le 2026-11-19 (SC-API-115)** : un seul tenant, `sport-challenge-dev.ca.auth0.com`, partagé par le développement local et la production ; plus de tenant, d'API ni d'application machine à machine par environnement (`docs/auth0-setup.md`).
+
 **Revue** : `security-reviewer`.
 **Commit** : `docs(auth): document Auth0 tenant setup`
 **Statut** : À faire

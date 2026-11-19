@@ -6,7 +6,7 @@ Procédure manuelle, suivie pour le seul tenant du projet, à refaire à l'ident
 
 ## Décisions
 
-- ✅ Auth0, **un seul tenant**, `sport-challenge-dev`, partagé par le développement local et la production, en région **Canada** (vérifié : disponible avec le forfait choisi). Décision du propriétaire du produit du 2026-11-19, qui remplace « un tenant par environnement » : aucun tenant `sport-challenge-prod` n'est à créer. La région ne se change pas après la création, et le domaine d'un tenant ne se renomme pas.
+- ✅ Auth0, **un seul tenant**, `sport-challenge-dev`, partagé par le développement local et la production, en région **Canada** (vérifié : disponible avec le forfait choisi). Décision du propriétaire du produit du 2026-11-19 (ticket SC-API-115, issue #216), qui remplace « un tenant par environnement » : aucun tenant `sport-challenge-prod` n'est à créer. La région ne se change pas après la création, et le domaine d'un tenant ne se renomme pas.
 - ✅ Connexion : e-mail par **code à usage unique**, seule méthode en V1. Pas de mot de passe. Le lien magique n'est pas utilisé : le New Universal Login ne le propose pas. Les connexions sociales (Google, Apple) sont reportées : leur procédure est en fin de document.
 - ✅ V1 web uniquement : seule l'application SPA est créée. L'application native (mobile) viendra en V2 (section « V2 : application native »).
 - ✅ Suppression de compte : l'API supprime aussi l'utilisateur chez Auth0 (décision D7), avec une application machine à machine limitée à `delete:users`.
@@ -22,10 +22,10 @@ Procédure manuelle, suivie pour le seul tenant du projet, à refaire à l'ident
 **État** : le tenant est configuré (connexion par code testée) et vérifié conforme le 2026-11-19 : accès utilisateur de la SPA (étape 2.6) et consentement. L'API et les jobs de production l'utilisent déjà (`AUTH0_DOMAIN` et `AUTH0_AUDIENCE` de Cloud Run, vérifiés le 2026-11-19). L'URL du frontend de production s'ajoutera à la SPA quand elle sera connue.
 
 **Conséquences du tenant unique** :
-- Les utilisateurs de test et ceux de production sont dans le même tenant : un compte créé en local existe aussi en production, et la suppression d'un compte chez Auth0 vaut pour les deux.
-- La SPA `Sport Challenge Web` autorise à la fois `localhost` et l'URL de production (URL de rappel, de déconnexion et origines). Si un tenant de production est créé un jour, retirer `localhost` de sa SPA, ou séparer les deux.
+- Les utilisateurs de test et ceux de production sont dans le même tenant : une adresse connectée en local a le même compte Auth0 (même `sub`) en production. Les bases restent séparées : l'utilisateur local n'est créé que dans la base locale, mais la suppression d'un compte depuis l'API locale le supprime aussi chez Auth0, donc en production. Ne tester la suppression de compte en local qu'avec des adresses de test, jamais avec une adresse utilisée en production.
+- La SPA `Sport Challenge Web` autorise à la fois `localhost` et l'URL de production (URL de rappel, de déconnexion et origines). **Risque accepté** (2026-11-19) : une application lancée sur le port local d'un poste peut obtenir, après une connexion de l'utilisateur, des jetons valides pour l'API de production (même émetteur, même audience). À revoir avant l'ouverture publique (phase 9) : retirer `localhost` de la SPA, ou créer un tenant de production.
 - Le fournisseur d'e-mail (étape 4) et les protections (étape 6) sont ceux de la production : les codes envoyés pendant les tests passent par eux et comptent dans leurs limites.
-- L'application machine à machine (étape 5) est la même en local et en production : le `.env` local porte les identifiants de production, et une rotation du secret touche les deux.
+- Deux applications machine à machine (étape 5), aux mêmes droits : `Sport Challenge API (management)` pour la production, dont le secret n'est que dans Secret Manager, et `Sport Challenge API (local)` pour le `.env` des postes. Une fuite ou une rotation de l'une ne touche pas l'autre. Elles agissent sur le même tenant : une suppression lancée en local supprime bien le compte Auth0 (voir plus haut).
 - L'audience garde son nom `https://api.dev.sport-challenge` en production : c'est un identifiant, il ne se renomme pas.
 
 Le domaine exact est affiché dans les réglages d'une application (**Applications → Applications → `Sport Challenge Web` → Settings → Domain**) : reporte-le ici s'il diffère de `<tenant>.ca.auth0.com`. Le `ca` du domaine (ou de l'adresse du dashboard, `manage.auth0.com/dashboard/ca/…`) confirme la région Canada. L'audience est un identifiant (une URI), pas une adresse appelée : elle ne se change pas après la création de l'API. Le port du frontend local (`5173`) est celui de Vite par défaut : adapte-le au dépôt du frontend.
@@ -101,13 +101,15 @@ Le domaine exact est affiché dans les réglages d'une application (**Applicatio
 
 Elle sert uniquement à supprimer un utilisateur chez Auth0 quand il supprime son compte (ticket SC-API-039).
 
-1. **Applications → Applications → Create Application** → **Machine to Machine Applications**, nom `Sport Challenge API (management)`.
+Le tenant étant partagé, cette étape est faite **deux fois**, avec les mêmes réglages : `Sport Challenge API (management)` pour la production, puis `Sport Challenge API (local)` pour le développement local. Le secret de production ne va jamais dans un `.env`.
+
+1. **Applications → Applications → Create Application** → **Machine to Machine Applications**, nom `Sport Challenge API (management)` (production) ou `Sport Challenge API (local)`.
 2. API autorisée : **Auth0 Management API**, avec **une seule** permission : `delete:users`. Ne rien cocher d'autre.
 3. Onglet **Connections** : aucune connexion activée. **Advanced Settings → Grant Types** : seulement **Client Credentials**.
 4. Onglet **Credentials** : **Client Secret (Post)**, la seule méthode que l'API prend en charge (Private Key JWT serait un changement du client, `internal/platform/auth/management.go`). Noter le **Client ID** et le **Client Secret**.
 5. Ranger le **Client Secret** dans Secret Manager (secret `auth0-mgmt-client-secret-ca`, réplication gérée à Montréal seulement, `docs/deploiement.md`), jamais dans un fichier du dépôt, un ticket ou un message. Le **Client ID** est, en production, une simple variable d'environnement (`AUTH0_MGMT_CLIENT_ID`) de l'API et des jobs : seul, il ne permet pas d'obtenir de jeton.
 
-   Le compte de service qui exécute l'API et les jobs (`sc-run`) lit le secret avec `roles/secretmanager.secretAccessor`. Le rôle lui est donné sur ce secret et sur `database-url-ca` seulement, pas sur le projet (SC-API-102). L'API lit le secret dans la variable `AUTH0_MGMT_CLIENT_SECRET` (injectée depuis Secret Manager) et le Client ID dans `AUTH0_MGMT_CLIENT_ID` (configuration de Cloud Run) : les deux sont obligatoires dans tous les environnements (le démarrage échoue sans elles) ; en développement local, elles vont seulement dans `.env` (ignoré par git), avec la même application machine à machine que la production (tenant unique).
+   Le compte de service qui exécute l'API et les jobs (`sc-run`) lit le secret avec `roles/secretmanager.secretAccessor`. Le rôle lui est donné sur ce secret et sur `database-url-ca` seulement, pas sur le projet (SC-API-102). L'API lit le secret dans la variable `AUTH0_MGMT_CLIENT_SECRET` (injectée depuis Secret Manager) et le Client ID dans `AUTH0_MGMT_CLIENT_ID` (configuration de Cloud Run) : les deux sont obligatoires dans tous les environnements (le démarrage échoue sans elles) ; en développement local, elles vont seulement dans `.env` (ignoré par git), avec les identifiants de `Sport Challenge API (local)`, jamais ceux de la production.
 6. Si le secret a été exposé : **Credentials → Rotate** dans Auth0, nouvelle version dans Secret Manager, puis **désactivation** de l'ancienne version.
 
 ## 6. Protections du tenant
@@ -143,8 +145,8 @@ Pour le tenant, une fois la procédure terminée :
 | `AUTH0_AUDIENCE` | non | configuration de l'API (Cloud Run) et du frontend |
 | `AUTH0_MGMT_DOMAIN` | non | configuration de l'API et des jobs (Cloud Run), seulement avec un domaine personnalisé : le domaine du tenant, `sport-challenge-dev.ca.auth0.com` (étape 7). Absente, elle vaut `AUTH0_DOMAIN` |
 | Client ID de la SPA | non | configuration du frontend |
-| Client ID de l'application machine à machine | non (seul, il ne donne aucun accès) | configuration de l'API et des jobs (Cloud Run), variable `AUTH0_MGMT_CLIENT_ID` |
-| Client Secret de l'application machine à machine | **oui** | Secret Manager : `auth0-mgmt-client-secret-ca`, lu par l'API dans `AUTH0_MGMT_CLIENT_SECRET` |
+| Client ID de l'application machine à machine | non (seul, il ne donne aucun accès) | configuration de l'API et des jobs (Cloud Run), variable `AUTH0_MGMT_CLIENT_ID` (`Sport Challenge API (management)`) ; `.env` local avec celui de `Sport Challenge API (local)` |
+| Client Secret de l'application machine à machine | **oui** | Secret Manager : `auth0-mgmt-client-secret-ca`, lu par l'API dans `AUTH0_MGMT_CLIENT_SECRET` (`Sport Challenge API (management)`) ; `.env` local avec celui de `Sport Challenge API (local)` |
 
 `AUTH0_DOMAIN` et `AUTH0_AUDIENCE` seront ajoutées à la configuration de l'API et à `.env.example` par le ticket SC-API-017.
 
@@ -158,7 +160,7 @@ Pour le tenant :
 - [ ] Application de test de l'API et Default App supprimées ; aucune application machine à machine autorisée sur l'API.
 - [ ] SPA : URL de rappel, de déconnexion et origines du local et de la production, sans joker ; rotation des refresh tokens activée ; grant *Implicit* décoché.
 - [ ] Profil d'authentification en *Identifier First* ; seule la connexion par code e-mail est activée sur la SPA ; `google-oauth2` désactivée ; connexion par mot de passe supprimée.
-- [ ] Application machine à machine limitée à `delete:users`, grant *Client Credentials* seul, aucune connexion ; identifiants dans Secret Manager, accès réservé au compte de service de l'API.
+- [ ] Applications machine à machine `Sport Challenge API (management)` et `Sport Challenge API (local)` limitées à `delete:users`, grant *Client Credentials* seul, aucune connexion ; secret de production dans Secret Manager seulement, accès réservé au compte de service de l'API ; le `.env` local porte celui de l'application locale.
 - [ ] Connexion de test réussie depuis le frontend (ou **Authentication → … → Try** dans le dashboard).
 - [ ] Production : domaine personnalisé Auth0 actif, `AUTH0_DOMAIN` réglé sur ce domaine et `AUTH0_MGMT_DOMAIN` sur le domaine du tenant (étape 7) ; suppression de compte testée ensuite.
 
