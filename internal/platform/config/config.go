@@ -29,7 +29,7 @@ type Config struct {
 	// DatabaseURL contains the database password: never log it.
 	DatabaseURL string
 	// Auth0Domain is the tenant host name, without scheme or path
-	// (sport-challenge-dev.ca.auth0.com); Auth0Audience is the API identifier.
+	// (sport-challenge-prod.ca.auth0.com); Auth0Audience is the API identifier.
 	Auth0Domain   string
 	Auth0Audience string
 	// Auth0MgmtDomain is the tenant host name of the Management API, which
@@ -291,7 +291,7 @@ func isASCII(v string) bool {
 
 var defaultPorts = map[string]string{"http": "80", "https": "443"}
 
-// hostName accepts a DNS host name such as sport-challenge-dev.ca.auth0.com.
+// hostName accepts a DNS host name such as sport-challenge-prod.ca.auth0.com.
 // It rejects anything that would change the JWKS URL built from it (@, ?, #...).
 var hostName = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 
