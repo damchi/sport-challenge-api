@@ -166,7 +166,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 ### 3.2 Authentification
 
 - ✅ Service tiers pour les comptes et la connexion (OIDC). V1 : e-mail sans mot de passe par **code à usage unique**, seule méthode de connexion. Connexions sociales (Google, Apple) reportées à plus tard.
-- ✅ **Auth0**, avec **un seul tenant** (`sport-challenge-prod.ca.auth0.com`), partagé par le développement local et la production, en région **Canada** (vérifiée disponible avec le forfait choisi). Décision du propriétaire du produit du 2026-11-19 (SC-API-115), qui remplace « un tenant par environnement » ; conséquences et procédure : `docs/auth0-setup.md`.
+- ✅ **Auth0**, avec **un seul tenant** (`sport-challenge-prod.ca.auth0.com`), partagé par le développement local et la production, en région **Canada** (vérifiée disponible avec le forfait choisi). Décision du propriétaire du produit du 2026-11-19 (SC-API-115), qui remplace « un tenant par environnement » ; le local a sa propre SPA et sa propre API Auth0 (audience `https://api.local.sport-challenge`), pour qu'un jeton obtenu en local soit refusé par la production ; conséquences et procédure : `docs/auth0-setup.md`.
 - ✅ Connexion par e-mail : **code à usage unique** (passwordless, mode code), et non lien magique : le New Universal Login d'Auth0 ne propose pas le lien magique.
 - Le backend reste indépendant du fournisseur (interface `TokenVerifier`, identifiant d'utilisateur local, validation JWT par JWKS) : un changement ultérieur ne toucherait pas les modules métier.
 - La région du tenant ne se change pas après sa création.

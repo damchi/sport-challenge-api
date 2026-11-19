@@ -130,7 +130,7 @@ Ne jamais coller un secret dans un ticket, un message ou un journal. Un secret e
 ### Vérifications techniques
 
 - [ ] **Suppression de compte testée** en production avec un compte de test : anonymisation dans l'API, abandon des challenges à venir ou en cours, résultats des challenges terminés sous un nom neutre, **utilisateur supprimé chez Auth0** (et reprise par `retry-auth0-deletions` si Auth0 a échoué).
-- [ ] **Tenant Auth0 partagé** : `localhost` retiré de la SPA `Sport Challenge Web` (rappel, déconnexion, origines), ou tenant de production créé, ou risque réaccepté par écrit (`docs/auth0-setup.md`, « Conséquences du tenant unique »).
+- [ ] **Tenant Auth0 partagé** : `Sport Challenge Web` n'a que les URL de production (aucun `localhost`) et n'est autorisée que sur `https://api.sport-challenge` ; la SPA locale n'est autorisée que sur `https://api.local.sport-challenge` ; utilisateurs de test nettoyés du tenant (`docs/auth0-setup.md`, « Conséquences du tenant unique »).
 - [ ] **Sauvegardes testées** : restauration d'une sauvegarde (ou clone à un instant donné) vers une **instance séparée**, puis vérification des données ; durée de l'opération notée ici.
 - [ ] **Quotas** vérifiés : instances maximales de Cloud Run, connexions Cloud SQL, quotas de l'API de gestion Auth0 (suppressions) et du plan Auth0 (utilisateurs actifs).
 - [ ] **Budget** : alertes de budget actives (50 %, 90 %, 100 %) et reçues par une adresse lue ; coût fixe de Cloud SQL (`db-f1-micro`, zonale) connu.

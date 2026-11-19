@@ -19,14 +19,14 @@ Aucun secret dans le dépôt. Les valeurs non secrètes (domaine, audience, iden
 | Environnement | Tenant | Domaine (`AUTH0_DOMAIN`) | Audience (`AUTH0_AUDIENCE`) | URL du frontend |
 |---|---|---|---|---|
 | Production ✅ | `sport-challenge-prod` | `sport-challenge-prod.ca.auth0.com` | `https://api.sport-challenge` | à définir |
-| Développement local ✅ | `sport-challenge-prod` (le même) | `sport-challenge-prod.ca.auth0.com` | `https://api.sport-challenge` | `http://localhost:5173` |
+| Développement local ✅ | `sport-challenge-prod` (le même) | `sport-challenge-prod.ca.auth0.com` | `https://api.local.sport-challenge` | `http://localhost:5173` |
 
 État : le tenant est créé le 2026-11-19 avec cette procédure ; à vérifier avec la liste de la section « Vérification », puis à reporter dans la configuration de l'API et des jobs (Cloud Run, Secret Manager) et du frontend (`docs/deploiement.md`). L'URL du frontend de production s'ajoutera à la SPA quand elle sera connue.
 
 Conséquences du tenant unique :
 
 - Les utilisateurs de test et ceux de production sont dans le même tenant : une adresse connectée en local a le même compte Auth0 (même `sub`) en production. Les bases restent séparées : l'utilisateur local n'est créé que dans la base locale. La suppression d'un compte depuis l'API locale ne touche pas Auth0 : l'application machine à machine locale n'a aucun droit (étape 5), la demande échoue et reste en attente de reprise dans la base locale.
-- La SPA Sport Challenge Web autorise à la fois localhost et l'URL de production (URL de rappel, de déconnexion et origines). Risque accepté (2026-11-19) : une application lancée sur le port local d'un poste peut obtenir, après une connexion de l'utilisateur, des jetons valides pour l'API de production (même émetteur, même audience). À trancher avant l'ouverture publique : case de la liste de contrôle de `docs/runbook.md` §6 (retirer localhost de la SPA, ou créer un tenant de production).
+- Le local et la production ont chacun leur SPA et leur API Auth0 (étapes 2 et 3) : Sport Challenge Web (URL de production seulement) est autorisée sur `https://api.sport-challenge`, Sport Challenge Web (local) (`localhost` seulement) sur `https://api.local.sport-challenge`. Un jeton obtenu depuis `localhost` porte l'audience locale : l'API de production le refuse. Le même émetteur ne suffit pas à le faire accepter, l'audience est vérifiée à chaque requête.
 - Le fournisseur d'e-mail (étape 4) et les protections (étape 6) sont ceux de la production : les codes envoyés pendant les tests passent par eux et comptent dans leurs limites.
 - Deux applications machine à machine (étape 5) : Sport Challenge API (management) pour la production, avec `delete:users`, dont le secret n'est que dans Secret Manager, et Sport Challenge API (local) pour le `.env` des postes, sans aucun droit sur l'API de gestion. Une fuite du `.env` ne permet de supprimer aucun compte, et une rotation de l'une ne touche pas l'autre.
 
@@ -47,8 +47,10 @@ Le domaine exact est affiché dans les réglages d'une application (**Applicatio
 
 ## 2. Créer l'API (audience)
 
+Le tenant étant partagé, cette étape est faite deux fois, avec les mêmes réglages : Sport Challenge API (identifiant `https://api.sport-challenge`) pour la production, puis Sport Challenge Local API (`https://api.local.sport-challenge`) pour le développement local.
+
 1. **APIs** → Create API.
-2. Name : Sport Challenge API ; Identifier : l'audience du tableau ; JSON Web Token (JWT) Profile : Auth0 ; Signing Algorithm : RS256 (l'API refuse tout autre algorithme).
+2. Name : Sport Challenge API ou Sport Challenge Local API ; Identifier : l'audience du tableau ; JSON Web Token (JWT) Profile : Auth0 ; Signing Algorithm : RS256 (l'API refuse tout autre algorithme).
 3. Onglet Settings :
    - Maximum Access Token Lifetime : 900 (15 min). Un jeton reste valide jusqu'à son expiration, même après une suppression de compte ou une exclusion : la rotation des refresh tokens rend une durée courte sans effet pour l'utilisateur.
    - Implicit / Hybrid Flow Access Token Lifetime : 900 (sans effet puisque le grant Implicit est désactivé, mais aligné).
@@ -57,20 +59,22 @@ Le domaine exact est affiché dans les réglages d'une application (**Applicatio
    - Allow Skipping User Consent : activé. Sport Challenge Web est une application interne (first-party) : l'utilisateur n'a pas à autoriser l'accès à sa propre API. En local, l'écran de consentement reste affiché malgré ce réglage : Auth0 ne le saute jamais pour une application servie depuis localhost, faute de pouvoir vérifier son origine. Il suffit de l'accepter une fois par utilisateur de test.
 4. Aucune permission (scope) à créer pour l'instant.
 5. Supprimer l'application de test : Auth0 crée en général, avec l'API, une application machine à machine Sport Challenge API (Test Application) autorisée sur cette audience. Avec son secret, n'importe qui obtiendrait un jeton valide pour l'API (`sub` en `…@clients`). La supprimer (**Applications**), puis vérifier dans l'onglet Machine To Machine Applications de l'API (ou Application Access, selon la version) qu'aucune application n'est autorisée.
-6. Autoriser la SPA en accès utilisateur (obligatoire). Sans ce réglage, la connexion du frontend échoue avec `Client "<Client ID de la SPA>" is not authorized to access resource server "<audience>"`. À faire une fois la SPA créée (étape 3) :
-   - **APIs** → Sport Challenge API → Settings → Application Access Policy → User-Delegated Access : Per-app authorization. Seules les applications autorisées une à une obtiennent alors un jeton utilisateur pour l'API.
-   - Onglet Application Access → Edit sur Sport Challenge Web → User-Delegated Access : Grant Access, sans aucune permission (l'API n'en définit pas).
+6. Autoriser la SPA de l'environnement en accès utilisateur (obligatoire), et elle seule : Sport Challenge Web sur Sport Challenge API, Sport Challenge Web (local) sur Sport Challenge Local API. Jamais la SPA locale sur l'API de production. Sans ce réglage, la connexion du frontend échoue avec `Client "<Client ID de la SPA>" is not authorized to access resource server "<audience>"`. À faire une fois la SPA créée (étape 3) :
+   - **APIs** → l'API → Settings → Application Access Policy → User-Delegated Access : Per-app authorization. Seules les applications autorisées une à une obtiennent alors un jeton utilisateur pour l'API.
+   - Onglet Application Access → Edit sur la SPA de l'environnement → User-Delegated Access : Grant Access, sans aucune permission (l'API n'en définit pas).
    - Aucune autre application n'y a d'accès, ni utilisateur ni machine à machine (étape 2.5).
 
 ## 3. Créer l'application web (SPA)
 
-1. **Applications** → Create Application → Single Page Web Applications, nom Sport Challenge Web.
-2. Onglet Settings, avec chaque URL du frontend (`<front>`) : `http://localhost:5173` et l'URL de production, séparées par des virgules dans chaque champ (tenant unique) :
+Le tenant étant partagé, cette étape est faite deux fois, avec les mêmes réglages sauf les URL : Sport Challenge Web pour la production (URL du frontend de production seulement, à ajouter quand elle sera connue), puis Sport Challenge Web (local) pour le développement local (`http://localhost:5173` seulement).
+
+1. **Applications** → Create Application → Single Page Web Applications, nom Sport Challenge Web ou Sport Challenge Web (local).
+2. Onglet Settings, avec l'URL du frontend de l'environnement (`<front>`) :
    - Allowed Callback URLs : `<front>/callback`
    - Allowed Logout URLs : `<front>`
    - Allowed Web Origins : `<front>`
    - Allowed Origins (CORS) : `<front>`
-   - Jamais de joker (`*`) ; `http://localhost` est accepté tant que le tenant est partagé avec le développement local.
+   - Jamais de joker (`*`) ; `http://localhost` seulement sur Sport Challenge Web (local), jamais sur Sport Challenge Web.
 3. Refresh Token Rotation :
    - Rotation : activée ; Reuse Interval : 0.
    - Absolute Expiration : activée, 2592000 (30 jours).
@@ -78,16 +82,16 @@ Le domaine exact est affiché dans les réglages d'une application (**Applicatio
 4. Advanced Settings → Grant Types : seulement Authorization Code et Refresh Token (décocher Implicit). Cross-Origin Authentication : désactivée (inutile avec Universal Login). ID Token Expiration : 3600 (1 h). L'API refuse de toute façon les ID tokens : leur audience est le Client ID, pas `AUTH0_AUDIENCE`.
 5. Pas de méthode d'authentification à régler : le type Single Page Application l'impose à None (une SPA ne garde pas de secret ; le flux utilise PKCE), et il n'y a pas d'onglet Credentials.
 6. Onglet Connections : désactiver google-oauth2 (créée par défaut par Auth0) et toute autre connexion. La connexion email (code) n'apparaît ici qu'une fois créée dans le tenant : revenir l'activer après l'étape 4.
-7. Noter le Client ID : il n'est pas secret, il va dans la configuration du frontend.
+7. Noter le Client ID : il n'est pas secret, il va dans la configuration du frontend (celui de Sport Challenge Web (local) dans la configuration locale).
 8. À transmettre au frontend :
    - garder les jetons en mémoire (`cacheLocation: 'memory'` du SDK Auth0, jamais `localStorage`, à cause du risque XSS) et utiliser les refresh tokens (`useRefreshTokens: true`) ;
    - passer `connection: 'email'` dans les `authorizationParams` de la connexion : le New Universal Login n'affiche la connexion par code que si ce paramètre est envoyé à `/authorize` (sinon l'écran de connexion ne propose pas le code, même avec Identifier First) ;
    - la déconnexion par redirection (`/v2/logout`) ne révoque pas le refresh token : le révoquer explicitement à la déconnexion.
-9. Revenir à l'étape 2.6 : autoriser la SPA en accès utilisateur sur l'API.
+9. Revenir à l'étape 2.6 : autoriser la SPA en accès utilisateur sur l'API de son environnement.
 
 ## 4. Activer la connexion par code
 
-1. Désactiver les connexions sociales créées par défaut : google-oauth2 est créée automatiquement avec chaque tenant (**Connections**, ancienne navigation : Authentication → Social). La désactiver pour Sport Challenge Web (étape 3.6), ou la supprimer si le dashboard le permet.
+1. Désactiver les connexions sociales créées par défaut : google-oauth2 est créée automatiquement avec chaque tenant (**Connections**, ancienne navigation : Authentication → Social). La désactiver pour les deux SPA (étape 3.6), ou la supprimer si le dashboard le permet.
 2. Supprimer la connexion par mot de passe : **Authentication** → Database → Username-Password-Authentication → supprimer la connexion. La désactiver seulement pour la SPA la laisserait disponible pour toute future application.
 3. Code par e-mail (**Authentication** → Passwordless → Email). Ne pas utiliser le passwordless intégré aux connexions Database (Early Access) : cette procédure s'appuie sur la connexion Passwordless Email.
    - Activer la connexion. Onglet Settings :
@@ -96,7 +100,7 @@ Le domaine exact est affiché dans les réglages d'une application (**Applicatio
      - Promote Connection to Domain Level : désactivé (sinon la connexion est ouverte à toutes les applications du tenant, y compris tierces).
      - Authentication Parameters : vide.
      - From, Subject, Body : ignorés tant que le fournisseur d'e-mail d'Auth0 est utilisé (avertissement affiché) ; les personnaliser en français et en anglais après avoir configuré un fournisseur d'e-mail (production).
-   - Onglet Applications de la connexion (ou onglet Connections de la SPA) : l'activer pour Sport Challenge Web.
+   - Onglet Applications de la connexion (ou onglet Connections de la SPA) : l'activer pour Sport Challenge Web et Sport Challenge Web (local).
 4. **Authentication** → Authentication Profile : choisir Identifier First (pas Identifier First + Biometrics). L'écran de connexion demande d'abord l'e-mail, puis envoie le code. Sans ce mode, la connexion par code ne fonctionne pas avec le New Universal Login.
 5. Vérifier avec le bouton Try que la connexion par code fonctionne (il exige les deux réglages ci-dessus : Identifier First et au moins une application assignée).
 6. Avant la mise en production, configurer un fournisseur d'e-mail (**Emails**, section Messaging, à confirmer ; ancienne navigation : Branding → Email Provider) sur le tenant, partagé avec le développement local : le fournisseur de test d'Auth0 est limité et ne convient qu'au développement.
@@ -147,24 +151,22 @@ Pour le tenant, une fois la procédure terminée :
 | Valeur | Secrète | Destination |
 |---|---|---|
 | `AUTH0_DOMAIN` | non | configuration de l'API (Cloud Run) et du frontend |
-| `AUTH0_AUDIENCE` | non | configuration de l'API (Cloud Run) et du frontend |
+| `AUTH0_AUDIENCE` | non | configuration de l'API (Cloud Run) et du frontend : `https://api.sport-challenge` ; en local (`.env`, configuration locale du frontend) : `https://api.local.sport-challenge` |
 | `AUTH0_MGMT_DOMAIN` | non | configuration de l'API et des jobs (Cloud Run), seulement avec un domaine personnalisé : le domaine du tenant, `sport-challenge-prod.ca.auth0.com` (étape 7). Absente, elle vaut `AUTH0_DOMAIN` |
-| Client ID de la SPA | non | configuration du frontend |
+| Client ID de la SPA | non | configuration du frontend : Sport Challenge Web en production, Sport Challenge Web (local) en local |
 | Client ID de l'application machine à machine | non (seul, il ne donne aucun accès) | configuration de l'API et des jobs (Cloud Run), variable `AUTH0_MGMT_CLIENT_ID` (Sport Challenge API (management)) ; `.env` local avec celui de Sport Challenge API (local) |
 | Client Secret de l'application machine à machine | oui | Secret Manager : `auth0-mgmt-client-secret-ca`, lu par l'API dans `AUTH0_MGMT_CLIENT_SECRET` (Sport Challenge API (management)) ; `.env` local avec celui de Sport Challenge API (local) |
-
-`AUTH0_DOMAIN` et `AUTH0_AUDIENCE` seront ajoutées à la configuration de l'API et à `.env.example` par le ticket SC-API-017.
 
 ## Vérification
 
 Pour le tenant :
 
 - [ ] Tenant en région Canada (`ca` dans le domaine de l'application ou dans l'adresse du dashboard).
-- [ ] API en RS256, durée de vie des access tokens à 15 min, accès hors ligne activé, Allow Skipping User Consent activé.
-- [ ] API en Per-app authorization ; Sport Challenge Web seule autorisée en accès utilisateur, sans permission (étape 2.6).
+- [ ] Les deux API (Sport Challenge API, Sport Challenge Local API) en RS256, durée de vie des access tokens à 15 min, accès hors ligne activé, Allow Skipping User Consent activé.
+- [ ] Les deux API en Per-app authorization ; chacune n'autorise que la SPA de son environnement en accès utilisateur, sans permission (étape 2.6).
 - [ ] Application de test de l'API et Default App supprimées ; aucune application machine à machine autorisée sur l'API.
-- [ ] SPA : URL de rappel, de déconnexion et origines du local et de la production, sans joker ; rotation des refresh tokens activée ; grant Implicit décoché.
-- [ ] Profil d'authentification en Identifier First ; seule la connexion par code e-mail est activée sur la SPA ; google-oauth2 désactivée ; connexion par mot de passe supprimée.
+- [ ] SPA : Sport Challenge Web avec les seules URL de production, Sport Challenge Web (local) avec les seules URL `localhost`, sans joker ; rotation des refresh tokens activée ; grant Implicit décoché.
+- [ ] Profil d'authentification en Identifier First ; seule la connexion par code e-mail est activée sur les deux SPA ; google-oauth2 désactivée ; connexion par mot de passe supprimée.
 - [ ] Frontend : `connection: 'email'` passé à la connexion (étape 3.8).
 - [ ] Application machine à machine Sport Challenge API (management) limitée à `delete:users`, Sport Challenge API (local) sans aucune API autorisée ; grant Client Credentials seul, aucune connexion ; secret de production dans Secret Manager seulement, accès réservé au compte de service de l'API ; le `.env` local porte celui de l'application locale.
 - [ ] Connexion de test réussie depuis le frontend (ou **Authentication** → Passwordless → Email → Try dans le dashboard).
