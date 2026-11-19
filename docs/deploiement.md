@@ -41,7 +41,7 @@ Comptes de service et droits, donnés ressource par ressource depuis le 2026-11-
 | `sc-scheduler` | lance les jobs du worker | `roles/run.invoker` sur les trois jobs `sc-worker-*` seulement (pas sur `sc-migrate`) |
 | `sc-deploy` | utilisé par le workflow de déploiement (fédération GitHub) | `roles/run.developer` sur `sc-api`, `sc-migrate` et les trois `sc-worker-*` ; `roles/iam.serviceAccountUser` sur `sc-run` seulement ; `roles/artifactregistry.writer` sur le dépôt `sport-challenge` ; pris seulement par les jetons du job de l'Environment `production` (`roles/iam.workloadIdentityUser`, sujet ci-dessus) |
 
-Les variables d'environnement de l'API et des jobs sont celles que lit `internal/platform/config` (`ENV=production`, `PORT` posé par Cloud Run pour l'API, `LOG_LEVEL`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_MGMT_CLIENT_ID`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, plus les deux secrets). `CLOCK_OFFSET` n'est accepté qu'avec `ENV=local` : la production le refuse.
+Les variables d'environnement de l'API et des jobs sont celles que lit `internal/platform/config` (`ENV=production`, `PORT` posé par Cloud Run pour l'API, `LOG_LEVEL`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_MGMT_CLIENT_ID`, `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`, plus les deux secrets). `CLOCK_OFFSET` n'est accepté qu'avec `ENV=local` : la production le refuse. `AUTH0_MGMT_DOMAIN` (domaine du tenant pour l'API de gestion d'Auth0) n'est pas posée : elle vaut alors `AUTH0_DOMAIN`. Elle s'ajoutera à l'API et aux jobs du worker avec le domaine personnalisé Auth0 (`docs/auth0-setup.md`, étape 7).
 
 ### Connexion à la base
 

@@ -56,6 +56,17 @@ func (f *fakeAuth0) serve(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// TestNewAuth0ManagementUsesTheTenantDomain: the address, and so the
+// audience (base URL + /api/v2/, checked by fakeAuth0), come from the domain
+// given, the tenant's (config AUTH0_MGMT_DOMAIN), never the custom domain
+// that issues the tokens.
+func TestNewAuth0ManagementUsesTheTenantDomain(t *testing.T) {
+	m := NewAuth0Management("tenant.ca.auth0.com", testClientID, testClientSecret)
+	if m.baseURL != "https://tenant.ca.auth0.com" {
+		t.Fatalf("baseURL = %q, want https://tenant.ca.auth0.com", m.baseURL)
+	}
+}
+
 func TestDeleteUser(t *testing.T) {
 	tests := []struct {
 		name         string

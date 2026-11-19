@@ -22,17 +22,17 @@ func TestLoad(t *testing.T) {
 		{
 			name: "valid",
 			vars: map[string]string{"ENV": "production", "PORT": "8080", "LOG_LEVEL": "warn", "DATABASE_URL": "postgres://db.example/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
-			want: Config{Env: EnvProduction, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour, RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser},
+			want: Config{Env: EnvProduction, Port: 8080, LogLevel: slog.LevelWarn, DatabaseURL: "postgres://db.example/x", Auth0Domain: "tenant.ca.auth0.com", Auth0MgmtDomain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour, RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser},
 		},
 		{
 			name: "log level is case insensitive",
 			vars: map[string]string{"ENV": "local", "PORT": "1", "LOG_LEVEL": "DEBUG", "DATABASE_URL": "postgres://localhost/x", "AUTH0_DOMAIN": "tenant.ca.auth0.com", "AUTH0_AUDIENCE": "https://api.test", "AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret"},
-			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour, RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser},
+			want: Config{Env: EnvLocal, Port: 1, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0MgmtDomain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour, RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser},
 		},
 		{
 			name: "surrounding spaces are ignored",
 			vars: map[string]string{"ENV": " local ", "PORT": "8080 ", "LOG_LEVEL": "info   ", "DATABASE_URL": " postgres://localhost/x ", "AUTH0_DOMAIN": " tenant.ca.auth0.com ", "AUTH0_AUDIENCE": " https://api.test ", "AUTH0_MGMT_CLIENT_ID": " mgmt-id ", "AUTH0_MGMT_CLIENT_SECRET": " mgmt-secret "}, //nolint:gosec // test value, not a credential
-			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour, RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser},
+			want: Config{Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x", Auth0Domain: "tenant.ca.auth0.com", Auth0MgmtDomain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test", Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour, RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser},
 		},
 		{
 			name:    "blank values count as missing",
@@ -107,7 +107,7 @@ func TestLoad(t *testing.T) {
 			},
 			want: Config{
 				Env: EnvLocal, Port: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://localhost/x",
-				Auth0Domain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test",
+				Auth0Domain: "tenant.ca.auth0.com", Auth0MgmtDomain: "tenant.ca.auth0.com", Auth0Audience: "https://api.test",
 				Auth0MgmtClientID: "mgmt-id", Auth0MgmtClientSecret: "mgmt-secret", AtRiskThreshold: 24 * time.Hour,
 				RateLimitIP: defaultRateLimitIP, RateLimitUser: defaultRateLimitUser,
 			},
@@ -248,6 +248,51 @@ func TestLoadAtRiskThreshold(t *testing.T) {
 			}
 			if got.AtRiskThreshold != tt.want {
 				t.Fatalf("AtRiskThreshold = %v, want %v", got.AtRiskThreshold, tt.want)
+			}
+		})
+	}
+}
+
+// TestLoadAuth0MgmtDomain: the Management API keeps the tenant domain when
+// AUTH0_DOMAIN is a custom domain; without AUTH0_MGMT_DOMAIN, both are the
+// same.
+func TestLoadAuth0MgmtDomain(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		want       string
+		wantIssuer string
+		wantErr    bool
+	}{
+		{name: "absent: AUTH0_DOMAIN", raw: "", want: "login.example.com", wantIssuer: "login.example.com"},
+		{name: "blank: AUTH0_DOMAIN", raw: "  ", want: "login.example.com", wantIssuer: "login.example.com"},
+		{name: "tenant domain apart", raw: "tenant.ca.auth0.com", want: "tenant.ca.auth0.com", wantIssuer: "login.example.com"},
+		{name: "lowercased and trimmed", raw: " Tenant.CA.Auth0.com ", want: "tenant.ca.auth0.com", wantIssuer: "login.example.com"},
+		{name: "with a scheme", raw: "https://tenant.ca.auth0.com", wantErr: true},
+		{name: "with a path", raw: "tenant.ca.auth0.com/api/v2", wantErr: true},
+		{name: "with a port", raw: "tenant.ca.auth0.com:443", wantErr: true},
+		{name: "with credentials", raw: "x@evil.com", wantErr: true},
+		{name: "single label", raw: "localhost", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Load(envFrom(map[string]string{
+				"ENV": "local", "PORT": "8080", "LOG_LEVEL": "info", "DATABASE_URL": "postgres://localhost/x",
+				"AUTH0_DOMAIN": "login.example.com", "AUTH0_AUDIENCE": "https://api.test",
+				"AUTH0_MGMT_CLIENT_ID": "mgmt-id", "AUTH0_MGMT_CLIENT_SECRET": "mgmt-secret",
+				"AUTH0_MGMT_DOMAIN": tt.raw,
+			}))
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "AUTH0_MGMT_DOMAIN must be a host name") {
+					t.Fatalf("Load() error = %v, want an AUTH0_MGMT_DOMAIN error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if got.Auth0MgmtDomain != tt.want || got.Auth0Domain != tt.wantIssuer {
+				t.Fatalf("Auth0MgmtDomain = %q, Auth0Domain = %q, want %q and %q", got.Auth0MgmtDomain, got.Auth0Domain, tt.want, tt.wantIssuer)
 			}
 		})
 	}
