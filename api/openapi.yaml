@@ -261,10 +261,10 @@ paths:
       description: |
         `public`: the public challenges; `mine`: those the user created or
         joined (abandoned included). Deleted challenges never appear, and a
-        private challenge never appears in `public`. The status is computed
-        from the current instant. Upcoming and ongoing challenges come
-        soonest first, finished ones most recent first; without a status
-        filter, by start date.
+        private challenge never appears in `public`. The status, filter
+        and field alike, is computed from the current instant. Upcoming and
+        ongoing challenges come soonest first, finished ones most recent
+        first; without a status filter, by start date.
       tags: [challenges]
       parameters:
         - name: scope
@@ -1635,7 +1635,7 @@ components:
           description: The end of the current week; null when eliminated or outside the weeks.
     ChallengeSummary:
       type: object
-      required: [id, title, visibility, timezone, starts_at, ends_at, participant_count, my_status]
+      required: [id, title, visibility, timezone, starts_at, ends_at, participant_count, my_role, my_status, status]
       additionalProperties: false
       properties:
         id:
@@ -1657,11 +1657,18 @@ components:
         participant_count:
           type: integer
           description: Everyone who joined, abandoned included.
+        my_role:
+          type: string
+          enum: [creator, participant, abandoned, invited, outsider]
+          description: The user's role in the challenge.
         my_status:
           type: string
           enum: [active, abandoned]
           nullable: true
           description: The user's participation; null when not a participant.
+        status:
+          type: string
+          enum: [upcoming, ongoing, finished]
     ChallengeDetail:
       type: object
       required: [id, title, description, visibility, members_can_invite, timezone, starts_at, ends_at, categories, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at]

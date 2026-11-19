@@ -124,20 +124,30 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 }
 
 // List returns a page of challenges for actorID: public ones, or those the
-// actor created or joined. The status filter uses the clock. The
-// visibility rules are applied by the query itself, never by filtering a
-// loaded list.
+// actor created or joined. The status filter and the status of each
+// challenge use the same instant of the clock. The visibility rules are
+// applied by the query itself, never by filtering a loaded list.
 func (s *Service) List(ctx context.Context, actorID, scope, status string, limit int, after *Position) (Page, error) {
 	if limit < 1 {
 		return Page{}, apperr.InvalidFields(nil, "limit")
 	}
+	now := s.clock.Now()
 	// One more than asked tells whether a next page exists.
 	items, err := s.repo.List(ctx, ListQuery{
 		ActorID: actorID, Scope: scope, Status: status,
-		Now: s.clock.Now(), Limit: limit + 1, After: after,
+		Now: now, Limit: limit + 1, After: after,
 	})
 	if err != nil {
 		return Page{}, fmt.Errorf("list challenges: %w", err)
+	}
+	for i := range items {
+		it := &items[i]
+		m := Membership{Creator: it.Creator, Invited: it.Invited}
+		if it.MyStatus != nil {
+			m.Participant = ParticipantStatus(*it.MyStatus)
+		}
+		it.Role = RoleOf(m)
+		it.Status = StatusAt(now, it.StartsAt, it.EndsAt)
 	}
 	page := Page{Items: items}
 	if len(items) > limit {

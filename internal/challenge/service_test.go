@@ -438,6 +438,38 @@ func TestServiceList(t *testing.T) {
 	}
 }
 
+// TestServiceListRoleAndStatus checks that each item gets the role of its
+// membership and its status at the clock's now.
+func TestServiceListRoleAndStatus(t *testing.T) {
+	active, abandoned := string(ParticipantActive), string(ParticipantAbandoned)
+	day := 24 * time.Hour
+	tests := []struct {
+		name       string
+		summary    Summary
+		wantRole   Role
+		wantStatus string
+	}{
+		{name: "creator, upcoming", summary: Summary{Creator: true, MyStatus: &active, StartsAt: now.Add(day), EndsAt: now.Add(15 * day)}, wantRole: RoleCreator, wantStatus: StatusUpcoming},
+		{name: "creator who abandoned stays a creator", summary: Summary{Creator: true, MyStatus: &abandoned, StartsAt: now.Add(-day), EndsAt: now.Add(13 * day)}, wantRole: RoleCreator, wantStatus: StatusOngoing},
+		{name: "participant, ongoing from its first instant", summary: Summary{MyStatus: &active, StartsAt: now, EndsAt: now.Add(14 * day)}, wantRole: RoleParticipant, wantStatus: StatusOngoing},
+		{name: "abandoned, finished at its last instant", summary: Summary{MyStatus: &abandoned, StartsAt: now.Add(-14 * day), EndsAt: now}, wantRole: RoleAbandoned, wantStatus: StatusFinished},
+		{name: "invited", summary: Summary{Invited: true, StartsAt: now.Add(day), EndsAt: now.Add(15 * day)}, wantRole: RoleInvited, wantStatus: StatusUpcoming},
+		{name: "non participant", summary: Summary{StartsAt: now.Add(-15 * day), EndsAt: now.Add(-day)}, wantRole: RoleOutsider, wantStatus: StatusFinished},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{summaries: []Summary{tt.summary}}
+			page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := page.Items[0]; got.Role != tt.wantRole || got.Status != tt.wantStatus {
+				t.Fatalf("role %v, status %q, want %v, %q", got.Role, got.Status, tt.wantRole, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestServiceListRefusesAnEmptyPage(t *testing.T) {
 	_, err := NewService(&fakeRepository{summaries: summaries(3)}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 0, nil)
 	if !errors.Is(err, apperr.New(apperr.CodeValidationFailed, nil)) {
