@@ -28,9 +28,11 @@ const (
 	maxDistanceFactor   = 2
 	distanceFactorScale = 100 // two decimals at most, like numeric(4,2)
 	startDateLayout     = time.DateOnly
-	// referenceSport is the ×1 reference of the distance category: every
-	// distance is brought back to a running distance, so its factor is fixed.
-	referenceSport       = "run"
+	// defaultReferenceSport is the reference sport of a challenge whose
+	// creator chose none.
+	defaultReferenceSport = "run"
+	// distanceRequired is the distance mode a reference sport needs.
+	distanceRequired     = "required"
 	factorFieldPrefix    = "distance_factors."
 	unknownFactorsFields = "distance_factors"
 )
@@ -51,10 +53,22 @@ type Draft struct {
 	Weeks     int
 	// EliminationStepMeters is the increment X of the elimination category.
 	EliminationStepMeters int
+	// ReferenceSport is the sport the distances are brought back to and the
+	// elimination is run in; nil for run (an empty code is refused).
+	ReferenceSport *string
 	// DistanceFactors are the factors the creator chose, by sport code; the
-	// other distance sports keep their suggested factor. run is the ×1
-	// reference and cannot be changed.
+	// other distance sports keep their suggested factor, brought back to the
+	// reference (referenceFactors). The reference is ×1 and cannot be
+	// changed.
 	DistanceFactors map[string]float64
+}
+
+// reference is the reference sport of the draft, run when none is given.
+func (d Draft) reference() string {
+	if d.ReferenceSport == nil {
+		return defaultReferenceSport
+	}
+	return *d.ReferenceSport
 }
 
 // Window is the period of a challenge, [StartsAt, EndsAt) in UTC.
@@ -65,13 +79,14 @@ type Window struct {
 
 // Validate checks draft against the challenge rules, at the instant now
 // (from platform/clock), with distanceSports the sports of the catalogue that
-// have a distance. It returns the window of the challenge: from the first
-// instant of the first local day (midnight, or the end of the skipped hour
-// where a time change skips midnight: scoring.StartOfDay), for a whole number
-// of weeks counted in local days (a week across a time change lasts 167 or
-// 169 hours). A broken rule gives 400 validation_failed listing the fields,
-// sorted.
-func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Window, error) {
+// have a distance and referenceMode the distance mode of the reference sport
+// (empty when the catalogue has no such sport). It returns the window of the
+// challenge: from the first instant of the first local day (midnight, or the
+// end of the skipped hour where a time change skips midnight:
+// scoring.StartOfDay), for a whole number of weeks counted in local days (a
+// week across a time change lasts 167 or 169 hours). A broken rule gives 400
+// validation_failed listing the fields, sorted.
+func Validate(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string) (Window, error) {
 	var fields []string
 
 	if !validTitle(draft.Title) {
@@ -89,7 +104,10 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool) (Windo
 	if draft.EliminationStepMeters <= 0 || draft.EliminationStepMeters > maxEliminationStep {
 		fields = append(fields, "elimination_step_meters")
 	}
-	fields = append(fields, invalidFactors(draft.DistanceFactors, distanceSports)...)
+	if referenceMode != distanceRequired {
+		fields = append(fields, "reference_sport")
+	}
+	fields = append(fields, invalidFactors(draft.DistanceFactors, distanceSports, draft.reference())...)
 
 	loc, locErr := location(draft.Timezone)
 	if locErr != nil {
@@ -181,10 +199,10 @@ func location(name string) (*time.Location, error) {
 }
 
 // invalidFactors returns the fields of factors that break the rules: a known
-// distance sport is named ("distance_factors.ride"); a code outside the
-// distance sports gives "distance_factors" only, so a value the client chose
-// is never sent back.
-func invalidFactors(factors map[string]float64, distanceSports map[string]bool) []string {
+// distance sport is named ("distance_factors.ride"), the reference among
+// them; a code outside the distance sports gives "distance_factors" only, so
+// a value the client chose is never sent back.
+func invalidFactors(factors map[string]float64, distanceSports map[string]bool, reference string) []string {
 	var fields []string
 	unknown := false
 	for code, factor := range factors {
@@ -192,7 +210,7 @@ func invalidFactors(factors map[string]float64, distanceSports map[string]bool) 
 			unknown = true
 			continue
 		}
-		if code == referenceSport {
+		if code == reference {
 			fields = append(fields, factorFieldPrefix+code)
 			continue
 		}
@@ -207,4 +225,27 @@ func invalidFactors(factors map[string]float64, distanceSports map[string]bool) 
 		fields = append(fields, unknownFactorsFields)
 	}
 	return fields
+}
+
+// referenceFactors brings the suggested factors of the catalogue, made for
+// run, back to reference (README §2.4): min(1, f / f_reference), rounded to
+// two decimals (half up) and never under 0.1, the reference itself ×1. The
+// sports slower than the reference count 1 for 1. Computed in hundredths, as
+// the catalogue stores them, so the rounding is exact. A reference the
+// catalogue gives no factor counts as ×1.
+func referenceFactors(suggested map[string]float64, reference string) map[string]float64 {
+	ref := int64(math.Round(suggested[reference] * distanceFactorScale))
+	if ref <= 0 {
+		ref = distanceFactorScale
+	}
+	factors := make(map[string]float64, len(suggested))
+	for code, f := range suggested {
+		hundredths := int64(math.Round(f * distanceFactorScale))
+		// Half up: floor(100 f / ref + 1/2), in integers.
+		ratio := (2*distanceFactorScale*hundredths + ref) / (2 * ref)
+		ratio = min(max(ratio, minDistanceFactor*distanceFactorScale), distanceFactorScale)
+		factors[code] = float64(ratio) / distanceFactorScale
+	}
+	factors[reference] = 1
+	return factors
 }

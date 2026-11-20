@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
 	"strings"
@@ -287,6 +288,14 @@ func (f fakeCatalogue) SuggestedFactors(context.Context) (map[string]float64, er
 	return f.factors, f.err
 }
 
+// catalogueModes are the distance modes of the fake catalogue.
+var catalogueModes = map[string]string{"run": "required", "walk": "required", "ride": "required", "rowing": "required", "yoga": "none", "other": "optional"}
+
+func (f fakeCatalogue) DistanceMode(_ context.Context, code string) (string, bool, error) {
+	mode, ok := catalogueModes[code]
+	return mode, ok, f.err
+}
+
 func suggested() map[string]float64 {
 	return map[string]float64{"run": 1, "walk": 1, "ride": 0.3, "other": 1}
 }
@@ -335,8 +344,66 @@ func TestServiceCreate(t *testing.T) {
 			t.Errorf("factor of %s = %v, want %v", code, factors[code], f)
 		}
 	}
+	if c.ReferenceSport != "run" {
+		t.Errorf("reference %q, want run by default", c.ReferenceSport)
+	}
 	if p := c.Categories[2].Params; p.Sport != "run" || p.StepMeters != 2000 {
 		t.Errorf("elimination params %+v, want run with a 2000 m step", p)
+	}
+}
+
+// TestServiceCreateWithAReferenceSport: the suggestions are brought back to
+// the reference, the creator's factors replace them, and the elimination is
+// run in the reference.
+func TestServiceCreateWithAReferenceSport(t *testing.T) {
+	catalogue := map[string]float64{"run": 1, "walk": 1, "ride": 0.3, "rowing": 0.5, "other": 1}
+	tests := []struct {
+		name      string
+		reference string
+		factors   map[string]float64
+		want      map[string]float64
+	}{
+		{name: "ride", reference: "ride", want: map[string]float64{"run": 1, "walk": 1, "ride": 1, "rowing": 1, "other": 1}},
+		{name: "rowing", reference: "rowing", want: map[string]float64{"run": 1, "walk": 1, "ride": 0.6, "rowing": 1, "other": 1}},
+		{name: "run changed under ride", reference: "ride", factors: map[string]float64{"run": 0.5}, want: map[string]float64{"run": 0.5, "walk": 1, "ride": 1, "rowing": 1, "other": 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{}
+			svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: catalogue}, fakeStandings{}, clock.NewFake(now))
+			c, err := svc.Create(t.Context(), actor, with(func(d *Draft) { d.ReferenceSport = sportCode(tt.reference); d.DistanceFactors = tt.factors }))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.ReferenceSport != tt.reference || repo.created.ReferenceSport != tt.reference {
+				t.Errorf("reference %q, stored %q, want %s", c.ReferenceSport, repo.created.ReferenceSport, tt.reference)
+			}
+			if got := c.Categories[1].Params.Factors; !maps.Equal(got, tt.want) {
+				t.Errorf("factors %v, want %v", got, tt.want)
+			}
+			if p := c.Categories[2].Params; p.Sport != tt.reference {
+				t.Errorf("elimination in %s, want %s", p.Sport, tt.reference)
+			}
+		})
+	}
+}
+
+// TestServiceCreateRefusesTheReference: a reference without a required
+// distance is refused before anything is written.
+func TestServiceCreateRefusesTheReference(t *testing.T) {
+	for _, reference := range []string{"yoga", "other", "quidditch", ""} {
+		t.Run(reference, func(t *testing.T) {
+			repo := &fakeRepository{}
+			svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now))
+			_, err := svc.Create(t.Context(), actor, with(func(d *Draft) { d.ReferenceSport = sportCode(reference) }))
+			var appErr *apperr.Error
+			if !errors.As(err, &appErr) || appErr.Code != apperr.CodeValidationFailed || appErr.Params[apperr.FieldsParam] != "reference_sport" {
+				t.Fatalf("error %v, want 400 validation_failed on reference_sport", err)
+			}
+			if repo.created != nil {
+				t.Fatal("challenge stored despite the refusal")
+			}
+		})
 	}
 }
 

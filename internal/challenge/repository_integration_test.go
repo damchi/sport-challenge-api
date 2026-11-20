@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -75,6 +76,15 @@ func (c sqlCatalogue) SuggestedFactors(ctx context.Context) (map[string]float64,
 		factors[code] = f
 	}
 	return factors, rows.Err()
+}
+
+func (c sqlCatalogue) DistanceMode(ctx context.Context, code string) (string, bool, error) {
+	var mode string
+	err := c.pool.QueryRow(ctx, "SELECT distance_mode FROM sports WHERE code = $1", code).Scan(&mode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	return mode, err == nil, err
 }
 
 func setup(t *testing.T, pseudo *string) (*Service, *pgxpool.Pool, string) {
@@ -141,6 +151,79 @@ func TestCreateStoresEverything(t *testing.T) {
 	}
 	if ride != 0.25 || walk != 1 || sport != "run" || step != 2000 {
 		t.Fatalf("frozen params ride %v walk %v sport %s step %v, want 0.25, the suggested 1, run and 2000", ride, walk, sport, step)
+	}
+}
+
+// TestCreateStoresTheReferenceSport: with the catalogue of the migrations,
+// the factors are brought back to the reference, the elimination is run in
+// it, and the reference is stored and read back; run when none is given.
+func TestCreateStoresTheReferenceSport(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, userID := setup(t, &pseudo)
+	tests := []struct {
+		reference   string
+		want        string
+		wantFactors map[string]float64
+	}{
+		{reference: "", want: "run", wantFactors: map[string]float64{"run": 1, "walk": 1, "ride": 0.3, "rowing": 0.5}},
+		{reference: "ride", want: "ride", wantFactors: map[string]float64{"run": 1, "walk": 1, "ride": 1, "rowing": 1}},
+		{reference: "rowing", want: "rowing", wantFactors: map[string]float64{"run": 1, "ride": 0.6, "rowing": 1, "xc_ski": 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			c, err := svc.Create(t.Context(), userID, with(func(d *Draft) {
+				if tt.reference != "" {
+					d.ReferenceSport = sportCode(tt.reference)
+				}
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stored, sport string
+			if err := pool.QueryRow(t.Context(), `SELECT c.reference_sport, cat.params->>'sport'
+				FROM challenges c JOIN categories cat ON cat.challenge_id = c.id AND cat.type = 'elimination'
+				WHERE c.id = $1`, c.ID).Scan(&stored, &sport); err != nil {
+				t.Fatal(err)
+			}
+			if stored != tt.want || sport != tt.want {
+				t.Fatalf("stored reference %s, elimination in %s, want %s", stored, sport, tt.want)
+			}
+			for code, want := range tt.wantFactors {
+				var f float64
+				if err := pool.QueryRow(t.Context(), "SELECT (params->'factors'->>$2)::float8 FROM categories WHERE challenge_id = $1 AND type = 'cumulative_distance'", c.ID, code).Scan(&f); err != nil {
+					t.Fatal(err)
+				}
+				if f != want {
+					t.Errorf("factor of %s = %v, want %v", code, f, want)
+				}
+			}
+			d, err := svc.Get(t.Context(), userID, c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.ReferenceSport != tt.want {
+				t.Fatalf("reference read back %q, want %s", d.ReferenceSport, tt.want)
+			}
+		})
+	}
+}
+
+// TestCreateRefusesAReferenceWithoutRequiredDistance: with the catalogue of
+// the migrations, yoga (no distance), other (optional) and an unknown code.
+func TestCreateRefusesAReferenceWithoutRequiredDistance(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, userID := setup(t, &pseudo)
+	for _, reference := range []string{"yoga", "other", "quidditch"} {
+		t.Run(reference, func(t *testing.T) {
+			_, err := svc.Create(t.Context(), userID, with(func(d *Draft) { d.ReferenceSport = sportCode(reference) }))
+			var appErr *apperr.Error
+			if !errors.As(err, &appErr) || appErr.Code != apperr.CodeValidationFailed || appErr.Params[apperr.FieldsParam] != "reference_sport" {
+				t.Fatalf("error %v, want 400 validation_failed on reference_sport", err)
+			}
+		})
+	}
+	if n := count(t, pool, "SELECT count(*) FROM challenges"); n != 0 {
+		t.Fatalf("%d challenges stored, want none", n)
 	}
 }
 

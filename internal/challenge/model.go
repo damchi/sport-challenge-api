@@ -25,12 +25,15 @@ type Challenge struct {
 	Visibility       string
 	MembersCanInvite bool
 	Timezone         string
-	StartsAt         time.Time
-	EndsAt           time.Time
-	CreatedBy        string
-	DeletedAt        *time.Time
-	CreatedAt        time.Time `gorm:"->"`
-	UpdatedAt        time.Time `gorm:"->"`
+	// ReferenceSport is the sport the distances are brought back to and the
+	// elimination is run in, frozen at creation.
+	ReferenceSport string
+	StartsAt       time.Time
+	EndsAt         time.Time
+	CreatedBy      string
+	DeletedAt      *time.Time
+	CreatedAt      time.Time `gorm:"->"`
+	UpdatedAt      time.Time `gorm:"->"`
 	// Categories are not a column: the repository loads them alongside.
 	Categories []Category `gorm:"-"`
 }

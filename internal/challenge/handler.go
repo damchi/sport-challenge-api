@@ -41,6 +41,7 @@ func (h *Handler) CreateChallenge(ctx context.Context, req api.CreateChallengeRe
 		StartDate:             b.StartDate.String(),
 		Weeks:                 b.Weeks,
 		EliminationStepMeters: b.EliminationStepMeters,
+		ReferenceSport:        b.ReferenceSport,
 	}
 	if b.MembersCanInvite != nil {
 		draft.MembersCanInvite = *b.MembersCanInvite
@@ -72,6 +73,7 @@ func toAPI(c Challenge) (api.Challenge, error) {
 		Visibility:       api.ChallengeVisibility(c.Visibility),
 		MembersCanInvite: c.MembersCanInvite,
 		Timezone:         c.Timezone,
+		ReferenceSport:   c.ReferenceSport,
 		StartsAt:         c.StartsAt.UTC(),
 		EndsAt:           c.EndsAt.UTC(),
 		Categories:       make([]api.Category, 0, len(c.Categories)),
@@ -250,7 +252,7 @@ func (h *Handler) UpdateChallenge(ctx context.Context, req api.UpdateChallengeRe
 	for name, value := range map[string]any{
 		"categories": b.Categories, "distance_factors": b.DistanceFactors,
 		"elimination_step_meters": b.EliminationStepMeters, "ends_at": b.EndsAt,
-		"members_can_invite": b.MembersCanInvite, "start_date": b.StartDate,
+		"members_can_invite": b.MembersCanInvite, "reference_sport": b.ReferenceSport, "start_date": b.StartDate,
 		"starts_at": b.StartsAt, "timezone": b.Timezone,
 		"visibility": b.Visibility, "weeks": b.Weeks,
 	} {
@@ -281,6 +283,7 @@ func toDetail(d Detail) (api.ChallengeDetail, error) {
 		Visibility:           api.ChallengeDetailVisibility(base.Visibility),
 		MembersCanInvite:     base.MembersCanInvite,
 		Timezone:             base.Timezone,
+		ReferenceSport:       base.ReferenceSport,
 		StartsAt:             base.StartsAt,
 		EndsAt:               base.EndsAt,
 		Categories:           base.Categories,

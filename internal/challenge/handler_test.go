@@ -118,6 +118,42 @@ func TestCreateChallenge(t *testing.T) {
 	if repo.created == nil || repo.created.CreatedBy != actor {
 		t.Fatalf("stored %+v, want a challenge created by the actor from the token", repo.created)
 	}
+	if out["reference_sport"] != "run" {
+		t.Fatalf("reference_sport %v, want run by default", out["reference_sport"])
+	}
+}
+
+// TestCreateChallengeWithAReferenceSport: the reference is passed on, its
+// factor refused, and the answer carries it.
+func TestCreateChallengeWithAReferenceSport(t *testing.T) {
+	svc, repo := newTestService(true)
+	rec, out := post(t, svc, strings.Replace(validBody, `"distance_factors":{"ride":0.25}`, `"reference_sport":"ride","distance_factors":{"run":0.5}`, 1))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d, want 201: %s", rec.Code, rec.Body)
+	}
+	cats, _ := out["categories"].([]any)
+	distance, _ := cats[1].(map[string]any)["params"].(map[string]any)["factors"].(map[string]any)
+	elimination, _ := cats[2].(map[string]any)["params"].(map[string]any)
+	if out["reference_sport"] != "ride" || repo.created.ReferenceSport != "ride" || distance["ride"] != 1.0 || distance["run"] != 0.5 || elimination["sport"] != "ride" {
+		t.Fatalf("body %v, want ride as the reference, ×1, run at 0.5 and the elimination in ride", out)
+	}
+
+	// An empty code is not run.
+	svc, repo = newTestService(true)
+	rec, out = post(t, svc, strings.Replace(validBody, `"distance_factors":{"ride":0.25}`, `"reference_sport":""`, 1))
+	e, _ := out["error"].(map[string]any)
+	params, _ := e["params"].(map[string]any)
+	if rec.Code != http.StatusBadRequest || params["fields"] != "reference_sport" || repo.created != nil {
+		t.Fatalf("got %d %v, want 400 validation_failed on reference_sport", rec.Code, out)
+	}
+
+	svc, repo = newTestService(true)
+	rec, out = post(t, svc, strings.Replace(validBody, `"distance_factors":{"ride":0.25}`, `"reference_sport":"ride","distance_factors":{"ride":1}`, 1))
+	e, _ = out["error"].(map[string]any)
+	params, _ = e["params"].(map[string]any)
+	if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || params["fields"] != "distance_factors.ride" || repo.created != nil {
+		t.Fatalf("got %d %v, want 400 validation_failed on distance_factors.ride", rec.Code, out)
+	}
 }
 
 func TestCreateChallengeRefusals(t *testing.T) {
@@ -132,6 +168,7 @@ func TestCreateChallengeRefusals(t *testing.T) {
 		{name: "incomplete profile", body: validBody, wantStatus: 422, wantCode: "profile_incomplete"},
 		{name: "rule broken (start in the past)", complete: true, body: strings.Replace(validBody, "2026-03-04", "2026-03-01", 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "start_date"},
 		{name: "contract broken (53 weeks, other visibility)", complete: true, body: strings.Replace(strings.Replace(validBody, `"weeks":6`, `"weeks":53`, 1), `"public"`, `"friends"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "visibility,weeks"},
+		{name: "reference sport over 32 characters", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"reference_sport":"`+strings.Repeat("a", 33)+`"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "reference_sport"},
 		{name: "factor of an unknown sport: the key is not echoed", complete: true, body: strings.Replace(validBody, `"ride":0.25`, `"<script>":"x"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors"},
 		{name: "factor out of range", complete: true, body: strings.Replace(validBody, `"ride":0.25`, `"ride":0.123`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors.ride"},
 		{name: "missing title", complete: true, body: strings.Replace(validBody, `"title":"Spring run",`, "", 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
@@ -506,6 +543,7 @@ func TestUpdateChallenge(t *testing.T) {
 		{name: "creator", membership: creator, body: `{"title":"New title","description":""}`, wantStatus: 200},
 		{name: "participant", membership: Membership{Participant: ParticipantActive}, body: `{"title":"New title"}`, wantStatus: 403, wantCode: "forbidden"},
 		{name: "frozen fields", membership: creator, body: `{"title":"New title","weeks":8,"visibility":"private"}`, wantStatus: 422, wantCode: "field_not_editable", wantFields: "visibility,weeks"},
+		{name: "frozen reference sport", membership: creator, body: `{"title":"New title","reference_sport":"ride"}`, wantStatus: 422, wantCode: "field_not_editable", wantFields: "reference_sport"},
 		{name: "unknown field", membership: creator, body: `{"titel":"New title"}`, wantStatus: 400, wantCode: "validation_failed"},
 		{name: "null title", membership: creator, body: `{"title":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
 		{name: "null description", membership: creator, body: `{"description":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "description"},
@@ -545,8 +583,8 @@ func TestUpdateChallengeFrozenFieldNull(t *testing.T) {
 	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111"
 	for _, field := range []string{
 		"categories", "distance_factors", "elimination_step_meters", "ends_at",
-		"members_can_invite", "start_date", "starts_at", "timezone",
-		"visibility", "weeks",
+		"members_can_invite", "reference_sport", "start_date", "starts_at",
+		"timezone", "visibility", "weeks",
 	} {
 		t.Run(field, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Creator: true, Participant: ParticipantActive}}
