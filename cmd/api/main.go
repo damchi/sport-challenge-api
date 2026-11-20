@@ -87,21 +87,31 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// Each needs the other: deleting an account abandons its challenges, a
-	// challenge reads the profiles. The closure resolves challenges once set.
-	var challenges *challenge.Service
+	// Each needs the other: deleting an account abandons its challenges and
+	// erases its rows in the other modules, which read the profiles. The
+	// closures resolve the services once set.
+	var (
+		challenges  *challenge.Service
+		activities  *activity.Service
+		invitations *invitation.Service
+	)
 	abandonAll := abandonAllFunc(func(ctx context.Context, userID string) error {
 		return challenges.AbandonAll(ctx, userID)
 	})
+	erasers := []user.Eraser{
+		eraseUserFunc(func(ctx context.Context, userID string) error { return invitations.EraseUser(ctx, userID) }),
+		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
+		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
+	}
 	management := auth.NewAuth0Management(cfg.Auth0MgmtDomain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
-	users := user.NewService(user.NewRepository(gdb), abandonAll, management, logger)
+	users := user.NewService(user.NewRepository(gdb), abandonAll, erasers, management, logger)
 
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, clk)
-	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
+	activities = activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
 	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, cfg.AtRiskThreshold)
-	invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
+	invitations = invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 	challengeHandler := challenge.NewHandler(challenges)
 	handlers := server{
 		Handler:            health.NewHandler(pool, logger, build),
@@ -163,6 +173,13 @@ func run() error {
 type abandonAllFunc func(ctx context.Context, userID string) error
 
 func (f abandonAllFunc) AbandonAll(ctx context.Context, userID string) error {
+	return f(ctx, userID)
+}
+
+// eraseUserFunc is a function as a user.Eraser.
+type eraseUserFunc func(ctx context.Context, userID string) error
+
+func (f eraseUserFunc) EraseUser(ctx context.Context, userID string) error {
 	return f(ctx, userID)
 }
 

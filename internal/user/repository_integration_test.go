@@ -111,7 +111,7 @@ func TestServiceRefusesAnAnonymizedAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := NewService(repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|gone", "")
+	_, err := NewService(repo, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|gone", "")
 	if !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
 		t.Fatalf("error = %v, want account_deleted", err)
 	}
@@ -129,7 +129,7 @@ func TestServiceAnswersAccountDeletedAfterTheDeletion(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1", u.ID); err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(repo, nil, nil, discard)
+	service := NewService(repo, nil, nil, nil, discard)
 	deleted := apperr.New(apperr.CodeAccountDeleted, nil)
 
 	tests := []struct {
@@ -354,7 +354,7 @@ func TestProfileFromBeforeTheNamesIsIncomplete(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ('email|old', 'old_1') RETURNING id").Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(repo, nil, nil, discard)
+	svc := NewService(repo, nil, nil, nil, discard)
 	if complete, err := svc.ProfileComplete(t.Context(), id); err != nil || complete {
 		t.Fatalf("ProfileComplete() = %v, %v, want false", complete, err)
 	}

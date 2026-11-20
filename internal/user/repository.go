@@ -120,7 +120,7 @@ func (r *Repository) UpdateEmail(ctx context.Context, id, email string) error {
 // Delete anonymizes the account of user id and makes its deletion final, in
 // one transaction that abandon joins (ctx carries it): the row is locked,
 // the fingerprint of its subject is stored, the subject is replaced by a
-// placeholder and the pseudo, names, e-mail and avatar are erased; then
+// placeholder and the pseudo, names, e-mail, avatar and language are erased; then
 // abandon runs. It returns the former subject, for the deletion at Auth0. An
 // unknown or already anonymized user gives errUserNotFound; an error of
 // abandon rolls everything back.
@@ -149,6 +149,7 @@ func (r *Repository) Delete(ctx context.Context, id string, abandon func(ctx con
 			"last_name":     nil,
 			"email":         nil,
 			"avatar_key":    nil,
+			"language":      nil,
 			"anonymized_at": gorm.Expr("now()"),
 		})
 		if res.Error != nil {

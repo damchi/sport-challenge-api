@@ -33,6 +33,9 @@ type fakeRepository struct {
 	listed  *ListQuery
 }
 
+// EraseUser is covered by the integration tests.
+func (f *fakeRepository) EraseUser(context.Context, string) error { return nil }
+
 func (f *fakeRepository) List(_ context.Context, q ListQuery) ([]Activity, error) {
 	f.listed = &q
 	if f.err != nil {

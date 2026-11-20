@@ -56,7 +56,7 @@ func TestInvitationValidityAgreesAcrossModules(t *testing.T) {
 				t.Fatal(err)
 			}
 			clk := clock.NewFake(recordNow)
-			users := user.NewService(user.NewRepository(gdb), nil, nil, logger)
+			users := user.NewService(user.NewRepository(gdb), nil, nil, nil, logger)
 			challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), clk)
 			invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 
@@ -128,7 +128,7 @@ func TestAcceptInvitation(t *testing.T) {
 	start := toronto(t, 2026, 6, 1, 0)
 	deadline := start.AddDate(0, 0, 7)
 	clk := clock.NewFake(start.Add(24 * time.Hour))
-	users := user.NewService(user.NewRepository(gdb), nil, nil, logger)
+	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, logger)
 	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), clk)
 	invitations := invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 

@@ -231,10 +231,10 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 	t.Run("the transaction holds the closure and the eliminations together", func(t *testing.T) {
 		repo := NewRepository(gdb)
 		c := Challenge{ID: challengeID, CategoryID: categoryID}
-		// A participant of nowhere breaks the participant key of the elimination.
-		_, err := repo.CloseWeek(t.Context(), c, 4, weekEnd(3), []scoring.Eliminated{{UserID: stranger, Week: 4, RunMeters: 1, MinimumMeters: 2}})
+		// A negative distance breaks a check of the elimination.
+		_, err := repo.CloseWeek(t.Context(), c, 4, weekEnd(3), []scoring.Eliminated{{UserID: b, Week: 4, RunMeters: -1, MinimumMeters: 2}})
 		if err == nil {
-			t.Fatal("error = nil, want the foreign key of the participant")
+			t.Fatal("error = nil, want the check of the distance")
 		}
 		if weeks := s.closedWeeks(challengeID); !reflect.DeepEqual(weeks, []int{1, 2, 3}) {
 			t.Fatalf("closed weeks = %v: the closure of week 4 stayed without its eliminations", weeks)
@@ -558,5 +558,44 @@ func TestCloseWeeksAfterTheFinalization(t *testing.T) {
 	}
 	if weeks := s.closedWeeks(challengeID); !reflect.DeepEqual(weeks, []int{1, 2, 3, 4}) {
 		t.Fatalf("closed weeks = %v, want [1 2 3 4]: week 3 left behind", weeks)
+	}
+}
+
+// TestSaveSnapshotsOfAnAccountDeletedSinceTheRanking: the rankings are
+// computed before the transaction that stores them. An account deleted in
+// between (anonymized, its participations erased) must neither stay in the
+// snapshots nor get an elimination; the others are stored as ranked.
+func TestSaveSnapshotsOfAnAccountDeletedSinceTheRanking(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	kept, gone := s.user("kept"), s.user("gone")
+	start := time.Date(2026, 5, 4, 4, 0, 0, 0, time.UTC)
+	challengeID, categoryID := s.challenge(kept, start, false)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, challengeID, kept, start)
+	// Ranked first, then deleted: its account erased as DELETE /me does.
+	s.exec(`UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1`, gone)
+
+	payload := []byte(`{"entries": [{"user_id": "` + gone + `", "rank": 1, "value": 9000, "abandoned": false},
+		{"user_id": "` + kept + `", "rank": 2, "value": 5000, "abandoned": false}]}`)
+	last := LastWeek{Number: 4, CategoryID: categoryID, Eliminated: []scoring.Eliminated{{UserID: gone, Week: 4, RunMeters: 1, MinimumMeters: 2}}}
+	done, err := NewRepository(gdb).SaveSnapshots(t.Context(), challengeID, start.AddDate(0, 0, 28),
+		[]Snapshot{{CategoryID: categoryID, Type: "run_elimination", Payload: payload}}, last)
+	if err != nil || !done {
+		t.Fatalf("done = %v, err = %v, want the snapshots recorded", done, err)
+	}
+
+	want := []payloadEntry{{UserID: kept, Rank: 2, Value: 5000}}
+	if got := s.snapshots(challengeID); len(got) != 1 || !reflect.DeepEqual(got[0].Payload.Entries, want) {
+		t.Fatalf("snapshots = %+v, want only %+v", got, want)
+	}
+	if elims := s.eliminations(challengeID); len(elims) != 0 {
+		t.Fatalf("eliminations = %+v, want none for the erased participation", elims)
+	}
+	if weeks := s.closedWeeks(challengeID); !reflect.DeepEqual(weeks, []int{4}) {
+		t.Fatalf("closed weeks = %v, want [4]", weeks)
 	}
 }

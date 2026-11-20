@@ -385,6 +385,42 @@ func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 	}
 }
 
+// TestGetFrozenAfterTheErasure: once the deletion erased the entries of an
+// account from the frozen results (README §2.2), the others move up as when
+// they were only left out: the ranks frozen with it are given again.
+func TestGetFrozenAfterTheErasure(t *testing.T) {
+	c := twoWeeks(t)
+	// The snapshots of TestGetFrozenLeavesOutDeletedAccounts, d erased.
+	repo := &fakeRepo{snapshots: map[string]json.RawMessage{
+		CategoryCumulativeTime:     json.RawMessage(`{"entries":[{"user_id":"a","rank":2,"value":9000},{"user_id":"b","rank":2,"value":9000}]}`),
+		CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":28000},{"user_id":"b","rank":3,"value":5000}]}`),
+		CategoryRunElimination:     json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},{"user_id":"b","rank":3,"value":5000,"eliminated_week":1}]}`),
+	}}
+	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt), time.Hour)
+
+	got, err := svc.Get(t.Context(), "actor", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []CategoryRanking{
+		{Type: CategoryCumulativeTime, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 9000}, Name: bobName},
+		}},
+		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
+		}},
+		{Type: CategoryRunElimination, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 1}}, Name: bobName},
+		}},
+	}
+	if !reflect.DeepEqual(got.Categories, want) {
+		t.Fatalf("Get() = %+v, want %+v", got.Categories, want)
+	}
+}
+
 func TestGetComputesWhatIsNotFrozenYet(t *testing.T) {
 	c := twoWeeks(t)
 	tests := []struct {

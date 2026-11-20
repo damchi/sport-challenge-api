@@ -154,6 +154,15 @@ func (r *Repository) Delete(ctx context.Context, actorID, id string, at time.Tim
 	return nil
 }
 
+// EraseUser deletes every activity of userID, those marked deleted
+// included. It runs in the transaction of ctx (account deletion).
+func (r *Repository) EraseUser(ctx context.Context, userID string) error {
+	if err := db.Conn(ctx, r.db).Exec("DELETE FROM activities WHERE user_id = ?", userID).Error; err != nil {
+		return fmt.Errorf("delete activities: %w", err)
+	}
+	return nil
+}
+
 // change runs decide then write on activity id, locked, in one transaction
 // (Update, Delete). Only an activity of actorID is read, so that the row of
 // someone else is never locked: theirs gives errActivityNotFound, as a

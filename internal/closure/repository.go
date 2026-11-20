@@ -107,12 +107,14 @@ func (r *Repository) CloseWeek(ctx context.Context, c Challenge, week int, close
 
 // insertEliminations records the eliminations of a week in category
 // categoryID. A participant is eliminated once: an existing row is the
-// earlier judgement.
+// earlier judgement. A participation erased since the judgement (account
+// deleted) gets none.
 func insertEliminations(tx *gorm.DB, challengeID, categoryID string, eliminated []scoring.Eliminated) error {
 	for _, e := range eliminated {
 		if err := tx.Exec(
 			`INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters)
-			VALUES (@challenge, @category, @user, @week, @run, @minimum)
+			SELECT @challenge, @category, @user, @week, @run, @minimum
+			WHERE EXISTS (SELECT 1 FROM participants WHERE challenge_id = @challenge AND user_id = @user)
 			ON CONFLICT (category_id, user_id) DO NOTHING`,
 			map[string]any{
 				"challenge": challengeID, "category": categoryID, "user": e.UserID,
@@ -170,13 +172,39 @@ func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]Ende
 	return out, nil
 }
 
+// lockParticipantsQuery takes FOR SHARE the users of the participants of
+// @id, in one global order: an account deletion, which locks its user row
+// first, then waits for the snapshots to be written, or they wait for it.
+const lockParticipantsQuery = `SELECT u.id FROM participants p JOIN users u ON u.id = p.user_id
+WHERE p.challenge_id = @id ORDER BY u.id FOR SHARE OF u`
+
+// dropDeletedEntriesQuery removes from the snapshots of @id the entries of
+// the accounts deleted (anonymized) since they were ranked, keeping the
+// order of the others; the ranks are computed again when served.
+const dropDeletedEntriesQuery = `UPDATE result_snapshot rs
+SET payload = jsonb_set(rs.payload, '{entries}', COALESCE(
+	(SELECT jsonb_agg(e ORDER BY n) FROM jsonb_array_elements(rs.payload->'entries') WITH ORDINALITY AS t(e, n)
+		WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id::text = e->>'user_id' AND u.anonymized_at IS NOT NULL)),
+	'[]'::jsonb))
+WHERE rs.challenge_id = @id`
+
 // SaveSnapshots records the snapshots of a challenge, then the closure of its
 // last week and the eliminations judged in it, in one transaction. A run that
 // finalized the challenge at the same time wins: this one records nothing
 // (false). A closure or an elimination already there is kept.
+//
+// The rankings were computed before the transaction: an account deleted
+// since would stay in them, its erasure having found nothing to erase. So
+// the users of the participants are locked first (lockParticipantsQuery) and
+// the entries of deleted accounts dropped once written: a deletion either
+// commits before, and is dropped here, or waits and erases them itself.
 func (r *Repository) SaveSnapshots(ctx context.Context, challengeID string, createdAt time.Time, snapshots []Snapshot, last LastWeek) (bool, error) {
 	var recorded bool
 	err := db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+		var locked []string
+		if err := tx.Raw(lockParticipantsQuery, map[string]any{"id": challengeID}).Scan(&locked).Error; err != nil {
+			return fmt.Errorf("lock participants: %w", err)
+		}
 		for i, s := range snapshots {
 			res := tx.Exec(
 				`INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at)
@@ -197,6 +225,9 @@ func (r *Repository) SaveSnapshots(ctx context.Context, challengeID string, crea
 		}
 		if len(snapshots) == 0 {
 			return nil
+		}
+		if err := tx.Exec(dropDeletedEntriesQuery, map[string]any{"id": challengeID}).Error; err != nil {
+			return fmt.Errorf("drop entries of deleted accounts: %w", err)
 		}
 		if err := tx.Exec(
 			`INSERT INTO week_closure (challenge_id, week_number, closed_at) VALUES (@id, @week, @closed_at)

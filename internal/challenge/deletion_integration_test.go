@@ -27,7 +27,8 @@ type deletedAtAuth0 struct{}
 func (deletedAtAuth0) DeleteUser(context.Context, string) error { return nil }
 
 // accounts returns the user service of pool, whose deletions abandon the
-// challenges of svc, as cmd/api wires it.
+// challenges of svc and erase nothing: these tests judge AbandonAll alone
+// (the erasure of the rows is tested in cmd/api, wired as in production).
 func accounts(t *testing.T, pool *pgxpool.Pool, svc *Service) *user.Service {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -35,7 +36,7 @@ func accounts(t *testing.T, pool *pgxpool.Pool, svc *Service) *user.Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return user.NewService(user.NewRepository(gdb), svc, deletedAtAuth0{}, logger)
+	return user.NewService(user.NewRepository(gdb), svc, nil, deletedAtAuth0{}, logger)
 }
 
 func statusOf(t *testing.T, pool *pgxpool.Pool, challengeID, userID string) (string, *time.Time) {
@@ -116,7 +117,7 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 		t.Fatalf("ongoing challenge: %s at %v, want abandoned at the clock's now", status, at)
 	}
 	if status, _ := statusOf(t, pool, finished.ID, member); status != "active" {
-		t.Fatalf("finished challenge: %s, want active: its results stay", status)
+		t.Fatalf("finished challenge: %s, want active: AbandonAll leaves it", status)
 	}
 	if status, at := statusOf(t, pool, left.ID, member); status != "abandoned" || !at.Equal(*leftAt) {
 		t.Fatalf("challenge abandoned before: %s at %v, want the first abandon kept (%v)", status, at, leftAt)
@@ -130,7 +131,7 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 	if status, _ := statusOf(t, pool, endingNow.ID, member); status != "active" {
 		t.Fatalf("challenge ending at the deletion: %s, want active: finished from that instant", status)
 	}
-	// The creator stays a creator of the finished challenge, under no name.
+	// AbandonAll leaves the creator rows (the erasure removes them).
 	if n := count(t, pool, "SELECT count(*) FROM challenge_creators WHERE challenge_id = $1 AND user_id = $2", finished.ID, member); n != 1 {
 		t.Fatalf("%d creator rows, want the link kept", n)
 	}

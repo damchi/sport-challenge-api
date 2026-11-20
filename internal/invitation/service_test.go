@@ -75,6 +75,9 @@ func (f *fakeRepository) Create(_ context.Context, inv Invitation) (Invitation, 
 	return inv, nil
 }
 
+// EraseUser is covered by the integration tests.
+func (f *fakeRepository) EraseUser(context.Context, string) error { return nil }
+
 func (f *fakeRepository) Link(_ context.Context, tokenHash []byte, userID string, at time.Time) (string, error) {
 	if f.err != nil {
 		return "", f.err
@@ -208,6 +211,21 @@ func TestServiceLinkStorageFails(t *testing.T) {
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
+	}
+}
+
+// TestServiceOfADeletedAccount: an account deleted while the request ran
+// (the repository found it anonymized once locked) answers account_deleted.
+func TestServiceOfADeletedAccount(t *testing.T) {
+	deleted := fmt.Errorf("lock user: %w", errAccountDeleted)
+	svc := NewService(fakeChallenges{}, &fakeRepository{err: deleted}, clock.NewFake(now))
+	want := apperr.New(apperr.CodeAccountDeleted, nil)
+	if _, token, err := svc.Create(t.Context(), actor, challengeID); !errors.Is(err, want) || token != "" {
+		t.Fatalf("Create() = %v, token %q, want account_deleted and no token", err, token)
+	}
+	token, _ := validToken()
+	if _, err := svc.Link(t.Context(), actor, token); !errors.Is(err, want) {
+		t.Fatalf("Link() = %v, want account_deleted", err)
 	}
 }
 
