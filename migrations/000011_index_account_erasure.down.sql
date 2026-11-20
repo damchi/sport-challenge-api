@@ -1,0 +1,4 @@
+DROP INDEX invitations_invited_by_idx;
+DROP INDEX elimination_user_id_challenge_id_idx;
+DROP INDEX challenge_creators_user_id_idx;
+DROP INDEX activities_user_id_idx;
