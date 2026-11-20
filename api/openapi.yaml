@@ -433,8 +433,8 @@ paths:
         challenge is frozen at creation and answers 422 `field_not_editable`
         with the fields in `params.fields`. An absent field is left as is;
         an empty `description` removes it. `null` is refused for `title` and
-        `description`; a frozen field sent as `null` changes nothing and is
-        ignored, like an absent one.
+        `description`, and a frozen field sent as `null` answers 400
+        `validation_failed` with the field in `params.fields`.
       tags: [challenges]
       parameters:
         - name: challengeId
@@ -1916,25 +1916,25 @@ components:
             U+200C, U+200D, U+200E, U+200F and the tags of flags (U+E0020 to
             U+E007F).
         visibility:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         members_can_invite:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         timezone:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         start_date:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         weeks:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         elimination_step_meters:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         distance_factors:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         categories:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         starts_at:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         ends_at:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`.
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
     CreatorAdd:
       type: object
       required: [user_id]

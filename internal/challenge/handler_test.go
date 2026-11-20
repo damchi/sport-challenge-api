@@ -539,6 +539,30 @@ func TestUpdateChallenge(t *testing.T) {
 	}
 }
 
+// TestUpdateChallengeFrozenFieldNull: a frozen field sent as null is refused
+// by the contract, and nothing is written.
+func TestUpdateChallengeFrozenFieldNull(t *testing.T) {
+	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111"
+	for _, field := range []string{
+		"categories", "distance_factors", "elimination_step_meters", "ends_at",
+		"members_can_invite", "start_date", "starts_at", "timezone",
+		"visibility", "weeks",
+	} {
+		t.Run(field, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Creator: true, Participant: ParticipantActive}}
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodPatch, target, `{"title":"New title","`+field+`":null}`)
+			e, _ := out["error"].(map[string]any)
+			params, _ := e["params"].(map[string]any)
+			if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || params["fields"] != field {
+				t.Fatalf("got %d %v, want 400 validation_failed fields %q", rec.Code, out, field)
+			}
+			if repo.updated != nil {
+				t.Fatal("challenge written despite the refusal")
+			}
+		})
+	}
+}
+
 // TestUpdateChallengeNotFoundIsTheSameAnswer: a missing challenge and a
 // private one the actor may not see answer the same 404 on edit too.
 func TestUpdateChallengeNotFoundIsTheSameAnswer(t *testing.T) {
