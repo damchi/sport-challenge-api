@@ -46,7 +46,7 @@ Migration `activity` (`source` avec la valeur « manuelle » en V1, `external_id
 
 ## Phase 6 — Scoring et classement
 
-Utilise le skill `scoring-rules`. Écris les tests d'abord. Packages `scoring` (les 3 catégories : temps cumulé, distance cumulée, course avec élimination ; ex aequo) puis `leaderboard` et `GET /challenges/{id}/leaderboard`.
+Utilise le skill `scoring-rules`. Écris les tests d'abord. Packages `scoring` (les catégories : temps cumulé, distance cumulée, élimination, points ; ex aequo) puis `leaderboard` et `GET /challenges/{id}/leaderboard`.
 
 ## Phase 7 — Clôtures et worker
 

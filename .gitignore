@@ -61,3 +61,6 @@ gha-creds-*.json
 # Security audits: they describe the weaknesses of the API, kept out of the
 # public repository (findings go to the issues instead)
 docs/audit-*.md
+
+# Local design notes and plans (superpowers)
+docs/superpowers/
