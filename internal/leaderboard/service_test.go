@@ -33,8 +33,12 @@ type fakeRepo struct {
 	frozenAt  time.Time
 	// snapshotsErr is what Snapshots fails with.
 	snapshotsErr error
-	err          error
-	calls        int
+	// deleted are the deleted accounts; deletedErr what DeletedAccounts
+	// fails with.
+	deleted    map[string]bool
+	deletedErr error
+	err        error
+	calls      int
 	// from and to are the window the activities were asked for, weekly the
 	// sport summed per week.
 	from, to time.Time
@@ -54,6 +58,10 @@ func (f *fakeRepo) Activities(_ context.Context, _ string, w scoring.Window, wee
 
 func (f *fakeRepo) Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error) {
 	return f.snapshots, f.frozenAt, f.snapshotsErr
+}
+
+func (f *fakeRepo) DeletedAccounts(context.Context, []string) (map[string]bool, error) {
+	return f.deleted, f.deletedErr
 }
 
 type fakeProfiles struct {
@@ -122,7 +130,7 @@ func TestGetRanksEveryCategory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// c is an anonymized account: no pseudo.
+	// c abandoned, and the fake gives it no name: the live path lists it.
 	want := Leaderboard{ComputedAt: now, Categories: []CategoryRanking{
 		{Type: CategoryCumulativeTime, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
@@ -305,7 +313,7 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 		},
 		frozenAt: frozenAt,
 	}
-	// Long after the end, and the pseudo of c is gone.
+	// Long after the end, and c has no name: it is not deleted, still listed.
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
 
 	got, err := svc.Get(t.Context(), "actor", "c1")
@@ -332,6 +340,48 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 	}
 	if repo.calls != 0 {
 		t.Fatalf("activities read %d times, want the snapshots alone", repo.calls)
+	}
+}
+
+// TestGetFrozenLeavesOutDeletedAccounts: an account deleted after the end
+// is left out of the frozen results, and the others move up, equal values
+// still sharing a rank.
+func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
+	c := twoWeeks(t)
+	repo := &fakeRepo{snapshots: map[string]json.RawMessage{
+		CategoryCumulativeTime: json.RawMessage(`{"entries":[{"user_id":"d","rank":1,"value":10000},` +
+			`{"user_id":"a","rank":2,"value":9000},{"user_id":"b","rank":2,"value":9000},{"user_id":"e","rank":0,"value":0,"abandoned":true}]}`),
+		CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":28000},` +
+			`{"user_id":"d","rank":1,"value":28000},{"user_id":"b","rank":3,"value":5000}]}`),
+		CategoryRunElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},` +
+			`{"user_id":"d","rank":2,"value":9000,"eliminated_week":2},{"user_id":"b","rank":3,"value":5000,"eliminated_week":1}]}`),
+	}, deleted: map[string]bool{"d": true, "e": true}}
+	profiles := &recordingProfiles{fakeProfiles: pseudos}
+	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt), time.Hour)
+
+	got, err := svc.Get(t.Context(), "actor", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []CategoryRanking{
+		{Type: CategoryCumulativeTime, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 9000}, Name: bobName},
+		}},
+		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
+		}},
+		{Type: CategoryRunElimination, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 1}}, Name: bobName},
+		}},
+	}
+	if !reflect.DeepEqual(got.Categories, want) {
+		t.Fatalf("Get() = %+v, want %+v", got.Categories, want)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(profiles.asked, want) {
+		t.Fatalf("names asked for %v, want %v: never a deleted account", profiles.asked, want)
 	}
 }
 
@@ -373,6 +423,11 @@ func TestGetFrozenFailures(t *testing.T) {
 		repo *fakeRepo
 	}{
 		{name: "storage failure", repo: &fakeRepo{snapshotsErr: boom}},
+		{name: "deleted accounts not read", repo: &fakeRepo{deletedErr: boom, snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime:     json.RawMessage(`{"entries":[]}`),
+			CategoryCumulativeDistance: json.RawMessage(`{"entries":[]}`),
+			CategoryRunElimination:     json.RawMessage(`{"entries":[]}`),
+		}}},
 		{name: "invalid payload: an error, not a computed ranking", repo: &fakeRepo{snapshots: map[string]json.RawMessage{
 			CategoryCumulativeTime: bad, CategoryCumulativeDistance: bad, CategoryRunElimination: bad,
 		}}},

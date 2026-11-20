@@ -354,6 +354,12 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		s.run(b, inWeek(week+1), meters)
 	}
 	s.run(quitter, inWeek(1), 100)
+	// An account deleted between the end and the run: still active here, but
+	// no longer ranked.
+	gone := s.user("gone")
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, challengeID, gone, start)
+	s.run(gone, inWeek(1), 99000)
+	s.exec(`UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1`, gone)
 
 	service := func(now time.Time) *Service {
 		return NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(now), slog.New(slog.NewJSONHandler(io.Discard, nil)))
@@ -430,6 +436,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 			Participants(context.Context, string) ([]scoring.Participant, error)
 			Activities(context.Context, string, scoring.Window, string) ([]scoring.Activity, error)
 			Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
+			DeletedAccounts(context.Context, []string) (map[string]bool, error)
 		},
 		) leaderboard.Leaderboard {
 			t.Helper()

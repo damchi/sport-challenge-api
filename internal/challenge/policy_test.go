@@ -281,6 +281,9 @@ func TestExcludeRefusal(t *testing.T) {
 		{name: "target is a creator", actor: creatorActive, target: creatorActive, visibility: VisibilityPublic, now: before, want: apperr.CodeCannotExcludeCreator},
 		{name: "target is a creator who abandoned", actor: creatorActive, target: creatorAbandoned, visibility: VisibilityPublic, now: before, want: apperr.CodeCannotExcludeCreator},
 		{name: "target never joined", actor: creatorActive, target: outsider, visibility: VisibilityPublic, now: before, want: apperr.CodeNotFound},
+		{name: "target account deleted: as if it never joined", actor: creatorActive, target: Membership{Participant: ParticipantAbandoned, AccountDeleted: true}, visibility: VisibilityPublic, now: before, want: apperr.CodeNotFound},
+		{name: "target account deleted, still active after the end", actor: creatorActive, target: Membership{Participant: ParticipantActive, AccountDeleted: true}, visibility: VisibilityPublic, now: at, want: apperr.CodeNotFound},
+		{name: "target account deleted, a creator", actor: creatorActive, target: Membership{Creator: true, Participant: ParticipantActive, AccountDeleted: true}, visibility: VisibilityPublic, now: at, want: apperr.CodeNotFound},
 		{name: "participant: forbidden", actor: active, target: active, visibility: VisibilityPublic, now: before, want: apperr.CodeForbidden},
 		{name: "outsider of a public challenge: forbidden", actor: outsider, target: active, visibility: VisibilityPublic, now: before, want: apperr.CodeForbidden},
 		{name: "outsider of a private challenge: hidden", actor: outsider, target: active, visibility: VisibilityPrivate, now: before, want: apperr.CodeChallengeNotFound},
@@ -343,6 +346,8 @@ func TestAddCreatorRefusal(t *testing.T) {
 		{name: "already a creator, after the end", actor: creatorActive, target: creatorAbandoned, visibility: VisibilityPublic, now: at, wantNoop: true},
 		{name: "target abandoned", actor: creatorActive, target: abandoned, visibility: VisibilityPublic, now: before, want: apperr.CodeNotActiveParticipant},
 		{name: "target never joined", actor: creatorActive, target: outsider, visibility: VisibilityPublic, now: before, want: apperr.CodeNotActiveParticipant},
+		{name: "target account deleted, still active: as if it never joined", actor: creatorActive, target: Membership{Participant: ParticipantActive, AccountDeleted: true}, visibility: VisibilityPublic, now: before, want: apperr.CodeNotActiveParticipant},
+		{name: "target account deleted, a creator: as if it never joined", actor: creatorActive, target: Membership{Creator: true, Participant: ParticipantActive, AccountDeleted: true}, visibility: VisibilityPublic, now: at, want: apperr.CodeNotActiveParticipant},
 		{name: "target only invited", actor: creatorActive, target: invited, visibility: VisibilityPrivate, now: before, want: apperr.CodeNotActiveParticipant},
 		{name: "at the exact end", actor: creatorActive, target: active, visibility: VisibilityPublic, now: at, want: apperr.CodeChallengeEnded},
 		{name: "participant: forbidden", actor: active, target: active, visibility: VisibilityPublic, now: before, want: apperr.CodeForbidden},
@@ -556,6 +561,8 @@ func TestActivitiesRefusal(t *testing.T) {
 		{name: "target who never joined", actor: active, target: outsider, visibility: VisibilityPublic, want: apperr.CodeNotFound},
 		{name: "target only invited", actor: creatorActive, target: invited, visibility: VisibilityPrivate, want: apperr.CodeNotFound},
 		{name: "target with an unknown status", actor: active, target: Membership{Participant: "excluded"}, visibility: VisibilityPublic, want: apperr.CodeNotFound},
+		{name: "target account deleted, still active (finished challenge)", actor: creatorActive, target: Membership{Participant: ParticipantActive, AccountDeleted: true}, visibility: VisibilityPublic, want: apperr.CodeNotFound},
+		{name: "target account deleted, abandoned", actor: active, target: Membership{Participant: ParticipantAbandoned, AccountDeleted: true}, visibility: VisibilityPrivate, want: apperr.CodeNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

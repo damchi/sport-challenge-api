@@ -34,6 +34,10 @@ type Membership struct {
 	// a bearer token: anyone logged in who holds it may open it, and only the
 	// opening, recorded, makes them invited.
 	Invited bool
+	// AccountDeleted is true when the account of the user whose membership
+	// this is (the target, when read for one) was deleted (anonymized): it is
+	// then shown nowhere, its participation included.
+	AccountDeleted bool
 }
 
 // Role is the role of a user in a challenge, from none to the strongest.
@@ -122,8 +126,8 @@ func CanViewActivities(role Role) bool {
 // activities of target in a challenge of that visibility, or nil if they
 // may. A challenge the actor may not see is not found (404
 // challenge_not_found); a visible one shows its leaderboard only to anyone
-// CanViewActivities lets out (404 not_found); a target who never joined has
-// no activities there (404 not_found).
+// CanViewActivities lets out (404 not_found); a target who never joined, or
+// whose account was deleted, has no activities there (404 not_found).
 func ActivitiesRefusal(actor, target Membership, visibility string) error {
 	role := RoleOf(actor)
 	if err := RequireView(role, visibility); err != nil {
@@ -132,7 +136,7 @@ func ActivitiesRefusal(actor, target Membership, visibility string) error {
 	if !CanViewActivities(role) {
 		return apperr.New(apperr.CodeNotFound, nil)
 	}
-	if target.Participant != ParticipantActive && target.Participant != ParticipantAbandoned {
+	if target.AccountDeleted || (target.Participant != ParticipantActive && target.Participant != ParticipantAbandoned) {
 		return apperr.New(apperr.CodeNotFound, nil)
 	}
 	return nil
@@ -247,8 +251,9 @@ func AbandonRefusal(m Membership, visibility string, now, endsAt time.Time) (noo
 
 // DeletionAbandons reports whether deleting the account of a user with
 // membership m makes them abandon a challenge ending at endsAt: an active
-// participation in a challenge not finished at now. A finished challenge
-// keeps its results, under the neutral name of the anonymized account.
+// participation in a challenge not finished at now. In a finished challenge
+// the participation stays active; every view leaves the deleted account
+// out (AccountDeleted).
 func DeletionAbandons(m Membership, now, endsAt time.Time) bool {
 	return m.Participant == ParticipantActive && now.Before(endsAt)
 }
@@ -277,9 +282,10 @@ func CanExclude(role Role) bool {
 // ExcludeRefusal is the exclusion rule. On the actor: a challenge the actor
 // may not see is not found (404 challenge_not_found), and only creators may
 // exclude (403 forbidden). On the target: creators cannot be excluded (422
-// cannot_exclude_creator), someone who never joined has nothing to lose
-// (404 not_found), someone already out changes nothing (noop), and a
-// finished challenge is frozen (422 challenge_ended from the exact endsAt).
+// cannot_exclude_creator), someone who never joined, or whose account was
+// deleted, has nothing to lose (404 not_found), someone already out changes
+// nothing (noop), and a finished challenge is frozen (422 challenge_ended
+// from the exact endsAt).
 // An excluded participant is abandoned, shown like any abandon.
 func ExcludeRefusal(actor, target Membership, visibility string, now, endsAt time.Time) (noop bool, err error) {
 	role := RoleOf(actor)
@@ -288,6 +294,9 @@ func ExcludeRefusal(actor, target Membership, visibility string, now, endsAt tim
 	}
 	if !CanExclude(role) {
 		return false, apperr.New(apperr.CodeForbidden, nil)
+	}
+	if target.AccountDeleted {
+		return false, apperr.New(apperr.CodeNotFound, nil)
 	}
 	if target.Creator {
 		return false, apperr.New(apperr.CodeCannotExcludeCreator, nil)
@@ -315,8 +324,9 @@ func CanAddCreator(role Role) bool {
 // challenge the actor may not see is not found (404 challenge_not_found),
 // and only creators may add one (403 forbidden). On the target: a creator
 // already changes nothing (noop), only an active participant may become one
-// (422 not_active_participant: every creator is a participant), and a
-// finished challenge is frozen (422 challenge_ended from the exact endsAt).
+// (422 not_active_participant: every creator is a participant; a deleted
+// account is none, creator or not), and a finished challenge is frozen (422
+// challenge_ended from the exact endsAt).
 func AddCreatorRefusal(actor, target Membership, visibility string, now, endsAt time.Time) (noop bool, err error) {
 	role := RoleOf(actor)
 	if err := RequireView(role, visibility); err != nil {
@@ -326,6 +336,8 @@ func AddCreatorRefusal(actor, target Membership, visibility string, now, endsAt 
 		return false, apperr.New(apperr.CodeForbidden, nil)
 	}
 	switch {
+	case target.AccountDeleted:
+		return false, apperr.New(apperr.CodeNotActiveParticipant, nil)
 	case target.Creator:
 		return true, nil
 	case target.Participant != ParticipantActive:

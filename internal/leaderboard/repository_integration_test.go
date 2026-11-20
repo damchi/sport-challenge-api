@@ -70,6 +70,10 @@ func TestGetFromTheDatabase(t *testing.T) {
 	at := func(day, hour int) time.Time { return time.Date(2026, 6, day, hour, 0, 0, 0, loc) }
 
 	runner, walker, quitter, stranger := s.user("runner"), s.user("walker"), s.user("quitter"), s.user("stranger")
+	// Deleted accounts: one deleted after the end (still active here), one
+	// that abandoned when it was deleted. Neither is listed.
+	gone, goneQuitter := s.user("gone"), s.user("gone-quitter")
+	s.exec("UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id IN ($1, $2)", gone, goneQuitter)
 	var challengeID, other string
 	for _, id := range []*string{&challengeID, &other} {
 		if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
@@ -79,6 +83,8 @@ func TestGetFromTheDatabase(t *testing.T) {
 	}
 	s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3), ($1, $4, $3)", challengeID, runner, start, walker)
 	s.exec("INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $4)", challengeID, quitter, start, at(5, 0))
+	s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", challengeID, gone, start)
+	s.exec("INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $4)", challengeID, goneQuitter, start, at(5, 0))
 	// The runner also takes part in another challenge over the same weeks: the
 	// activities must not come twice, nor those of someone who is not here.
 	s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3), ($1, $4, $3)", other, runner, start, stranger)
@@ -95,6 +101,7 @@ func TestGetFromTheDatabase(t *testing.T) {
 	s.activity(walker, "walk", start, 600, km(1000), false)       // at the start: in
 	s.activity(quitter, "run", at(2, 9), 3600, km(99000), false)  // abandoned: no longer counts
 	s.activity(stranger, "run", at(2, 9), 3600, km(99000), false) // in no participation here
+	s.activity(gone, "run", at(2, 9), 3600, km(99000), false)     // deleted account: no longer counts
 
 	c := Challenge{
 		ID: challengeID, Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end.UTC(),
@@ -194,6 +201,21 @@ func TestGetServesTheSnapshotsOfAnEndedChallenge(t *testing.T) {
 
 	if v, at := valueOf(); v != 3600 || !at.Equal(frozenAt) {
 		t.Fatalf("value = %d at %s, want the snapshot 3600 at %s", v, at, frozenAt)
+	}
+
+	// An account deleted since is left out, even with a name served (the
+	// database tells, not the names); a runner without a name stays.
+	gone := s.user("gone")
+	s.exec(`UPDATE result_snapshot SET payload = $2 WHERE category_id = $1`, timeCategory,
+		`{"entries":[{"user_id":"`+gone+`","rank":1,"value":9000},{"user_id":"`+runner+`","rank":2,"value":3600}]}`)
+	s.exec("UPDATE users SET anonymized_at = now() WHERE id = $1", gone)
+	named := NewService(staticChallenge(c), fakeProfiles{names: map[string]Name{gone: {Pseudo: pseudo("gone")}}}, NewRepository(gdb), fake, 24*time.Hour)
+	got, err := named.Get(t.Context(), runner, challengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := got.Categories[0].Entries; len(e) != 1 || e[0].UserID != runner || e[0].Rank != 1 {
+		t.Fatalf("entries = %+v, want the runner alone, first", e)
 	}
 }
 

@@ -269,7 +269,7 @@ func scorerOf(cat Category) (scoring.Scorer, error) {
 }
 
 // payload is the stored ranking of a category. It names participants by id,
-// never by pseudo: an account anonymized since shows under a neutral name.
+// never by pseudo; an account deleted since is left out when it is served.
 type payload struct {
 	Entries []payloadEntry `json:"entries"`
 }

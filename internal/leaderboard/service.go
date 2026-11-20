@@ -24,6 +24,9 @@ type repository interface {
 	// Snapshots gives the frozen results of the challenge by category type,
 	// and when they were frozen; none until the worker has finalized it.
 	Snapshots(ctx context.Context, challengeID string) (map[string]json.RawMessage, time.Time, error)
+	// DeletedAccounts gives which of ids are deleted (anonymized) accounts,
+	// left out of the frozen results.
+	DeletedAccounts(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
 // Challenges gives challenge challengeID, with its categories, for actorID
@@ -58,8 +61,9 @@ func NewService(challenges Challenges, profiles Profiles, repo repository, c clo
 // Get returns the ranking of every category of challenge id, in position
 // order, as actorID may read it (the rule is the challenge module's, and
 // nothing is loaded before it passes). Abandoned participants are listed in
-// each category, unranked. The weeks are judged at the instant of the
-// clock. Once the challenge is over, the frozen results are served; until
+// each category, unranked; deleted accounts are not listed at all. The weeks
+// are judged at the instant of the clock. Once the challenge is over, the
+// frozen results are served; until
 // the worker has frozen them, the ranking is computed, which gives the same
 // result: the weeks that ended are locked by the clock, not by the worker.
 func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, error) {
@@ -148,7 +152,8 @@ type frozenRanking struct {
 
 // frozen builds the leaderboard of a challenge that is over from its result
 // snapshots, and reports false when they are not all there yet. The names
-// are read now: an account anonymized since shows under a neutral name.
+// are read now, and an account deleted since is left out: the participants
+// after it move up.
 func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, error) {
 	if len(c.Categories) == 0 {
 		return Leaderboard{}, false, nil
@@ -177,25 +182,48 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 			}
 		}
 	}
-	names, err := s.profiles.Names(ctx, ids)
+	deleted, err := s.repo.DeletedAccounts(ctx, ids)
+	if err != nil {
+		return Leaderboard{}, false, err
+	}
+	// The names of the deleted accounts are not even asked for.
+	kept := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !deleted[id] {
+			kept = append(kept, id)
+		}
+	}
+	names, err := s.profiles.Names(ctx, kept)
 	if err != nil {
 		return Leaderboard{}, false, fmt.Errorf("read names: %w", err)
 	}
 
 	board := Leaderboard{ComputedAt: createdAt, Categories: make([]CategoryRanking, len(c.Categories))}
 	for i, cat := range c.Categories {
-		ranked := make([]Ranked, len(rankings[i].Entries))
-		for j, e := range rankings[i].Entries {
-			ranked[j] = Ranked{Entry: scoring.Entry{UserID: e.UserID, Rank: e.Rank, Value: e.Value, Abandoned: e.Abandoned}}
+		ranked := make([]Ranked, 0, len(rankings[i].Entries))
+		// The ranks are given again without the deleted accounts, in the
+		// frozen order: equal ones still share a rank (1, 1, 3).
+		var frozenRank, rank int
+		for _, e := range rankings[i].Entries {
+			if deleted[e.UserID] {
+				continue
+			}
+			r := Ranked{Entry: scoring.Entry{UserID: e.UserID, Value: e.Value, Abandoned: e.Abandoned}, Name: names[e.UserID]}
+			if e.Rank > 0 {
+				if e.Rank != frozenRank {
+					frozenRank, rank = e.Rank, len(ranked)+1
+				}
+				r.Rank = rank
+			}
 			// As computed: a survivor of the elimination category has an empty
 			// progress once the challenge is over, an abandoned one has none.
 			if cat.Type == CategoryRunElimination && !e.Abandoned {
-				ranked[j].Progress = &scoring.Progress{}
+				r.Progress = &scoring.Progress{}
 				if e.EliminatedWeek > 0 {
-					ranked[j].Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
+					r.Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
 				}
 			}
-			ranked[j].Name = names[e.UserID]
+			ranked = append(ranked, r)
 		}
 		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
 	}

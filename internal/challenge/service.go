@@ -160,8 +160,8 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 
 // Participants returns a page of the participants of challenge id, visible
 // to whoever sees the challenge (ParticipantsRefusal): anyone else gets the
-// same 404 challenge_not_found as for a missing challenge. An anonymized
-// account has no name.
+// same 404 challenge_not_found as for a missing challenge. A deleted
+// (anonymized) account is not listed.
 func (s *Service) Participants(ctx context.Context, actorID, id string, limit int, after *ParticipantPosition) (ParticipantPage, error) {
 	if limit < 1 {
 		return ParticipantPage{}, apperr.InvalidFields(nil, "limit")

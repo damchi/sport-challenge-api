@@ -33,8 +33,8 @@ type Category struct {
 	StepMeters int
 }
 
-// Ranked is a line of a ranking with the public name of the participant,
-// empty for an anonymized account.
+// Ranked is a line of a ranking with the public name of the participant
+// (never a deleted account: it is not ranked).
 type Ranked struct {
 	scoring.Entry
 	Name Name
