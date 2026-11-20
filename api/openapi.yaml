@@ -278,8 +278,7 @@ paths:
         In `mine`, `my_week` gives where the user stands in each ongoing
         challenge they take part in: their lines of the leaderboard
         (`GET /challenges/{challengeId}/leaderboard`), computed at the
-        instant of the request. A challenge that ends in the meantime has
-        none.
+        instant the status is.
       tags: [challenges]
       parameters:
         - name: scope

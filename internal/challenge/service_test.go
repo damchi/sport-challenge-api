@@ -69,16 +69,21 @@ func (f *fakeRepository) CategoriesOf(_ context.Context, ids []string) (map[stri
 }
 
 // fakeStandings gives the standings it holds, by challenge ID, of the
-// challenges asked for; asked records them, err fails the call.
+// challenges asked for; asked records them and askedAt the instant, err
+// fails the call.
 type fakeStandings struct {
 	standings map[string]Standing
 	asked     *[]Challenge
+	askedAt   *time.Time
 	err       error
 }
 
-func (f fakeStandings) Standings(_ context.Context, _ string, challenges []Challenge) (map[string]Standing, error) {
+func (f fakeStandings) Standings(_ context.Context, _ string, challenges []Challenge, now time.Time) (map[string]Standing, error) {
 	if f.asked != nil {
 		*f.asked = challenges
+	}
+	if f.askedAt != nil {
+		*f.askedAt = now
 	}
 	out := make(map[string]Standing)
 	for _, c := range challenges {
@@ -536,7 +541,8 @@ func TestServiceListStandings(t *testing.T) {
 	standing := Standing{Week: 1, WeekEndsAt: now.Add(6 * day), Rankings: []Ranking{{Type: CategoryCumulativeTime, Rank: 2, RankedCount: 5}}}
 	repo := &fakeRepository{summaries: items, categoriesOf: map[string][]Category{"running": cats, "also running": cats}}
 	var asked []Challenge
-	standings := fakeStandings{standings: map[string]Standing{"running": standing}, asked: &asked}
+	var askedAt time.Time
+	standings := fakeStandings{standings: map[string]Standing{"running": standing}, asked: &asked, askedAt: &askedAt}
 
 	page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, standings, clock.NewFake(now)).List(t.Context(), actor, ScopeMine, "", 20, nil)
 	if err != nil {
@@ -551,6 +557,10 @@ func TestServiceListStandings(t *testing.T) {
 	}
 	if !reflect.DeepEqual(asked, want) {
 		t.Fatalf("standings asked for %+v, want %+v", asked, want)
+	}
+	// The instant of the statuses: an ongoing challenge is judged at it.
+	if !askedAt.Equal(now) {
+		t.Fatalf("standings asked at %s, want the clock's now %s", askedAt, now)
 	}
 	for _, it := range page.Items {
 		switch {

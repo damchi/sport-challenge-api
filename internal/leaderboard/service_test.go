@@ -662,8 +662,9 @@ func TestStandings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepo{participants: tt.participants, activities: tt.activities}
-			svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(tt.now), 24*time.Hour)
-			got, err := svc.Standings(t.Context(), "a", []Challenge{c})
+			// The instant is the caller's, never the service's clock.
+			svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), 24*time.Hour)
+			got, err := svc.Standings(t.Context(), "a", []Challenge{c}, tt.now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -700,9 +701,9 @@ func TestStandingsReadsEveryChallengeAtOnce(t *testing.T) {
 			"c2": {{UserID: "b", SportCode: "run", StartedAt: time.Date(2026, 6, 2, 7, 0, 0, 0, loc), DurationSeconds: 60, DistanceMeters: meters(1000)}},
 		},
 	}
-	svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Date(2026, 6, 3, 12, 0, 0, 0, loc)), 24*time.Hour)
+	svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), 24*time.Hour)
 
-	got, err := svc.Standings(t.Context(), "a", []Challenge{first, second, gone, ended})
+	got, err := svc.Standings(t.Context(), "a", []Challenge{first, second, gone, ended}, time.Date(2026, 6, 3, 12, 0, 0, 0, loc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,7 +728,7 @@ func TestStandingsReadsEveryChallengeAtOnce(t *testing.T) {
 func TestStandingsFailures(t *testing.T) {
 	boom := errors.New("boom")
 	c := threeWeeks(t)
-	now := clock.NewFake(c.StartsAt.Add(time.Hour))
+	now := c.StartsAt.Add(time.Hour)
 	bad := c
 	bad.Timezone = "Nowhere/Else"
 	tests := []struct {
@@ -741,8 +742,8 @@ func TestStandingsFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(&fakeChallenges{}, pseudos, tt.repo, now, time.Hour)
-			if _, err := svc.Standings(t.Context(), "a", tt.challenges); err == nil {
+			svc := NewService(&fakeChallenges{}, pseudos, tt.repo, clock.NewFake(time.Time{}), time.Hour)
+			if _, err := svc.Standings(t.Context(), "a", tt.challenges, now); err == nil {
 				t.Fatal("Standings() error = nil, want one")
 			}
 			if tt.repo.calls != tt.wantCalls {
@@ -754,8 +755,8 @@ func TestStandingsFailures(t *testing.T) {
 
 func TestStandingsWithoutChallengeInItsWeeks(t *testing.T) {
 	repo := &fakeRepo{}
-	svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)), time.Hour)
-	got, err := svc.Standings(t.Context(), "a", []Challenge{threeWeeks(t)})
+	svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), time.Hour)
+	got, err := svc.Standings(t.Context(), "a", []Challenge{threeWeeks(t)}, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}

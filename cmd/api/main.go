@@ -97,8 +97,8 @@ func run() error {
 		invitations  *invitation.Service
 		leaderboards *leaderboard.Service
 	)
-	standings := standingsFunc(func(ctx context.Context, actorID string, cs []leaderboard.Challenge) (map[string]leaderboard.Standing, error) {
-		return leaderboards.Standings(ctx, actorID, cs)
+	standings := standingsFunc(func(ctx context.Context, actorID string, cs []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error) {
+		return leaderboards.Standings(ctx, actorID, cs, now)
 	})
 	abandonAll := abandonAllFunc(func(ctx context.Context, userID string) error {
 		return challenges.AbandonAll(ctx, userID)
@@ -327,14 +327,14 @@ func toLeaderboardChallenge(c challenge.Challenge) leaderboard.Challenge {
 
 // standingsFunc gives module challenge the standings of module leaderboard,
 // as challenge.Standings.
-type standingsFunc func(ctx context.Context, actorID string, challenges []leaderboard.Challenge) (map[string]leaderboard.Standing, error)
+type standingsFunc func(ctx context.Context, actorID string, challenges []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error)
 
-func (f standingsFunc) Standings(ctx context.Context, actorID string, challenges []challenge.Challenge) (map[string]challenge.Standing, error) {
+func (f standingsFunc) Standings(ctx context.Context, actorID string, challenges []challenge.Challenge, now time.Time) (map[string]challenge.Standing, error) {
 	in := make([]leaderboard.Challenge, len(challenges))
 	for i, c := range challenges {
 		in[i] = toLeaderboardChallenge(c)
 	}
-	standings, err := f(ctx, actorID, in)
+	standings, err := f(ctx, actorID, in, now)
 	if err != nil {
 		return nil, err
 	}

@@ -50,11 +50,11 @@ type Catalogue interface {
 }
 
 // Standings gives where actorID stands in each of challenges that is in its
-// weeks and where they are an active participant, by challenge ID; the
-// others are left out (module leaderboard). challenges carry their
+// weeks at now and where they are an active participant, by challenge ID;
+// the others are left out (module leaderboard). challenges carry their
 // categories.
 type Standings interface {
-	Standings(ctx context.Context, actorID string, challenges []Challenge) (map[string]Standing, error)
+	Standings(ctx context.Context, actorID string, challenges []Challenge, now time.Time) (map[string]Standing, error)
 }
 
 // Service holds the use cases of the challenges.
@@ -169,7 +169,7 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 		page.Next = &Position{StartsAt: last.StartsAt, ID: last.ID}
 	}
 	if scope == ScopeMine {
-		if err := s.addStandings(ctx, actorID, page.Items); err != nil {
+		if err := s.addStandings(ctx, actorID, page.Items, now); err != nil {
 			return Page{}, err
 		}
 	}
@@ -177,9 +177,9 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 }
 
 // addStandings sets MyWeek on the ongoing challenges of items where actorID
-// is an active participant, the categories and the standings each read once
-// for all of them.
-func (s *Service) addStandings(ctx context.Context, actorID string, items []Summary) error {
+// is an active participant, at now, the instant of their status: the
+// categories and the standings each read once for all of them.
+func (s *Service) addStandings(ctx context.Context, actorID string, items []Summary, now time.Time) error {
 	var running []Challenge
 	var ids []string
 	for _, it := range items {
@@ -198,7 +198,7 @@ func (s *Service) addStandings(ctx context.Context, actorID string, items []Summ
 	for i := range running {
 		running[i].Categories = categories[running[i].ID]
 	}
-	standings, err := s.standings.Standings(ctx, actorID, running)
+	standings, err := s.standings.Standings(ctx, actorID, running, now)
 	if err != nil {
 		return fmt.Errorf("list challenges: %w", err)
 	}

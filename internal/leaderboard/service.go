@@ -122,13 +122,13 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 }
 
 // Standings returns where actorID stands in each of challenges that is in
-// its weeks at the instant of the clock, by challenge ID: the current week
-// and the actor's line in every category, as Get computes it at the same
-// instant. A challenge outside its weeks, or where the actor is not an active
+// its weeks at now, by challenge ID: the current week and the actor's line
+// in every category, as Get computes it at that instant. now is the caller's,
+// so that its own statuses and the standings tell the same instant. A
+// challenge outside its weeks, or where the actor is not an active
 // participant, is left out. The challenges are the caller's list of the
 // actor's own; however many, they are read in two queries.
-func (s *Service) Standings(ctx context.Context, actorID string, challenges []Challenge) (map[string]Standing, error) {
-	now := s.clock.Now()
+func (s *Service) Standings(ctx context.Context, actorID string, challenges []Challenge, now time.Time) (map[string]Standing, error) {
 	type running struct {
 		c       Challenge
 		w       scoring.Window
