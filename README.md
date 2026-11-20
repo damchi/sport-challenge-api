@@ -128,12 +128,12 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 
 ### 2.8 Profil et langues
 
-- ✅ Pseudo et avatar. Pseudo **unique sans tenir compte de la casse**, de 3 à 20 caractères (lettres, chiffres, `_`, `.`, `-`).
+- ✅ Pseudo et avatar. Le pseudo est **facultatif** (décision du 2026-11-20, SC-API-118) ; quand il est saisi, il est **unique sans tenir compte de la casse**, de 3 à 20 caractères (lettres, chiffres, `_`, `.`, `-`).
 - ✅ Les lettres du pseudo sont **ASCII** (`a-z`, `A-Z`, sans accent) : l'unicité sans tenir compte de la casse est la même partout, et deux pseudos ne peuvent pas se ressembler à l'œil en étant différents.
-- ✅ **Prénom et nom** : saisis par l'utilisateur dans son profil, chacun de 1 à 50 caractères : des lettres de tout alphabet (accents compris), en mots séparés par une espace, `-`, `'` ou `’`, chaque mot commençant par une lettre, sans espace au début ni à la fin. Les autres utilisateurs voient le pseudo, le prénom et le nom (participants, classements ; pour un challenge public, tout utilisateur connecté). Décision du propriétaire du produit du 2026-11-19 (SC-API-116).
+- ✅ **Prénom et nom** : saisis par l'utilisateur dans son profil, chacun de 1 à 50 caractères : des lettres de tout alphabet (accents compris), en mots séparés par une espace, `-`, `'` ou `’`, chaque mot commençant par une lettre, sans espace au début ni à la fin. Les autres utilisateurs voient le pseudo (s'il est saisi), le prénom et le nom (participants, classements ; pour un challenge public, tout utilisateur connecté). Décision du propriétaire du produit du 2026-11-19 (SC-API-116).
 - ✅ **E-mail** : il vient du fournisseur d'authentification (claim ajoutée à l'access token par une Action Auth0, `docs/auth0-setup.md`), tenu à jour à chaque requête s'il change ; il n'est pas modifiable dans le profil et n'est visible que de son titulaire (`GET /me`), jamais des autres utilisateurs (SC-API-116).
-- ✅ Le profil est **complet** dès que le pseudo, le prénom et le nom sont saisis (SC-API-116 : un profil créé avant n'a que le pseudo et redevient incomplet jusqu'à la saisie des noms ; comme la saisie d'une activité exige aussi un profil complet, ADR 0001, l'app doit demander les noms dès la connexion) ; aucun des trois ne peut plus être retiré, seulement changé. **Créer ou rejoindre un challenge exige un profil complet** (erreur `profile_incomplete`).
-- ✅ En V1, l'avatar affiché est formé des initiales du pseudo ; l'envoi d'une image vient en V1.1.
+- ✅ Le profil est **complet** dès que le prénom et le nom sont saisis, avec ou sans pseudo (SC-API-118 ; un profil créé avant SC-API-116 n'a que le pseudo et reste incomplet jusqu'à la saisie des noms ; comme la saisie d'une activité exige aussi un profil complet, ADR 0001, l'app doit demander les noms dès la connexion). Le prénom et le nom ne peuvent plus être retirés, seulement changés ; le pseudo, facultatif, peut être retiré (`PATCH /me` avec `pseudo: null`). **Créer ou rejoindre un challenge exige un profil complet** (erreur `profile_incomplete`).
+- ✅ En V1, l'avatar affiché est formé des initiales du pseudo s'il y en a un, sinon des initiales du prénom et du nom (choix d'affichage des apps) ; l'envoi d'une image vient en V1.1.
 - ✅ Langues : **français et anglais**.
 - ✅ Unité : **km uniquement** pour le moment.
 
@@ -511,7 +511,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Rejoindre un challenge public | tout utilisateur connecté, jusqu'à la fin de la semaine 1 (✅) |
 | Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) ; une invitation n'est valide que tant que son auteur est encore créateur ou participant actif, et que son compte n'est pas supprimé. Exclure un participant (ou qu'il abandonne) n'exclut pas les personnes qu'il a invitées : celles qui ont déjà rejoint restent participantes ; seul son lien est annulé, pour les personnes invitées qui n'ont pas encore rejoint (✅) |
 | Inviter | créateurs ; participants seulement si le créateur l'a autorisé à la création (✅) |
-| Voir l'e-mail d'un utilisateur | lui seul, par `GET /me` ; les autres voient le pseudo, le prénom et le nom (✅, SC-API-116) |
+| Voir l'e-mail d'un utilisateur | lui seul, par `GET /me` ; les autres voient le pseudo (s'il est saisi), le prénom et le nom (✅, SC-API-116) |
 | Modifier titre et description | créateurs (✅) |
 | Modifier les catégories | personne, après la création (✅) |
 | Ajouter un créateur | créateurs (✅) |

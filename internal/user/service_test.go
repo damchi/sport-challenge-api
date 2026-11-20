@@ -273,6 +273,8 @@ func TestServiceUpdateProfile(t *testing.T) {
 	}{
 		{name: "pseudo and language", changes: ProfileChanges{Pseudo: ptr("Marie"), Language: ptr("fr")}, wantWritten: true},
 		{name: "nothing to change", wantWritten: true},
+		{name: "pseudo removed", changes: ProfileChanges{RemovePseudo: true}, wantWritten: true},
+		{name: "pseudo removed, invalid language", changes: ProfileChanges{RemovePseudo: true, Language: ptr("de")}, wantStatus: http.StatusBadRequest, wantFields: "language"},
 		{name: "invalid pseudo and language", changes: ProfileChanges{Pseudo: ptr("é"), Language: ptr("de")}, wantStatus: http.StatusBadRequest, wantFields: "language,pseudo"},
 		{name: "invalid language only", changes: ProfileChanges{Pseudo: ptr("marie"), Language: ptr("FR")}, wantStatus: http.StatusBadRequest, wantFields: "language"},
 		{name: "pseudo taken", changes: ProfileChanges{Pseudo: ptr("marie")}, repoErr: fmt.Errorf("update user: %w", errPseudoTaken), wantStatus: http.StatusConflict, wantFields: "pseudo", wantWritten: true},
@@ -289,6 +291,9 @@ func TestServiceUpdateProfile(t *testing.T) {
 
 			if wrote := written != sentinel; wrote != tt.wantWritten {
 				t.Fatalf("repository called = %v, want %v", wrote, tt.wantWritten)
+			}
+			if tt.wantWritten && written.RemovePseudo != tt.changes.RemovePseudo {
+				t.Fatalf("pseudo removed = %v, want %v", written.RemovePseudo, tt.changes.RemovePseudo)
 			}
 			if tt.wantStatus == 0 {
 				if err != nil || got.ID != "u-1" {
@@ -318,11 +323,11 @@ func TestServiceProfileComplete(t *testing.T) {
 		wantCode apperr.Code
 	}{
 		{name: "pseudo and names set", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie"), FirstName: ptr("Marie"), LastName: ptr("Roy")}}, want: true},
-		{name: "no pseudo", repo: fakeRepository{user: User{ID: "u-1", FirstName: ptr("Marie"), LastName: ptr("Roy")}}},
+		{name: "names without a pseudo", repo: fakeRepository{user: User{ID: "u-1", FirstName: ptr("Marie"), LastName: ptr("Roy")}}, want: true},
 		// A profile from before the names: incomplete until they are set.
 		{name: "pseudo without names", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie")}}},
 		{name: "no last name", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie"), FirstName: ptr("Marie")}}},
-		// Anonymization clears the pseudo: a deleted account is deleted, not
+		// Anonymization clears the names: a deleted account is deleted, not
 		// incomplete (a request racing the deletion). The repository never
 		// returns an anonymized row: it answers errUserNotFound.
 		{name: "account deleted meanwhile", repo: fakeRepository{err: fmt.Errorf("read user: %w", errUserNotFound)}, wantErr: true, wantCode: apperr.CodeAccountDeleted},

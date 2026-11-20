@@ -124,6 +124,11 @@ func TestGetMe(t *testing.T) {
 		{name: "new user, empty profile", user: User{ID: meID}},
 		{name: "pseudo without names", user: User{ID: meID, Pseudo: ptr("marie_92"), Language: ptr("fr")}},
 		{
+			name:         "names without a pseudo",
+			user:         User{ID: meID, FirstName: ptr("Marie-Ève"), LastName: ptr("Tremblay")},
+			wantComplete: true,
+		},
+		{
 			name:         "complete profile",
 			user:         User{ID: meID, Pseudo: ptr("marie_92"), FirstName: ptr("Marie-Ève"), LastName: ptr("Tremblay"), Email: ptr("marie@example.com"), Language: ptr("fr")},
 			wantComplete: true,
@@ -156,6 +161,7 @@ func TestPatchMe(t *testing.T) {
 		wantCode   string
 		wantFields string
 		wantPseudo *string
+		wantRemove bool
 		wantFirst  *string
 		wantLast   *string
 	}{
@@ -169,7 +175,9 @@ func TestPatchMe(t *testing.T) {
 		{name: "last name over 50 characters", body: `{"last_name":"` + strings.Repeat("é", 51) + `"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "last_name"},
 		{name: "e-mail not editable", body: `{"email":"other@example.com"}`, wantStatus: 400, wantCode: "validation_failed"},
 		{name: "empty object changes nothing", body: `{}`, wantStatus: 200},
-		{name: "null pseudo refused", body: `{"pseudo":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "pseudo"},
+		{name: "null pseudo removes it", body: `{"pseudo":null}`, wantStatus: 200, wantRemove: true},
+		{name: "null pseudo with a first name", body: `{"pseudo":null,"first_name":"Ana","last_name":"Lee"}`, wantStatus: 200, wantRemove: true, wantFirst: ptr("Ana"), wantLast: ptr("Lee")},
+		{name: "null language refused", body: `{"language":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "language"},
 		{name: "invalid pseudo and language", body: `{"pseudo":"a b","language":"de"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "language,pseudo"},
 		{name: "pseudo with an accent", body: `{"pseudo":"élodie"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "pseudo"},
 		{name: "unknown field", body: `{"pseudo":"marie_92","avatar":"x"}`, wantStatus: 400, wantCode: "validation_failed"},
@@ -192,6 +200,9 @@ func TestPatchMe(t *testing.T) {
 			}
 			if tt.wantPseudo != nil && (written.Pseudo == nil || *written.Pseudo != *tt.wantPseudo) {
 				t.Fatalf("pseudo written = %v, want %q", written.Pseudo, *tt.wantPseudo)
+			}
+			if written.RemovePseudo != tt.wantRemove || (tt.wantRemove && written.Pseudo != nil) {
+				t.Fatalf("pseudo removed = %v (written %v), want removed = %v", written.RemovePseudo, written.Pseudo, tt.wantRemove)
 			}
 			if tt.wantFirst != nil && (written.FirstName == nil || *written.FirstName != *tt.wantFirst || written.LastName == nil || *written.LastName != *tt.wantLast) {
 				t.Fatalf("names written = %v %v, want %q %q", written.FirstName, written.LastName, *tt.wantFirst, *tt.wantLast)

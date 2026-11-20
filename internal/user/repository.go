@@ -205,6 +205,9 @@ func (r *Repository) UpdateProfile(ctx context.Context, id string, changes Profi
 	if changes.Pseudo != nil {
 		columns["pseudo"] = *changes.Pseudo
 	}
+	if changes.RemovePseudo {
+		columns["pseudo"] = nil
+	}
 	if changes.FirstName != nil {
 		columns["first_name"] = *changes.FirstName
 	}

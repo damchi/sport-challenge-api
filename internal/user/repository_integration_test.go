@@ -191,6 +191,11 @@ func TestUpdateProfile(t *testing.T) {
 	if got, err = repo.UpdateProfile(t.Context(), u.ID, ProfileChanges{}); err != nil || got.ID != u.ID {
 		t.Fatalf("got %+v, %v, want the stored user", got, err)
 	}
+
+	// The pseudo is optional: it can be removed, the language stays.
+	if got, err = repo.UpdateProfile(t.Context(), u.ID, ProfileChanges{RemovePseudo: true}); err != nil || got.Pseudo != nil || got.Language == nil || *got.Language != "en" {
+		t.Fatalf("got %+v, %v, want no pseudo and language en", got, err)
+	}
 }
 
 func TestUpdateProfilePseudoIsUniqueRegardlessOfCase(t *testing.T) {
@@ -211,6 +216,27 @@ func TestUpdateProfilePseudoIsUniqueRegardlessOfCase(t *testing.T) {
 	}
 	if got.Pseudo != nil || got.Language != nil {
 		t.Fatalf("user = %+v, want nothing written on conflict", got)
+	}
+}
+
+// TestRemovedPseudoIsFreeAgain: a removed pseudo is stored as NULL, so
+// another user can take it (the unique index skips NULL).
+func TestRemovedPseudoIsFreeAgain(t *testing.T) {
+	repo, pool := newRepository(t)
+	first := newUser(t, repo, "email|first")
+	second := newUser(t, repo, "email|second")
+	if _, err := repo.UpdateProfile(t.Context(), first.ID, ProfileChanges{Pseudo: ptr("Marie")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateProfile(t.Context(), first.ID, ProfileChanges{RemovePseudo: true}); err != nil {
+		t.Fatal(err)
+	}
+	var stored *string
+	if err := pool.QueryRow(t.Context(), "SELECT pseudo FROM users WHERE id = $1", first.ID).Scan(&stored); err != nil || stored != nil {
+		t.Fatalf("stored pseudo %v, %v, want NULL", stored, err)
+	}
+	if got, err := repo.UpdateProfile(t.Context(), second.ID, ProfileChanges{Pseudo: ptr("marie")}); err != nil || got.Pseudo == nil || *got.Pseudo != "marie" {
+		t.Fatalf("got %+v, %v, want the removed pseudo taken by another user", got, err)
 	}
 }
 

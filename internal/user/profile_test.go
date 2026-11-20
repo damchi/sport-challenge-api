@@ -65,7 +65,8 @@ func TestProfileComplete(t *testing.T) {
 	}{
 		{name: "empty", user: User{}},
 		{name: "pseudo only", user: User{Pseudo: ptr("marie")}},
-		{name: "names only", user: User{FirstName: ptr("Marie"), LastName: ptr("Roy")}},
+		{name: "names without a pseudo", user: User{FirstName: ptr("Marie"), LastName: ptr("Roy")}, want: true},
+		{name: "no first name", user: User{Pseudo: ptr("marie"), LastName: ptr("Roy")}},
 		{name: "no last name", user: User{Pseudo: ptr("marie"), FirstName: ptr("Marie")}},
 		{name: "pseudo and names", user: User{Pseudo: ptr("marie"), FirstName: ptr("Marie"), LastName: ptr("Roy")}, want: true},
 	}

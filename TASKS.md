@@ -392,14 +392,14 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 `E2` · Story · Phase 2 · Estimation 3 · Dépend de : 020, 012
 
 **Critères d'acceptation**
-- [ ] `GET /me` renvoie : identifiant, pseudo, avatar, langue, `profile_complete` (vrai si le pseudo est renseigné).
-- [ ] `PATCH /me` modifie pseudo et langue (`fr` ou `en`). La clé d'avatar viendra avec l'upload d'avatar (ticket 023, V1.1) : en V1, l'avatar affiché est formé des initiales du pseudo.
-- [ ] Pseudo : 3 à 20 caractères parmi lettres ASCII, chiffres, `_`, `.` et `-` ; unique sans tenir compte de la casse (D5 ✅) ; conflit : 409 `validation_failed` avec le champ `pseudo`. `PATCH` : un champ absent est inchangé, `null` est refusé.
-- [ ] ✅ Créer ou rejoindre un challenge exige un profil complet : le code `profile_incomplete` (422, décision du ticket 028) est ajouté à `apperr` et au contrat ici, la règle est appliquée dans les tickets 029 et 033.
+- [ ] `GET /me` renvoie : identifiant, pseudo, prénom, nom, e-mail, avatar, langue, `profile_complete` (✅ vrai dès que le prénom et le nom sont renseignés, avec ou sans pseudo : SC-API-116 puis SC-API-118).
+- [ ] `PATCH /me` modifie pseudo, prénom, nom (SC-API-116) et langue (`fr` ou `en`). La clé d'avatar viendra avec l'upload d'avatar (ticket 023, V1.1) : en V1, l'avatar affiché est formé des initiales du pseudo s'il y en a un, sinon de celles du prénom et du nom (SC-API-118).
+- [ ] Pseudo : 3 à 20 caractères parmi lettres ASCII, chiffres, `_`, `.` et `-` ; unique sans tenir compte de la casse (D5 ✅) ; conflit : 409 `validation_failed` avec le champ `pseudo`. `PATCH` : un champ absent est inchangé ; ✅ le pseudo, facultatif, se retire avec `null` (SC-API-118) ; `null` est refusé pour le prénom, le nom et la langue.
+- [ ] ✅ Créer ou rejoindre un challenge (et saisir une activité, ADR 0001) exige un profil complet : le code `profile_incomplete` (422, décision du ticket 028) est ajouté à `apperr` et au contrat ici, la règle est appliquée dans les tickets 029 et 033.
 
 - [ ] Introduit la validation des requêtes contre le contrat et leur conversion en 400 `validation_failed` avec la liste des champs fautifs dans `params.fields` (séparés par des virgules) ; les réponses de succès sont les types générés par le serveur strict (premier endpoint qui en a besoin).
 
-**Tests** : validation du pseudo, unicité, `profile_complete`.
+**Tests** : validation du pseudo, du prénom et du nom, unicité, retrait du pseudo, `profile_complete`.
 **Revue** : `go-reviewer`.
 **Commit** : `feat(user): add profile read and update endpoints`
 **Statut** : À faire
@@ -647,9 +647,9 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 `E4` · Story · Phase 4 · Estimation 2 · Dépend de : 031
 
 **Critères d'acceptation**
-- [ ] Renvoie pseudo, avatar, statut (actif ou abandonné) et date d'inscription, avec pagination par curseur.
+- [ ] Renvoie pseudo (nul s'il n'est pas saisi), prénom, nom, avatar, statut (actif ou abandonné) et date d'inscription, avec pagination par curseur.
 - [ ] Visible selon la politique, comme le challenge (`challenge.CanView` : challenge privé visible par les créateurs, les participants, y compris ceux qui ont abandonné, et les invités).
-- [ ] Un utilisateur anonymisé s'affiche avec un pseudo neutre prévu par le frontend (champ vide côté API).
+- [ ] ✅ Un compte supprimé (anonymisé) n'apparaît pas dans la liste (SC-API-113).
 
 - [ ] Ajoute à `policy.go` la règle de visibilité de la liste des participants, avec ses tests.
 **Tests** : visibilité, pagination, abandonné, anonymisé.
@@ -661,7 +661,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 `E4` · Story · Phase 4 · Estimation 5 · Dépend de : 034, 015
 
 **Critères d'acceptation**
-- [ ] Anonymisation : pseudo effacé (et avatar, à partir de la V1.1 : le fichier est alors supprimé au mieux, en tâche de fond), `auth_subject` remplacé par une valeur de remplacement, `anonymized_at` renseigné.
+- [ ] Anonymisation : pseudo, prénom, nom et e-mail effacés (et avatar, à partir de la V1.1 : le fichier est alors supprimé au mieux, en tâche de fond), `auth_subject` remplacé par une valeur de remplacement, `anonymized_at` renseigné.
 - [ ] Ses participations actives dans les challenges à venir ou en cours passent à `abandoned` (comme un abandon). Dans un challenge terminé, la participation reste active (comme un abandon après la fin, refusé par `challenge_ended`) ; ✅ le compte est toutefois retiré des classements (SC-API-113).
 - [ ] Ses activités restent, rattachées au compte anonymisé ; elles ne comptent plus dans aucun classement (SC-API-113).
 - [ ] Les requêtes suivantes avec son jeton renvoient 401 `account_deleted`.
@@ -881,7 +881,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 `E6` · Story · Phase 6 · Estimation 5 · Dépend de : 052
 
 **Critères d'acceptation**
-- [ ] Réponse par catégorie : rang, utilisateur (identifiant, pseudo, avatar), valeur, mention d'abandon, semaine d'élimination.
+- [ ] Réponse par catégorie : rang, utilisateur (identifiant, pseudo nul s'il n'est pas saisi, prénom, nom, avatar), valeur, mention d'abandon, semaine d'élimination.
 - [ ] Catégorie 3, statut en direct : `reached` si la distance de la semaine atteint le minimum ; sinon `at_risk` s'il reste 24 h ou moins avant la fin de la semaine ; sinon `in_progress` ; `eliminated` pour un éliminé ; aucun statut en semaine 1 (D4 ✅).
 - [ ] Pour chaque personne : minimum de la semaine, distance déjà courue, fin de la semaine.
 - [ ] Le seuil de 24 h est un paramètre de configuration.
