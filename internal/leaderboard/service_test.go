@@ -33,8 +33,12 @@ type fakeRepo struct {
 	frozenAt  time.Time
 	// snapshotsErr is what Snapshots fails with.
 	snapshotsErr error
-	err          error
-	calls        int
+	// deleted are the deleted accounts; deletedErr what DeletedAccounts
+	// fails with.
+	deleted    map[string]bool
+	deletedErr error
+	err        error
+	calls      int
 	// from and to are the window the activities were asked for, weekly the
 	// sport summed per week.
 	from, to time.Time
@@ -54,6 +58,10 @@ func (f *fakeRepo) Activities(_ context.Context, _ string, w scoring.Window, wee
 
 func (f *fakeRepo) Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error) {
 	return f.snapshots, f.frozenAt, f.snapshotsErr
+}
+
+func (f *fakeRepo) DeletedAccounts(context.Context, []string) (map[string]bool, error) {
+	return f.deleted, f.deletedErr
 }
 
 type fakeProfiles struct {
@@ -97,7 +105,6 @@ func twoWeeks(t *testing.T) Challenge {
 var (
 	annName = Name{Pseudo: pseudo("Ann"), FirstName: pseudo("Ann"), LastName: pseudo("Archer")}
 	bobName = Name{Pseudo: pseudo("Bob"), FirstName: pseudo("Bob"), LastName: pseudo("Bélanger")}
-	catName = Name{Pseudo: pseudo("Cat")}
 	pseudos = fakeProfiles{names: map[string]Name{"a": annName, "b": bobName}}
 )
 
@@ -306,9 +313,8 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 		},
 		frozenAt: frozenAt,
 	}
-	// Long after the end.
-	profiles := fakeProfiles{names: map[string]Name{"a": annName, "b": bobName, "c": catName}}
-	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
+	// Long after the end, and c has no name: it is not deleted, still listed.
+	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
 
 	got, err := svc.Get(t.Context(), "actor", "c1")
 	if err != nil {
@@ -317,16 +323,16 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 	want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{
 		{Type: CategoryCumulativeTime, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
-			{Entry: scoring.Entry{UserID: "c", Abandoned: true}, Name: catName},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 		{Type: CategoryCumulativeDistance, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
-			{Entry: scoring.Entry{UserID: "c", Abandoned: true}, Name: catName},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 		{Type: CategoryRunElimination, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Name: bobName},
-			{Entry: scoring.Entry{UserID: "c", Abandoned: true}, Name: catName},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
 	}}
 	if !reflect.DeepEqual(got, want) {
@@ -338,8 +344,8 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 }
 
 // TestGetFrozenLeavesOutDeletedAccounts: an account deleted after the end
-// (it has no public name any more) is left out of the frozen results, and
-// the others move up, equal values still sharing a rank.
+// is left out of the frozen results, and the others move up, equal values
+// still sharing a rank.
 func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 	c := twoWeeks(t)
 	repo := &fakeRepo{snapshots: map[string]json.RawMessage{
@@ -349,7 +355,7 @@ func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 			`{"user_id":"d","rank":1,"value":28000},{"user_id":"b","rank":3,"value":5000}]}`),
 		CategoryRunElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},` +
 			`{"user_id":"d","rank":2,"value":9000,"eliminated_week":2},{"user_id":"b","rank":3,"value":5000,"eliminated_week":1}]}`),
-	}}
+	}, deleted: map[string]bool{"d": true, "e": true}}
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt), time.Hour)
 
 	got, err := svc.Get(t.Context(), "actor", "c1")
@@ -413,6 +419,11 @@ func TestGetFrozenFailures(t *testing.T) {
 		repo *fakeRepo
 	}{
 		{name: "storage failure", repo: &fakeRepo{snapshotsErr: boom}},
+		{name: "deleted accounts not read", repo: &fakeRepo{deletedErr: boom, snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime:     json.RawMessage(`{"entries":[]}`),
+			CategoryCumulativeDistance: json.RawMessage(`{"entries":[]}`),
+			CategoryRunElimination:     json.RawMessage(`{"entries":[]}`),
+		}}},
 		{name: "invalid payload: an error, not a computed ranking", repo: &fakeRepo{snapshots: map[string]json.RawMessage{
 			CategoryCumulativeTime: bad, CategoryCumulativeDistance: bad, CategoryRunElimination: bad,
 		}}},

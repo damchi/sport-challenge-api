@@ -178,8 +178,7 @@ func TestGetServesTheSnapshotsOfAnEndedChallenge(t *testing.T) {
 		Categories: []Category{{Type: CategoryCumulativeTime}},
 	}
 	fake := clock.NewFake(end)
-	profiles := fakeProfiles{names: map[string]Name{runner: {Pseudo: pseudo("runner")}}}
-	svc := NewService(staticChallenge(c), profiles, NewRepository(gdb), fake, 24*time.Hour)
+	svc := NewService(staticChallenge(c), fakeProfiles{}, NewRepository(gdb), fake, 24*time.Hour)
 	valueOf := func() (int, time.Time) {
 		t.Helper()
 		got, err := svc.Get(t.Context(), runner, challengeID)
@@ -202,6 +201,21 @@ func TestGetServesTheSnapshotsOfAnEndedChallenge(t *testing.T) {
 
 	if v, at := valueOf(); v != 3600 || !at.Equal(frozenAt) {
 		t.Fatalf("value = %d at %s, want the snapshot 3600 at %s", v, at, frozenAt)
+	}
+
+	// An account deleted since is left out, even with a name served (the
+	// database tells, not the names); a runner without a name stays.
+	gone := s.user("gone")
+	s.exec(`UPDATE result_snapshot SET payload = $2 WHERE category_id = $1`, timeCategory,
+		`{"entries":[{"user_id":"`+gone+`","rank":1,"value":9000},{"user_id":"`+runner+`","rank":2,"value":3600}]}`)
+	s.exec("UPDATE users SET anonymized_at = now() WHERE id = $1", gone)
+	named := NewService(staticChallenge(c), fakeProfiles{names: map[string]Name{gone: {Pseudo: pseudo("gone")}}}, NewRepository(gdb), fake, 24*time.Hour)
+	got, err := named.Get(t.Context(), runner, challengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := got.Categories[0].Entries; len(e) != 1 || e[0].UserID != runner || e[0].Rank != 1 {
+		t.Fatalf("entries = %+v, want the runner alone, first", e)
 	}
 }
 

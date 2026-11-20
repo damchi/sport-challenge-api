@@ -311,15 +311,10 @@ func (s staticChallenge) Challenge(context.Context, string, string) (leaderboard
 	return s.c, nil
 }
 
-// everyoneNamed names every user it is asked for: none is deleted.
-type everyoneNamed struct{}
+type noProfiles struct{}
 
-func (everyoneNamed) Names(_ context.Context, ids []string) (map[string]leaderboard.Name, error) {
-	names := make(map[string]leaderboard.Name, len(ids))
-	for _, id := range ids {
-		names[id] = leaderboard.Name{}
-	}
-	return names, nil
+func (noProfiles) Names(context.Context, []string) (map[string]leaderboard.Name, error) {
+	return nil, nil
 }
 
 // withoutSnapshots makes the leaderboard compute its ranking.
@@ -441,10 +436,11 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 			Participants(context.Context, string) ([]scoring.Participant, error)
 			Activities(context.Context, string, scoring.Window, string) ([]scoring.Activity, error)
 			Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
+			DeletedAccounts(context.Context, []string) (map[string]bool, error)
 		},
 		) leaderboard.Leaderboard {
 			t.Helper()
-			svc := leaderboard.NewService(staticChallenge{c}, everyoneNamed{}, repo, clock.NewFake(end.Add(48*time.Hour)), time.Hour)
+			svc := leaderboard.NewService(staticChallenge{c}, noProfiles{}, repo, clock.NewFake(end.Add(48*time.Hour)), time.Hour)
 			got, err := svc.Get(t.Context(), a, challengeID)
 			if err != nil {
 				t.Fatal(err)

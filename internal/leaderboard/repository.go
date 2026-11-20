@@ -120,6 +120,26 @@ func (r *Repository) Activities(ctx context.Context, challengeID string, w scori
 	return out, nil
 }
 
+// DeletedAccounts returns which of ids are deleted (anonymized) accounts.
+func (r *Repository) DeletedAccounts(ctx context.Context, ids []string) (map[string]bool, error) {
+	out := make(map[string]bool)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var deleted []string
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT id FROM users WHERE id IN @ids AND anonymized_at IS NOT NULL`,
+		map[string]any{"ids": ids},
+	).Scan(&deleted).Error
+	if err != nil {
+		return nil, fmt.Errorf("read deleted accounts: %w", err)
+	}
+	for _, id := range deleted {
+		out[id] = true
+	}
+	return out, nil
+}
+
 // Snapshots returns the frozen ranking of each category of challenge
 // challengeID by category type, and when they were frozen; none until the
 // worker has finalized the challenge. The time is the latest of the rows.

@@ -24,6 +24,9 @@ type repository interface {
 	// Snapshots gives the frozen results of the challenge by category type,
 	// and when they were frozen; none until the worker has finalized it.
 	Snapshots(ctx context.Context, challengeID string) (map[string]json.RawMessage, time.Time, error)
+	// DeletedAccounts gives which of ids are deleted (anonymized) accounts,
+	// left out of the frozen results.
+	DeletedAccounts(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
 // Challenges gives challenge challengeID, with its categories, for actorID
@@ -33,9 +36,8 @@ type Challenges interface {
 	Challenge(ctx context.Context, actorID, challengeID string) (Challenge, error)
 }
 
-// Profiles gives the public name of each user of ids; an anonymized
-// (deleted) account has none, which leaves it out of the frozen results
-// (module user).
+// Profiles gives the public name of each user of ids; an anonymized account
+// has none (module user).
 type Profiles interface {
 	Names(ctx context.Context, ids []string) (map[string]Name, error)
 }
@@ -150,8 +152,8 @@ type frozenRanking struct {
 
 // frozen builds the leaderboard of a challenge that is over from its result
 // snapshots, and reports false when they are not all there yet. The names
-// are read now: an account deleted since (it has no name any more) is left
-// out, and the participants after it move up.
+// are read now, and an account deleted since is left out: the participants
+// after it move up.
 func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, error) {
 	if len(c.Categories) == 0 {
 		return Leaderboard{}, false, nil
@@ -180,6 +182,10 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 			}
 		}
 	}
+	deleted, err := s.repo.DeletedAccounts(ctx, ids)
+	if err != nil {
+		return Leaderboard{}, false, err
+	}
 	names, err := s.profiles.Names(ctx, ids)
 	if err != nil {
 		return Leaderboard{}, false, fmt.Errorf("read names: %w", err)
@@ -192,11 +198,10 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 		// frozen order: equal ones still share a rank (1, 1, 3).
 		var frozenRank, rank int
 		for _, e := range rankings[i].Entries {
-			name, ok := names[e.UserID]
-			if !ok {
+			if deleted[e.UserID] {
 				continue
 			}
-			r := Ranked{Entry: scoring.Entry{UserID: e.UserID, Value: e.Value, Abandoned: e.Abandoned}, Name: name}
+			r := Ranked{Entry: scoring.Entry{UserID: e.UserID, Value: e.Value, Abandoned: e.Abandoned}, Name: names[e.UserID]}
 			if e.Rank > 0 {
 				if e.Rank != frozenRank {
 					frozenRank, rank = e.Rank, len(ranked)+1
