@@ -72,13 +72,14 @@ Chaque code est ajouté à `apperr` par le premier ticket qui le renvoie.
 | # | Décision | Tickets |
 |---|---|---|
 | D1 ✅ | Une activité est saisie **une seule fois** pour tous les challenges de l'utilisateur ; elle compte dans chaque challenge où il est participant actif et dont la fenêtre la contient. Elle est non modifiable dès que sa semaine est terminée dans **l'un** d'eux. Une activité hors de toute fenêtre est acceptée. Voir `docs/adr/0001-activity-scope.md` | 040, 043, 044, 045 |
-| D2 ✅ | Tout challenge a **toujours les 3 catégories** ; le créateur règle seulement l'incrément X | 027, 029 |
+| D2 ✅ | Tout challenge a **toujours les 3 catégories** ; le créateur règle seulement l'incrément X. **Remplacée par D10** (2026-11-20) | 027, 029 |
 | D3 ✅ | Durée = nombre **entier de semaines, de 2 à 52** | 027 |
 | D4 ✅ | Statut de la catégorie 3 : « objectif atteint » ; « à risque » s'il reste 24 h ou moins ; « en cours » avant | 053 |
 | D5 ✅ | Pseudo **unique sans tenir compte de la casse**, 3 à 20 caractères | 016, 021 |
 | D6 ✅ | Un utilisateur peut **saisir un sport à la main** s'il n'est pas proposé (sport « autre » avec libellé libre) | 024, 041, 042 |
 | D7 ✅ | La suppression de compte supprime aussi l'utilisateur **chez Auth0** | 015, 039, 057 |
 | D8 ✅ | Distance d'un badge : **réelle**, sans coefficient | 060 |
+| D10 ✅ | **Catégories à la carte** (2026-11-20) : temps cumulé toujours ; distance cumulée, élimination et Points au choix ; sport de référence choisi à la création (course par défaut), coefficients suggérés `min(1, f / f_référence)`. Règles au README §2.1 à §2.4. Tickets dans GitHub : SC-API-131 à 136 (#250 à #255) ; jusqu'à leur livraison, le code et le contrat ont encore les 3 catégories de D2 | SC-API-131 à 136 |
 
 ### À confirmer
 
