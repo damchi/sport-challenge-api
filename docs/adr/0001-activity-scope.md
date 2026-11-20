@@ -2,7 +2,7 @@
 
 - **Statut** : accepté (décision D1, `TASKS.md`)
 - **Date** : 2026-11-09
-- **Tickets concernés** : SC-API-041 à 046, 052, 062, 121 (verrouillage à 7 h)
+- **Tickets concernés** : SC-API-041 à 046, 052, 062, 121 (verrouillage à 7 h), 130 (écriture au moment du verrouillage)
 
 ## Contexte
 
@@ -33,6 +33,11 @@ La validation propre à l'activité (durée, distance selon le sport, date jamai
 - Rejoindre un challenge peut faire compter des activités déjà saisies. L'inscription n'étant possible que jusqu'à la fin de la semaine 1, les activités d'avant l'inscription tombent dans une semaine non verrouillée au moment de rejoindre, puis se verrouillent avec elle.
 - Abandonner (ou être exclu) retire l'activité de ce challenge : elle n'y compte plus et ce challenge ne la verrouille plus.
 - Une activité datée de la fenêtre d'un challenge terminé est acceptée jusqu'à 7 h le premier jour après le challenge (sa dernière semaine n'est pas encore verrouillée), puis refusée par le verrouillage (README §2.5 : impossible d'importer une activité après la fin).
+- **Écriture au moment du verrouillage** (SC-API-130) :
+  - **Mécanisme.** Une écriture d'activité (création, modification, suppression) prend un verrou consultatif PostgreSQL **partagé** avant de lire l'horloge pour vérifier le verrouillage, et le garde jusqu'à la fin de sa transaction. Chaque exécution de `close-weeks` et de `finalize-challenges` lit son horloge, puis prend ce verrou en **exclusif** un instant : elle attend ainsi la fin de toute écriture qui a vérifié le verrouillage avant cet instant. Une activité acceptée juste avant 7 h figure donc toujours dans le jugement de sa semaine et dans les résultats figés, quel que soit l'ordre de validation ; une écriture qui commence après lit une horloge plus tardive et est refusée.
+  - **Attente.** Les écritures ne s'attendent pas entre elles ; pendant que le worker attend, les nouvelles écritures attendent derrière lui, le temps que celles en cours se terminent. Le worker n'attend pas plus de 30 secondes : au-delà, l'exécution échoue sans rien juger et la suivante donne le même résultat.
+  - **Limite d'horloge.** La garantie suppose que l'horloge de l'API et celle du worker concordent ; si l'API retarde de d sur le worker, une écriture vérifiée dans les d avant le verrouillage, selon l'horloge du worker, peut encore échapper au jugement.
+  - **Suppression de compte.** Seul `activity.Service` écrit les activités ; la suppression de compte les efface sans ce verrou (elle retire le compte partout, résultats figés compris, README §2.2).
 - Une activité à cheval sur la fin d'une semaine (une course du dimanche 23:30 à 00:30) se saisit une fois finie, avant 7 h : elle compte pour la semaine de son début.
 - Saisir une activité ne demande pas d'être participant d'un challenge : il suffit d'un profil complet. La réponse de `POST /activities` liste les challenges où l'activité compte, et cette liste peut être vide.
 - Le verrouillage et l'ensemble des challenges où une activité compte dépendent de la participation : `activity/policy.go` (ticket 043) les obtient du module `challenge` par une petite interface définie côté `activity`, sans importer son repository.

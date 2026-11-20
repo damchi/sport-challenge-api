@@ -29,6 +29,14 @@ type fakeRepo struct {
 	snapshotAt time.Time
 	// last is the closure of the last week given with the snapshots.
 	last LastWeek
+	// awaitErr is the error of AwaitActivityWrites; awaits counts its calls.
+	awaitErr error
+	awaits   int
+}
+
+func (f *fakeRepo) AwaitActivityWrites(context.Context) error {
+	f.awaits++
+	return f.awaitErr
 }
 
 func newFakeRepo(cs ...Challenge) *fakeRepo {
@@ -536,5 +544,50 @@ func TestEliminationSport(t *testing.T) {
 	}
 	if got := eliminationSport(with[:1]); got != "" {
 		t.Fatalf("without an elimination category: %q, want empty", got)
+	}
+}
+
+func TestRunsAwaitTheActivityWrites(t *testing.T) {
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	c := Challenge{
+		ID: "c1", Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: start.AddDate(0, 0, 28).UTC(),
+		CategoryID: "cat3", Sport: "run", StepMeters: 2000,
+	}
+	ended := EndedChallenge{ID: "c1", Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Categories: []Category{{ID: "cat1", Type: categoryCumulativeTime}}}
+	after := clock.NewFake(start.AddDate(0, 0, 40))
+
+	tests := []struct {
+		name string
+		run  func(svc *Service) error
+	}{
+		{"close-weeks", func(svc *Service) error { _, err := svc.CloseWeeks(t.Context()); return err }},
+		{"finalize-challenges", func(svc *Service) error { _, err := svc.FinalizeChallenges(t.Context()); return err }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+" waits once", func(t *testing.T) {
+			repo := newFakeRepo(c)
+			repo.ended = []EndedChallenge{ended}
+			if err := tt.run(NewService(repo, &fakeData{}, after, discard())); err != nil {
+				t.Fatal(err)
+			}
+			if repo.awaits != 1 {
+				t.Fatalf("%d waits, want 1", repo.awaits)
+			}
+		})
+		t.Run(tt.name+" judges nothing when the wait fails", func(t *testing.T) {
+			repo := newFakeRepo(c)
+			repo.ended = []EndedChallenge{ended}
+			repo.awaitErr = errors.New("database down")
+			data := &fakeData{}
+			err := tt.run(NewService(repo, data, after, discard()))
+			if err == nil || repo.loads != 0 || data.loads != 0 || len(repo.closed) != 0 || len(repo.snapshots) != 0 {
+				t.Fatalf("err = %v, %d listings, %d reads, closed %v, snapshots %v, want an error and nothing read",
+					err, repo.loads, data.loads, repo.closed, repo.snapshots)
+			}
+		})
 	}
 }
