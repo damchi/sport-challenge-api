@@ -12,7 +12,7 @@ Aucun secret ici : les valeurs sensibles sont dans Secret Manager, seuls leurs n
 
 | Ressource | Nom | Réglages |
 |---|---|---|
-| Service Cloud Run (API) | `sc-api` | entrée publique (`all`), 1 vCPU, 512 Mio, compte `sc-run`, connexion à `sc-db` par le connecteur Cloud SQL |
+| Service Cloud Run (API) | `sc-api` | entrée publique (`all`), 1 vCPU, 512 Mio, concurrence 80, 0 à 3 instances (maximum fixé au niveau du service, toutes révisions comprises), délai de requête 300 s, compte `sc-run`, connexion à `sc-db` par le connecteur Cloud SQL |
 | Job de migrations | `sc-migrate` | commande `migrate up`, compte `sc-run`, connecteur Cloud SQL |
 | Jobs du worker | `sc-worker-close-weeks`, `sc-worker-finalize-challenges`, `sc-worker-retry-auth0-deletions` | commande `worker <tâche>`, compte `sc-run`, connecteur Cloud SQL |
 | Planifications Cloud Scheduler | `close-weeks` (`0 * * * *`), `finalize-challenges` (`10 * * * *`), `retry-auth0-deletions` (`20 * * * *`) | fuseau `America/Toronto`, `POST` sur l'API Cloud Run `…/jobs/<job>:run`, jeton OAuth du compte `sc-scheduler`, délai de 180 s |
@@ -62,6 +62,37 @@ gcloud run services describe sc-api --region=northamerica-northeast1 --project=s
   --format='value(spec.template.metadata.annotations."run.googleapis.com/cloudsql-instances")'
 gcloud sql instances describe sc-db --project=sport-challenge-prod \
   --format='value(settings.ipConfiguration.sslMode,settings.ipConfiguration.authorizedNetworks.len())'
+```
+
+### Connexions à la base : budget
+
+Relevé le 2026-11-20 (lecture seule) :
+
+| Valeur | Production | Source |
+|---|---|---|
+| `max_connections` de `sc-db` | **25** : aucun drapeau, valeur par défaut de Cloud SQL pour `db-f1-micro` ; 3 sont réservées aux superutilisateurs, il en reste **22** pour `sc-run` | `gcloud sql instances describe sc-db … --format='yaml(settings.tier,settings.databaseFlags)'` |
+| Instances de `sc-api` | 3 au plus, concurrence 80 | `gcloud run services describe sc-api … --format='yaml(metadata.annotations,spec.template.spec.containerConcurrency)'` (`run.googleapis.com/maxScale`) |
+| Jobs | `sc-migrate` et les trois `sc-worker-*` : parallélisme 1, une tâche ; les trois planifications sont décalées (:00, :10, :20) | `gcloud run jobs describe <job> … --format='value(spec.template.spec.parallelism,spec.template.spec.taskCount)'` |
+| Paramètres de `DATABASE_URL` hors secret | socket du connecteur (`host=/cloudsql/…`), voir ci-dessus ; un éventuel `pool_max_conns` est **ignoré** : la taille vient du code | vérification sans afficher la valeur ci-dessous |
+
+La taille de chaque pool est une constante du binaire, pas un réglage de déploiement :
+
+| Binaire | Connexions | Où |
+|---|---|---|
+| API | 4 par instance × 3 instances = **12** | `poolSize`, `cmd/api/main.go` |
+| Worker | 2 par job × 3 jobs (s'ils se chevauchaient tous) = **6** | `poolSize`, `cmd/worker/main.go` : une tâche enchaîne ses requêtes, une connexion suffit, la seconde est une marge |
+| Migrations | **1** (golang-migrate garde une seule connexion) | `SetMaxOpenConns(1)`, `cmd/migrate/main.go` |
+| **Total** | **19** sur 22 | il reste 3 connexions pour une console `psql` ou Cloud SQL Studio |
+
+Règle : (pool de l'API × instances maximales) + (pool du worker × jobs) + migrations < connexions disponibles. **Toute hausse** du maximum d'instances, d'un pool ou un changement de gamme de `sc-db` refait ce calcul avant d'être appliquée (un `db-g1-small` passe à 50).
+
+Quand le pool est plein, une requête attend une connexion, mais pas sans limite : chaque requête de l'API a une échéance de 25 s (`requestTimeout`, `cmd/api/main.go`, sous le `WriteTimeout` de 30 s), après quoi l'attente s'arrête et la requête répond `500 internal_error`. Une exception : après la suppression d'un compte, l'appel à Auth0 et le retrait de la suppression en attente se détachent de la requête (`context.WithoutCancel`, `internal/user/service.go`) pour aller au bout même si le client part ; l'appel à Auth0 est borné à 10 s, le retrait suit l'attente du pool. Les jobs du worker n'ont pas d'échéance propre : une tâche seule ne peut pas épuiser son pool, et Cloud Run arrête un job à son délai d'exécution.
+
+Vérifier les paramètres du pool dans le secret **sans afficher la valeur** (seuls leurs noms s'affichent) :
+
+```
+gcloud secrets versions access latest --secret=database-url-ca --project=sport-challenge-prod \
+  | grep -o 'pool_[a-z_]*' || echo "aucun paramètre pool_"
 ```
 
 ## Alertes

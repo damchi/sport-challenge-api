@@ -297,6 +297,27 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 }
 
+// TestRequestTimeout checks that every request, the authentication included,
+// runs under the deadline of requestTimeout.
+func TestRequestTimeout(t *testing.T) {
+	var remaining time.Duration
+	r := newTestRouter(t, acceptingVerifier{}, func(ctx context.Context, _ auth.Claims) (string, error) {
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining = time.Until(deadline)
+		}
+		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
+	})
+	r.GET("/api/v1/probe", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/probe", nil)
+	req.Header.Set("Authorization", "Bearer some.access.token")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	if remaining <= 0 || remaining > requestTimeout {
+		t.Fatalf("deadline in %v, want within %v", remaining, requestTimeout)
+	}
+}
+
 // TestSecurityHeadersBeforeEarlyAnswers checks the answers given before
 // authentication: a preflight and a refused flood carry the headers too.
 func TestSecurityHeadersBeforeEarlyAnswers(t *testing.T) {

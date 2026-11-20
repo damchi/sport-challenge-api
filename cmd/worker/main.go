@@ -41,6 +41,11 @@ const taskFinalizeChallenges = "finalize-challenges"
 // at Auth0 that failed.
 const taskRetryAuth0Deletions = "retry-auth0-deletions"
 
+// poolSize is the number of database connections of a worker job. A task runs
+// its queries one after the other: one connection would do, the second is a
+// margin. Counted in the budget of docs/deploiement.md.
+const poolSize = 2
+
 // errUsage is returned for a missing or unknown task.
 var errUsage = errors.New("usage: worker close-weeks|finalize-challenges|retry-auth0-deletions")
 
@@ -84,7 +89,7 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 
-	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL, poolSize)
 	if err != nil {
 		return err
 	}
