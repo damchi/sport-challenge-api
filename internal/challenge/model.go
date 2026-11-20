@@ -45,6 +45,10 @@ type Challenge struct {
 	UpdatedAt      time.Time `gorm:"->"`
 	// Categories are not a column: the repository loads them alongside.
 	Categories []Category `gorm:"-"`
+	// ParticipantCount is not a column either: the repository counts every
+	// participation, abandoned included, but those of deleted accounts, when
+	// it reads the challenge with a membership.
+	ParticipantCount int `gorm:"-"`
 }
 
 // Category is a row of the categories table: a category of a challenge

@@ -292,6 +292,7 @@ func toDetail(d Detail) (api.ChallengeDetail, error) {
 		StartsAt:             base.StartsAt,
 		EndsAt:               base.EndsAt,
 		Categories:           base.Categories,
+		ParticipantCount:     d.ParticipantCount,
 		MyRole:               roleName(d.Role),
 		Status:               api.ChallengeDetailStatus(d.Status),
 		CanJoin:              d.CanJoin,

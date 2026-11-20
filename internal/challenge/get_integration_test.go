@@ -52,6 +52,70 @@ func TestGetReadsTheChallengeAndMyPlace(t *testing.T) {
 	}
 }
 
+// TestGetCountsTheParticipants: the detail counts every participation,
+// abandoned and excluded included, but those of deleted accounts, as a
+// summary does; the detail a join answers counts the new participant.
+func TestGetCountsTheParticipants(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, creatorID := setup(t, &pseudo)
+	c, err := svc.Create(t.Context(), creatorID, valid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	countOf := func(actor string) int {
+		t.Helper()
+		d, err := svc.Get(t.Context(), actor, c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.ParticipantCount
+	}
+	if n := countOf(creatorID); n != 1 {
+		t.Fatalf("alone: %d participants, want the creator", n)
+	}
+
+	join := func(subject string) string {
+		t.Helper()
+		id := insertProfile(t, pool, subject)
+		if _, err := svc.Join(t.Context(), id, c.ID); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	member := insertProfile(t, pool, "email|member")
+	d, err := svc.Join(t.Context(), member, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ParticipantCount != 2 {
+		t.Fatalf("join answers %d participants, want the new one counted", d.ParticipantCount)
+	}
+	if _, err := svc.Abandon(t.Context(), join("email|quitter"), c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, c.ID, join("email|excluded")); err != nil {
+		t.Fatal(err)
+	}
+	if n := countOf(member); n != 4 {
+		t.Fatalf("with an abandon and an exclusion: %d participants, want 4", n)
+	}
+
+	gone := join("email|gone")
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", gone); err != nil {
+		t.Fatal(err)
+	}
+	if n := countOf(member); n != 4 {
+		t.Fatalf("with a deleted account: %d participants, want it left out", n)
+	}
+	page, err := svc.List(t.Context(), member, ScopeMine, "", 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ParticipantCount != 4 {
+		t.Fatalf("summaries %+v, want the count of the detail", page.Items)
+	}
+}
+
 // TestGetNotFoundIsTheSameForEveryCase: missing, deleted and private
 // without access answer the very same error.
 func TestGetNotFoundIsTheSameForEveryCase(t *testing.T) {

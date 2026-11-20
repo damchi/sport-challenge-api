@@ -504,6 +504,7 @@ func TestListParticipantsNormalizesTheCursorID(t *testing.T) {
 func TestGetChallenge(t *testing.T) {
 	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantAbandoned}}
 	repo.challenge.Categories = []Category{{Type: CategoryCumulativeTime, Position: 1}}
+	repo.challenge.ParticipantCount = 4
 	clk := clock.NewFake(time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC))
 	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clk), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
 
@@ -513,6 +514,7 @@ func TestGetChallenge(t *testing.T) {
 	want := map[string]any{
 		"my_role": "abandoned", "my_status": "abandoned", "status": "ongoing", "can_join": false,
 		"current_week": 1.0, "week_ends_at": "2026-03-09T04:00:00Z", "registration_deadline": "2026-03-09T04:00:00Z",
+		"participant_count": 4.0,
 	}
 	for k, v := range want {
 		if out[k] != v {
