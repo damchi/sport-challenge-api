@@ -120,10 +120,11 @@ func (r *Repository) UpdateEmail(ctx context.Context, id, email string) error {
 // Delete anonymizes the account of user id and makes its deletion final, in
 // one transaction that abandon joins (ctx carries it): the row is locked,
 // the fingerprint of its subject is stored, the subject is replaced by a
-// placeholder and the pseudo, names, e-mail, avatar and language are erased; then
-// abandon runs. It returns the former subject, for the deletion at Auth0. An
-// unknown or already anonymized user gives errUserNotFound; an error of
-// abandon rolls everything back.
+// placeholder and the pseudo, names, e-mail, avatar and language are erased,
+// the deletion at Auth0 is recorded as pending; then abandon runs. It returns
+// the former subject, for the deletion at Auth0. An unknown or already
+// anonymized user gives errUserNotFound; an error of abandon rolls everything
+// back, the pending deletion included.
 func (r *Repository) Delete(ctx context.Context, id string, abandon func(ctx context.Context) error) (string, error) {
 	var subject string
 	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
@@ -155,6 +156,11 @@ func (r *Repository) Delete(ctx context.Context, id string, abandon func(ctx con
 		if res.Error != nil {
 			return fmt.Errorf("anonymize user: %w", res.Error)
 		}
+		// Recorded with the deletion, not after the commit: a process stopped
+		// before Auth0 is called leaves a row the worker replays.
+		if err := tx.Exec("INSERT INTO pending_auth0_deletions (auth_subject) VALUES (?)", u.AuthSubject).Error; err != nil {
+			return fmt.Errorf("insert pending auth0 deletion: %w", err)
+		}
 		subject = u.AuthSubject
 		return abandon(ctx)
 	})
@@ -162,17 +168,6 @@ func (r *Repository) Delete(ctx context.Context, id string, abandon func(ctx con
 		return "", fmt.Errorf("delete user: %w", err)
 	}
 	return subject, nil
-}
-
-// AddPendingAuth0Deletion records a deletion at Auth0 that failed, for the
-// worker to replay it (task retry-auth0-deletions). Recording it twice
-// keeps one row.
-func (r *Repository) AddPendingAuth0Deletion(ctx context.Context, subject string) error {
-	err := r.db.WithContext(ctx).Exec("INSERT INTO pending_auth0_deletions (auth_subject) VALUES (?) ON CONFLICT DO NOTHING", subject).Error
-	if err != nil {
-		return fmt.Errorf("insert pending auth0 deletion: %w", err)
-	}
-	return nil
 }
 
 // PendingAuth0Deletions returns the subjects whose deletion at Auth0 is

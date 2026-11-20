@@ -293,6 +293,10 @@ func TestAccountDeletionErasesEveryRow(t *testing.T) {
 			t.Errorf("%d rows of the deleted account left in %s, want none", n, table)
 		}
 	}
+	// Done at Auth0: the deletion recorded in the transaction is removed.
+	if n := f.count("SELECT count(*) FROM pending_auth0_deletions"); n != 0 {
+		t.Errorf("%d pending Auth0 deletions, want none", n)
+	}
 	// The rows of the others stay, but for the links to gone's invitation.
 	others[f.carol]["invitation_recipients"]--
 	others[f.dave]["invitation_recipients"]--
@@ -374,5 +378,8 @@ func TestAccountDeletionErasesNothingOnFailure(t *testing.T) {
 	}
 	if n := f.count("SELECT count(*) FROM participants WHERE user_id = $1 AND status = 'abandoned'", f.gone); n != 0 {
 		t.Errorf("%d abandons kept, want none", n)
+	}
+	if n := f.count("SELECT count(*) FROM pending_auth0_deletions"); n != 0 {
+		t.Errorf("%d pending Auth0 deletions, want none: the deletion rolled back", n)
 	}
 }

@@ -18,7 +18,6 @@ type repository interface {
 	UpdateEmail(ctx context.Context, id, email string) error
 	PublicNames(ctx context.Context, ids []string) (map[string]PublicName, error)
 	Delete(ctx context.Context, id string, abandon func(ctx context.Context) error) (string, error)
-	AddPendingAuth0Deletion(ctx context.Context, subject string) error
 	PendingAuth0Deletions(ctx context.Context) ([]string, error)
 	RemovePendingAuth0Deletion(ctx context.Context, subject string) error
 }
@@ -155,12 +154,13 @@ func (s *Service) PublicNames(ctx context.Context, ids []string) (map[string]Pub
 // Delete deletes the account of user actorID (README §6): in one
 // transaction, the account is anonymized (pseudo, names, e-mail, avatar and
 // language erased, subject replaced, its fingerprint kept so that it never logs in
-// again), every challenge not finished is abandoned (which refuses the last
-// creator), then every row of the account kept by the other modules is
-// erased (erasers); the row of the user stays, anonymized, for the
-// challenges it created. The user is then deleted at Auth0; if
-// that fails, the deletion is recorded for the worker to replay. Only a
-// failure to record it fails the call, the account being deleted already.
+// again), its deletion at Auth0 is recorded as pending, every challenge not
+// finished is abandoned (which refuses the last creator), then every row of
+// the account kept by the other modules is erased (erasers); the row of the
+// user stays, anonymized, for the challenges it created. The user is then
+// deleted at Auth0 and the pending deletion removed. Nothing after the
+// commit fails the call: a deletion at Auth0 that fails, or whose record
+// cannot be removed, stays pending for the worker to replay.
 func (s *Service) Delete(ctx context.Context, actorID string) error {
 	subject, err := s.repo.Delete(ctx, actorID, func(ctx context.Context) error {
 		if err := s.participations.AbandonAll(ctx, actorID); err != nil {
@@ -181,17 +181,18 @@ func (s *Service) Delete(ctx context.Context, actorID string) error {
 		return fmt.Errorf("delete account: %w", err)
 	}
 	// The account is deleted: a client that goes away must not stop what
-	// follows, or the deletion at Auth0 would be neither done nor recorded.
+	// follows, or the deletion at Auth0 would wait for the worker.
 	ctx = context.WithoutCancel(ctx)
-	deleteErr := s.identities.DeleteUser(ctx, subject)
-	if deleteErr == nil {
+	// Never the subject in a log: the errors below do not carry it.
+	if err := s.identities.DeleteUser(ctx, subject); err != nil {
+		s.logger.WarnContext(ctx, "auth0 deletion failed, kept for retry", slog.String("error", err.Error()))
 		return nil
 	}
-	if err := s.repo.AddPendingAuth0Deletion(ctx, subject); err != nil {
-		return fmt.Errorf("delete account: auth0 deletion failed (%w) and could not be recorded: %w", deleteErr, err)
+	// Removed only after the deletion: if this fails, the worker replays a
+	// deletion already done, which is harmless.
+	if err := s.repo.RemovePendingAuth0Deletion(ctx, subject); err != nil {
+		s.logger.WarnContext(ctx, "auth0 deletion done, pending record not removed", slog.String("error", err.Error()))
 	}
-	// Never the subject: the error of the Auth0 client does not carry it.
-	s.logger.WarnContext(ctx, "auth0 deletion failed, recorded for retry", slog.String("error", deleteErr.Error()))
 	return nil
 }
 
@@ -204,10 +205,10 @@ type RetryResult struct {
 	Failed int
 }
 
-// RetryAuth0Deletions replays the deletions at Auth0 that failed when the
-// accounts were deleted, and removes each one once done. It can be run again
-// and again: a user Auth0 no longer knows counts as deleted, and a deletion
-// that fails stays pending for the next run. A failure does not stop the
+// RetryAuth0Deletions replays the deletions at Auth0 still pending (failed,
+// or interrupted, when the accounts were deleted), and removes each one once
+// done. It can be run again and again: a user Auth0 no longer knows counts as
+// deleted, and a deletion that fails stays pending for the next run. A failure does not stop the
 // others; the errors are joined. Never the subject in an error or a log.
 func (s *Service) RetryAuth0Deletions(ctx context.Context) (RetryResult, error) {
 	subjects, err := s.repo.PendingAuth0Deletions(ctx)
