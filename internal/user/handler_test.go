@@ -176,6 +176,7 @@ func TestPatchMe(t *testing.T) {
 		{name: "e-mail not editable", body: `{"email":"other@example.com"}`, wantStatus: 400, wantCode: "validation_failed"},
 		{name: "empty object changes nothing", body: `{}`, wantStatus: 200},
 		{name: "null pseudo removes it", body: `{"pseudo":null}`, wantStatus: 200, wantRemove: true},
+		{name: "null pseudo with a first name", body: `{"pseudo":null,"first_name":"Ana","last_name":"Lee"}`, wantStatus: 200, wantRemove: true, wantFirst: ptr("Ana"), wantLast: ptr("Lee")},
 		{name: "null language refused", body: `{"language":null}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "language"},
 		{name: "invalid pseudo and language", body: `{"pseudo":"a b","language":"de"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "language,pseudo"},
 		{name: "pseudo with an accent", body: `{"pseudo":"élodie"}`, wantStatus: 400, wantCode: "validation_failed", wantFields: "pseudo"},
