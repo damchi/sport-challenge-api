@@ -89,8 +89,10 @@ paths:
       summary: Read my profile
       description: |
         Profile of the authenticated user, created empty on first login. The
-        profile is complete once the pseudo is set: creating or joining a
-        challenge requires it (`profile_incomplete`).
+        profile is complete once the pseudo, the first name and the last name
+        are set: creating or joining a challenge requires it
+        (`profile_incomplete`). The e-mail comes from the access token and is
+        only ever returned here, to its owner.
       tags: [me]
       responses:
         "200":
@@ -109,8 +111,10 @@ paths:
       operationId: patchMe
       summary: Update my profile
       description: |
-        Changes the pseudo and the language. An absent field is left
-        unchanged; `null` is refused (a pseudo cannot be removed).
+        Changes the pseudo, the first name, the last name and the language.
+        An absent field is left unchanged; `null` is refused (none of them
+        can be removed). The e-mail is not editable: it comes from the auth
+        provider.
       tags: [me]
       requestBody:
         required: true
@@ -145,7 +149,8 @@ paths:
       operationId: deleteMe
       summary: Delete my account
       description: |
-        Final: the account is anonymized (pseudo and avatar erased) and
+        Final: the account is anonymized (pseudo, first name, last name,
+        e-mail and avatar erased) and
         abandons every challenge not finished; a finished challenge keeps its
         results under a neutral name. The user is also deleted at the auth
         provider. Every later request with a token of this account, even
@@ -334,7 +339,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "422":
-          description: The profile is incomplete (`profile_incomplete`); choose a pseudo first.
+          description: The profile is incomplete (`profile_incomplete`); set the pseudo, first name and last name first.
           content:
             application/json:
               schema:
@@ -1283,12 +1288,21 @@ components:
       type: string
       pattern: "^[A-Za-z0-9_.-]{3,20}$"
       example: marie_92
+    PersonName:
+      description: |
+        A first or last name: 1 to 50 letters (any alphabet, accents
+        included), words separated by one space, `-`, `'` or `’`, each
+        starting with a letter; no space at either end.
+      type: string
+      maxLength: 50
+      pattern: "^\\p{L}[\\p{L}\\p{M}]*(?:[ '’-]\\p{L}[\\p{L}\\p{M}]*)*$"
+      example: Marie-Ève
     Language:
       type: string
       enum: [fr, en]
     Me:
       type: object
-      required: [id, pseudo, avatar, language, profile_complete]
+      required: [id, pseudo, first_name, last_name, email, avatar, language, profile_complete]
       additionalProperties: false
       properties:
         id:
@@ -1300,6 +1314,25 @@ components:
           allOf:
             - $ref: "#/components/schemas/Pseudo"
           description: Null until the user chooses one.
+        first_name:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PersonName"
+          description: Null until the user sets it.
+        last_name:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PersonName"
+          description: Null until the user sets it.
+        email:
+          type: string
+          nullable: true
+          maxLength: 254
+          description: |
+            From the access token (claim set by the auth provider); null until
+            a token carries it. Only returned to its owner.
         avatar:
           type: string
           nullable: true
@@ -1312,13 +1345,17 @@ components:
           description: Null until the user chooses one.
         profile_complete:
           type: boolean
-          description: True once the pseudo is set.
+          description: True once the pseudo, the first name and the last name are set.
     MeUpdate:
       type: object
       additionalProperties: false
       properties:
         pseudo:
           $ref: "#/components/schemas/Pseudo"
+        first_name:
+          $ref: "#/components/schemas/PersonName"
+        last_name:
+          $ref: "#/components/schemas/PersonName"
         language:
           $ref: "#/components/schemas/Language"
     SportList:
@@ -1509,7 +1546,7 @@ components:
           description: Pass it as `cursor` for the next page; null on the last page.
     Participant:
       type: object
-      required: [user_id, pseudo, avatar, status, joined_at]
+      required: [user_id, pseudo, first_name, last_name, avatar, status, joined_at]
       additionalProperties: false
       properties:
         user_id:
@@ -1521,6 +1558,18 @@ components:
           allOf:
             - $ref: "#/components/schemas/Pseudo"
           description: Null for a deleted (anonymized) account; the apps show a neutral name.
+        first_name:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PersonName"
+          description: Null for a deleted (anonymized) account, or one that has not set it.
+        last_name:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PersonName"
+          description: Null for a deleted (anonymized) account, or one that has not set it.
         avatar:
           type: string
           nullable: true
@@ -1589,7 +1638,7 @@ components:
           description: Only in `run_elimination`, and null for a participant who abandoned.
     LeaderboardUser:
       type: object
-      required: [id, pseudo, avatar]
+      required: [id, pseudo, first_name, last_name, avatar]
       additionalProperties: false
       properties:
         id:
@@ -1601,6 +1650,18 @@ components:
           allOf:
             - $ref: "#/components/schemas/Pseudo"
           description: Null for a deleted (anonymized) account; the apps show a neutral name.
+        first_name:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PersonName"
+          description: Null for a deleted (anonymized) account, or one that has not set it.
+        last_name:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PersonName"
+          description: Null for a deleted (anonymized) account, or one that has not set it.
         avatar:
           type: string
           nullable: true

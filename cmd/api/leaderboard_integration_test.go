@@ -45,13 +45,13 @@ func newLeaderboardFixture(t *testing.T) leaderboardFixture {
 	}
 	clk := clock.NewFake(recordNow)
 	users := user.NewService(user.NewRepository(gdb), nil, nil, logger)
-	challenges := challenge.NewService(challenge.NewRepository(gdb), users, sport.NewService(sport.NewRepository(gdb)), clk)
-	svc := leaderboard.NewService(leaderboardChallenges{challenges}, users, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
+	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), clk)
+	svc := leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
 
 	f := leaderboardFixture{t: t, svc: svc}
 	insertUser := func(subject string) string {
 		var id string
-		if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ($1, $1) RETURNING id", subject).Scan(&id); err != nil {
+		if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ($1, $1, 'Test', 'User') RETURNING id", subject).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id
@@ -130,7 +130,7 @@ func TestLeaderboardOfAPublicChallengeIsOpenToAStranger(t *testing.T) {
 		if c.Type != w.typ || len(c.Entries) != 1 {
 			t.Fatalf("category %d = %+v, want %s with the runner alone", i, c, w.typ)
 		}
-		if e := c.Entries[0]; e.UserID != f.runner || e.Rank != 1 || e.Value != w.value || e.Pseudo == nil || *e.Pseudo != "runner" {
+		if e := c.Entries[0]; e.UserID != f.runner || e.Rank != 1 || e.Value != w.value || e.Name.Pseudo == nil || *e.Name.Pseudo != "runner" || e.Name.FirstName == nil || *e.Name.FirstName != "Test" {
 			t.Fatalf("%s entry = %+v, want the runner first with %d", w.typ, e, w.value)
 		}
 	}

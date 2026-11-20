@@ -156,13 +156,21 @@ type Page struct {
 	Next  *Position
 }
 
-// Participant is a participation in a listing. Pseudo is nil for an
-// anonymized account.
+// Participant is a participation in a listing, with the public name of the
+// participant (empty for an anonymized account).
 type Participant struct {
 	UserID   string
 	Status   ParticipantStatus
 	JoinedAt time.Time
-	Pseudo   *string
+	Name     Name
+}
+
+// Name is what a user shows the others: never the e-mail. Each field is nil
+// for an anonymized account, and a name not set yet is nil too.
+type Name struct {
+	Pseudo    *string
+	FirstName *string
+	LastName  *string
 }
 
 // ParticipantPosition is the place of a participant in the listing: the

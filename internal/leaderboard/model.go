@@ -33,11 +33,19 @@ type Category struct {
 	StepMeters int
 }
 
-// Ranked is a line of a ranking with the pseudo of the participant; nil for
-// an anonymized account.
+// Ranked is a line of a ranking with the public name of the participant,
+// empty for an anonymized account.
 type Ranked struct {
 	scoring.Entry
-	Pseudo *string
+	Name Name
+}
+
+// Name is what a user shows the others: never the e-mail. Each field is nil
+// for an anonymized account, and a name not set yet is nil too.
+type Name struct {
+	Pseudo    *string
+	FirstName *string
+	LastName  *string
 }
 
 // CategoryRanking is the ranking of one category.

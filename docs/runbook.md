@@ -120,8 +120,9 @@ Ne jamais coller un secret dans un ticket, un message ou un journal. Un secret e
 
 - [ ] **Politique de confidentialité** publiée en **français et en anglais**, qui mentionne :
   - que les activités détaillées d'un participant sont **visibles par les autres participants** du challenge (l'application le dit aussi avant de rejoindre), **y compris après avoir quitté le challenge ou en avoir été exclu**, pour toutes les activités datées de sa fenêtre (README §5.7) ;
-  - les données conservées (résumés d'activité), leur lieu (Canada, Montréal) et leur durée de conservation (à décider : la purge des challenges supprimés est une question ouverte, README §8) ;
-  - l'effet d'une suppression de compte (anonymisation, résultats des challenges terminés conservés sous un nom neutre) ;
+  - que le **prénom et le nom** d'un participant sont visibles par les autres utilisateurs (participants, classements ; pour un challenge public, par tout utilisateur connecté), et que son **adresse e-mail**, reçue d'Auth0, n'est visible que de lui (README §2.8) ;
+  - les données conservées (profil : pseudo, prénom, nom, e-mail ; résumés d'activité), leur lieu (Canada, Montréal) et leur durée de conservation (à décider : la purge des challenges supprimés est une question ouverte, README §8) ;
+  - l'effet d'une suppression de compte (anonymisation : pseudo, prénom, nom et e-mail effacés ; résultats des challenges terminés conservés sous un nom neutre) ;
   - la personne responsable de la protection des renseignements personnels et comment la joindre.
 - [ ] **Loi 25** : validation juridique faite (consentement, personne responsable désignée, registre des incidents ouvert, évaluation des facteurs relatifs à la vie privée du système, évaluation avant tout transfert hors Québec).
 - [ ] **Accord de traitement des données** signé avec **Auth0** (Okta), et région du tenant vérifiée (Canada) ; ce tenant est unique, partagé avec le développement local (`docs/auth0-setup.md`).

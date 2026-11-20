@@ -139,7 +139,7 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range page.Items {
-		if p.UserID == member && (p.Pseudo != nil || p.Status != ParticipantAbandoned) {
+		if p.UserID == member && (p.Name.Pseudo != nil || p.Status != ParticipantAbandoned) {
 			t.Fatalf("listed as %+v, want abandoned without pseudo", p)
 		}
 	}
@@ -154,7 +154,7 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 	}
 
 	// A login with the former subject (insertProfile uses the pseudo).
-	if _, err := users.GetOrCreateBySubject(t.Context(), "del_member"); !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
+	if _, err := users.GetOrCreateBySubject(t.Context(), "del_member", ""); !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
 		t.Fatalf("login after deletion: %v, want account_deleted", err)
 	}
 	if n := count(t, pool, "SELECT count(*) FROM users WHERE auth_subject = 'del_member'"); n != 0 {

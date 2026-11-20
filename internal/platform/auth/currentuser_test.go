@@ -61,10 +61,10 @@ func TestCurrentUser(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, nil))
-			var gotSubject, gotID string
+			var gotSubject, gotEmail, gotID string
 			var served bool
-			resolve := func(_ context.Context, subject string) (string, error) {
-				gotSubject = subject
+			resolve := func(_ context.Context, claims Claims) (string, error) {
+				gotSubject, gotEmail = claims.Subject, claims.Email
 				return tt.resolveID, tt.resolveErr
 			}
 
@@ -96,8 +96,12 @@ func TestCurrentUser(t *testing.T) {
 			if served != (tt.wantStatus == http.StatusNoContent) {
 				t.Fatalf("route served = %v with status %d", served, rec.Code)
 			}
-			if served && (gotID != localUserID || gotSubject != "email|123") {
-				t.Fatalf("user ID = %q for subject %q, want %q for email|123", gotID, gotSubject, localUserID)
+			if served && (gotID != localUserID || gotSubject != "email|123" || gotEmail != "marie@example.com") {
+				t.Fatalf("user ID = %q for subject %q, e-mail %q, want %q for email|123 and its e-mail", gotID, gotSubject, gotEmail, localUserID)
+			}
+			// Personal data: the e-mail never reaches the logs.
+			if strings.Contains(logs.String(), "marie@example.com") {
+				t.Fatalf("logs hold the e-mail: %s", logs.String())
 			}
 			if tt.wantLog != "" && !strings.Contains(logs.String(), tt.wantLog) {
 				t.Fatalf("logs = %s, want %q", logs.String(), tt.wantLog)
@@ -110,7 +114,7 @@ func TestCurrentUserWithoutClaimsIsUnauthenticated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	r := httpx.NewRouter(logger)
-	r.GET("/private", CurrentUser(func(context.Context, string) (string, error) {
+	r.GET("/private", CurrentUser(func(context.Context, Claims) (string, error) {
 		t.Error("resolver called without claims")
 		return localUserID, nil
 	}, logger), func(c *gin.Context) { c.Status(http.StatusNoContent) })

@@ -12,9 +12,13 @@ import (
 // read-only for GORM: the database fills them (default values and trigger),
 // so the application never writes the time itself.
 type User struct {
-	ID           string `gorm:"->"`
-	AuthSubject  string
-	Pseudo       *string
+	ID          string `gorm:"->"`
+	AuthSubject string
+	Pseudo      *string
+	FirstName   *string
+	LastName    *string
+	// Email comes from the access token; only its owner ever sees it.
+	Email        *string
 	AvatarKey    *string
 	Language     *string
 	CreatedAt    time.Time `gorm:"->"`
@@ -24,14 +28,25 @@ type User struct {
 
 // ProfileChanges are the profile fields to change; nil leaves a field as is.
 type ProfileChanges struct {
-	Pseudo   *string
-	Language *string
+	Pseudo    *string
+	FirstName *string
+	LastName  *string
+	Language  *string
 }
 
-// ProfileComplete reports whether the user chose a pseudo, required to
-// create or join a challenge.
+// PublicName is what the other users see of a user: never the e-mail. Every
+// field is nil for an anonymized account, and a name the user has not set
+// yet is nil too.
+type PublicName struct {
+	Pseudo    *string
+	FirstName *string
+	LastName  *string
+}
+
+// ProfileComplete reports whether the user set a pseudo, a first name and a
+// last name, required to create or join a challenge.
 func (u User) ProfileComplete() bool {
-	return u.Pseudo != nil
+	return u.Pseudo != nil && u.FirstName != nil && u.LastName != nil
 }
 
 // subjectFingerprint is what is kept of the auth subject of a deleted

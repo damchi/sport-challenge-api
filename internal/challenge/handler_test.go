@@ -55,7 +55,7 @@ func serve(t *testing.T, svc *Service, method, target, body string) (*httptest.R
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
 		auth.Authenticate(acceptingVerifier{}, logger),
-		auth.CurrentUser(func(context.Context, string) (string, error) { return actor, nil }, logger),
+		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return actor, nil }, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(challengesOnly{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
@@ -261,7 +261,7 @@ const participantsPath = "/api/v1/challenges/11111111-1111-1111-1111-11111111111
 
 func TestListParticipants(t *testing.T) {
 	repo := &fakeRepository{challenge: stored(VisibilityPublic), participants: participants(3)}
-	profiles := fakeProfiles{pseudos: map[string]string{"00000000-0000-0000-0000-000000000001": "marie_92"}}
+	profiles := fakeProfiles{names: map[string]Name{"00000000-0000-0000-0000-000000000001": marie}}
 	svc := NewService(repo, profiles, fakeCatalogue{}, clock.NewFake(now))
 
 	rec, out := serve(t, svc, http.MethodGet, participantsPath+"?limit=2", "")
@@ -271,12 +271,19 @@ func TestListParticipants(t *testing.T) {
 	items, _ := out["items"].([]any)
 	first, _ := items[0].(map[string]any)
 	second, _ := items[1].(map[string]any)
-	if len(items) != 2 || first["pseudo"] != "marie_92" || first["status"] != "active" || first["avatar"] != nil {
-		t.Fatalf("items %v, want 2 items, the first with its pseudo", out["items"])
+	if len(items) != 2 || first["pseudo"] != "marie_92" || first["first_name"] != "Marie-Ève" || first["last_name"] != "Tremblay" ||
+		first["status"] != "active" || first["avatar"] != nil {
+		t.Fatalf("items %v, want 2 items, the first with its pseudo and names", out["items"])
 	}
-	// An anonymized account: pseudo null, for the apps' neutral name.
-	if pseudo, ok := second["pseudo"]; !ok || pseudo != nil || second["status"] != "abandoned" {
-		t.Fatalf("second item %v, want abandoned with a null pseudo", second)
+	// Never the e-mail of another user.
+	if _, ok := first["email"]; ok {
+		t.Fatalf("first item %v carries an e-mail", first)
+	}
+	// An anonymized account: pseudo and names null, for the apps' neutral name.
+	for _, field := range []string{"pseudo", "first_name", "last_name"} {
+		if v, ok := second[field]; !ok || v != nil || second["status"] != "abandoned" {
+			t.Fatalf("second item %v, want abandoned with a null %s", second, field)
+		}
 	}
 	cursor, _ := out["next_cursor"].(string)
 	if cursor == "" {

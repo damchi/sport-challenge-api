@@ -195,18 +195,35 @@ func TestVerifyCancelledContextIsNotAnInvalidToken(t *testing.T) {
 	}
 }
 
-func TestVerifyExposesOnlySubjectExpirationAndScopes(t *testing.T) {
+// TestVerifyExposesOnlyTheExpectedClaims: subject, e-mail (only from the
+// namespaced claim of the Auth0 Action, never a plain "email"), expiration
+// and scopes.
+func TestVerifyExposesOnlyTheExpectedClaims(t *testing.T) {
 	key := newSigningKey(t, "key-1")
 	v := newTestVerifier(t, newJWKSServer(t, key), time.Minute)
 	exp := time.Now().Add(10 * time.Minute).Truncate(time.Second)
 
-	got, err := v.Verify(t.Context(), sign(t, key, with(map[string]any{"exp": exp.Unix(), "email": "someone@example.com"})))
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name      string
+		claims    map[string]any
+		wantEmail string
+	}{
+		{name: "namespaced e-mail claim", claims: map[string]any{"https://sport-challenge/email": "marie@example.com", "email": "other@example.com"}, wantEmail: "marie@example.com"},
+		{name: "plain e-mail claim only: ignored", claims: map[string]any{"email": "someone@example.com"}},
+		{name: "no e-mail", claims: map[string]any{}},
 	}
-	want := Claims{Subject: "email|123", ExpiresAt: exp, Scopes: []string{"openid", "profile", "email"}}
-	if got.Subject != want.Subject || !got.ExpiresAt.Equal(want.ExpiresAt) || !slices.Equal(got.Scopes, want.Scopes) {
-		t.Fatalf("Verify() = %+v, want %+v", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.claims["exp"] = exp.Unix()
+			got, err := v.Verify(t.Context(), sign(t, key, with(tt.claims)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := Claims{Subject: "email|123", Email: tt.wantEmail, ExpiresAt: exp, Scopes: []string{"openid", "profile", "email"}}
+			if got.Subject != want.Subject || got.Email != want.Email || !got.ExpiresAt.Equal(want.ExpiresAt) || !slices.Equal(got.Scopes, want.Scopes) {
+				t.Fatalf("Verify() = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
 

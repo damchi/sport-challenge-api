@@ -313,7 +313,9 @@ func (s staticChallenge) Challenge(context.Context, string, string) (leaderboard
 
 type noProfiles struct{}
 
-func (noProfiles) Pseudos(context.Context, []string) (map[string]string, error) { return nil, nil }
+func (noProfiles) Names(context.Context, []string) (map[string]leaderboard.Name, error) {
+	return nil, nil
+}
 
 // withoutSnapshots makes the leaderboard compute its ranking.
 type withoutSnapshots struct{ *leaderboard.Repository }

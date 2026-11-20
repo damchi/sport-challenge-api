@@ -31,7 +31,7 @@ func (f *fakeVerifier) Verify(_ context.Context, raw string) (Claims, error) {
 	if raw != goodToken {
 		return Claims{}, f.err
 	}
-	return Claims{Subject: "email|123", ExpiresAt: time.Now().Add(time.Hour), Scopes: []string{"openid"}}, nil
+	return Claims{Subject: "email|123", Email: "marie@example.com", ExpiresAt: time.Now().Add(time.Hour), Scopes: []string{"openid"}}, nil
 }
 
 type result struct {

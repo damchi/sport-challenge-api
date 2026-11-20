@@ -56,7 +56,7 @@ func get(t *testing.T, svc *Service, target string, withToken bool) (*httptest.R
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
 		auth.Authenticate(acceptingVerifier{}, logger),
-		auth.CurrentUser(func(context.Context, string) (string, error) { return ann, nil }, logger),
+		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return ann, nil }, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(leaderboardOnly{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
@@ -108,7 +108,7 @@ func handlerService(t *testing.T, challenges *fakeChallenges) *Service {
 	}
 	// Week 2 is running, a day and a half from its end.
 	now := c.EndsAt.Add(-36 * time.Hour)
-	profiles := fakeProfiles{pseudos: map[string]string{ann: "Ann", bob: "Bob"}}
+	profiles := fakeProfiles{names: map[string]Name{ann: annName, bob: bobName}}
 	return NewService(challenges, profiles, repo, clock.NewFake(now), 24*time.Hour)
 }
 
@@ -136,8 +136,12 @@ func TestGetLeaderboardAnswersEveryCategory(t *testing.T) {
 		t.Fatalf("first entry %v, want rank 1, 3600 s, not abandoned, no elimination", first)
 	}
 	user := first["user"].(map[string]any)
-	if user["id"] != ann || user["pseudo"] != "Ann" || user["avatar"] != nil {
-		t.Fatalf("user %v, want ann with her pseudo and no avatar", user)
+	if user["id"] != ann || user["pseudo"] != "Ann" || user["first_name"] != "Ann" || user["last_name"] != "Archer" || user["avatar"] != nil {
+		t.Fatalf("user %v, want ann with her pseudo, her names and no avatar", user)
+	}
+	// Never the e-mail of another user.
+	if _, ok := user["email"]; ok {
+		t.Fatalf("user %v carries an e-mail", user)
 	}
 	// Abandoned: last, with no rank, no value.
 	last := entries[len(entries)-1].(map[string]any)

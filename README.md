@@ -130,7 +130,9 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 
 - ✅ Pseudo et avatar. Pseudo **unique sans tenir compte de la casse**, de 3 à 20 caractères (lettres, chiffres, `_`, `.`, `-`).
 - ✅ Les lettres du pseudo sont **ASCII** (`a-z`, `A-Z`, sans accent) : l'unicité sans tenir compte de la casse est la même partout, et deux pseudos ne peuvent pas se ressembler à l'œil en étant différents.
-- ✅ Le profil est **complet** dès que le pseudo est choisi ; un pseudo ne peut plus être retiré, seulement changé. **Créer ou rejoindre un challenge exige un profil complet** (erreur `profile_incomplete`).
+- ✅ **Prénom et nom** : saisis par l'utilisateur dans son profil, chacun de 1 à 50 caractères : des lettres de tout alphabet (accents compris), en mots séparés par une espace, `-`, `'` ou `’`, chaque mot commençant par une lettre, sans espace au début ni à la fin. Les autres utilisateurs voient le pseudo, le prénom et le nom (participants, classements ; pour un challenge public, tout utilisateur connecté). Décision du propriétaire du produit du 2026-11-19 (SC-API-116).
+- ✅ **E-mail** : il vient du fournisseur d'authentification (claim ajoutée à l'access token par une Action Auth0, `docs/auth0-setup.md`), tenu à jour à chaque requête s'il change ; il n'est pas modifiable dans le profil et n'est visible que de son titulaire (`GET /me`), jamais des autres utilisateurs (SC-API-116).
+- ✅ Le profil est **complet** dès que le pseudo, le prénom et le nom sont saisis (SC-API-116 : un profil créé avant n'a que le pseudo et redevient incomplet jusqu'à la saisie des noms ; comme la saisie d'une activité exige aussi un profil complet, ADR 0001, l'app doit demander les noms dès la connexion) ; aucun des trois ne peut plus être retiré, seulement changé. **Créer ou rejoindre un challenge exige un profil complet** (erreur `profile_incomplete`).
 - ✅ En V1, l'avatar affiché est formé des initiales du pseudo ; l'envoi d'une image vient en V1.1.
 - ✅ Langues : **français et anglais**.
 - ✅ Unité : **km uniquement** pour le moment.
@@ -288,7 +290,7 @@ sport-challenge-api/
 │   │
 │   ├── user/
 │   │   ├── model.go                 entité User
-│   │   ├── profile.go               règles du profil : pseudo, langue
+│   │   ├── profile.go               règles du profil : pseudo, prénom, nom, langue, e-mail du jeton
 │   │   ├── service.go               création au premier login, profil, suppression (anonymisation), reprise
 │   │   │                            des suppressions Auth0 échouées
 │   │   ├── repository.go            accès base (GORM)
@@ -418,7 +420,7 @@ flowchart TD
 
 | Module | Responsabilité |
 |---|---|
-| `user` | Crée la ligne locale au premier login, gère pseudo, avatar, langue |
+| `user` | Crée la ligne locale au premier login, gère pseudo, prénom, nom, e-mail (copié du jeton), avatar, langue |
 | `challenge` | Création, modification limitée (titre, description), fuseau, durée, visibilité, règle d'invitation, co-créateurs |
 | `invitation` | Liens et invitations pour les challenges privés, selon la règle « les participants peuvent inviter » |
 | `sport` | Catalogue des sports et coefficients de distance, figés par challenge à sa création |
@@ -433,7 +435,7 @@ flowchart TD
 
 | Entité | Champs clés |
 |---|---|
-| `users` | id, identifiant du fournisseur d'auth, pseudo, avatar, langue |
+| `users` | id, identifiant du fournisseur d'auth, pseudo, prénom, nom, e-mail, avatar, langue |
 | `challenges` | id, titre, description, visibilité, participants peuvent inviter (`members_can_invite`), fuseau, début et fin (UTC), créé par, suppression logique (`deleted_at`) ; le statut (à venir, en cours, terminé) se déduit des dates |
 | `challenge_creators` | challenge, utilisateur |
 | `categories` | challenge, type (temps cumulé, distance cumulée, course avec élimination), position, paramètres figés (`params`) ; le nom est traduit par le frontend |
@@ -509,6 +511,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Rejoindre un challenge public | tout utilisateur connecté, jusqu'à la fin de la semaine 1 (✅) |
 | Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) ; une invitation n'est valide que tant que son auteur est encore créateur ou participant actif, et que son compte n'est pas supprimé. Exclure un participant (ou qu'il abandonne) n'exclut pas les personnes qu'il a invitées : celles qui ont déjà rejoint restent participantes ; seul son lien est annulé, pour les personnes invitées qui n'ont pas encore rejoint (✅) |
 | Inviter | créateurs ; participants seulement si le créateur l'a autorisé à la création (✅) |
+| Voir l'e-mail d'un utilisateur | lui seul, par `GET /me` ; les autres voient le pseudo, le prénom et le nom (✅, SC-API-116) |
 | Modifier titre et description | créateurs (✅) |
 | Modifier les catégories | personne, après la création (✅) |
 | Ajouter un créateur | créateurs (✅) |
@@ -568,6 +571,7 @@ La V2 (synchronisations) a peu d'impact sur la V1 si ces choix, presque gratuits
 - **RGPD** si des utilisateurs européens s'ajoutent.
 - ✅ **Suppression de compte** : anonymisation, traitée comme un abandon dans tous les challenges à venir ou en cours (un challenge terminé garde ses résultats, sous un nom neutre), refusée tant que le compte est le dernier créateur d'un challenge à venir ou en cours (§2.2) ; l'utilisateur est aussi **supprimé chez Auth0** (API de gestion, avec reprise en cas d'échec) pour que l'effacement soit réel.
 - ✅ Les activités détaillées d'un participant sont visibles par les autres participants du challenge : l'app l'indique **avant** de rejoindre, et la politique de confidentialité le mentionne. Quitter un challenge (ou en être exclu) ne les cache pas : les activités datées de sa fenêtre restent visibles jusqu'à sa fin, même celles d'après le départ.
+- ✅ Le **prénom et le nom** d'un participant sont visibles des autres utilisateurs (participants et classements ; pour un challenge public, de tout utilisateur connecté) ; son **e-mail** n'est visible que de lui (§2.8). La politique de confidentialité le mentionne.
 - 🟡 Ne stocker que les **résumés d'activité** (distance, durée, type, date), pas les traces GPS.
 - Tenir un **inventaire des sous-traitants** (Auth, notifications, analytics, fournisseurs sportifs) avec la région de chacun.
 - ✅ **Cible** : héberger à Montréal (`northamerica-northeast1`) les données de production : base, sauvegardes, journaux et secrets. Elle n'est pas encore atteinte partout : l'état réel, avec ses exceptions datées (journaux d'audit de GCP, Error Reporting, sauvegardes et journaux antérieurs en attente d'expiration, emplacement non vérifié des journaux de transactions), est dans `docs/deploiement.md`.

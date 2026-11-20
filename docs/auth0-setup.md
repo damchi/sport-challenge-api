@@ -139,6 +139,25 @@ Réglage de l'API : ce changement modifie l'émetteur des jetons, et `AUTH0_DOMA
 
 En développement local, le frontend et l'API gardent le domaine du tenant (les jetons y ont l'émetteur du tenant) : on accepte de repasser par la page Auth0 à chaque rechargement.
 
+## 8. Ajouter l'e-mail à l'access token (Action)
+
+L'API lit l'e-mail de l'utilisateur dans l'access token (SC-API-116) : un access token n'a pas de claim `email`, et Auth0 n'y garde une claim ajoutée que si son nom a un espace de noms. Une Action post-login l'ajoute sous `https://sport-challenge/email` ; l'API ignore une claim `email` sans espace de noms. Le tenant étant partagé, l'Action sert au local et à la production.
+
+1. **Actions** (section Automation & Extensibility, à confirmer ; ancienne navigation : Actions → Library) → Create Action → Build from scratch : nom Add e-mail to access token, trigger Login / Post Login, runtime Node le plus récent proposé.
+2. Code :
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     // Only a verified address: the passwordless e-mail connection verifies it.
+     if (event.user.email && event.user.email_verified) {
+       api.accessToken.setCustomClaim('https://sport-challenge/email', event.user.email);
+     }
+   };
+   ```
+3. Deploy, puis le déclencheur post-login (**Actions** → Triggers → post-login, à confirmer) : glisser l'Action dans le flux, Apply.
+4. Vérifier : se connecter depuis le frontend, puis `GET /api/v1/me` renvoie `email`. Un jeton obtenu avant l'ajout de l'Action n'a pas la claim : l'e-mail arrive au jeton suivant (rafraîchissement ou nouvelle connexion).
+
+L'e-mail est une donnée personnelle : l'API ne le journalise jamais et ne le renvoie qu'à son titulaire (README §2.8).
+
 ## Points d'attention pour l'API (ticket SC-API-017)
 
 - Jetons machine à machine : refuser un access token dont `gty` vaut `client-credentials` ou dont `sub` se termine par `@clients`, en défense en profondeur de l'étape 2.5.
@@ -170,6 +189,7 @@ Pour le tenant :
 - [ ] Frontend : `connection: 'email'` passé à la connexion (étape 3.8).
 - [ ] Application machine à machine Sport Challenge API (management) limitée à `delete:users`, Sport Challenge API (local) sans aucune API autorisée ; grant Client Credentials seul, aucune connexion ; secret de production dans Secret Manager seulement, accès réservé au compte de service de l'API ; le `.env` local porte celui de l'application locale.
 - [ ] Connexion de test réussie depuis le frontend (ou **Authentication** → Passwordless → Email → Try dans le dashboard).
+- [ ] Action Add e-mail to access token déployée et placée dans le flux post-login (étape 8) ; `GET /api/v1/me` renvoie l'e-mail.
 - [ ] Après la fin de l'essai : protections de l'étape 6 toujours actives.
 - [ ] Production : domaine personnalisé Auth0 actif, `AUTH0_DOMAIN` réglé sur ce domaine et `AUTH0_MGMT_DOMAIN` sur le domaine du tenant (étape 7) ; suppression de compte testée ensuite.
 
