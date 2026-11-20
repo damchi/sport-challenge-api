@@ -41,6 +41,11 @@ type Identities interface {
 	DeleteUser(ctx context.Context, subject string) error
 }
 
+// pendingRemovalTimeout bounds the removal of the pending Auth0 deletion
+// after an account deletion, waiting for a connection of the pool included:
+// detached from the request, it is outside the request deadline.
+const pendingRemovalTimeout = 5 * time.Second
+
 // Service holds the use cases of the local users.
 type Service struct {
 	repo           repository
@@ -162,9 +167,10 @@ func (s *Service) PublicNames(ctx context.Context, ids []string) (map[string]Pub
 // the account kept by the other modules is erased (erasers); the row of the
 // user stays, anonymized, for the challenges it created. The deletion is
 // dated by the clock, like the other business dates. The user is then
-// deleted at Auth0 and the pending deletion removed. Nothing after the
-// commit fails the call: a deletion at Auth0 that fails, or whose record
-// cannot be removed, stays pending for the worker to replay.
+// deleted at Auth0 and the pending deletion removed, even if the client
+// left; the removal has its own deadline. Nothing after the commit fails the
+// call: a deletion at Auth0 that fails, or whose record cannot be removed in
+// time, stays pending for the worker to replay.
 func (s *Service) Delete(ctx context.Context, actorID string) error {
 	subject, err := s.repo.Delete(ctx, actorID, s.clock.Now(), func(ctx context.Context) error {
 		if err := s.participations.AbandonAll(ctx, actorID); err != nil {
@@ -192,9 +198,11 @@ func (s *Service) Delete(ctx context.Context, actorID string) error {
 		s.logger.WarnContext(ctx, "auth0 deletion failed, kept for retry", slog.String("error", err.Error()))
 		return nil
 	}
-	// Removed only after the deletion: if this fails, the worker replays a
-	// deletion already done, which is harmless.
-	if err := s.repo.RemovePendingAuth0Deletion(ctx, subject); err != nil {
+	// Removed only after the deletion: if this fails or runs out of time,
+	// the worker replays a deletion already done, which is harmless.
+	removeCtx, cancel := context.WithTimeout(ctx, pendingRemovalTimeout)
+	defer cancel()
+	if err := s.repo.RemovePendingAuth0Deletion(removeCtx, subject); err != nil {
 		s.logger.WarnContext(ctx, "auth0 deletion done, pending record not removed", slog.String("error", err.Error()))
 	}
 	return nil
