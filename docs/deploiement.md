@@ -23,7 +23,7 @@ Aucun secret ici : les valeurs sensibles sont dans Secret Manager, seuls leurs n
 | Images | Artifact Registry `sport-challenge` (Docker) | image `…/sport-challenge/api`, taguée `<sha court>` et `<version>` |
 | Fédération GitHub | pool Workload Identity `github-prod`, fournisseur `github-provider` | émetteur `https://token.actions.githubusercontent.com` ; condition : identifiant numérique du dépôt (`1438448292`), nom `damchi/sport-challenge-api`, branche `main` **et** Environment `production` ; `sc-deploy` n'est lié qu'au sujet `repo:damchi@38217786/sport-challenge-api@1438448292:environment:production` (le dépôt utilise les sujets OIDC **immuables** de GitHub : propriétaire et dépôt suivis de leur identifiant numérique ; `gh api repos/damchi/sport-challenge-api/actions/oidc/customization/sub` le montre) |
 | Budget | « sport challenge », sur le compte de facturation du projet | 20 CAD par mois, **sur tout le compte de facturation** (pas filtré sur `sport-challenge-prod` : les autres projets du compte comptent aussi) ; avertissements à 50 %, 90 % et 100 %, envoyés par courriel aux administrateurs du compte de facturation. Un budget ne bloque aucune dépense : il prévient seulement |
-| Alertes Cloud Monitoring | canal « Production : courriel » ; politiques « API : erreurs 5xx », « Job Cloud Run en échec », « close-weeks : aucune exécution réussie depuis 3 heures », « API injoignable » ; vérification de disponibilité « API : /ready » | courriel vers une adresse lue (gardée dans la console, jamais dans le dépôt) ; détail et fichiers de politique dans « Alertes » ci-dessous |
+| Alertes Cloud Monitoring | canal « Production : courriel » ; politiques « API : erreurs 5xx », « Job Cloud Run en échec », « close-weeks : aucune exécution réussie depuis 3 heures », « retry-auth0-deletions : aucune exécution réussie depuis 6 heures », « API injoignable » ; vérification de disponibilité « API : /ready » | courriel vers une adresse lue (gardée dans la console, jamais dans le dépôt) ; détail et fichiers de politique dans « Alertes » ci-dessous |
 
 Lire le budget (l'appel est facturé à `sport-challenge-prod` grâce à `--billing-project`, sinon gcloud prendrait le projet par défaut du poste) :
 
@@ -97,16 +97,19 @@ gcloud secrets versions access latest --secret=database-url-ca --project=sport-c
 
 ## Alertes
 
-Quatre politiques Cloud Monitoring, créées le 2026-11-17, envoient un courriel par le canal « Production : courriel ». Chacune porte une courte documentation (que lire, que faire) qui renvoie à `docs/runbook.md`. Un incident se ferme seul 30 minutes après le retour à la normale.
+Cinq politiques Cloud Monitoring, créées le 2026-11-17 (la cinquième le 2026-11-20), envoient un courriel par le canal « Production : courriel ». Chacune porte une courte documentation (que lire, que faire) qui renvoie à `docs/runbook.md`. Un incident se ferme seul 30 minutes après le retour à la normale.
 
 | Politique | Condition | Runbook |
 |---|---|---|
 | « API : erreurs 5xx » | service `sc-api`, `run.googleapis.com/request_count` avec `response_code_class = 5xx` : plus de 5 réponses sur 5 minutes | §1, §2 |
 | « Job Cloud Run en échec » | tout job du projet (`sc-migrate`, `sc-worker-*`), `run.googleapis.com/job/completed_execution_count` avec `result = failed` : dès une exécution en échec, un incident par job | §3, §4 |
 | « close-weeks : aucune exécution réussie depuis 3 heures » | `sc-worker-close-weeks`, même métrique avec `result = succeeded` : absente pendant 3 heures. La condition ne s'arme qu'après un premier succès | §4 |
+| « retry-auth0-deletions : aucune exécution réussie depuis 6 heures » | `sc-worker-retry-auth0-deletions`, même métrique avec `result = succeeded` : absente pendant 6 heures, soit six exécutions horaires manquées ou en échec d'affilée. Couvre la tâche qui ne tourne plus (planification absente, en pause ou cassée : aucune exécution, donc aucun échec) et l'échec permanent (secret Auth0 révoqué, droits retirés), dont l'incident « Job Cloud Run en échec » se ferme et se rouvre chaque heure. La condition ne s'arme qu'après un premier succès. Ajoutée le 2026-11-20 (SC-API-127) | §4, §7 |
 | « API injoignable » | vérification de disponibilité « API : /ready » (`GET /ready` de `sc-api` en HTTPS, 200 attendu en 10 s, toutes les 5 minutes, depuis les régions par défaut de Cloud Monitoring), `monitoring.googleapis.com/uptime_check/check_passed` : en échec depuis plus d'une région pendant 10 minutes. Couvre l'API injoignable (aucune requête n'arrive, donc aucun 5xx) et la base injoignable (`/ready` répond 503) | §1, §2 |
 
 Chaque alerte a été déclenchée une fois le 2026-11-17 pour vérifier la réception du courriel : une exécution de `sc-worker-finalize-challenges` avec un argument invalide (échec de job), la condition 5xx basculée un moment sur 4xx avec un seuil à 0, la durée d'absence ramenée un moment à 10 minutes ; les deux politiques ont ensuite retrouvé leurs réglages ci-dessous. « API injoignable » a été déclenchée le même jour en faisant pointer la vérification un moment vers un chemin inexistant (404), puis remise sur son chemin. Le 2026-11-17 aussi (SC-API-106), la sonde est passée de `/readyz` à `/ready` (Cloud Run intercepte `/healthz` et peut intercepter d'autres chemins finissant par `z`) : pour qu'aucune fausse alerte ne parte entre le déploiement et le changement de la vérification, celle-ci (même identifiant) est passée sur `/ready` sous le nom « API : /ready » **avant** la fusion, en acceptant 200 ou 401 (la route inconnue répondait 401), puis n'a plus accepté que 200 une fois la nouvelle version déployée. Une API réellement en panne (pas de réponse, 5xx, 503) alertait pendant toute la transition.
+
+« retry-auth0-deletions : aucune exécution réussie depuis 6 heures » a été créée le 2026-11-20 avec une absence ramenée à 10 minutes : le courriel est arrivé, puis la durée est revenue à 6 heures. La politique s'est armée sur les succès des heures précédentes, sans attendre l'exécution suivante.
 
 Recréer les alertes (composant `beta` de gcloud) : créer le canal, puis chaque politique depuis son fichier, après avoir remplacé `<canal>` par l'identifiant du canal. Le canal se crée de préférence dans la console (Monitoring > Alerting > Edit notification channels) : en ligne de commande, l'adresse reste dans l'historique du shell. Ne jamais coller la sortie de `channels describe`, qui contient l'adresse, dans une issue ou une pull request. Les fichiers nomment les ressources avec le préfixe `sc` (`sc-api`, `sc-worker-close-weeks`) : si `CLOUD_RUN_NAME_PREFIX` change, adapter les filtres, sinon les alertes ne voient plus rien, sans erreur.
 
@@ -220,6 +223,38 @@ documentation:
     Le job sc-worker-close-weeks (lancé chaque heure par Cloud Scheduler) n'a pas réussi depuis 3 heures : les semaines ne se clôturent plus.
     Lire : Cloud Scheduler > close-weeks (dernière exécution, statut) et Cloud Run > Jobs > sc-worker-close-weeks.
     Faire : runbook §4 (relance du worker ; la tâche est idempotente).
+    Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
+notificationChannels:
+  - projects/sport-challenge-prod/notificationChannels/<canal>
+```
+
+`retry-auth0-deletions-absent.yaml` :
+
+```yaml
+displayName: "retry-auth0-deletions : aucune exécution réussie depuis 6 heures"
+combiner: OR
+conditions:
+  - displayName: "sc-worker-retry-auth0-deletions : pas de succès depuis 6 heures"
+    conditionAbsent:
+      filter: >-
+        resource.type = "cloud_run_job" AND resource.labels.job_name = "sc-worker-retry-auth0-deletions"
+        AND metric.type = "run.googleapis.com/job/completed_execution_count"
+        AND metric.labels.result = "succeeded"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_SUM
+          crossSeriesReducer: REDUCE_SUM
+      duration: 21600s
+      trigger:
+        count: 1
+alertStrategy:
+  autoClose: 1800s
+documentation:
+  mimeType: text/markdown
+  content: |-
+    Le job sc-worker-retry-auth0-deletions (lancé chaque heure par Cloud Scheduler) n'a pas réussi depuis 6 heures : les comptes supprimés dans l'API restent chez Auth0 (identité et e-mail), l'effacement promis n'est pas fait.
+    Lire : Cloud Scheduler > retry-auth0-deletions (dernière exécution, statut) et Cloud Run > Jobs > sc-worker-retry-auth0-deletions (journaux, champ failed).
+    Faire : runbook §4 (secret Auth0, planification, relance ; la tâche est idempotente) ; si des identités sont restées chez Auth0, noter l'incident au registre (runbook §7).
     Runbook : https://github.com/damchi/sport-challenge-api/blob/main/docs/runbook.md
 notificationChannels:
   - projects/sport-challenge-prod/notificationChannels/<canal>
