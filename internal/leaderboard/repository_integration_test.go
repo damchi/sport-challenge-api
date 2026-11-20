@@ -108,7 +108,7 @@ func TestGetFromTheDatabase(t *testing.T) {
 		Categories: []Category{
 			{Type: CategoryCumulativeTime},
 			{Type: CategoryCumulativeDistance, Factors: map[string]float64{"run": 1, "walk": 1, "ride": 0.3}},
-			{Type: CategoryRunElimination, Sport: "run", StepMeters: 2000},
+			{Type: CategoryElimination, Sport: "run", StepMeters: 2000},
 		},
 	}
 	svc := NewService(staticChallenge(c), fakeProfiles{}, NewRepository(gdb), clock.NewFake(end), 24*time.Hour)
@@ -127,7 +127,7 @@ func TestGetFromTheDatabase(t *testing.T) {
 		{Type: CategoryCumulativeDistance, Entries: []scoring.Entry{
 			{UserID: runner, Rank: 1, Value: 28000}, {UserID: walker, Rank: 2, Value: 5000}, {UserID: quitter, Abandoned: true},
 		}},
-		{Type: CategoryRunElimination, Entries: []scoring.Entry{
+		{Type: CategoryElimination, Entries: []scoring.Entry{
 			{UserID: runner, Rank: 1, Value: 22000}, {UserID: walker, Rank: 2}, {UserID: quitter, Abandoned: true},
 		}},
 	}

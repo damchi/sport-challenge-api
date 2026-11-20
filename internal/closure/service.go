@@ -1,5 +1,5 @@
 // Package closure runs the work done when a week or a challenge ends: it
-// judges the weeks that ended in the run elimination category and records
+// judges the weeks that ended in the elimination category and records
 // the eliminations, and it freezes the final ranking of every category when
 // the challenge is over, once. Rankings never read the eliminations (they are
 // computed from the raw activities); only a result snapshot is the stored
@@ -45,7 +45,7 @@ type repository interface {
 const (
 	categoryCumulativeTime     = "cumulative_time"
 	categoryCumulativeDistance = "cumulative_distance"
-	categoryRunElimination     = "run_elimination"
+	categoryElimination        = "elimination"
 )
 
 // Activities gives the participants of a challenge and, in one query, the
@@ -255,7 +255,7 @@ func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now t
 		if err != nil {
 			return false, err
 		}
-		if cat.Type == categoryRunElimination {
+		if cat.Type == categoryElimination {
 			last.CategoryID = cat.ID
 			e := scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters}
 			for _, out := range e.Eliminations(w, participants, activities) {
@@ -277,11 +277,11 @@ func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now t
 	return done, nil
 }
 
-// eliminationSport is the sport of the run elimination category, the only one
+// eliminationSport is the sport of the elimination category, the only one
 // counted week by week; empty without such a category.
 func eliminationSport(categories []Category) string {
 	for _, cat := range categories {
-		if cat.Type == categoryRunElimination {
+		if cat.Type == categoryElimination {
 			return cat.Sport
 		}
 	}
@@ -296,7 +296,7 @@ func scorerOf(cat Category) (scoring.Scorer, error) {
 		return scoring.Duration{}, nil
 	case categoryCumulativeDistance:
 		return scoring.Distance{Factors: cat.Factors}, nil
-	case categoryRunElimination:
+	case categoryElimination:
 		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters}, nil
 	default:
 		return nil, fmt.Errorf("unknown category type %q", cat.Type)
@@ -314,7 +314,7 @@ type payloadEntry struct {
 	Rank      int    `json:"rank"`
 	Value     int    `json:"value"`
 	Abandoned bool   `json:"abandoned"`
-	// EliminatedWeek is the week of the elimination, in the run elimination
+	// EliminatedWeek is the week of the elimination, in the elimination
 	// category; absent for a survivor.
 	EliminatedWeek int `json:"eliminated_week,omitempty"`
 }

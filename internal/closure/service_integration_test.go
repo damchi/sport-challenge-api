@@ -58,7 +58,7 @@ func (s seed) challenge(creator string, start time.Time, deleted bool) (id, cate
 		VALUES ('Spring', 'public', 'America/Toronto', $1, $2, $3, $4) RETURNING id`, start, start.AddDate(0, 0, 28), creator, deletedAt)
 	s.exec(`INSERT INTO categories (challenge_id, type, position) VALUES ($1, 'cumulative_time', 1), ($1, 'cumulative_distance', 2)`, id)
 	s.scan(&category, `INSERT INTO categories (challenge_id, type, position, params)
-		VALUES ($1, 'run_elimination', 3, '{"sport": "run", "step_meters": 2000}') RETURNING id`, id)
+		VALUES ($1, 'elimination', 3, '{"sport": "run", "step_meters": 2000}') RETURNING id`, id)
 	return id, category
 }
 
@@ -406,7 +406,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		if len(snaps) != 3 {
 			t.Fatalf("%d snapshots, want 3", len(snaps))
 		}
-		wantTypes := []string{"cumulative_time", "cumulative_distance", "run_elimination"}
+		wantTypes := []string{"cumulative_time", "cumulative_distance", "elimination"}
 		for i, snap := range snaps {
 			if snap.Type != wantTypes[i] || !snap.CreatedAt.Equal(lock.Add(time.Hour)) {
 				t.Fatalf("snapshot %d = %s at %v, want %s at the instant of the clock", i, snap.Type, snap.CreatedAt, wantTypes[i])
@@ -433,7 +433,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		var category string
 		s.scan(&category, "SELECT category_id FROM elimination WHERE challenge_id = $1 AND week_number = 4", challengeID)
 		if category != categoryID {
-			t.Fatalf("elimination of week 4 in category %s, want the run elimination one %s", category, categoryID)
+			t.Fatalf("elimination of week 4 in category %s, want the elimination one %s", category, categoryID)
 		}
 		if got := s.snapshots(deletedID); len(got) != 0 {
 			t.Fatalf("deleted challenge has %d snapshots, want none", len(got))
@@ -454,7 +454,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 			Categories: []leaderboard.Category{
 				{Type: leaderboard.CategoryCumulativeTime},
 				{Type: leaderboard.CategoryCumulativeDistance},
-				{Type: leaderboard.CategoryRunElimination, Sport: "run", StepMeters: 2000},
+				{Type: leaderboard.CategoryElimination, Sport: "run", StepMeters: 2000},
 			},
 		}
 		board := func(repo interface {
@@ -538,7 +538,7 @@ func TestCloseWeeksWhereMidnightIsSkipped(t *testing.T) {
 		VALUES ('Spring', 'public', 'America/Santiago', $1, $2, $3) RETURNING id`, start, end, creator)
 	s.exec(`INSERT INTO categories (challenge_id, type, position) VALUES ($1, 'cumulative_time', 1), ($1, 'cumulative_distance', 2)`, id)
 	s.exec(`INSERT INTO categories (challenge_id, type, position, params)
-		VALUES ($1, 'run_elimination', 3, '{"sport": "run", "step_meters": 2000}')`, id)
+		VALUES ($1, 'elimination', 3, '{"sport": "run", "step_meters": 2000}')`, id)
 	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, id, creator, start)
 
 	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(end), slog.New(slog.NewJSONHandler(io.Discard, nil)))
@@ -609,7 +609,7 @@ func TestSaveSnapshotsOfAnAccountDeletedSinceTheRanking(t *testing.T) {
 		{"user_id": "` + kept + `", "rank": 2, "value": 5000, "abandoned": false}]}`)
 	last := LastWeek{Number: 4, CategoryID: categoryID, Eliminated: []scoring.Eliminated{{UserID: gone, Week: 4, RunMeters: 1, MinimumMeters: 2}}}
 	done, err := NewRepository(gdb).SaveSnapshots(t.Context(), challengeID, start.AddDate(0, 0, 28),
-		[]Snapshot{{CategoryID: categoryID, Type: "run_elimination", Payload: payload}}, last)
+		[]Snapshot{{CategoryID: categoryID, Type: "elimination", Payload: payload}}, last)
 	if err != nil || !done {
 		t.Fatalf("done = %v, err = %v, want the snapshots recorded", done, err)
 	}

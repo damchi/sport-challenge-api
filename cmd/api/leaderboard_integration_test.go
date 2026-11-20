@@ -81,7 +81,7 @@ func newLeaderboardFixture(t *testing.T) leaderboardFixture {
 		for _, c := range []struct{ typ, params string }{
 			{challenge.CategoryCumulativeTime, `{}`},
 			{challenge.CategoryCumulativeDistance, `{"factors": {"run": 1, "ride": 0.3}}`},
-			{challenge.CategoryRunElimination, `{"sport": "run", "step_meters": 2000}`},
+			{challenge.CategoryElimination, `{"sport": "run", "step_meters": 2000}`},
 		} {
 			if _, err := pool.Exec(t.Context(), `INSERT INTO categories (challenge_id, type, position, params)
 				VALUES ($1, $2, (SELECT count(*) + 1 FROM categories WHERE challenge_id = $1), $3::jsonb)`, id, c.typ, c.params); err != nil {
@@ -130,7 +130,7 @@ func TestLeaderboardOfAPublicChallengeIsOpenToAStranger(t *testing.T) {
 	}{
 		{leaderboard.CategoryCumulativeTime, 3600},
 		{leaderboard.CategoryCumulativeDistance, 11000},
-		{leaderboard.CategoryRunElimination, 11000},
+		{leaderboard.CategoryElimination, 11000},
 	}
 	for i, w := range want {
 		c := got.Categories[i]

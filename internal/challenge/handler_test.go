@@ -211,7 +211,7 @@ func TestListChallengesMyWeek(t *testing.T) {
 	standings := fakeStandings{standings: map[string]Standing{running.ID: {Week: 2, WeekEndsAt: weekEnd, Rankings: []Ranking{
 		{Type: CategoryCumulativeTime, Rank: 1, RankedCount: 7},
 		{Type: CategoryCumulativeDistance, Rank: 5, RankedCount: 7},
-		{Type: CategoryRunElimination, Rank: 3, RankedCount: 7, Progress: &scoring.Progress{
+		{Type: CategoryElimination, Rank: 3, RankedCount: 7, Progress: &scoring.Progress{
 			Status: scoring.StatusAtRisk, MinimumMeters: &minimum, RunMeters: 6000, WeekEndsAt: weekEnd,
 		}},
 	}}}}
@@ -231,7 +231,7 @@ func TestListChallengesMyWeek(t *testing.T) {
 	want := `{"rankings":[` +
 		`{"elimination":null,"rank":1,"ranked_count":7,"type":"cumulative_time"},` +
 		`{"elimination":null,"rank":5,"ranked_count":7,"type":"cumulative_distance"},` +
-		`{"elimination":{"eliminated_week":null,"minimum_meters":7000,"run_meters":6000,"status":"at_risk","week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"},"rank":3,"ranked_count":7,"type":"run_elimination"}` +
+		`{"elimination":{"eliminated_week":null,"minimum_meters":7000,"run_meters":6000,"status":"at_risk","week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"},"rank":3,"ranked_count":7,"type":"elimination"}` +
 		`],"week":2,"week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"}`
 	if string(got) != want {
 		t.Fatalf("my_week\n%s\nwant\n%s", got, want)

@@ -49,7 +49,7 @@ type Draft struct {
 	// most a year ahead.
 	StartDate string
 	Weeks     int
-	// EliminationStepMeters is the increment X of the run elimination category.
+	// EliminationStepMeters is the increment X of the elimination category.
 	EliminationStepMeters int
 	// DistanceFactors are the factors the creator chose, by sport code; the
 	// other distance sports keep their suggested factor. run is the ×1

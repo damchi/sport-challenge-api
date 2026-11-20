@@ -318,7 +318,7 @@ func TestServiceCreate(t *testing.T) {
 	if len(c.Categories) != 3 {
 		t.Fatalf("%d categories, want 3", len(c.Categories))
 	}
-	wantTypes := []string{CategoryCumulativeTime, CategoryCumulativeDistance, CategoryRunElimination}
+	wantTypes := []string{CategoryCumulativeTime, CategoryCumulativeDistance, CategoryElimination}
 	for i, cat := range c.Categories {
 		if cat.Type != wantTypes[i] || cat.Position != i+1 {
 			t.Errorf("category %d = %s at %d, want %s at %d", i, cat.Type, cat.Position, wantTypes[i], i+1)
@@ -537,7 +537,7 @@ func TestServiceListStandings(t *testing.T) {
 		{ID: "finished", MyStatus: &active, StartsAt: now.Add(-14 * day), EndsAt: now},
 		ongoing("also running", &active),
 	}
-	cats := []Category{{Type: CategoryCumulativeTime, Position: 1}, {Type: CategoryRunElimination, Position: 3, Params: Params{Sport: "run", StepMeters: 2000}}}
+	cats := []Category{{Type: CategoryCumulativeTime, Position: 1}, {Type: CategoryElimination, Position: 3, Params: Params{Sport: "run", StepMeters: 2000}}}
 	standing := Standing{Week: 1, WeekEndsAt: now.Add(6 * day), Rankings: []Ranking{{Type: CategoryCumulativeTime, Rank: 2, RankedCount: 5}}}
 	repo := &fakeRepository{summaries: items, categoriesOf: map[string][]Category{"running": cats, "also running": cats}}
 	var asked []Challenge
@@ -1382,7 +1382,7 @@ func TestServiceActivitiesScope(t *testing.T) {
 			c.Categories = []Category{
 				{Type: CategoryCumulativeTime, Position: 1},
 				{Type: CategoryCumulativeDistance, Position: 2, Params: Params{Factors: factors}},
-				{Type: CategoryRunElimination, Position: 3, Params: Params{Sport: "run", StepMeters: 1000}},
+				{Type: CategoryElimination, Position: 3, Params: Params{Sport: "run", StepMeters: 1000}},
 			}
 			repo := &fakeRepository{challenge: c, membership: tt.actor, others: tt.others}
 			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", tt.userID)

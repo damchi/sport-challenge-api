@@ -135,8 +135,8 @@ func TestCreateStoresEverything(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `SELECT
 		(SELECT (params->'factors'->>'ride')::float8 FROM categories WHERE challenge_id = $1 AND type = 'cumulative_distance'),
 		(SELECT (params->'factors'->>'walk')::float8 FROM categories WHERE challenge_id = $1 AND type = 'cumulative_distance'),
-		(SELECT params->>'sport' FROM categories WHERE challenge_id = $1 AND type = 'run_elimination'),
-		(SELECT (params->>'step_meters')::float8 FROM categories WHERE challenge_id = $1 AND type = 'run_elimination')`, c.ID).Scan(&ride, &walk, &sport, &step); err != nil {
+		(SELECT params->>'sport' FROM categories WHERE challenge_id = $1 AND type = 'elimination'),
+		(SELECT (params->>'step_meters')::float8 FROM categories WHERE challenge_id = $1 AND type = 'elimination')`, c.ID).Scan(&ride, &walk, &sport, &step); err != nil {
 		t.Fatal(err)
 	}
 	if ride != 0.25 || walk != 1 || sport != "run" || step != 2000 {
@@ -191,7 +191,7 @@ func TestCreateStoresAPrivateChallenge(t *testing.T) {
 			t.Errorf("cumulative_time params %s, want {}", params)
 		}
 	}
-	if want := []string{"1 cumulative_time", "2 cumulative_distance", "3 run_elimination"}; !slices.Equal(got, want) {
+	if want := []string{"1 cumulative_time", "2 cumulative_distance", "3 elimination"}; !slices.Equal(got, want) {
 		t.Fatalf("categories %v, want %v", got, want)
 	}
 

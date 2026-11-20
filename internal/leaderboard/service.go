@@ -233,7 +233,7 @@ func (s *Service) scorerOf(cat Category) (scoring.Scorer, error) {
 		return scoring.Duration{}, nil
 	case CategoryCumulativeDistance:
 		return scoring.Distance{Factors: cat.Factors}, nil
-	case CategoryRunElimination:
+	case CategoryElimination:
 		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters, AtRisk: s.atRisk}, nil
 	default:
 		return nil, fmt.Errorf("unknown category type %q", cat.Type)
@@ -318,7 +318,7 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 			}
 			// As computed: a survivor of the elimination category has an empty
 			// progress once the challenge is over, an abandoned one has none.
-			if cat.Type == CategoryRunElimination && !e.Abandoned {
+			if cat.Type == CategoryElimination && !e.Abandoned {
 				r.Progress = &scoring.Progress{}
 				if e.EliminatedWeek > 0 {
 					r.Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
@@ -335,7 +335,7 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 // scorers count week by week; empty without such a category.
 func weeklySport(categories []Category) string {
 	for _, cat := range categories {
-		if cat.Type == CategoryRunElimination {
+		if cat.Type == CategoryElimination {
 			return cat.Sport
 		}
 	}

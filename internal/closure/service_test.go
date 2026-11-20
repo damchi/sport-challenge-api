@@ -351,7 +351,7 @@ func TestFinalizeChallenges(t *testing.T) {
 		Categories: []Category{
 			{ID: "cat1", Type: categoryCumulativeTime},
 			{ID: "cat2", Type: categoryCumulativeDistance, Factors: map[string]float64{"run": 1}},
-			{ID: "cat3", Type: categoryRunElimination, Sport: "run", StepMeters: 2000},
+			{ID: "cat3", Type: categoryElimination, Sport: "run", StepMeters: 2000},
 		},
 	}
 	run := func(week int, meters int) scoring.Activity {
@@ -406,7 +406,7 @@ func TestFinalizeChallenges(t *testing.T) {
 			t.Fatalf("snapshot at %v, want the instant of the clock", repo.snapshotAt)
 		}
 		// The last week is closed with the results (SC-API-089): only its
-		// eliminations, in the run elimination category.
+		// eliminations, in the elimination category.
 		wantLast := LastWeek{Number: 4, CategoryID: "cat3", Eliminated: []scoring.Eliminated{{UserID: "a", Week: 4, RunMeters: 10000, MinimumMeters: 11000}}}
 		if !reflect.DeepEqual(repo.last, wantLast) {
 			t.Fatalf("last week = %+v, want %+v", repo.last, wantLast)
@@ -538,7 +538,7 @@ func (s staleRepo) EndedChallenges(context.Context, time.Time) ([]EndedChallenge
 }
 
 func TestEliminationSport(t *testing.T) {
-	with := []Category{{Type: categoryCumulativeTime}, {Type: categoryRunElimination, Sport: "run"}}
+	with := []Category{{Type: categoryCumulativeTime}, {Type: categoryElimination, Sport: "run"}}
 	if got := eliminationSport(with); got != "run" {
 		t.Fatalf("with an elimination category: %q, want run", got)
 	}

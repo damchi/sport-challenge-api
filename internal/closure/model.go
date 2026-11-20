@@ -8,14 +8,14 @@ import (
 )
 
 // Challenge is a challenge whose weeks can be closed: not deleted and
-// started, with its run elimination category and the settings frozen at
+// started, with its elimination category and the settings frozen at
 // creation.
 type Challenge struct {
 	ID       string
 	Timezone string
 	StartsAt time.Time
 	EndsAt   time.Time
-	// CategoryID is the run elimination category, the one weeks are judged in.
+	// CategoryID is the elimination category, the one weeks are judged in.
 	CategoryID string
 	Sport      string
 	StepMeters int
@@ -47,7 +47,7 @@ type Category struct {
 	Type string
 	// Factors is the distance factor by sport code (cumulative_distance).
 	Factors map[string]float64
-	// Sport and StepMeters are the run elimination settings.
+	// Sport and StepMeters are the elimination settings.
 	Sport      string
 	StepMeters int
 }
@@ -62,7 +62,7 @@ type Snapshot struct {
 // LastWeek is the closure of the last week of a challenge, recorded with its
 // snapshots: the week ends with the challenge, so close-weeks leaves it to
 // the finalization. Eliminated are the eliminations judged that week in
-// category CategoryID, the run elimination one.
+// category CategoryID, the elimination one.
 type LastWeek struct {
 	Number     int
 	CategoryID string

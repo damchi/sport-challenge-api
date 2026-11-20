@@ -116,7 +116,7 @@ func twoWeeks(t *testing.T) Challenge {
 		Categories: []Category{
 			{Type: CategoryCumulativeTime},
 			{Type: CategoryCumulativeDistance, Factors: map[string]float64{"run": 1, "ride": 0.3}},
-			{Type: CategoryRunElimination, Sport: "run", StepMeters: 2000},
+			{Type: CategoryElimination, Sport: "run", StepMeters: 2000},
 		},
 	}
 }
@@ -163,7 +163,7 @@ func TestGetRanksEveryCategory(t *testing.T) {
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-		{Type: CategoryRunElimination, Entries: []Ranked{
+		{Type: CategoryElimination, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
@@ -335,7 +335,7 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 		snapshots: map[string]json.RawMessage{
 			CategoryCumulativeTime:     json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":9000,"abandoned":false},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
 			CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":28000,"abandoned":false},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
-			CategoryRunElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000,"abandoned":false},` +
+			CategoryElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000,"abandoned":false},` +
 				`{"user_id":"b","rank":2,"value":5000,"abandoned":false,"eliminated_week":2},{"user_id":"c","rank":0,"value":0,"abandoned":true}]}`),
 		},
 		frozenAt: frozenAt,
@@ -356,7 +356,7 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-		{Type: CategoryRunElimination, Entries: []Ranked{
+		{Type: CategoryElimination, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
@@ -380,7 +380,7 @@ func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 			`{"user_id":"a","rank":2,"value":9000},{"user_id":"b","rank":2,"value":9000},{"user_id":"e","rank":0,"value":0,"abandoned":true}]}`),
 		CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":28000},` +
 			`{"user_id":"d","rank":1,"value":28000},{"user_id":"b","rank":3,"value":5000}]}`),
-		CategoryRunElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},` +
+		CategoryElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},` +
 			`{"user_id":"d","rank":2,"value":9000,"eliminated_week":2},{"user_id":"b","rank":3,"value":5000,"eliminated_week":1}]}`),
 	}, deleted: map[string]bool{"d": true, "e": true}}
 	profiles := &recordingProfiles{fakeProfiles: pseudos}
@@ -399,7 +399,7 @@ func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
 		}},
-		{Type: CategoryRunElimination, Entries: []Ranked{
+		{Type: CategoryElimination, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 1}}, Name: bobName},
 		}},
@@ -421,7 +421,7 @@ func TestGetFrozenAfterTheErasure(t *testing.T) {
 	repo := &fakeRepo{snapshots: map[string]json.RawMessage{
 		CategoryCumulativeTime:     json.RawMessage(`{"entries":[{"user_id":"a","rank":2,"value":9000},{"user_id":"b","rank":2,"value":9000}]}`),
 		CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":28000},{"user_id":"b","rank":3,"value":5000}]}`),
-		CategoryRunElimination:     json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},{"user_id":"b","rank":3,"value":5000,"eliminated_week":1}]}`),
+		CategoryElimination:        json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},{"user_id":"b","rank":3,"value":5000,"eliminated_week":1}]}`),
 	}}
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt), time.Hour)
 
@@ -438,7 +438,7 @@ func TestGetFrozenAfterTheErasure(t *testing.T) {
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
 		}},
-		{Type: CategoryRunElimination, Entries: []Ranked{
+		{Type: CategoryElimination, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 1}}, Name: bobName},
 		}},
@@ -460,7 +460,7 @@ func TestGetComputesWhatIsNotFrozenYet(t *testing.T) {
 		{name: "still running, snapshots are not read", now: c.EndsAt.Add(-time.Second), snapshots: map[string]json.RawMessage{
 			CategoryCumulativeTime:     json.RawMessage(`{"entries":[]}`),
 			CategoryCumulativeDistance: json.RawMessage(`{"entries":[]}`),
-			CategoryRunElimination:     json.RawMessage(`{"entries":[]}`),
+			CategoryElimination:        json.RawMessage(`{"entries":[]}`),
 		}},
 	}
 	for _, tt := range tests {
@@ -489,10 +489,10 @@ func TestGetFrozenFailures(t *testing.T) {
 		{name: "deleted accounts not read", repo: &fakeRepo{deletedErr: boom, snapshots: map[string]json.RawMessage{
 			CategoryCumulativeTime:     json.RawMessage(`{"entries":[]}`),
 			CategoryCumulativeDistance: json.RawMessage(`{"entries":[]}`),
-			CategoryRunElimination:     json.RawMessage(`{"entries":[]}`),
+			CategoryElimination:        json.RawMessage(`{"entries":[]}`),
 		}}},
 		{name: "invalid payload: an error, not a computed ranking", repo: &fakeRepo{snapshots: map[string]json.RawMessage{
-			CategoryCumulativeTime: bad, CategoryCumulativeDistance: bad, CategoryRunElimination: bad,
+			CategoryCumulativeTime: bad, CategoryCumulativeDistance: bad, CategoryElimination: bad,
 		}}},
 	}
 	for _, tt := range tests {
@@ -515,7 +515,7 @@ func TestGetFrozenNamesEveryCategory(t *testing.T) {
 	repo := &fakeRepo{snapshots: map[string]json.RawMessage{
 		CategoryCumulativeTime:     json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":1}]}`),
 		CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":1},{"user_id":"b","rank":2,"value":0}]}`),
-		CategoryRunElimination:     json.RawMessage(`{"entries":[{"user_id":"b","rank":1,"value":1}]}`),
+		CategoryElimination:        json.RawMessage(`{"entries":[{"user_id":"b","rank":1,"value":1}]}`),
 	}}
 	profiles := &recordingProfiles{fakeProfiles: pseudos}
 	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt), time.Hour)
@@ -576,7 +576,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 1, WeekEndsAt: endOf(1), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000}, RankedCount: 2},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{RunMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 2},
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{RunMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 2},
 			}},
 		},
 		{
@@ -585,7 +585,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 2, WeekEndsAt: endOf(2), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000}, RankedCount: 2},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000, Progress: &scoring.Progress{
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000, Progress: &scoring.Progress{
 					Status: scoring.StatusInProgress, MinimumMeters: minimum(7000), RunMeters: 6000, WeekEndsAt: endOf(2),
 				}}, RankedCount: 2},
 			}},
@@ -596,7 +596,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 2, WeekEndsAt: endOf(2), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000}, RankedCount: 2},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000, Progress: &scoring.Progress{
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000, Progress: &scoring.Progress{
 					Status: scoring.StatusAtRisk, MinimumMeters: minimum(7000), RunMeters: 6000, WeekEndsAt: endOf(2),
 				}}, RankedCount: 2},
 			}},
@@ -607,7 +607,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 2, WeekEndsAt: endOf(2), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 12000}, RankedCount: 2},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 12000, Progress: &scoring.Progress{
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 12000, Progress: &scoring.Progress{
 					Status: scoring.StatusReached, MinimumMeters: minimum(7000), RunMeters: 7000, WeekEndsAt: endOf(2),
 				}}, RankedCount: 2},
 			}},
@@ -618,7 +618,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 3, WeekEndsAt: endOf(3), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000}, RankedCount: 2},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
 					Status: scoring.StatusEliminated, EliminatedWeek: 2,
 				}}, RankedCount: 2},
 			}},
@@ -630,7 +630,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 1, WeekEndsAt: endOf(1), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 3},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 3, Value: 5000}, RankedCount: 3},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 3, Value: 5000, Progress: &scoring.Progress{RunMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 3},
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 3, Value: 5000, Progress: &scoring.Progress{RunMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 3},
 			}},
 		},
 		{
@@ -639,7 +639,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 2, WeekEndsAt: endOf(2), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000}, RankedCount: 2},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{
 					Status: scoring.StatusInProgress, MinimumMeters: minimum(7000), RunMeters: 0, WeekEndsAt: endOf(2),
 				}}, RankedCount: 2},
 			}},
@@ -650,7 +650,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 3, WeekEndsAt: endOf(3), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000}, RankedCount: 2},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
 					Status: scoring.StatusInProgress, MinimumMeters: minimum(8000), RunMeters: 0, WeekEndsAt: endOf(3),
 				}}, RankedCount: 2},
 			}},
@@ -661,7 +661,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 3, WeekEndsAt: endOf(3), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000}, RankedCount: 2},
-				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
 					Status: scoring.StatusEliminated, EliminatedWeek: 2,
 				}}, RankedCount: 2},
 			}},
