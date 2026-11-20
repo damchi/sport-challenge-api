@@ -58,7 +58,14 @@ func (h *Handler) PatchMe(ctx context.Context, req api.PatchMeRequestObject) (ap
 	}
 	var changes ProfileChanges
 	if req.Body != nil {
-		changes.Pseudo = req.Body.Pseudo
+		if req.Body.Pseudo.IsSpecified() {
+			if req.Body.Pseudo.IsNull() {
+				changes.RemovePseudo = true
+			} else {
+				pseudo := req.Body.Pseudo.MustGet()
+				changes.Pseudo = &pseudo
+			}
+		}
 		changes.FirstName = req.Body.FirstName
 		changes.LastName = req.Body.LastName
 		if req.Body.Language != nil {

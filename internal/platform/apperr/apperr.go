@@ -18,8 +18,9 @@ const (
 	CodeInvalidToken    Code = "invalid_token"
 	CodeTokenExpired    Code = "token_expired"
 	CodeAccountDeleted  Code = "account_deleted"
-	// CodeProfileIncomplete refuses creating or joining a challenge until
-	// the pseudo is set: a condition to meet, not a missing right (422).
+	// CodeProfileIncomplete refuses creating or joining a challenge and
+	// recording an activity until the first and last names are set: a
+	// condition to meet, not a missing right (422).
 	CodeProfileIncomplete Code = "profile_incomplete"
 	CodeNotFound          Code = "not_found"
 	// CodeForbidden refuses an action on a resource the user may see.

@@ -89,9 +89,9 @@ paths:
       summary: Read my profile
       description: |
         Profile of the authenticated user, created empty on first login. The
-        profile is complete once the pseudo, the first name and the last name
-        are set: creating or joining a challenge requires it
-        (`profile_incomplete`). The e-mail comes from the access token and is
+        profile is complete once the first name and the last name are set, with
+        or without a pseudo: creating or joining a challenge and recording an
+        activity require it (`profile_incomplete`). The e-mail comes from the access token and is
         only ever returned here, to its owner.
       tags: [me]
       responses:
@@ -112,9 +112,10 @@ paths:
       summary: Update my profile
       description: |
         Changes the pseudo, the first name, the last name and the language.
-        An absent field is left unchanged; `null` is refused (none of them
-        can be removed). The e-mail is not editable: it comes from the auth
-        provider.
+        An absent field is left unchanged. `pseudo: null` removes the pseudo,
+        which is optional; `null` is refused for the other fields (the first
+        name, the last name and the language can be changed, never removed).
+        The e-mail is not editable: it comes from the auth provider.
       tags: [me]
       requestBody:
         required: true
@@ -340,7 +341,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "422":
-          description: The profile is incomplete (`profile_incomplete`); set the pseudo, first name and last name first.
+          description: The profile is incomplete (`profile_incomplete`); set the first name and last name first.
           content:
             application/json:
               schema:
@@ -1320,7 +1321,7 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/Pseudo"
-          description: Null until the user chooses one.
+          description: Null until the user chooses one, or once removed (optional).
         first_name:
           type: string
           nullable: true
@@ -1343,7 +1344,9 @@ components:
         avatar:
           type: string
           nullable: true
-          description: Avatar image; always null in V1, where the apps show the pseudo's initials.
+          description: |
+            Avatar image; always null in V1, where the apps show the initials
+            of the pseudo, or of the first and last names without one.
         language:
           type: string
           nullable: true
@@ -1352,13 +1355,22 @@ components:
           description: Null until the user chooses one.
         profile_complete:
           type: boolean
-          description: True once the pseudo, the first name and the last name are set.
+          description: True once the first name and the last name are set, with or without a pseudo.
     MeUpdate:
       type: object
       additionalProperties: false
       properties:
         pseudo:
-          $ref: "#/components/schemas/Pseudo"
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Pseudo"
+          description: "`null` removes the pseudo."
+          # Tells an absent pseudo (left as is) from null (removed).
+          x-go-type: nullable.Nullable[string]
+          x-go-type-skip-optional-pointer: true
+          x-go-type-import:
+            path: github.com/oapi-codegen/nullable
         first_name:
           $ref: "#/components/schemas/PersonName"
         last_name:
@@ -1580,7 +1592,9 @@ components:
         avatar:
           type: string
           nullable: true
-          description: Avatar image; always null in V1, where the apps show the pseudo's initials.
+          description: |
+            Avatar image; always null in V1, where the apps show the initials
+            of the pseudo, or of the first and last names without one.
         status:
           type: string
           enum: [active, abandoned]
@@ -1672,7 +1686,9 @@ components:
         avatar:
           type: string
           nullable: true
-          description: Avatar image; always null in V1, where the apps show the pseudo's initials.
+          description: |
+            Avatar image; always null in V1, where the apps show the initials
+            of the pseudo, or of the first and last names without one.
     EliminationProgress:
       type: object
       required: [status, eliminated_week, minimum_meters, run_meters, week_ends_at]

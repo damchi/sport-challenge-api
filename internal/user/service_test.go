@@ -318,11 +318,11 @@ func TestServiceProfileComplete(t *testing.T) {
 		wantCode apperr.Code
 	}{
 		{name: "pseudo and names set", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie"), FirstName: ptr("Marie"), LastName: ptr("Roy")}}, want: true},
-		{name: "no pseudo", repo: fakeRepository{user: User{ID: "u-1", FirstName: ptr("Marie"), LastName: ptr("Roy")}}},
+		{name: "names without a pseudo", repo: fakeRepository{user: User{ID: "u-1", FirstName: ptr("Marie"), LastName: ptr("Roy")}}, want: true},
 		// A profile from before the names: incomplete until they are set.
 		{name: "pseudo without names", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie")}}},
 		{name: "no last name", repo: fakeRepository{user: User{ID: "u-1", Pseudo: ptr("marie"), FirstName: ptr("Marie")}}},
-		// Anonymization clears the pseudo: a deleted account is deleted, not
+		// Anonymization clears the names: a deleted account is deleted, not
 		// incomplete (a request racing the deletion). The repository never
 		// returns an anonymized row: it answers errUserNotFound.
 		{name: "account deleted meanwhile", repo: fakeRepository{err: fmt.Errorf("read user: %w", errUserNotFound)}, wantErr: true, wantCode: apperr.CodeAccountDeleted},

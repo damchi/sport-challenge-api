@@ -27,11 +27,14 @@ type User struct {
 }
 
 // ProfileChanges are the profile fields to change; nil leaves a field as is.
+// RemovePseudo clears the pseudo, which is optional, and is never set with
+// Pseudo; the names and the language can only be changed.
 type ProfileChanges struct {
-	Pseudo    *string
-	FirstName *string
-	LastName  *string
-	Language  *string
+	Pseudo       *string
+	RemovePseudo bool
+	FirstName    *string
+	LastName     *string
+	Language     *string
 }
 
 // PublicName is what the other users see of a user: never the e-mail. Every
@@ -43,10 +46,11 @@ type PublicName struct {
 	LastName  *string
 }
 
-// ProfileComplete reports whether the user set a pseudo, a first name and a
-// last name, required to create or join a challenge.
+// ProfileComplete reports whether the user set a first name and a last name,
+// required to create or join a challenge and to record an activity; the
+// pseudo is optional.
 func (u User) ProfileComplete() bool {
-	return u.Pseudo != nil && u.FirstName != nil && u.LastName != nil
+	return u.FirstName != nil && u.LastName != nil
 }
 
 // subjectFingerprint is what is kept of the auth subject of a deleted

@@ -96,11 +96,11 @@ func (s *Service) Profile(ctx context.Context, actorID string) (User, error) {
 	return u, nil
 }
 
-// UpdateProfile changes the pseudo, the names and the language of user
-// actorID. Invalid fields answer 400 validation_failed; a pseudo already
-// taken, regardless of case, answers 409 validation_failed, both listing the
-// fields in params.fields; an account deleted meanwhile answers 401
-// account_deleted (as Profile).
+// UpdateProfile changes the pseudo (or removes it), the names and the
+// language of user actorID. Invalid fields answer 400 validation_failed; a
+// pseudo already taken, regardless of case, answers 409 validation_failed,
+// both listing the fields in params.fields; an account deleted meanwhile
+// answers 401 account_deleted (as Profile).
 func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes ProfileChanges) (User, error) {
 	if fields := invalidProfileFields(changes); len(fields) > 0 {
 		return User{}, apperr.InvalidFields(nil, fields...)
@@ -121,10 +121,11 @@ func (s *Service) UpdateProfile(ctx context.Context, actorID string, changes Pro
 }
 
 // ProfileComplete reports whether the profile of user id is complete
-// (pseudo, first name and last name set): creating or joining a challenge
-// requires it. An account deleted meanwhile answers account_deleted
-// (Profile), not an incomplete profile: anonymization clears the pseudo and
-// the names, and a request racing the deletion may come after it.
+// (first name and last name set, the pseudo is optional): creating or
+// joining a challenge and recording an activity require it. An account deleted meanwhile answers
+// account_deleted (Profile), not an incomplete profile: anonymization clears
+// the pseudo and the names, and a request racing the deletion may come
+// after it.
 func (s *Service) ProfileComplete(ctx context.Context, id string) (bool, error) {
 	u, err := s.Profile(ctx, id)
 	if err != nil {
