@@ -323,7 +323,7 @@ func TestListParticipants(t *testing.T) {
 	if _, ok := first["email"]; ok {
 		t.Fatalf("first item %v carries an e-mail", first)
 	}
-	// An anonymized account: pseudo and names null, for the apps' neutral name.
+	// No name (account deleted after the listing was read): pseudo and names null.
 	for _, field := range []string{"pseudo", "first_name", "last_name"} {
 		if v, ok := second[field]; !ok || v != nil || second["status"] != "abandoned" {
 			t.Fatalf("second item %v, want abandoned with a null %s", second, field)

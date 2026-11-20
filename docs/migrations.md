@@ -62,6 +62,12 @@ Du plus sûr au plus risqué :
 
 - Le premier `migrate up` crée toutes les tables : vérifier que l'utilisateur `sport` a le droit de créer dans le schéma `public` sur Cloud SQL (PostgreSQL 15 et plus ont retiré ce droit par défaut). S'il manque, il se donne une fois, à la main, puis le job réussit.
 
+## En-têtes antérieurs à l'effacement des comptes supprimés
+
+Les commentaires des migrations `000004` à `000009` décrivent l'état d'avant SC-API-117, où les lignes d'un compte supprimé restaient en base : « results stay when a user is anonymized » (`000004`, `000007`), « the deleted account's row stays, anonymized, so that results are not changed » (`000005`), « an anonymized account keeps its activities » (`000006`), « an account anonymized later shows under a neutral name » (`000008`), « an account is anonymized, never removed » (`000009`). Ces migrations sont appliquées : elles ne se modifient pas.
+
+Le comportement actuel : à la suppression d'un compte, dans la même transaction, la ligne de `users` est anonymisée et reste (notamment pour `created_by` des challenges créés par le compte), et toutes les autres lignes du compte sont **effacées**, challenges terminés compris : activités, participations, éliminations, rôles de créateur, invitations créées (avec leurs liens), liens aux invitations des autres, et entrées des résultats figés (`result_snapshot`, l'ordre des autres est gardé et les rangs sont recalculés à la lecture). L'absence de cascade reste voulue : l'effacement est fait par le code, module par module, jamais par la base.
+
 ## Limite connue
 
 L'API et le job de migration utilisent les mêmes identifiants de base de données : l'API tourne donc avec un rôle qui a les droits de modifier le schéma. Un durcissement possible, plus tard : deux rôles PostgreSQL (un pour les migrations, un limité aux lectures et écritures pour l'API) et deux secrets.

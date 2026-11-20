@@ -146,7 +146,7 @@ func (s *Service) ProfileComplete(ctx context.Context, id string) (bool, error) 
 
 // PublicNames returns what the other users see of each user of ids: pseudo,
 // first name and last name, never the e-mail. An anonymized user is left
-// out, and the apps show a neutral name.
+// out, like an unknown one: a deleted account is listed nowhere.
 func (s *Service) PublicNames(ctx context.Context, ids []string) (map[string]PublicName, error) {
 	if len(ids) == 0 {
 		return map[string]PublicName{}, nil
