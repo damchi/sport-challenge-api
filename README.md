@@ -522,7 +522,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Exclure un participant | créateurs (✅) |
 | Créer un badge | créateurs (✅) |
 | Modifier ou supprimer un badge | créateurs, tant que personne ne l'a gagné (🟡) |
-| Saisir une activité | l'utilisateur, pour lui-même, hors des semaines terminées des challenges où elle compte (✅, ADR 0001) |
+| Saisir une activité | l'utilisateur, pour lui-même, hors des semaines verrouillées des challenges où elle compte (7 h le premier jour de la semaine suivante) (✅, ADR 0001) |
 | Modifier ou supprimer une activité | son auteur, tant que sa semaine n'est verrouillée dans aucun challenge où elle compte (✅, ADR 0001) |
 | Abandonner (« quitter ») un challenge | le participant, pour lui-même ; équivaut à un abandon définitif (✅) |
 | Supprimer le challenge | créateurs, à tout moment (✅) |
