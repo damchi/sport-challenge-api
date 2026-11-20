@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -202,6 +203,46 @@ func TestNotNull(t *testing.T) {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23502" || pgErr.ColumnName != "joined_at" {
 		t.Fatalf("error = %v, want joined_at NOT NULL (no default: set from platform/clock)", err)
+	}
+}
+
+// TestErasureIndexes checks that each query of the deletion of an account
+// filtering by user can use the index made for it. The test tables are tiny,
+// so sequential scans are disabled: the plan then shows whether an index
+// serves the query at all.
+func TestErasureIndexes(t *testing.T) {
+	pool := testdb.New(t)
+	tests := []struct {
+		name  string
+		query string
+		index string
+	}{
+		{name: "activities", query: "DELETE FROM activities WHERE user_id = '" + userID + "'", index: "activities_user_id_idx"},
+		{name: "creator roles", query: "DELETE FROM challenge_creators WHERE user_id = '" + userID + "'", index: "challenge_creators_user_id_idx"},
+		{name: "challenges created (LastCreatorChallenges)", query: "SELECT challenge_id FROM challenge_creators WHERE user_id = '" + userID + "'", index: "challenge_creators_user_id_idx"},
+		{name: "eliminations", query: "DELETE FROM elimination WHERE user_id = '" + userID + "'", index: "elimination_user_id_challenge_id_idx"},
+		// The check of elimination_participant_fkey when a participation is deleted.
+		{name: "elimination of a participation", query: "SELECT 1 FROM elimination WHERE challenge_id = '" + challengeID + "' AND user_id = '" + userID + "'", index: "elimination_user_id_challenge_id_idx"},
+		{name: "invitations", query: "DELETE FROM invitations WHERE invited_by = '" + userID + "'", index: "invitations_invited_by_idx"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx, err := pool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(t.Context()) }()
+			if _, err := tx.Exec(t.Context(), "SET LOCAL enable_seqscan = off"); err != nil {
+				t.Fatal(err)
+			}
+			var plan string
+			if err := tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+tt.query).Scan(&plan); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(plan, `"Index Name": "`+tt.index+`"`) {
+				t.Fatalf("plan of %q does not use %s: %s", tt.query, tt.index, plan)
+			}
+		})
 	}
 }
 
