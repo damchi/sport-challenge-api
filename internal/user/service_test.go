@@ -468,6 +468,76 @@ func TestServiceDeleteSurvivesTheClientLeaving(t *testing.T) {
 	}
 }
 
+func TestServiceDeleteBoundsThePendingRemoval(t *testing.T) {
+	tests := []struct {
+		name      string
+		leaves    bool
+		removeErr error
+		wantLog   string
+	}{
+		{name: "removed within the deadline"},
+		// The client left once the account was deleted: the removal still runs.
+		{name: "client gone before the end", leaves: true},
+		// The pool stays full past the deadline: the worker replays the deletion.
+		{name: "removal past the deadline", removeErr: context.DeadlineExceeded, wantLog: "not removed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			participations := abandonThen(func() {})
+			if tt.leaves {
+				participations = abandonThen(cancel)
+			}
+			repo := &deadlineRepository{
+				fakeRepository: fakeRepository{user: User{ID: "u-1", AuthSubject: "email|1"}},
+				err:            tt.removeErr,
+			}
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			err := NewService(repo, participations, nil, &ctxIdentities{}, clock.Real{}, logger).Delete(ctx, "u-1")
+			end := time.Now()
+			if err != nil {
+				t.Fatalf("error = %v, want nil: the account is deleted", err)
+			}
+			if !repo.called || repo.ctxErr != nil {
+				t.Fatalf("removal called %v with a context error %v, want called, not cancelled", repo.called, repo.ctxErr)
+			}
+			// Set when the removal starts, so at most the timeout after the call ends.
+			if !repo.hasDeadline || repo.deadline.After(end.Add(pendingRemovalTimeout)) {
+				t.Fatalf("removal deadline %v (set %v), want within %v", repo.deadline.Sub(end), repo.hasDeadline, pendingRemovalTimeout)
+			}
+			if tt.wantLog == "" && logs.Len() > 0 {
+				t.Fatalf("logs %q, want none", logs.String())
+			}
+			if tt.wantLog != "" && (!strings.Contains(logs.String(), tt.wantLog) || !strings.Contains(logs.String(), `"level":"WARN"`)) {
+				t.Fatalf("logs %q, want a warning %q", logs.String(), tt.wantLog)
+			}
+			if strings.Contains(logs.String(), "email|1") {
+				t.Fatalf("logs %q carry the subject", logs.String())
+			}
+		})
+	}
+}
+
+// deadlineRepository records the context of RemovePendingAuth0Deletion and
+// fails it with err.
+type deadlineRepository struct {
+	fakeRepository
+	err         error
+	called      bool
+	ctxErr      error
+	deadline    time.Time
+	hasDeadline bool
+}
+
+func (d *deadlineRepository) RemovePendingAuth0Deletion(ctx context.Context, _ string) error {
+	d.called = true
+	d.ctxErr = ctx.Err()
+	d.deadline, d.hasDeadline = ctx.Deadline()
+	return d.err
+}
+
 type ctxIdentities struct{ ctxErr error }
 
 func (c *ctxIdentities) DeleteUser(ctx context.Context, _ string) error {
