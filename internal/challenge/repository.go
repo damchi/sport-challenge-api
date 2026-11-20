@@ -136,10 +136,10 @@ var errChallengeNotFound = errors.New("challenge not found")
 // abandoned participant, or of a deleted account, give nothing. The
 // token never reaches this query: only the link, recorded when the user
 // opened the invitation, counts. account_deleted tells whether @actor's
-// account was deleted (anonymized), participant_count is that of a summary. It never takes a lock: under READ
-// COMMITTED, a statement that waits for a lock keeps the snapshot taken
-// before the wait, so its
-// membership subqueries would miss a participation committed meanwhile.
+// account was deleted (anonymized). participant_count is that of a summary
+// (participantCountColumn). It never takes a lock: under READ COMMITTED, a
+// statement that waits for a lock keeps the snapshot taken before the wait, so
+// its membership subqueries would miss a participation committed meanwhile.
 // Join locks the challenge in a statement of its own, then runs this query.
 const membershipQuery = `SELECT c.*,
 	EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
