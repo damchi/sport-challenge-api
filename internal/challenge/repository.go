@@ -58,14 +58,18 @@ func (r *Repository) Create(ctx context.Context, c Challenge, joinedAt time.Time
 	return c, nil
 }
 
-// listColumns are the columns of a Summary; participant_count counts every
-// participation, abandoned included, but those of deleted accounts. The
-// membership of @actor is read as in membershipQuery, so a summary gives the
-// same role as the challenge itself.
+// participantCountColumn counts the participations of challenge c,
+// abandoned included, but those of deleted accounts; a summary and the
+// detail both read it.
+const participantCountColumn = `(SELECT count(*) FROM participants p JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
+        WHERE p.challenge_id = c.id)`
+
+// listColumns are the columns of a Summary. The membership of @actor is read
+// as in membershipQuery, so a summary gives the same role as the challenge
+// itself.
 const listColumns = `
 SELECT c.id, c.title, c.visibility, c.timezone, c.starts_at, c.ends_at,
-       (SELECT count(*) FROM participants p JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
-        WHERE p.challenge_id = c.id) AS participant_count,
+       ` + participantCountColumn + ` AS participant_count,
        me.status AS my_status,
        EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
        ` + invitedColumn + ` AS invited
@@ -132,7 +136,7 @@ var errChallengeNotFound = errors.New("challenge not found")
 // abandoned participant, or of a deleted account, give nothing. The
 // token never reaches this query: only the link, recorded when the user
 // opened the invitation, counts. account_deleted tells whether @actor's
-// account was deleted (anonymized). It never takes a lock: under READ
+// account was deleted (anonymized), participant_count is that of a summary. It never takes a lock: under READ
 // COMMITTED, a statement that waits for a lock keeps the snapshot taken
 // before the wait, so its
 // membership subqueries would miss a participation committed meanwhile.
@@ -141,7 +145,8 @@ const membershipQuery = `SELECT c.*,
 	EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
 	(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant,
 	` + invitedColumn + ` AS invited,
-	EXISTS (SELECT 1 FROM users WHERE id = @actor AND anonymized_at IS NOT NULL) AS account_deleted
+	EXISTS (SELECT 1 FROM users WHERE id = @actor AND anonymized_at IS NOT NULL) AS account_deleted,
+	` + participantCountColumn + ` AS participant_count
 	FROM challenges c WHERE c.id = @id AND c.deleted_at IS NULL`
 
 // invitedColumn tells whether @actor is invited to challenge c at @now (see
@@ -158,10 +163,11 @@ const invitedColumn = `EXISTS (SELECT 1 FROM invitation_recipients r JOIN invita
 func readWithMembership(gdb *gorm.DB, id, actorID string, now time.Time) (Challenge, Membership, error) {
 	var row struct {
 		Challenge
-		Creator        bool
-		Participant    *string
-		Invited        bool
-		AccountDeleted bool
+		Creator          bool
+		Participant      *string
+		Invited          bool
+		AccountDeleted   bool
+		ParticipantCount int
 	}
 	err := gdb.Raw(membershipQuery, map[string]any{"id": id, "actor": actorID, "now": now}).Scan(&row).Error
 	if err != nil {
@@ -174,7 +180,9 @@ func readWithMembership(gdb *gorm.DB, id, actorID string, now time.Time) (Challe
 	if row.Participant != nil {
 		m.Participant = ParticipantStatus(*row.Participant)
 	}
-	return row.Challenge, m, nil
+	c := row.Challenge
+	c.ParticipantCount = row.ParticipantCount
+	return c, m, nil
 }
 
 // Get returns the challenge id unless deleted, without its categories, and
