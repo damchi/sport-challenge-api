@@ -356,7 +356,8 @@ func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 		CategoryRunElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},` +
 			`{"user_id":"d","rank":2,"value":9000,"eliminated_week":2},{"user_id":"b","rank":3,"value":5000,"eliminated_week":1}]}`),
 	}, deleted: map[string]bool{"d": true, "e": true}}
-	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt), time.Hour)
+	profiles := &recordingProfiles{fakeProfiles: pseudos}
+	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt), time.Hour)
 
 	got, err := svc.Get(t.Context(), "actor", "c1")
 	if err != nil {
@@ -378,6 +379,9 @@ func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Categories, want) {
 		t.Fatalf("Get() = %+v, want %+v", got.Categories, want)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(profiles.asked, want) {
+		t.Fatalf("names asked for %v, want %v: never a deleted account", profiles.asked, want)
 	}
 }
 

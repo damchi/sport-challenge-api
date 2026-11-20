@@ -186,7 +186,14 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 	if err != nil {
 		return Leaderboard{}, false, err
 	}
-	names, err := s.profiles.Names(ctx, ids)
+	// The names of the deleted accounts are not even asked for.
+	kept := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !deleted[id] {
+			kept = append(kept, id)
+		}
+	}
+	names, err := s.profiles.Names(ctx, kept)
 	if err != nil {
 		return Leaderboard{}, false, fmt.Errorf("read names: %w", err)
 	}
