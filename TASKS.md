@@ -106,9 +106,9 @@ Tickets déplacés ou réduits : 012 (seulement CORS), 022 (limitation de débit
 
 ## Périmètre de la V1 : aller le plus vite possible
 
-Le frontend démarre en **web uniquement** (le mobile viendra en V2) et la V1 repose sur la saisie manuelle. Le backlog complet compte **69 tickets et 225 points** (E0 : 7 · E1 : 7 · E2 : 31 · E3 : 3 · E4 : 42 · E5 : 21 · E6 : 27 · E7 : 17 · E8 : 31 · E9 : 39).
+Le frontend démarre en **web uniquement** (le mobile viendra en V2) et la V1 repose sur la saisie manuelle.
 
-**Décision D10 ✅** : les badges et l'upload d'avatar sont **reportés à une V1.1** pour sortir la V1 plus vite. La V1 compte donc **197 points** (225 − 28). Au lancement, les avatars sont des **initiales par défaut**.
+**Décision D10 ✅** : les badges et l'upload d'avatar sont **reportés à une V1.1** pour sortir la V1 plus vite. Au lancement, les avatars sont des **initiales par défaut**.
 
 | Reporté en V1.1 | Tickets | Points | Effet |
 |---|---|---|---|
@@ -117,7 +117,7 @@ Le frontend démarre en **web uniquement** (le mobile viendra en V2) et la V1 re
 
 À **garder** même pour aller vite : fondations et CI (E0, E1), authentification (E2), catalogue de sports, challenges et participation (E4), activités avec verrouillage de semaine (E5), classement des 3 catégories (E6), clôtures et résultats figés (E7), invitations (065 et 066, indispensables aux challenges privés), limitation de débit (022) et un déploiement minimal reproductible (067, 069 à 071, 073, 076, 077). L'observabilité (072) et le runbook (074) peuvent être réduits à l'essentiel mais pas supprimés : alerte de budget et alerte d'échec du worker comprises.
 
-Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` ne les prend jamais.
+Les tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` ne les prend jamais.
 
 ## Épopées
 
