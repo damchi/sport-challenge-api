@@ -22,6 +22,7 @@ type repository interface {
 	// invitations at now (Membership.Invited).
 	Get(ctx context.Context, id, actorID string, now time.Time) (Challenge, Membership, error)
 	Categories(ctx context.Context, id string) ([]Category, error)
+	CategoriesOf(ctx context.Context, ids []string) (map[string][]Category, error)
 	UpdateText(ctx context.Context, id string, changes TextChanges) error
 	Join(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error
 	Abandon(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (bool, time.Time, error)) error
@@ -48,17 +49,26 @@ type Catalogue interface {
 	SuggestedFactors(ctx context.Context) (map[string]float64, error)
 }
 
+// Standings gives where actorID stands in each of challenges that is in its
+// weeks at now and where they are an active participant, by challenge ID;
+// the others are left out (module leaderboard). challenges carry their
+// categories.
+type Standings interface {
+	Standings(ctx context.Context, actorID string, challenges []Challenge, now time.Time) (map[string]Standing, error)
+}
+
 // Service holds the use cases of the challenges.
 type Service struct {
 	repo      repository
 	profiles  Profiles
 	catalogue Catalogue
+	standings Standings
 	clock     clock.Clock
 }
 
 // NewService returns a Service.
-func NewService(repo repository, profiles Profiles, catalogue Catalogue, c clock.Clock) *Service {
-	return &Service{repo: repo, profiles: profiles, catalogue: catalogue, clock: c}
+func NewService(repo repository, profiles Profiles, catalogue Catalogue, standings Standings, c clock.Clock) *Service {
+	return &Service{repo: repo, profiles: profiles, catalogue: catalogue, standings: standings, clock: c}
 }
 
 // Create creates the challenge described by draft, with actorID as its
@@ -127,7 +137,9 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 // List returns a page of challenges for actorID: public ones, or those the
 // actor created or joined. The status filter and the status of each
 // challenge use the same instant of the clock. The visibility rules are
-// applied by the query itself, never by filtering a loaded list.
+// applied by the query itself, never by filtering a loaded list. In the
+// actor's own list, each ongoing challenge they are an active participant
+// of has their standing (MyWeek), read for the whole page at once.
 func (s *Service) List(ctx context.Context, actorID, scope, status string, limit int, after *Position) (Page, error) {
 	if limit < 1 {
 		return Page{}, apperr.InvalidFields(nil, "limit")
@@ -156,7 +168,46 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 		last := page.Items[limit-1]
 		page.Next = &Position{StartsAt: last.StartsAt, ID: last.ID}
 	}
+	if scope == ScopeMine {
+		if err := s.addStandings(ctx, actorID, page.Items, now); err != nil {
+			return Page{}, err
+		}
+	}
 	return page, nil
+}
+
+// addStandings sets MyWeek on the ongoing challenges of items where actorID
+// is an active participant, at now, the instant of their status: the
+// categories and the standings each read once for all of them.
+func (s *Service) addStandings(ctx context.Context, actorID string, items []Summary, now time.Time) error {
+	var running []Challenge
+	var ids []string
+	for _, it := range items {
+		if it.Status == StatusOngoing && it.MyStatus != nil && ParticipantStatus(*it.MyStatus) == ParticipantActive {
+			running = append(running, Challenge{ID: it.ID, Timezone: it.Timezone, StartsAt: it.StartsAt, EndsAt: it.EndsAt})
+			ids = append(ids, it.ID)
+		}
+	}
+	if len(running) == 0 {
+		return nil
+	}
+	categories, err := s.repo.CategoriesOf(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("list challenges: %w", err)
+	}
+	for i := range running {
+		running[i].Categories = categories[running[i].ID]
+	}
+	standings, err := s.standings.Standings(ctx, actorID, running, now)
+	if err != nil {
+		return fmt.Errorf("list challenges: %w", err)
+	}
+	for i := range items {
+		if st, ok := standings[items[i].ID]; ok {
+			items[i].MyWeek = &st
+		}
+	}
+	return nil
 }
 
 // Participants returns a page of the participants of challenge id, visible

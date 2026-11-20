@@ -43,17 +43,37 @@ type fakeRepo struct {
 	// sport summed per week.
 	from, to time.Time
 	weekly   string
+	// participantsOf and activitiesOf replace participants and activities
+	// for the challenges they hold; scopes are the last ones asked for.
+	participantsOf map[string][]scoring.Participant
+	activitiesOf   map[string][]scoring.Activity
+	scopes         []Scope
 }
 
-func (f *fakeRepo) Participants(context.Context, string) ([]scoring.Participant, error) {
+func (f *fakeRepo) ParticipantsOf(_ context.Context, ids []string) (map[string][]scoring.Participant, error) {
 	f.calls++
-	return f.participants, f.err
+	out := make(map[string][]scoring.Participant, len(ids))
+	for _, id := range ids {
+		out[id] = f.participants
+		if p, ok := f.participantsOf[id]; ok {
+			out[id] = p
+		}
+	}
+	return out, f.err
 }
 
-func (f *fakeRepo) Activities(_ context.Context, _ string, w scoring.Window, weeklySport string) ([]scoring.Activity, error) {
+func (f *fakeRepo) ActivitiesOf(_ context.Context, scopes []Scope) (map[string][]scoring.Activity, error) {
 	f.calls++
-	f.from, f.to, f.weekly = w.Start, w.End, weeklySport
-	return f.activities, f.err
+	f.scopes = scopes
+	out := make(map[string][]scoring.Activity, len(scopes))
+	for _, sc := range scopes {
+		f.from, f.to, f.weekly = sc.Window.Start, sc.Window.End, sc.WeeklySport
+		out[sc.ChallengeID] = f.activities
+		if a, ok := f.activitiesOf[sc.ChallengeID]; ok {
+			out[sc.ChallengeID] = a
+		}
+	}
+	return out, f.err
 }
 
 func (f *fakeRepo) Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error) {
@@ -513,4 +533,234 @@ type recordingProfiles struct {
 func (r *recordingProfiles) Names(ctx context.Context, ids []string) (map[string]Name, error) {
 	r.asked = ids
 	return r.fakeProfiles.Names(ctx, ids)
+}
+
+// threeWeeks is twoWeeks lasting 3 weeks: a week runs after an elimination.
+func threeWeeks(t *testing.T) Challenge {
+	t.Helper()
+	c := twoWeeks(t)
+	c.EndsAt = c.StartsAt.AddDate(0, 0, 21)
+	return c
+}
+
+func TestStandings(t *testing.T) {
+	c := threeWeeks(t)
+	loc := toronto(t)
+	at := func(day, hour int) time.Time { return time.Date(2026, 6, day, hour, 0, 0, 0, loc).UTC() }
+	run := func(user string, day, distance int) scoring.Activity {
+		return scoring.Activity{UserID: user, SportCode: "run", StartedAt: at(day, 7), DurationSeconds: 3600, DistanceMeters: meters(distance)}
+	}
+	endOf := func(week int) time.Time { return at(1+7*week, 0) }
+	everyone := []scoring.Participant{{UserID: "a"}, {UserID: "b"}, {UserID: "c", Abandoned: true}}
+	// a and b run 5 km in week 1: equal everywhere.
+	week1 := []scoring.Activity{run("a", 2, 5000), run("b", 2, 5000), run("c", 2, 9000)}
+	minimum := func(m int) *int { return &m }
+	tests := []struct {
+		name         string
+		now          time.Time
+		participants []scoring.Participant
+		activities   []scoring.Activity
+		// want is nil when the challenge is left out.
+		want *Standing
+	}{
+		{
+			name: "week 1: equal ones share the rank, no minimum nor status",
+			now:  at(3, 12), participants: everyone, activities: week1,
+			want: &Standing{Week: 1, WeekEndsAt: endOf(1), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 2},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000}, RankedCount: 2},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{RunMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 2},
+			}},
+		},
+		{
+			name: "week 2, under the minimum: in progress",
+			now:  at(10, 12), participants: everyone, activities: append(week1, run("a", 9, 6000)),
+			want: &Standing{Week: 2, WeekEndsAt: endOf(2), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000}, RankedCount: 2},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000, Progress: &scoring.Progress{
+					Status: scoring.StatusInProgress, MinimumMeters: minimum(7000), RunMeters: 6000, WeekEndsAt: endOf(2),
+				}}, RankedCount: 2},
+			}},
+		},
+		{
+			name: "week 2, under the minimum 24 h before the end: at risk",
+			now:  endOf(2).Add(-24 * time.Hour), participants: everyone, activities: append(week1, run("a", 9, 6000)),
+			want: &Standing{Week: 2, WeekEndsAt: endOf(2), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000}, RankedCount: 2},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000, Progress: &scoring.Progress{
+					Status: scoring.StatusAtRisk, MinimumMeters: minimum(7000), RunMeters: 6000, WeekEndsAt: endOf(2),
+				}}, RankedCount: 2},
+			}},
+		},
+		{
+			name: "week 2, the minimum run: reached",
+			now:  endOf(2).Add(-time.Hour), participants: everyone, activities: append(week1, run("a", 9, 7000)),
+			want: &Standing{Week: 2, WeekEndsAt: endOf(2), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 12000}, RankedCount: 2},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 12000, Progress: &scoring.Progress{
+					Status: scoring.StatusReached, MinimumMeters: minimum(7000), RunMeters: 7000, WeekEndsAt: endOf(2),
+				}}, RankedCount: 2},
+			}},
+		},
+		{
+			name: "week 3, eliminated in week 2: ranked after the survivor",
+			now:  at(16, 12), participants: everyone, activities: append(week1, run("a", 9, 6000), run("b", 9, 7000)),
+			want: &Standing{Week: 3, WeekEndsAt: endOf(3), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000}, RankedCount: 2},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
+					Status: scoring.StatusEliminated, EliminatedWeek: 2,
+				}}, RankedCount: 2},
+			}},
+		},
+		{
+			name: "two ahead with the same value: third, after the gap",
+			now:  at(3, 12), participants: []scoring.Participant{{UserID: "a"}, {UserID: "b"}, {UserID: "d"}},
+			activities: []scoring.Activity{run("a", 2, 5000), run("b", 2, 6000), run("d", 2, 6000)},
+			want: &Standing{Week: 1, WeekEndsAt: endOf(1), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 3},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 3, Value: 5000}, RankedCount: 3},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 3, Value: 5000, Progress: &scoring.Progress{RunMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 3},
+			}},
+		},
+		{
+			name: "at the exact end of week 1: week 2, with its minimum",
+			now:  endOf(1), participants: everyone, activities: week1,
+			want: &Standing{Week: 2, WeekEndsAt: endOf(2), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 2},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000}, RankedCount: 2},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{
+					Status: scoring.StatusInProgress, MinimumMeters: minimum(7000), RunMeters: 0, WeekEndsAt: endOf(2),
+				}}, RankedCount: 2},
+			}},
+		},
+		{
+			name: "at the exact end of week 2: week 3, already eliminated",
+			now:  endOf(2), participants: everyone, activities: append(week1, run("a", 9, 6000), run("b", 9, 7000)),
+			want: &Standing{Week: 3, WeekEndsAt: endOf(3), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000}, RankedCount: 2},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
+					Status: scoring.StatusEliminated, EliminatedWeek: 2,
+				}}, RankedCount: 2},
+			}},
+		},
+		{
+			name: "abandoned: left out", now: at(3, 12), activities: week1,
+			participants: []scoring.Participant{{UserID: "a", Abandoned: true}, {UserID: "b"}},
+		},
+		{
+			name: "not a participant: left out", now: at(3, 12), activities: week1,
+			participants: []scoring.Participant{{UserID: "b"}},
+		},
+		{name: "before the start: left out", now: c.StartsAt.Add(-time.Second), participants: everyone, activities: week1},
+		{name: "at the end: left out", now: c.EndsAt, participants: everyone, activities: week1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepo{participants: tt.participants, activities: tt.activities}
+			// The instant is the caller's, never the service's clock.
+			svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), 24*time.Hour)
+			got, err := svc.Standings(t.Context(), "a", []Challenge{c}, tt.now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			st, ok := got["c1"]
+			if tt.want == nil {
+				if ok {
+					t.Fatalf("Standings() = %+v, want c1 left out", st)
+				}
+				return
+			}
+			if !ok || !reflect.DeepEqual(st, *tt.want) {
+				t.Fatalf("Standings() = %+v, want %+v", st, *tt.want)
+			}
+		})
+	}
+}
+
+func TestStandingsReadsEveryChallengeAtOnce(t *testing.T) {
+	first := threeWeeks(t)
+	second := threeWeeks(t)
+	second.ID = "c2"
+	gone := threeWeeks(t)
+	gone.ID = "c3"
+	ended := threeWeeks(t)
+	ended.ID, ended.StartsAt, ended.EndsAt = "c4", first.StartsAt.AddDate(0, 0, -21), first.StartsAt
+	loc := toronto(t)
+	repo := &fakeRepo{
+		participants: []scoring.Participant{{UserID: "a"}},
+		participantsOf: map[string][]scoring.Participant{
+			"c2": {{UserID: "a"}, {UserID: "b"}},
+			"c3": {{UserID: "a", Abandoned: true}},
+		},
+		activitiesOf: map[string][]scoring.Activity{
+			"c2": {{UserID: "b", SportCode: "run", StartedAt: time.Date(2026, 6, 2, 7, 0, 0, 0, loc), DurationSeconds: 60, DistanceMeters: meters(1000)}},
+		},
+	}
+	svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), 24*time.Hour)
+
+	got, err := svc.Standings(t.Context(), "a", []Challenge{first, second, gone, ended}, time.Date(2026, 6, 3, 12, 0, 0, 0, loc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.calls != 2 {
+		t.Fatalf("%d reads, want 2 whatever the number of challenges", repo.calls)
+	}
+	// Neither the abandoned challenge nor the ended one has its activities read.
+	if len(repo.scopes) != 2 || repo.scopes[0].ChallengeID != "c1" || repo.scopes[1].ChallengeID != "c2" {
+		t.Fatalf("activities read for %+v, want c1 and c2", repo.scopes)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Standings() = %+v, want c1 and c2", got)
+	}
+	if p := got["c2"].Categories[0]; p.Entry.Rank != 2 || p.RankedCount != 2 {
+		t.Fatalf("c2 time ranking = %+v, want rank 2 of 2", p)
+	}
+	if p := got["c1"].Categories[0]; p.Entry.Rank != 1 || p.RankedCount != 1 {
+		t.Fatalf("c1 time ranking = %+v, want rank 1 of 1", p)
+	}
+}
+
+func TestStandingsFailures(t *testing.T) {
+	boom := errors.New("boom")
+	c := threeWeeks(t)
+	now := c.StartsAt.Add(time.Hour)
+	bad := c
+	bad.Timezone = "Nowhere/Else"
+	tests := []struct {
+		name       string
+		challenges []Challenge
+		repo       *fakeRepo
+		wantCalls  int
+	}{
+		{name: "unknown time zone: nothing is loaded", challenges: []Challenge{bad}, repo: &fakeRepo{}},
+		{name: "storage failure", challenges: []Challenge{c}, repo: &fakeRepo{err: boom}, wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(&fakeChallenges{}, pseudos, tt.repo, clock.NewFake(time.Time{}), time.Hour)
+			if _, err := svc.Standings(t.Context(), "a", tt.challenges, now); err == nil {
+				t.Fatal("Standings() error = nil, want one")
+			}
+			if tt.repo.calls != tt.wantCalls {
+				t.Fatalf("%d reads, want %d", tt.repo.calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestStandingsWithoutChallengeInItsWeeks(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), time.Hour)
+	got, err := svc.Standings(t.Context(), "a", []Challenge{threeWeeks(t)}, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 || repo.calls != 0 {
+		t.Fatalf("Standings() = %+v after %d reads, want nothing read", got, repo.calls)
+	}
 }

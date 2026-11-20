@@ -50,6 +50,48 @@ type fakeRepository struct {
 	// invitationsAt is the instant of the last read, when its invitations
 	// are judged.
 	invitationsAt time.Time
+	// categoriesOf serves CategoriesOf; categoriesAsked records the ids
+	// asked for, categoriesErr fails it.
+	categoriesOf    map[string][]Category
+	categoriesAsked []string
+	categoriesErr   error
+}
+
+func (f *fakeRepository) CategoriesOf(_ context.Context, ids []string) (map[string][]Category, error) {
+	f.categoriesAsked = ids
+	out := make(map[string][]Category, len(ids))
+	for _, id := range ids {
+		if cats, ok := f.categoriesOf[id]; ok {
+			out[id] = cats
+		}
+	}
+	return out, f.categoriesErr
+}
+
+// fakeStandings gives the standings it holds, by challenge ID, of the
+// challenges asked for; asked records them and askedAt the instant, err
+// fails the call.
+type fakeStandings struct {
+	standings map[string]Standing
+	asked     *[]Challenge
+	askedAt   *time.Time
+	err       error
+}
+
+func (f fakeStandings) Standings(_ context.Context, _ string, challenges []Challenge, now time.Time) (map[string]Standing, error) {
+	if f.asked != nil {
+		*f.asked = challenges
+	}
+	if f.askedAt != nil {
+		*f.askedAt = now
+	}
+	out := make(map[string]Standing)
+	for _, c := range challenges {
+		if st, ok := f.standings[c.ID]; ok {
+			out[c.ID] = st
+		}
+	}
+	return out, f.err
 }
 
 func (f *fakeRepository) ActiveParticipations(context.Context, string, time.Time) ([]string, error) {
@@ -252,7 +294,7 @@ func suggested() map[string]float64 {
 func TestServiceCreate(t *testing.T) {
 	repo := &fakeRepository{}
 	clk := clock.NewFake(now)
-	svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, clk)
+	svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clk)
 
 	draft := with(func(d *Draft) {
 		d.Title = "  Spring run  "
@@ -305,7 +347,7 @@ func TestServiceCreateFreezesRunAtOne(t *testing.T) {
 		"run missing":          {"ride": 0.3},
 	} {
 		t.Run(name, func(t *testing.T) {
-			svc := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{factors: catalogue}, clock.NewFake(now))
+			svc := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{factors: catalogue}, fakeStandings{}, clock.NewFake(now))
 			c, err := svc.Create(t.Context(), actor, valid())
 			if err != nil {
 				t.Fatal(err)
@@ -320,7 +362,7 @@ func TestServiceCreateFreezesRunAtOne(t *testing.T) {
 func TestServiceCreateEmptyDescriptionIsNone(t *testing.T) {
 	repo := &fakeRepository{}
 	empty := ""
-	if _, err := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, clock.NewFake(now)).
+	if _, err := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now)).
 		Create(t.Context(), actor, with(func(d *Draft) { d.Description = &empty })); err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +373,7 @@ func TestServiceCreateEmptyDescriptionIsNone(t *testing.T) {
 
 func TestServiceCreateDoesNotChangeTheCatalogue(t *testing.T) {
 	catalogue := suggested()
-	svc := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{factors: catalogue}, clock.NewFake(now))
+	svc := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{factors: catalogue}, fakeStandings{}, clock.NewFake(now))
 	if _, err := svc.Create(t.Context(), actor, with(func(d *Draft) { d.DistanceFactors = map[string]float64{"ride": 0.5} })); err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +406,7 @@ func TestServiceCreateRefusals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{err: tt.repoErr}
-			_, err := NewService(repo, tt.profiles, tt.catalogue, clock.NewFake(now)).Create(t.Context(), actor, tt.draft)
+			_, err := NewService(repo, tt.profiles, tt.catalogue, fakeStandings{}, clock.NewFake(now)).Create(t.Context(), actor, tt.draft)
 			if tt.wantErr != nil {
 				var appErr *apperr.Error
 				if !errors.Is(err, tt.wantErr) || errors.As(err, &appErr) {
@@ -387,7 +429,7 @@ func TestServiceCreateUsesTheClock(t *testing.T) {
 	// The draft starts on 2026-03-04: valid at 10:00 local that day, past
 	// once the clock moves to the next local day.
 	clk := clock.NewFake(now)
-	svc := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, clk)
+	svc := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clk)
 	if _, err := svc.Create(t.Context(), actor, valid()); err != nil {
 		t.Fatalf("start today refused: %v", err)
 	}
@@ -424,7 +466,7 @@ func TestServiceList(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{summaries: summaries(tt.available)}
 			clk := clock.NewFake(now)
-			page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clk).List(t.Context(), actor, ScopeMine, StatusOngoing, tt.limit, nil)
+			page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clk).List(t.Context(), actor, ScopeMine, StatusOngoing, tt.limit, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -467,7 +509,7 @@ func TestServiceListRoleAndStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{summaries: []Summary{tt.summary}}
-			page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
+			page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -478,8 +520,98 @@ func TestServiceListRoleAndStatus(t *testing.T) {
 	}
 }
 
+// TestServiceListStandings checks which challenges of the actor's own list
+// get a standing: ongoing ones they are an active participant of, read for
+// the whole page at once with their categories.
+func TestServiceListStandings(t *testing.T) {
+	active, abandoned := string(ParticipantActive), string(ParticipantAbandoned)
+	day := 24 * time.Hour
+	ongoing := func(id string, status *string) Summary {
+		return Summary{ID: id, Timezone: "America/Toronto", MyStatus: status, StartsAt: now.Add(-day), EndsAt: now.Add(13 * day)}
+	}
+	items := []Summary{
+		ongoing("running", &active),
+		ongoing("abandoned", &abandoned),
+		ongoing("creator only", nil),
+		{ID: "upcoming", MyStatus: &active, StartsAt: now.Add(day), EndsAt: now.Add(15 * day)},
+		{ID: "finished", MyStatus: &active, StartsAt: now.Add(-14 * day), EndsAt: now},
+		ongoing("also running", &active),
+	}
+	cats := []Category{{Type: CategoryCumulativeTime, Position: 1}, {Type: CategoryRunElimination, Position: 3, Params: Params{Sport: "run", StepMeters: 2000}}}
+	standing := Standing{Week: 1, WeekEndsAt: now.Add(6 * day), Rankings: []Ranking{{Type: CategoryCumulativeTime, Rank: 2, RankedCount: 5}}}
+	repo := &fakeRepository{summaries: items, categoriesOf: map[string][]Category{"running": cats, "also running": cats}}
+	var asked []Challenge
+	var askedAt time.Time
+	standings := fakeStandings{standings: map[string]Standing{"running": standing}, asked: &asked, askedAt: &askedAt}
+
+	page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, standings, clock.NewFake(now)).List(t.Context(), actor, ScopeMine, "", 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"running", "also running"}; !reflect.DeepEqual(repo.categoriesAsked, want) {
+		t.Fatalf("categories read for %v, want %v", repo.categoriesAsked, want)
+	}
+	want := []Challenge{
+		{ID: "running", Timezone: "America/Toronto", StartsAt: items[0].StartsAt, EndsAt: items[0].EndsAt, Categories: cats},
+		{ID: "also running", Timezone: "America/Toronto", StartsAt: items[5].StartsAt, EndsAt: items[5].EndsAt, Categories: cats},
+	}
+	if !reflect.DeepEqual(asked, want) {
+		t.Fatalf("standings asked for %+v, want %+v", asked, want)
+	}
+	// The instant of the statuses: an ongoing challenge is judged at it.
+	if !askedAt.Equal(now) {
+		t.Fatalf("standings asked at %s, want the clock's now %s", askedAt, now)
+	}
+	for _, it := range page.Items {
+		switch {
+		case it.ID == "running":
+			if it.MyWeek == nil || !reflect.DeepEqual(*it.MyWeek, standing) {
+				t.Fatalf("%s: my week %+v, want %+v", it.ID, it.MyWeek, standing)
+			}
+		case it.MyWeek != nil:
+			// "also running" is asked for, but the leaderboard leaves it out.
+			t.Fatalf("%s: my week %+v, want none", it.ID, it.MyWeek)
+		}
+	}
+}
+
+func TestServiceListStandingsOnlyInMine(t *testing.T) {
+	active := string(ParticipantActive)
+	repo := &fakeRepository{summaries: []Summary{{ID: "running", MyStatus: &active, StartsAt: now.Add(-time.Hour), EndsAt: now.AddDate(0, 0, 14)}}}
+	var asked []Challenge
+	page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{asked: &asked}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.categoriesAsked != nil || asked != nil || page.Items[0].MyWeek != nil {
+		t.Fatalf("public list read categories %v and standings %v, want nothing", repo.categoriesAsked, asked)
+	}
+}
+
+func TestServiceListStandingsFailures(t *testing.T) {
+	boom := errors.New("boom")
+	active := string(ParticipantActive)
+	running := []Summary{{ID: "running", MyStatus: &active, StartsAt: now.Add(-time.Hour), EndsAt: now.AddDate(0, 0, 14)}}
+	tests := []struct {
+		name      string
+		repo      *fakeRepository
+		standings fakeStandings
+	}{
+		{name: "categories", repo: &fakeRepository{summaries: running, categoriesErr: boom}},
+		{name: "standings", repo: &fakeRepository{summaries: running, categoriesOf: map[string][]Category{"running": nil}}, standings: fakeStandings{err: boom}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, tt.standings, clock.NewFake(now)).List(t.Context(), actor, ScopeMine, "", 20, nil)
+			if !errors.Is(err, boom) {
+				t.Fatalf("error = %v, want it to wrap %v", err, boom)
+			}
+		})
+	}
+}
+
 func TestServiceListRefusesAnEmptyPage(t *testing.T) {
-	_, err := NewService(&fakeRepository{summaries: summaries(3)}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 0, nil)
+	_, err := NewService(&fakeRepository{summaries: summaries(3)}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 0, nil)
 	if !errors.Is(err, apperr.New(apperr.CodeValidationFailed, nil)) {
 		t.Fatalf("error = %v, want validation_failed on limit", err)
 	}
@@ -487,7 +619,7 @@ func TestServiceListRefusesAnEmptyPage(t *testing.T) {
 
 func TestServiceListStorageFailure(t *testing.T) {
 	storage := errors.New("connection refused")
-	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
+	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
 	if !errors.Is(err, storage) {
 		t.Fatalf("error = %v, want it to wrap %v", err, storage)
 	}
@@ -525,7 +657,7 @@ func TestServiceGet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
-			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).Get(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).Get(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -547,7 +679,7 @@ func TestServiceGetHidesPrivateChallenges(t *testing.T) {
 	private := &fakeRepository{challenge: stored(VisibilityPrivate)}
 	var errs []*apperr.Error
 	for _, repo := range []*fakeRepository{missing, private} {
-		_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Get(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+		_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
 		if repo.categoriesRead {
 			t.Fatal("categories read before the visibility check")
 		}
@@ -566,7 +698,7 @@ func TestServiceGetHidesPrivateChallenges(t *testing.T) {
 
 func TestServiceGetStorageFailure(t *testing.T) {
 	storage := errors.New("connection refused")
-	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Get(t.Context(), actor, "x")
+	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), actor, "x")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
@@ -600,7 +732,7 @@ func TestServiceUpdateText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
 			// After the end of the stored challenge (2026-03-23): edits never close.
-			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))).
+			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))).
 				UpdateText(t.Context(), actor, "11111111-1111-1111-1111-111111111111", tt.frozen, tt.changes)
 			if tt.wantCode == "" {
 				if err != nil {
@@ -624,7 +756,7 @@ func TestServiceUpdateText(t *testing.T) {
 
 func TestServiceUpdateTextMissing(t *testing.T) {
 	title := "New title"
-	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).
 		UpdateText(t.Context(), actor, "x", nil, TextChanges{Title: &title})
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("error = %v, want challenge_not_found", err)
@@ -640,7 +772,7 @@ func TestServiceUpdateTextNothingOrEmptyDescription(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: creator}
-			if _, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).UpdateText(t.Context(), actor, "x", nil, changes); err != nil {
+			if _, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).UpdateText(t.Context(), actor, "x", nil, changes); err != nil {
 				t.Fatal(err)
 			}
 			if repo.updated == nil || (changes.Description != nil && (repo.updated.Description == nil || *repo.updated.Description != "")) {
@@ -654,7 +786,7 @@ func TestServiceUpdateTextStorageFailure(t *testing.T) {
 	storage := errors.New("connection refused")
 	repo := &failingUpdate{fakeRepository: fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Creator: true}}, err: storage}
 	title := "New title"
-	_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).UpdateText(t.Context(), actor, "x", nil, TextChanges{Title: &title})
+	_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).UpdateText(t.Context(), actor, "x", nil, TextChanges{Title: &title})
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
@@ -693,7 +825,7 @@ func TestServiceJoin(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
-			d, err := NewService(repo, fakeProfiles{complete: tt.profile}, fakeCatalogue{}, clock.NewFake(tt.now)).Join(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+			d, err := NewService(repo, fakeProfiles{complete: tt.profile}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).Join(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
 			if tt.want == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -714,7 +846,7 @@ func TestServiceJoin(t *testing.T) {
 }
 
 func TestServiceJoinMissing(t *testing.T) {
-	_, err := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{}, clock.NewFake(now)).Join(t.Context(), actor, "x")
+	_, err := NewService(&fakeRepository{}, fakeProfiles{complete: true}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Join(t.Context(), actor, "x")
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("error = %v, want challenge_not_found", err)
 	}
@@ -723,8 +855,8 @@ func TestServiceJoinMissing(t *testing.T) {
 func TestServiceJoinFailures(t *testing.T) {
 	storage := errors.New("connection refused")
 	for name, svc := range map[string]*Service{
-		"profile lookup fails": NewService(&fakeRepository{challenge: stored(VisibilityPublic)}, fakeProfiles{err: storage}, fakeCatalogue{}, clock.NewFake(now)),
-		"storage fails":        NewService(&fakeRepository{err: storage}, fakeProfiles{complete: true}, fakeCatalogue{}, clock.NewFake(now)),
+		"profile lookup fails": NewService(&fakeRepository{challenge: stored(VisibilityPublic)}, fakeProfiles{err: storage}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)),
+		"storage fails":        NewService(&fakeRepository{err: storage}, fakeProfiles{complete: true}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := svc.Join(t.Context(), actor, "x")
@@ -757,7 +889,7 @@ func TestServiceAbandon(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
-			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).Abandon(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).Abandon(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) {
 					t.Fatalf("error = %v, want %s", err, tt.want)
@@ -783,7 +915,7 @@ func TestServiceAbandon(t *testing.T) {
 func TestServiceJoinDuplicateFromStorage(t *testing.T) {
 	// The insert found the participation already there: 409, not a 500.
 	repo := &duplicateJoin{fakeRepository: fakeRepository{challenge: stored(VisibilityPublic)}}
-	_, err := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, clock.NewFake(now)).Join(t.Context(), actor, "x")
+	_, err := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Join(t.Context(), actor, "x")
 	if !errors.Is(err, apperr.New(apperr.CodeAlreadyParticipant, nil)) {
 		t.Fatalf("error = %v, want already_participant", err)
 	}
@@ -819,7 +951,7 @@ func TestServiceInvitationDeadline(t *testing.T) {
 			c := stored(tt.visibility)
 			c.MembersCanInvite = tt.membersCanInvite
 			repo := &fakeRepository{challenge: c, membership: tt.membership}
-			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).InvitationDeadline(t.Context(), actor, c.ID)
+			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).InvitationDeadline(t.Context(), actor, c.ID)
 			if !repo.invitationsAt.Equal(tt.now) {
 				t.Fatalf("invitations judged at %s, want the clock's now %s", repo.invitationsAt, tt.now)
 			}
@@ -837,12 +969,12 @@ func TestServiceInvitationDeadline(t *testing.T) {
 }
 
 func TestServiceInvitationDeadlineMissingAndFailure(t *testing.T) {
-	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x")
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x")
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing: %v, want challenge_not_found", err)
 	}
 	storage := errors.New("connection refused")
-	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x")
+	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
@@ -850,12 +982,12 @@ func TestServiceInvitationDeadlineMissingAndFailure(t *testing.T) {
 }
 
 func TestServiceAbandonMissingAndFailure(t *testing.T) {
-	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Abandon(t.Context(), actor, "x")
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Abandon(t.Context(), actor, "x")
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing: %v, want challenge_not_found", err)
 	}
 	storage := errors.New("connection refused")
-	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Abandon(t.Context(), actor, "x")
+	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Abandon(t.Context(), actor, "x")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("storage: %v, want it wrapped as an internal error", err)
@@ -883,7 +1015,7 @@ func TestServiceExclude(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: tt.actor, target: tt.target}
-			err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).Exclude(t.Context(), actor, "c", "t")
+			err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).Exclude(t.Context(), actor, "c", "t")
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) {
 					t.Fatalf("error = %v, want %s", err, tt.want)
@@ -899,12 +1031,12 @@ func TestServiceExclude(t *testing.T) {
 }
 
 func TestServiceExcludeMissingAndFailure(t *testing.T) {
-	err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Exclude(t.Context(), actor, "c", "t")
+	err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Exclude(t.Context(), actor, "c", "t")
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing: %v, want challenge_not_found", err)
 	}
 	storage := errors.New("connection refused")
-	err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Exclude(t.Context(), actor, "c", "t")
+	err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Exclude(t.Context(), actor, "c", "t")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("storage: %v, want it wrapped as an internal error", err)
@@ -931,7 +1063,7 @@ func TestServiceAddCreator(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: tt.actor, target: tt.target}
-			_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).AddCreator(t.Context(), actor, "c", "t")
+			_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).AddCreator(t.Context(), actor, "c", "t")
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) {
 					t.Fatalf("error = %v, want %s", err, tt.want)
@@ -947,12 +1079,12 @@ func TestServiceAddCreator(t *testing.T) {
 }
 
 func TestServiceAddCreatorMissingAndFailure(t *testing.T) {
-	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).AddCreator(t.Context(), actor, "c", "t")
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AddCreator(t.Context(), actor, "c", "t")
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing: %v, want challenge_not_found", err)
 	}
 	storage := errors.New("connection refused")
-	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).AddCreator(t.Context(), actor, "c", "t")
+	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AddCreator(t.Context(), actor, "c", "t")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("storage: %v, want it wrapped as an internal error", err)
@@ -977,7 +1109,7 @@ func TestServiceDelete(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
-			err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).Delete(t.Context(), actor, "c")
+			err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).Delete(t.Context(), actor, "c")
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) {
 					t.Fatalf("error = %v, want %s", err, tt.want)
@@ -995,12 +1127,12 @@ func TestServiceDelete(t *testing.T) {
 }
 
 func TestServiceDeleteMissingAndFailure(t *testing.T) {
-	err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Delete(t.Context(), actor, "c")
+	err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Delete(t.Context(), actor, "c")
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing: %v, want challenge_not_found", err)
 	}
 	storage := errors.New("connection refused")
-	err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Delete(t.Context(), actor, "c")
+	err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Delete(t.Context(), actor, "c")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("storage: %v, want it wrapped as an internal error", err)
@@ -1041,7 +1173,7 @@ func TestServiceParticipants(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic), participants: participants(tt.available)}
 			after := &ParticipantPosition{JoinedAt: now, UserID: "00000000-0000-0000-0000-000000000009"}
 			profiles := fakeProfiles{names: map[string]Name{"00000000-0000-0000-0000-000000000001": marie}}
-			page, err := NewService(repo, profiles, fakeCatalogue{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, after)
+			page, err := NewService(repo, profiles, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, after)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1084,7 +1216,7 @@ func TestServiceParticipantsVisibility(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership, participants: participants(2)}
-			_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", 20, nil)
+			_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", 20, nil)
 			if tt.want == "" {
 				if err != nil {
 					t.Fatalf("error = %v, want the list", err)
@@ -1118,7 +1250,7 @@ func TestServiceParticipantsFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewService(tt.repo, tt.profiles, fakeCatalogue{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, nil)
+			_, err := NewService(tt.repo, tt.profiles, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, nil)
 			if tt.wantCode != "" && !errors.Is(err, apperr.New(tt.wantCode, nil)) {
 				t.Fatalf("error = %v, want %s", err, tt.wantCode)
 			}
@@ -1146,7 +1278,7 @@ func TestServiceAbandonAll(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPrivate), membership: Membership{Participant: tt.participant}, active: []string{"c"}}
-			if err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(tt.now)).AbandonAll(t.Context(), actor); err != nil {
+			if err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).AbandonAll(t.Context(), actor); err != nil {
 				t.Fatal(err)
 			}
 			if abandoned := !repo.abandonedAt.IsZero(); abandoned != tt.wantAbandoned {
@@ -1175,7 +1307,7 @@ func TestServiceAbandonAllFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).AbandonAll(t.Context(), actor)
+			err := NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AbandonAll(t.Context(), actor)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
@@ -1187,7 +1319,7 @@ func TestServiceAbandonAllFailures(t *testing.T) {
 // creator (README §2.2): the deletion is refused before anything is abandoned.
 func TestServiceAbandonAllRefusesTheLastCreator(t *testing.T) {
 	repo := &fakeRepository{challenge: stored(VisibilityPrivate), membership: Membership{Participant: ParticipantActive}, active: []string{"c"}, lastCreator: []string{"c"}}
-	err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).AbandonAll(t.Context(), actor)
+	err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AbandonAll(t.Context(), actor)
 	var appErr *apperr.Error
 	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeLastCreator || appErr.Params[apperr.ChallengesParam] != "c" {
 		t.Fatalf("error = %v, want last_creator listing c", err)
@@ -1199,13 +1331,13 @@ func TestServiceAbandonAllRefusesTheLastCreator(t *testing.T) {
 
 func TestServiceMemberships(t *testing.T) {
 	want := []UserChallenge{{ID: "c1", Timezone: "America/Toronto", Membership: Membership{Creator: true, Participant: ParticipantAbandoned}}}
-	got, err := NewService(&fakeRepository{memberships: want}, nil, nil, clock.NewFake(now)).Memberships(t.Context(), actor)
+	got, err := NewService(&fakeRepository{memberships: want}, nil, nil, fakeStandings{}, clock.NewFake(now)).Memberships(t.Context(), actor)
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("Memberships() = %+v, %v, want %+v", got, err, want)
 	}
 
 	storage := errors.New("connection refused")
-	if _, err := NewService(&fakeRepository{membershipsErr: storage}, nil, nil, clock.NewFake(now)).Memberships(t.Context(), actor); !errors.Is(err, storage) {
+	if _, err := NewService(&fakeRepository{membershipsErr: storage}, nil, nil, fakeStandings{}, clock.NewFake(now)).Memberships(t.Context(), actor); !errors.Is(err, storage) {
 		t.Fatalf("error = %v, want it to wrap %v", err, storage)
 	}
 }
@@ -1216,7 +1348,7 @@ func TestServiceActivitiesScopeWithoutDistanceCategory(t *testing.T) {
 	c := stored(VisibilityPublic)
 	c.Categories = []Category{{Type: CategoryCumulativeTime, Position: 1}}
 	repo := &fakeRepository{challenge: c, membership: active}
-	got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor)
+	got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor)
 	if err != nil || got.ID != c.ID || got.Factors != nil {
 		t.Fatalf("ActivitiesScope() = %+v, %v, want the challenge with no factors", got, err)
 	}
@@ -1250,7 +1382,7 @@ func TestServiceActivitiesScope(t *testing.T) {
 				{Type: CategoryRunElimination, Position: 3, Params: Params{Sport: "run", StepMeters: 1000}},
 			}
 			repo := &fakeRepository{challenge: c, membership: tt.actor, others: tt.others}
-			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", tt.userID)
+			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", tt.userID)
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) {
 					t.Fatalf("error = %v, want %s", err, tt.want)
@@ -1267,10 +1399,10 @@ func TestServiceActivitiesScope(t *testing.T) {
 
 func TestServiceActivitiesScopeFailures(t *testing.T) {
 	storageErr := errors.New("connection reset")
-	if _, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+	if _, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing challenge: error = %v, want challenge_not_found", err)
 	}
-	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, storageErr) {
+	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, storageErr) {
 		t.Fatalf("storage failure: error = %v, want the cause kept", err)
 	}
 }

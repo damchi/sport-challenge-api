@@ -3,9 +3,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"testing"
 	"time"
 
@@ -24,10 +26,11 @@ import (
 // the challenges below, 3.5 days before it ends): a runner who created and
 // joined two challenges, and a stranger who never joined any.
 type leaderboardFixture struct {
-	t        *testing.T
-	svc      *leaderboard.Service
-	runner   string
-	stranger string
+	t          *testing.T
+	svc        *leaderboard.Service
+	challenges *challenge.Service
+	runner     string
+	stranger   string
 	// quitter abandoned the private challenge.
 	quitter string
 	public  string
@@ -45,10 +48,14 @@ func newLeaderboardFixture(t *testing.T) leaderboardFixture {
 	}
 	clk := clock.NewFake(recordNow)
 	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, logger)
-	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), clk)
-	svc := leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
+	var svc *leaderboard.Service
+	standings := standingsFunc(func(ctx context.Context, actorID string, cs []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error) {
+		return svc.Standings(ctx, actorID, cs, now)
+	})
+	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), standings, clk)
+	svc = leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
 
-	f := leaderboardFixture{t: t, svc: svc}
+	f := leaderboardFixture{t: t, svc: svc, challenges: challenges}
 	insertUser := func(subject string) string {
 		var id string
 		if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ($1, $1, 'Test', 'User') RETURNING id", subject).Scan(&id); err != nil {
@@ -165,5 +172,56 @@ func TestLeaderboardOfAPrivateChallengeIsHiddenFromAStranger(t *testing.T) {
 		if entries := got.Categories[0].Entries; len(entries) != 2 || !entries[1].Abandoned || entries[1].UserID != f.quitter {
 			t.Fatalf("%s: entries = %+v, want the runner then the quitter, who abandoned", name, entries)
 		}
+	}
+}
+
+// TestMyWeekIsTheLeaderboard checks that the standing of the runner in their
+// list is their line in the leaderboard of each ongoing challenge, read at
+// the same instant, and that the one who abandoned has none.
+func TestMyWeekIsTheLeaderboard(t *testing.T) {
+	f := newLeaderboardFixture(t)
+
+	page, err := f.challenges.List(t.Context(), f.runner, challenge.ScopeMine, "", 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("%d challenges, want the public and the private ones", len(page.Items))
+	}
+	for _, it := range page.Items {
+		board, err := f.svc.Get(t.Context(), f.runner, it.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it.MyWeek == nil || it.MyWeek.Week != 2 || len(it.MyWeek.Rankings) != len(board.Categories) {
+			t.Fatalf("%s: my week %+v, want week 2 in the %d categories", it.ID, it.MyWeek, len(board.Categories))
+		}
+		for i, c := range board.Categories {
+			var ranked int
+			var mine leaderboard.Ranked
+			for _, e := range c.Entries {
+				if e.Rank > 0 {
+					ranked++
+				}
+				if e.UserID == f.runner {
+					mine = e
+				}
+			}
+			r := it.MyWeek.Rankings[i]
+			if r.Type != c.Type || r.Rank != mine.Rank || r.RankedCount != ranked || !reflect.DeepEqual(r.Progress, mine.Progress) {
+				t.Fatalf("%s %s: %+v, want rank %d of %d with %+v", it.ID, c.Type, r, mine.Rank, ranked, mine.Progress)
+			}
+		}
+		if p := it.MyWeek.Rankings[2].Progress; p == nil || !it.MyWeek.WeekEndsAt.Equal(p.WeekEndsAt) {
+			t.Fatalf("%s: week ends at %s, want the end of the elimination week %+v", it.ID, it.MyWeek.WeekEndsAt, p)
+		}
+	}
+
+	quitter, err := f.challenges.List(t.Context(), f.quitter, challenge.ScopeMine, "", 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quitter.Items) != 1 || quitter.Items[0].MyWeek != nil {
+		t.Fatalf("quitter's list %+v, want the private challenge without a standing", quitter.Items)
 	}
 }

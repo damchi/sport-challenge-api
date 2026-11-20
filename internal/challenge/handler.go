@@ -10,6 +10,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 // Handler implements the challenge operations of the API contract.
@@ -164,6 +165,9 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 			status := api.ChallengeSummaryMyStatus(*c.MyStatus)
 			item.MyStatus = &status
 		}
+		if c.MyWeek != nil {
+			item.MyWeek = toMyWeek(*c.MyWeek)
+		}
 		out.Items = append(out.Items, item)
 	}
 	if page.Next != nil {
@@ -174,6 +178,37 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 		out.NextCursor = &cursor
 	}
 	return api.ListChallenges200JSONResponse(out), nil
+}
+
+// toMyWeek turns a standing into its contract form, the elimination
+// progress as the leaderboard gives it.
+func toMyWeek(st Standing) *api.MyWeek {
+	out := &api.MyWeek{Week: st.Week, WeekEndsAt: st.WeekEndsAt.UTC(), Rankings: make([]api.MyRanking, len(st.Rankings))}
+	for i, r := range st.Rankings {
+		out.Rankings[i] = api.MyRanking{Type: api.MyRankingType(r.Type), Rank: r.Rank, RankedCount: r.RankedCount}
+		if r.Progress != nil {
+			out.Rankings[i].Elimination = toProgress(*r.Progress)
+		}
+	}
+	return out
+}
+
+// toProgress turns the live situation into its contract form, zero values
+// being null, as the leaderboard does (leaderboard.toProgress).
+func toProgress(p scoring.Progress) *api.EliminationProgress {
+	out := &api.EliminationProgress{MinimumMeters: p.MinimumMeters, RunMeters: p.RunMeters}
+	if p.Status != "" {
+		status := api.EliminationProgressStatus(p.Status)
+		out.Status = &status
+	}
+	if p.EliminatedWeek > 0 {
+		out.EliminatedWeek = &p.EliminatedWeek
+	}
+	if !p.WeekEndsAt.IsZero() {
+		end := p.WeekEndsAt.UTC()
+		out.WeekEndsAt = &end
+	}
+	return out
 }
 
 // GetChallenge answers a challenge as the authenticated user sees it.

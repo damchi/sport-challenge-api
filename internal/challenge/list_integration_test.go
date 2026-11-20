@@ -33,7 +33,7 @@ func newListFixture(t *testing.T) listFixture {
 	}
 	f := listFixture{
 		pool:  pool,
-		svc:   NewService(NewRepository(gdb), nil, nil, clock.NewFake(now)),
+		svc:   NewService(NewRepository(gdb), nil, nil, fakeStandings{}, clock.NewFake(now)),
 		me:    insertTestUser(t, pool, "email|me"),
 		other: insertTestUser(t, pool, "email|other"),
 	}

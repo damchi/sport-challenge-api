@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 // Category types, one of each per challenge, in this position order.
@@ -148,6 +150,28 @@ type Summary struct {
 	// the request.
 	Role   Role   `gorm:"-"`
 	Status string `gorm:"-"`
+	// MyWeek is where the actor stands in the challenge, from the
+	// leaderboard: only in their own list, while the challenge runs and they
+	// are an active participant; nil otherwise.
+	MyWeek *Standing `gorm:"-"`
+}
+
+// Standing is where a participant stands in a challenge during its weeks:
+// the current week, and their line in each category, in category order.
+type Standing struct {
+	Week       int
+	WeekEndsAt time.Time
+	Rankings   []Ranking
+}
+
+// Ranking is the line of a participant in a category: their rank, how many
+// are ranked, and the live situation in the elimination category (nil in
+// the others).
+type Ranking struct {
+	Type        string
+	Rank        int
+	RankedCount int
+	Progress    *scoring.Progress
 }
 
 // Page is a page of a listing; Next is nil on the last page.

@@ -266,10 +266,11 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	s.activity(users[1], "run", end, 3600, km(99000), false)                     // at the end, outside
 
 	repo := NewRepository(gdb)
-	participants, err := repo.Participants(t.Context(), challengeID)
+	participantsOf, err := repo.ParticipantsOf(t.Context(), []string{challengeID})
 	if err != nil {
 		t.Fatal(err)
 	}
+	participants := participantsOf[challengeID]
 	// The raw activities, as Activities read them before SC-API-082.
 	rows, err := pool.Query(t.Context(), `SELECT a.user_id, a.sport_code, a.started_at, a.duration_seconds, a.distance_meters
 		FROM participants p JOIN activities a ON a.user_id = p.user_id
@@ -290,18 +291,20 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	if rows.Err() != nil {
 		t.Fatal(rows.Err())
 	}
-	totals, err := repo.Activities(t.Context(), challengeID, w, "run")
+	totalsOf, err := repo.ActivitiesOf(t.Context(), []Scope{{ChallengeID: challengeID, Window: w, WeeklySport: "run"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	totals := totalsOf[challengeID]
 	if len(totals) >= len(raw) {
 		t.Fatalf("%d totals for %d raw activities, want fewer rows", len(totals), len(raw))
 	}
 	// Without an elimination category, nothing is summed per week.
-	noWeekly, err := repo.Activities(t.Context(), challengeID, w, "")
+	noWeeklyOf, err := repo.ActivitiesOf(t.Context(), []Scope{{ChallengeID: challengeID, Window: w, WeeklySport: ""}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	noWeekly := noWeeklyOf[challengeID]
 	elimination := scoring.Elimination{Sport: "run", StepMeters: 1500}
 	scorers := []struct {
 		name   string
@@ -407,11 +410,88 @@ func BenchmarkActivities5000(b *testing.B) {
 	})
 	b.Run("totals per week", func(b *testing.B) {
 		for b.Loop() {
-			totals, err := repo.Activities(b.Context(), challengeID, w, "run")
+			totalsOf, err := repo.ActivitiesOf(b.Context(), []Scope{{ChallengeID: challengeID, Window: w, WeeklySport: "run"}})
 			if err != nil {
 				b.Fatal(err)
 			}
+			totals := totalsOf[challengeID]
 			b.ReportMetric(float64(len(totals)), "rows")
 		}
 	})
+}
+
+// TestActivitiesOfKeepsEachChallengeInItsWindow checks that one query over
+// challenges with their own windows, weeks, time zones and participants
+// gives each the totals it gets alone.
+func TestActivitiesOfKeepsEachChallengeInItsWindow(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	both, onlySpring, quitter, gone := s.user("both"), s.user("spring"), s.user("quitter"), s.user("gone")
+	tor, paris := toronto(t), time.FixedZone("Paris", 2*3600)
+	challenge := func(start time.Time, weeks int, members ...string) (string, scoring.Window) {
+		end := start.AddDate(0, 0, 7*weeks)
+		var id string
+		if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+			VALUES ('C', 'public', 'UTC', $1, $2, $3) RETURNING id`, start, end, both).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		for _, u := range members {
+			s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", id, u, start)
+		}
+		return id, scoring.Window{Start: start, End: end, Location: start.Location()}
+	}
+	spring, springW := challenge(time.Date(2026, 3, 2, 0, 0, 0, 0, tor), 3, both, onlySpring, quitter, gone)
+	summer, summerW := challenge(time.Date(2026, 3, 16, 0, 0, 0, 0, paris), 2, both)
+	s.exec("UPDATE participants SET status = 'abandoned', abandoned_at = now() WHERE user_id = $1", quitter)
+	s.exec("UPDATE users SET anonymized_at = now() WHERE id = $1", gone)
+	km := func(m int) *int { return &m }
+	for day := range 35 {
+		at := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC).AddDate(0, 0, day)
+		s.activity(both, "run", at, 600, km(1000+day), false)
+		s.activity(onlySpring, "ride", at, 300, km(2000), false)
+		s.activity(quitter, "run", at, 300, km(9000), false)
+		s.activity(gone, "run", at, 300, km(9000), false)
+	}
+
+	repo := NewRepository(gdb)
+	scopes := []Scope{{ChallengeID: spring, Window: springW, WeeklySport: "run"}, {ChallengeID: summer, Window: summerW, WeeklySport: "run"}}
+	together, err := repo.ActivitiesOf(t.Context(), scopes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sc := range scopes {
+		alone, err := repo.ActivitiesOf(t.Context(), []Scope{sc})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(alone[sc.ChallengeID]) == 0 || !reflect.DeepEqual(together[sc.ChallengeID], alone[sc.ChallengeID]) {
+			t.Fatalf("%s together = %+v, want it alone %+v", sc.ChallengeID, together[sc.ChallengeID], alone[sc.ChallengeID])
+		}
+	}
+	// 3 weeks of runs for both in spring, plus the rides of onlySpring; 2
+	// weeks of runs in summer; nothing of the quitter nor of the deleted
+	// account.
+	if got := len(together[spring]); got != 4 {
+		t.Fatalf("spring: %d totals %+v, want 3 weekly runs and 1 ride total", got, together[spring])
+	}
+	if got := len(together[summer]); got != 2 {
+		t.Fatalf("summer: %d totals %+v, want 2 weekly runs", got, together[summer])
+	}
+	for _, a := range together[summer] {
+		if a.UserID != both || !summerW.Contains(a.StartedAt) {
+			t.Fatalf("summer total %+v, want both's, in its window", a)
+		}
+	}
+
+	participants, err := repo.ParticipantsOf(t.Context(), []string{spring, summer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(participants[spring]) != 3 || len(participants[summer]) != 1 {
+		t.Fatalf("participants = %+v, want 3 in spring (one abandoned, the deleted account left out), 1 in summer", participants)
+	}
 }

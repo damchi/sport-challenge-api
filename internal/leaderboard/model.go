@@ -60,3 +60,19 @@ type Leaderboard struct {
 	ComputedAt time.Time
 	Categories []CategoryRanking
 }
+
+// Standing is where a participant stands in a challenge during its weeks:
+// the current week, and their line in each category, in category order.
+type Standing struct {
+	Week       int
+	WeekEndsAt time.Time
+	Categories []Place
+}
+
+// Place is the line of a participant in the ranking of a category, with how
+// many participants are ranked in it (abandoned ones are not).
+type Place struct {
+	Type        string
+	Entry       scoring.Entry
+	RankedCount int
+}

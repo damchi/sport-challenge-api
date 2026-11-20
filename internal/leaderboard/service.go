@@ -16,11 +16,13 @@ import (
 
 // repository is what the service needs from the storage.
 type repository interface {
-	Participants(ctx context.Context, challengeID string) ([]scoring.Participant, error)
-	// Activities gives, in one query, the totals of the activities of the
-	// active participants started in w: per participant and week for
-	// weeklySport, per participant and sport for the others.
-	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string) ([]scoring.Activity, error)
+	// ParticipantsOf gives the participants of each challenge, in one query.
+	ParticipantsOf(ctx context.Context, challengeIDs []string) (map[string][]scoring.Participant, error)
+	// ActivitiesOf gives, in one query, the totals of the activities of the
+	// active participants of each challenge started in its window: per
+	// participant and week for its weekly sport, per participant and sport
+	// for the others.
+	ActivitiesOf(ctx context.Context, scopes []Scope) (map[string][]scoring.Activity, error)
 	// Snapshots gives the frozen results of the challenge by category type,
 	// and when they were frozen; none until the worker has finalized it.
 	Snapshots(ctx context.Context, challengeID string) (map[string]json.RawMessage, time.Time, error)
@@ -71,18 +73,12 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 	if err != nil {
 		return Leaderboard{}, err
 	}
-	loc, err := time.LoadLocation(c.Timezone)
+	now := s.clock.Now()
+	w, scorers, err := s.prepare(c, now)
 	if err != nil {
-		return Leaderboard{}, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
-	}
-	scorers := make([]scoring.Scorer, len(c.Categories))
-	for i, cat := range c.Categories {
-		if scorers[i], err = s.scorerOf(cat); err != nil {
-			return Leaderboard{}, err
-		}
+		return Leaderboard{}, err
 	}
 
-	now := s.clock.Now()
 	if !now.Before(c.EndsAt) {
 		board, ok, err := s.frozen(ctx, c)
 		if err != nil {
@@ -93,15 +89,16 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 		}
 	}
 
-	participants, err := s.repo.Participants(ctx, id)
+	byChallenge, err := s.repo.ParticipantsOf(ctx, []string{id})
 	if err != nil {
 		return Leaderboard{}, err
 	}
-	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
-	activities, err := s.repo.Activities(ctx, id, w, weeklySport(c.Categories))
+	participants := byChallenge[id]
+	activitiesOf, err := s.repo.ActivitiesOf(ctx, []Scope{{ChallengeID: id, Window: w, WeeklySport: weeklySport(c.Categories)}})
 	if err != nil {
 		return Leaderboard{}, err
 	}
+	activities := activitiesOf[id]
 	ids := make([]string, len(participants))
 	for i, p := range participants {
 		ids[i] = p.UserID
@@ -122,6 +119,109 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
 	}
 	return board, nil
+}
+
+// Standings returns where actorID stands in each of challenges that is in
+// its weeks at now, by challenge ID: the current week and the actor's line
+// in every category, as Get computes it at that instant. now is the caller's,
+// so that its own statuses and the standings tell the same instant. A
+// challenge outside its weeks, or where the actor is not an active
+// participant, is left out. The challenges are the caller's list of the
+// actor's own; however many, they are read in two queries.
+func (s *Service) Standings(ctx context.Context, actorID string, challenges []Challenge, now time.Time) (map[string]Standing, error) {
+	type running struct {
+		c       Challenge
+		w       scoring.Window
+		scorers []scoring.Scorer
+	}
+	var runs []running
+	ids := make([]string, 0, len(challenges))
+	for _, c := range challenges {
+		w, scorers, err := s.prepare(c, now)
+		if err != nil {
+			return nil, err
+		}
+		if week, _ := w.CurrentWeek(); week == 0 {
+			continue
+		}
+		runs = append(runs, running{c: c, w: w, scorers: scorers})
+		ids = append(ids, c.ID)
+	}
+	out := make(map[string]Standing, len(runs))
+	if len(runs) == 0 {
+		return out, nil
+	}
+	participants, err := s.repo.ParticipantsOf(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	// The activities are only read where the actor is still in the running.
+	kept := runs[:0]
+	var scopes []Scope
+	for _, r := range runs {
+		if isActive(participants[r.c.ID], actorID) {
+			kept = append(kept, r)
+			scopes = append(scopes, Scope{ChallengeID: r.c.ID, Window: r.w, WeeklySport: weeklySport(r.c.Categories)})
+		}
+	}
+	if len(kept) == 0 {
+		return out, nil
+	}
+	activities, err := s.repo.ActivitiesOf(ctx, scopes)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range kept {
+		week, ends := r.w.CurrentWeek()
+		st := Standing{Week: week, WeekEndsAt: ends, Categories: make([]Place, len(r.c.Categories))}
+		for i, cat := range r.c.Categories {
+			st.Categories[i] = placeOf(cat.Type, r.scorers[i].Score(r.w, participants[r.c.ID], activities[r.c.ID]), actorID)
+		}
+		out[r.c.ID] = st
+	}
+	return out, nil
+}
+
+// isActive reports whether userID is among participants and has not
+// abandoned.
+func isActive(participants []scoring.Participant, userID string) bool {
+	for _, p := range participants {
+		if p.UserID == userID {
+			return !p.Abandoned
+		}
+	}
+	return false
+}
+
+// placeOf is the line of userID in the ranking entries of a category, with
+// how many are ranked in it.
+func placeOf(categoryType string, entries []scoring.Entry, userID string) Place {
+	p := Place{Type: categoryType}
+	for _, e := range entries {
+		if e.Rank > 0 {
+			p.RankedCount++
+		}
+		if e.UserID == userID {
+			p.Entry = e
+		}
+	}
+	return p
+}
+
+// prepare returns the window of challenge c at now and the scorer of each of
+// its categories.
+func (s *Service) prepare(c Challenge, now time.Time) (scoring.Window, []scoring.Scorer, error) {
+	loc, err := time.LoadLocation(c.Timezone)
+	if err != nil {
+		return scoring.Window{}, nil, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
+	}
+	scorers := make([]scoring.Scorer, len(c.Categories))
+	for i, cat := range c.Categories {
+		if scorers[i], err = s.scorerOf(cat); err != nil {
+			return scoring.Window{}, nil, err
+		}
+	}
+	return scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}, scorers, nil
 }
 
 // scorerOf returns the scorer of a category, from the type and the settings
