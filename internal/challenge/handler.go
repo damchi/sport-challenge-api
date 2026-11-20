@@ -394,6 +394,7 @@ func (h *Handler) ListParticipants(ctx context.Context, req api.ListParticipants
 			FirstName: participant.Name.FirstName,
 			LastName:  participant.Name.LastName,
 			Status:    api.ParticipantStatus(participant.Status),
+			IsCreator: participant.IsCreator,
 			JoinedAt:  participant.JoinedAt.UTC(),
 		})
 	}

@@ -1001,6 +1001,60 @@ func TestDeleteByACreatorWhoAbandoned(t *testing.T) {
 	}
 }
 
+func TestParticipantsListingTellsCreators(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	// Joined one minute apart: a co-creator who abandoned, a co-creator, a
+	// participant, an excluded participant.
+	ids := []string{creatorID}
+	for _, subject := range []string{"creators_a", "creators_b", "creators_c", "creators_d"} {
+		clk.Advance(time.Minute)
+		u := insertProfile(t, pool, subject)
+		if _, err := svc.Join(t.Context(), u, id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u)
+	}
+	for _, u := range ids[1:3] {
+		if _, err := svc.AddCreator(t.Context(), creatorID, id, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Abandon(t.Context(), ids[1], id); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, id, ids[4]); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := svc.Participants(t.Context(), ids[3], id, 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		status  ParticipantStatus
+		creator bool
+	}{
+		{ParticipantActive, true},     // initial creator
+		{ParticipantAbandoned, true},  // co-creator who abandoned keeps the role
+		{ParticipantActive, true},     // co-creator added
+		{ParticipantActive, false},    // participant
+		{ParticipantAbandoned, false}, // excluded
+	}
+	if len(page.Items) != len(want) {
+		t.Fatalf("%d participants, want %d", len(page.Items), len(want))
+	}
+	for i, p := range page.Items {
+		if p.UserID != ids[i] || p.Status != want[i].status || p.IsCreator != want[i].creator {
+			t.Fatalf("participant %d: %s %s creator %t, want %s %s creator %t",
+				i, p.UserID, p.Status, p.IsCreator, ids[i], want[i].status, want[i].creator)
+		}
+	}
+}
+
 func TestParticipantsListing(t *testing.T) {
 	svc, clk, pool, id := joinFixture(t)
 	var creatorID string

@@ -1572,7 +1572,7 @@ components:
           description: Pass it as `cursor` for the next page; null on the last page.
     Participant:
       type: object
-      required: [user_id, pseudo, first_name, last_name, avatar, status, joined_at]
+      required: [user_id, pseudo, first_name, last_name, avatar, status, is_creator, joined_at]
       additionalProperties: false
       properties:
         user_id:
@@ -1606,6 +1606,13 @@ components:
           type: string
           enum: [active, abandoned]
           description: "`abandoned` also covers an excluded participant. A deleted account is never listed."
+        is_creator:
+          type: boolean
+          description: |
+            Whether the participant is a creator of the challenge, initial or
+            added since. A creator who abandoned stays one (true with status
+            `abandoned`); an excluded participant never is (a creator cannot be
+            excluded).
         joined_at:
           type: string
           format: date-time

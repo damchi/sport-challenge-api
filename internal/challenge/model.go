@@ -183,10 +183,11 @@ type Page struct {
 // Participant is a participation in a listing, with the public name of the
 // participant (empty for an anonymized account).
 type Participant struct {
-	UserID   string
-	Status   ParticipantStatus
-	JoinedAt time.Time
-	Name     Name
+	UserID    string
+	Status    ParticipantStatus
+	IsCreator bool
+	JoinedAt  time.Time
+	Name      Name
 }
 
 // Name is what a user shows the others: never the e-mail. Each field is nil

@@ -1140,7 +1140,7 @@ func TestServiceDeleteMissingAndFailure(t *testing.T) {
 }
 
 // participants returns n participations joined one minute apart, the
-// second one abandoned.
+// first one a creator and the second one abandoned.
 func participants(n int) []Participant {
 	items := make([]Participant, n)
 	for i := range items {
@@ -1149,6 +1149,9 @@ func participants(n int) []Participant {
 			Status:   ParticipantActive,
 			JoinedAt: now.Add(time.Duration(i) * time.Minute),
 		}
+	}
+	if n > 0 {
+		items[0].IsCreator = true
 	}
 	if n > 1 {
 		items[1].Status = ParticipantAbandoned
