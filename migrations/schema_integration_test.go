@@ -90,6 +90,10 @@ func TestConstraints(t *testing.T) {
 		{name: "end at start", sql: `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by) VALUES ('T', 'public', 'UTC', '2026-12-01Z', '2026-12-01Z', '` + userID + `')`, constraint: "challenges_window_check"},
 		{name: "unknown creator", sql: `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by) VALUES ('T', 'public', 'UTC', '2026-12-01Z', '2026-12-15Z', '00000000-0000-0000-0000-00000000dead')`, constraint: "challenges_created_by_fkey"},
 
+		// challenges.reference_sport (000013)
+		{name: "ride as the reference sport", sql: `INSERT INTO challenges (title, visibility, timezone, reference_sport, starts_at, ends_at, created_by) VALUES ('T', 'public', 'UTC', 'ride', '2026-12-01Z', '2026-12-15Z', '` + userID + `')`},
+		{name: "unknown reference sport", sql: `INSERT INTO challenges (title, visibility, timezone, reference_sport, starts_at, ends_at, created_by) VALUES ('T', 'public', 'UTC', 'curling', '2026-12-01Z', '2026-12-15Z', '` + userID + `')`, constraint: "challenges_reference_sport_fkey"},
+
 		// categories (000004)
 		{name: "the 3 categories", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_distance', 2), ('` + challengeID + `', 'elimination', 3)`},
 		{name: "unknown category type", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'fastest', 1)`, constraint: "categories_type_check"},
@@ -207,6 +211,22 @@ func TestNotNull(t *testing.T) {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23502" || pgErr.ColumnName != "joined_at" {
 		t.Fatalf("error = %v, want joined_at NOT NULL (no default: set from platform/clock)", err)
+	}
+}
+
+// TestReferenceSportDefault: a challenge written without its reference
+// sport, as by the version deployed before 000013, gets run.
+func TestReferenceSportDefault(t *testing.T) {
+	pool := testdb.New(t)
+	if _, err := pool.Exec(t.Context(), fixture); err != nil {
+		t.Fatal(err)
+	}
+	var reference string
+	if err := pool.QueryRow(t.Context(), "SELECT reference_sport FROM challenges WHERE id = $1", challengeID).Scan(&reference); err != nil {
+		t.Fatal(err)
+	}
+	if reference != "run" {
+		t.Fatalf("reference sport %q, want run by default", reference)
 	}
 }
 

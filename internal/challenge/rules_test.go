@@ -2,6 +2,7 @@ package challenge
 
 import (
 	"errors"
+	"maps"
 	"math"
 	"net/http"
 	"strings"
@@ -17,6 +18,12 @@ import (
 // distanceSports is the catalogue part the rules need: the sports that have
 // a distance (required or optional).
 var distanceSports = map[string]bool{"run": true, "walk": true, "ride": true, "other": true}
+
+// unknownSport marks a reference sport the catalogue does not have, whose
+// distance mode is empty.
+const unknownSport = "unknown"
+
+func sportCode(code string) *string { return &code }
 
 // now is 10:00 on Wednesday 2026-03-04 in Toronto (15:00 UTC).
 var now = time.Date(2026, 3, 4, 15, 0, 0, 0, time.UTC)
@@ -41,9 +48,12 @@ func with(change func(*Draft)) Draft {
 func TestValidate(t *testing.T) {
 	desc := func(n int) *string { s := strings.Repeat("é", n); return &s }
 	tests := []struct {
-		name       string
-		draft      Draft
-		wantFields string // empty: valid
+		name  string
+		draft Draft
+		// referenceMode is the distance mode of the reference sport in the
+		// catalogue: empty for required.
+		referenceMode string
+		wantFields    string // empty: valid
 	}{
 		{name: "valid", draft: valid()},
 		{name: "private, members can invite", draft: with(func(d *Draft) { d.Visibility = "private"; d.MembersCanInvite = true })},
@@ -124,6 +134,21 @@ func TestValidate(t *testing.T) {
 			d.DistanceFactors = map[string]float64{"ride": 0.29, "walk": 0.57, "other": 1.15}
 		})},
 		{name: "run is the fixed reference", draft: with(func(d *Draft) { d.DistanceFactors = map[string]float64{"run": 1} }), wantFields: "distance_factors.run"},
+		{name: "the reference is fixed, whatever the sport", draft: with(func(d *Draft) {
+			d.ReferenceSport = sportCode("ride")
+			d.DistanceFactors = map[string]float64{"ride": 1}
+		}), wantFields: "distance_factors.ride"},
+		{name: "run is free under another reference", draft: with(func(d *Draft) {
+			d.ReferenceSport = sportCode("ride")
+			d.DistanceFactors = map[string]float64{"run": 0.5}
+		})},
+
+		// Reference sport: a sport of the catalogue whose distance is
+		// required, run when none is given.
+		{name: "ride as the reference", draft: with(func(d *Draft) { d.ReferenceSport = sportCode("ride") })},
+		{name: "reference without distance", draft: with(func(d *Draft) { d.ReferenceSport = sportCode("yoga") }), referenceMode: "none", wantFields: "reference_sport"},
+		{name: "reference with an optional distance", draft: with(func(d *Draft) { d.ReferenceSport = sportCode("other") }), referenceMode: "optional", wantFields: "reference_sport"},
+		{name: "unknown reference", draft: with(func(d *Draft) { d.ReferenceSport = sportCode("quidditch") }), referenceMode: unknownSport, wantFields: "reference_sport"},
 		{name: "factor under 0.1", draft: with(func(d *Draft) { d.DistanceFactors = map[string]float64{"ride": 0.09} }), wantFields: "distance_factors.ride"},
 		{name: "factor over 2", draft: with(func(d *Draft) { d.DistanceFactors = map[string]float64{"ride": 2.01} }), wantFields: "distance_factors.ride"},
 		{name: "factor with 3 decimals", draft: with(func(d *Draft) { d.DistanceFactors = map[string]float64{"ride": 0.125} }), wantFields: "distance_factors.ride"},
@@ -142,7 +167,14 @@ func TestValidate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Validate(tt.draft, now, distanceSports)
+			mode := tt.referenceMode
+			switch mode {
+			case "":
+				mode = distanceRequired
+			case unknownSport:
+				mode = ""
+			}
+			_, err := Validate(tt.draft, now, distanceSports, mode)
 			if tt.wantFields == "" {
 				if err != nil {
 					t.Fatalf("Validate() error = %v, want nil", err)
@@ -226,7 +258,7 @@ func TestValidateWindow(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w, err := Validate(tt.draft, tt.now, distanceSports)
+			w, err := Validate(tt.draft, tt.now, distanceSports, distanceRequired)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -253,7 +285,7 @@ func TestValidateWindowIsNeverFixedDurations(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w, err := Validate(with(func(d *Draft) { d.StartDate = tt.start; d.Weeks = 2 }), tt.now, distanceSports)
+			w, err := Validate(with(func(d *Draft) { d.StartDate = tt.start; d.Weeks = 2 }), tt.now, distanceSports, distanceRequired)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -277,7 +309,7 @@ func TestValidateStartsOnTheChosenLocalDay(t *testing.T) {
 		t.Skip("this zone database does not skip midnight on 2027-09-05 in Santiago")
 	}
 	draft := with(func(d *Draft) { d.Timezone = "America/Santiago"; d.StartDate = "2027-09-05"; d.Weeks = 2 })
-	w, err := Validate(draft, time.Date(2027, 9, 1, 12, 0, 0, 0, time.UTC), distanceSports)
+	w, err := Validate(draft, time.Date(2027, 9, 1, 12, 0, 0, 0, time.UTC), distanceSports, distanceRequired)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,12 +320,12 @@ func TestValidateStartsOnTheChosenLocalDay(t *testing.T) {
 		t.Fatalf("ends at %s local, want 2027-09-19 00:00", got)
 	}
 	// On that day, starting the same day is still allowed at its first instant.
-	if _, err := Validate(draft, w.StartsAt, distanceSports); err != nil {
+	if _, err := Validate(draft, w.StartsAt, distanceSports, distanceRequired); err != nil {
 		t.Fatalf("start today refused at the first instant of the day: %v", err)
 	}
 	// And the day before is yesterday from that first instant.
 	yesterday := with(func(d *Draft) { d.Timezone = "America/Santiago"; d.StartDate = "2027-09-04"; d.Weeks = 2 })
-	if _, err := Validate(yesterday, w.StartsAt, distanceSports); err == nil {
+	if _, err := Validate(yesterday, w.StartsAt, distanceSports, distanceRequired); err == nil {
 		t.Fatal("start yesterday accepted at the first instant of the day")
 	}
 }
@@ -302,10 +334,10 @@ func TestValidateAYearAheadIsACalendarYear(t *testing.T) {
 	// From 2027-03-01, a year ahead is 2028-03-01: 366 days later, since
 	// 2028-02-29 exists. 365 days would stop at 2028-02-29.
 	from := time.Date(2027, 3, 1, 17, 0, 0, 0, time.UTC)
-	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-01" }), from, distanceSports); err != nil {
+	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-01" }), from, distanceSports, distanceRequired); err != nil {
 		t.Fatalf("start the same day next year refused: %v", err)
 	}
-	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-02" }), from, distanceSports); err == nil {
+	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-02" }), from, distanceSports, distanceRequired); err == nil {
 		t.Fatal("start after the same day next year accepted")
 	}
 }
@@ -317,11 +349,11 @@ func TestValidateStartAtTheEdgesOfToday(t *testing.T) {
 	}
 	draft := with(func(d *Draft) { d.StartDate = "2026-03-04" })
 	// Last second of the local 2026-03-04: starting that day is allowed.
-	if _, err := Validate(draft, time.Date(2026, 3, 4, 23, 59, 59, 0, toronto), distanceSports); err != nil {
+	if _, err := Validate(draft, time.Date(2026, 3, 4, 23, 59, 59, 0, toronto), distanceSports, distanceRequired); err != nil {
 		t.Fatalf("start today at 23:59:59 refused: %v", err)
 	}
 	// Local midnight of 2026-03-05: 2026-03-04 is now yesterday.
-	if _, err := Validate(draft, time.Date(2026, 3, 5, 0, 0, 0, 0, toronto), distanceSports); err == nil {
+	if _, err := Validate(draft, time.Date(2026, 3, 5, 0, 0, 0, 0, toronto), distanceSports, distanceRequired); err == nil {
 		t.Fatal("start yesterday accepted at local midnight")
 	}
 }
@@ -329,12 +361,12 @@ func TestValidateStartAtTheEdgesOfToday(t *testing.T) {
 func TestValidateTodayIsInTheChallengeTimeZone(t *testing.T) {
 	// 02:00 UTC on 2026-03-05 is still 2026-03-04 in Toronto (21:00).
 	late := time.Date(2026, 3, 5, 2, 0, 0, 0, time.UTC)
-	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2026-03-04" }), late, distanceSports); err != nil {
+	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2026-03-04" }), late, distanceSports, distanceRequired); err != nil {
 		t.Fatalf("start on the local today refused: %v", err)
 	}
 	// In Paris it is already 2026-03-05 (03:00): 2026-03-04 is in the past.
 	paris := with(func(d *Draft) { d.Timezone = "Europe/Paris"; d.StartDate = "2026-03-04" })
-	if _, err := Validate(paris, late, distanceSports); err == nil {
+	if _, err := Validate(paris, late, distanceSports, distanceRequired); err == nil {
 		t.Fatal("start on the local yesterday accepted")
 	}
 }
@@ -372,6 +404,32 @@ func TestValidateText(t *testing.T) {
 			}
 			if tt.wantTitle != nil && (got.Title == nil || *got.Title != *tt.wantTitle) {
 				t.Fatalf("title %v, want %q", got.Title, *tt.wantTitle)
+			}
+		})
+	}
+}
+
+func TestReferenceFactors(t *testing.T) {
+	suggested := map[string]float64{"run": 1, "walk": 1, "ride": 0.3, "rowing": 0.5, "other": 1}
+	tests := []struct {
+		name      string
+		suggested map[string]float64
+		reference string
+		want      map[string]float64
+	}{
+		{name: "run keeps the catalogue", suggested: suggested, reference: "run", want: map[string]float64{"run": 1, "walk": 1, "ride": 0.3, "rowing": 0.5, "other": 1}},
+		{name: "ride: the slower sports capped at 1", suggested: suggested, reference: "ride", want: map[string]float64{"run": 1, "walk": 1, "ride": 1, "rowing": 1, "other": 1}},
+		{name: "rowing: ride 0.3 / 0.5", suggested: suggested, reference: "rowing", want: map[string]float64{"run": 1, "walk": 1, "ride": 0.6, "rowing": 1, "other": 1}},
+		{name: "never under 0.1", suggested: map[string]float64{"fast": 0.1, "slow": 2}, reference: "slow", want: map[string]float64{"fast": 0.1, "slow": 1}},
+		{name: "rounded to two decimals", suggested: map[string]float64{"a": 0.3, "b": 0.7}, reference: "b", want: map[string]float64{"a": 0.43, "b": 1}},
+		{name: "half rounded up", suggested: map[string]float64{"a": 0.1, "b": 0.8}, reference: "b", want: map[string]float64{"a": 0.13, "b": 1}},
+		{name: "reference without a suggested factor: x1", suggested: map[string]float64{"ride": 0.3}, reference: "run", want: map[string]float64{"run": 1, "ride": 0.3}},
+		{name: "reference over 1 in the catalogue", suggested: map[string]float64{"a": 1, "b": 1.5}, reference: "b", want: map[string]float64{"a": 0.67, "b": 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := referenceFactors(tt.suggested, tt.reference); !maps.Equal(got, tt.want) {
+				t.Fatalf("referenceFactors() = %v, want %v", got, tt.want)
 			}
 		})
 	}
