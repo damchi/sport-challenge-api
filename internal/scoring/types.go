@@ -10,6 +10,16 @@ type Activity struct {
 	StartedAt       time.Time
 	DurationSeconds int
 	DistanceMeters  *int
+	// For the points category, an Activity is a group of sessions of a
+	// participant, week and sport, as the repository sums them (a single
+	// session in tests), StartedAt an instant of its week (its first
+	// session). LongestSeconds and LongestMeters are its longest
+	// session by duration and by distance (nil without distance); Sessions
+	// counts those lasting at least the category's minimum. Zero outside
+	// the points category.
+	LongestSeconds int
+	LongestMeters  *int
+	Sessions       int
 }
 
 // Scorer ranks the participants of a category from the raw activities.
@@ -21,14 +31,18 @@ type Scorer interface {
 
 // Participant is a member of a challenge as the scorers see it. An
 // abandoned participant (who left or was excluded) is listed but not ranked.
+// AbandonedAt is when they left (nil otherwise): the points category keeps
+// them in the weeks locked by then.
 type Participant struct {
-	UserID    string
-	Abandoned bool
+	UserID      string
+	Abandoned   bool
+	AbandonedAt *time.Time
 }
 
 // Entry is the line of a participant in the ranking of a category. Value is
-// in the unit of the category (seconds, meters). Rank starts at 1, equal
-// values share it (1, 1, 3). An abandoned participant has rank and value 0.
+// in the unit of the category (seconds, meters, points). Rank starts at 1,
+// equal values share it (1, 1, 3). An abandoned participant has rank and
+// value 0.
 type Entry struct {
 	UserID    string
 	Rank      int
@@ -37,6 +51,10 @@ type Entry struct {
 	// Progress is the live situation in the elimination category; nil for
 	// the other categories and for an abandoned participant.
 	Progress *Progress
+	// Provisional is, in the points category only, the points of the weeks
+	// started but not locked yet; nil for the other categories, for an
+	// abandoned participant, and when every started week is locked.
+	Provisional *int
 }
 
 // Live statuses of a participant in the elimination category.
