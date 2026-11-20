@@ -10,11 +10,20 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
-// Category types, one of each per challenge, in this position order.
+// Category types, at most one of each per challenge, in this position order;
+// only the cumulative time is always there.
 const (
 	CategoryCumulativeTime     = "cumulative_time"
 	CategoryCumulativeDistance = "cumulative_distance"
 	CategoryElimination        = "elimination"
+)
+
+// Positions of the categories, fixed by type: a missing category leaves a
+// gap.
+const (
+	positionTime        = 1
+	positionDistance    = 2
+	positionElimination = 3
 )
 
 // Challenge is a row of the challenges table with its categories.

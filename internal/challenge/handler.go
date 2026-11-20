@@ -34,14 +34,19 @@ func (h *Handler) CreateChallenge(ctx context.Context, req api.CreateChallengeRe
 	}
 	b := req.Body
 	draft := Draft{
-		Title:                 b.Title,
-		Description:           b.Description,
-		Visibility:            string(b.Visibility),
-		Timezone:              b.Timezone,
-		StartDate:             b.StartDate.String(),
-		Weeks:                 b.Weeks,
-		EliminationStepMeters: b.EliminationStepMeters,
-		ReferenceSport:        b.ReferenceSport,
+		Title:          b.Title,
+		Description:    b.Description,
+		Visibility:     string(b.Visibility),
+		Timezone:       b.Timezone,
+		StartDate:      b.StartDate.String(),
+		Weeks:          b.Weeks,
+		ReferenceSport: b.ReferenceSport,
+	}
+	if cats := b.Categories; cats != nil {
+		draft.Distance = cats.CumulativeDistance != nil
+		if e := cats.Elimination; e != nil {
+			draft.Elimination = &EliminationDraft{StepMeters: e.StepMeters}
+		}
 	}
 	if b.MembersCanInvite != nil {
 		draft.MembersCanInvite = *b.MembersCanInvite

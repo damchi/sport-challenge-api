@@ -34,7 +34,7 @@ const (
 	// distanceRequired is the distance mode a reference sport needs.
 	distanceRequired     = "required"
 	factorFieldPrefix    = "distance_factors."
-	unknownFactorsFields = "distance_factors"
+	distanceFactorsField = "distance_factors"
 )
 
 // Draft is a challenge as its creator describes it.
@@ -51,8 +51,11 @@ type Draft struct {
 	// most a year ahead.
 	StartDate string
 	Weeks     int
-	// EliminationStepMeters is the increment X of the elimination category.
-	EliminationStepMeters int
+	// Distance is whether the challenge has the cumulative distance
+	// category; the cumulative time is always there.
+	Distance bool
+	// Elimination is the elimination category, nil when not chosen.
+	Elimination *EliminationDraft
 	// ReferenceSport is the sport the distances are brought back to and the
 	// elimination is run in; nil for run (an empty code is refused).
 	ReferenceSport *string
@@ -61,6 +64,12 @@ type Draft struct {
 	// reference (referenceFactors). The reference is ×1 and cannot be
 	// changed.
 	DistanceFactors map[string]float64
+}
+
+// EliminationDraft is the setting of the elimination category.
+type EliminationDraft struct {
+	// StepMeters is the increment X, in meters.
+	StepMeters int
 }
 
 // reference is the reference sport of the draft, run when none is given.
@@ -80,12 +89,14 @@ type Window struct {
 // Validate checks draft against the challenge rules, at the instant now
 // (from platform/clock), with distanceSports the sports of the catalogue that
 // have a distance and referenceMode the distance mode of the reference sport
-// (empty when the catalogue has no such sport). It returns the window of the
-// challenge: from the first instant of the first local day (midnight, or the
-// end of the skipped hour where a time change skips midnight:
-// scoring.StartOfDay), for a whole number of weeks counted in local days (a
-// week across a time change lasts 167 or 169 hours). A broken rule gives 400
-// validation_failed listing the fields, sorted.
+// (empty when the catalogue has no such sport). The distance factors are
+// refused without the cumulative distance, the only category to use them.
+// It returns the window of the challenge: from the first instant of the
+// first local day (midnight, or the end of the skipped hour where a time
+// change skips midnight: scoring.StartOfDay), for a whole number of weeks
+// counted in local days (a week across a time change lasts 167 or 169
+// hours). A broken rule gives 400 validation_failed listing the fields,
+// sorted.
 func Validate(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string) (Window, error) {
 	var fields []string
 
@@ -101,13 +112,18 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool, refere
 	if draft.Weeks < minWeeks || draft.Weeks > maxWeeks {
 		fields = append(fields, "weeks")
 	}
-	if draft.EliminationStepMeters <= 0 || draft.EliminationStepMeters > maxEliminationStep {
-		fields = append(fields, "elimination_step_meters")
+	if e := draft.Elimination; e != nil && (e.StepMeters <= 0 || e.StepMeters > maxEliminationStep) {
+		fields = append(fields, "categories.elimination.step_meters")
 	}
 	if referenceMode != distanceRequired {
 		fields = append(fields, "reference_sport")
 	}
-	fields = append(fields, invalidFactors(draft.DistanceFactors, distanceSports, draft.reference())...)
+	if !draft.Distance && draft.DistanceFactors != nil {
+		// No category uses them: the field alone, its keys never echoed.
+		fields = append(fields, distanceFactorsField)
+	} else {
+		fields = append(fields, invalidFactors(draft.DistanceFactors, distanceSports, draft.reference())...)
+	}
 
 	loc, locErr := location(draft.Timezone)
 	if locErr != nil {
@@ -222,7 +238,7 @@ func invalidFactors(factors map[string]float64, distanceSports map[string]bool, 
 		}
 	}
 	if unknown {
-		fields = append(fields, unknownFactorsFields)
+		fields = append(fields, distanceFactorsField)
 	}
 	return fields
 }

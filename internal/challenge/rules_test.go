@@ -28,14 +28,16 @@ func sportCode(code string) *string { return &code }
 // now is 10:00 on Wednesday 2026-03-04 in Toronto (15:00 UTC).
 var now = time.Date(2026, 3, 4, 15, 0, 0, 0, time.UTC)
 
+// valid is a draft with every category.
 func valid() Draft {
 	return Draft{
-		Title:                 "Spring run",
-		Visibility:            "public",
-		Timezone:              "America/Toronto",
-		StartDate:             "2026-03-04",
-		Weeks:                 6,
-		EliminationStepMeters: 2000,
+		Title:       "Spring run",
+		Visibility:  "public",
+		Timezone:    "America/Toronto",
+		StartDate:   "2026-03-04",
+		Weeks:       6,
+		Distance:    true,
+		Elimination: &EliminationDraft{StepMeters: 2000},
 	}
 }
 
@@ -120,12 +122,32 @@ func TestValidate(t *testing.T) {
 		{name: "53 weeks", draft: with(func(d *Draft) { d.Weeks = 53 }), wantFields: "weeks"},
 		{name: "0 weeks", draft: with(func(d *Draft) { d.Weeks = 0 }), wantFields: "weeks"},
 
+		// Categories: the cumulative time alone, or with any of the others.
+		{name: "cumulative time only", draft: with(func(d *Draft) { d.Distance = false; d.Elimination = nil })},
+		{name: "elimination without distance", draft: with(func(d *Draft) { d.Distance = false })},
+		{name: "distance without elimination", draft: with(func(d *Draft) { d.Elimination = nil })},
+
 		// Elimination step X: meters, > 0 and 100 km at most.
-		{name: "step of 1 m", draft: with(func(d *Draft) { d.EliminationStepMeters = 1 })},
-		{name: "step of 100 km", draft: with(func(d *Draft) { d.EliminationStepMeters = 100_000 })},
-		{name: "step of 0", draft: with(func(d *Draft) { d.EliminationStepMeters = 0 }), wantFields: "elimination_step_meters"},
-		{name: "negative step", draft: with(func(d *Draft) { d.EliminationStepMeters = -1 }), wantFields: "elimination_step_meters"},
-		{name: "step over 100 km", draft: with(func(d *Draft) { d.EliminationStepMeters = 100_001 }), wantFields: "elimination_step_meters"},
+		{name: "step of 1 m", draft: with(func(d *Draft) { d.Elimination.StepMeters = 1 })},
+		{name: "step of 100 km", draft: with(func(d *Draft) { d.Elimination.StepMeters = 100_000 })},
+		{name: "step of 0", draft: with(func(d *Draft) { d.Elimination.StepMeters = 0 }), wantFields: "categories.elimination.step_meters"},
+		{name: "negative step", draft: with(func(d *Draft) { d.Elimination.StepMeters = -1 }), wantFields: "categories.elimination.step_meters"},
+		{name: "step over 100 km", draft: with(func(d *Draft) { d.Elimination.StepMeters = 100_001 }), wantFields: "categories.elimination.step_meters"},
+
+		// Distance factors only serve the cumulative distance: without it,
+		// even none or invalid ones are refused, and the keys never echoed.
+		{name: "factors without distance", draft: with(func(d *Draft) {
+			d.Distance = false
+			d.DistanceFactors = map[string]float64{"ride": 0.25}
+		}), wantFields: "distance_factors"},
+		{name: "empty factors without distance", draft: with(func(d *Draft) {
+			d.Distance = false
+			d.DistanceFactors = map[string]float64{}
+		}), wantFields: "distance_factors"},
+		{name: "invalid factors without distance: the field only", draft: with(func(d *Draft) {
+			d.Distance = false
+			d.DistanceFactors = map[string]float64{"ride": 3, "quidditch": 1}
+		}), wantFields: "distance_factors"},
 
 		// Distance factors chosen by the creator: distance sports, 0.1 to 2,
 		// two decimals at most.
@@ -161,8 +183,8 @@ func TestValidate(t *testing.T) {
 
 		{
 			name:       "every invalid field, sorted",
-			draft:      Draft{Title: "x", Visibility: "x", Timezone: "America/Toronto", StartDate: "x", Weeks: 99, EliminationStepMeters: 0},
-			wantFields: "elimination_step_meters,start_date,title,visibility,weeks",
+			draft:      Draft{Title: "x", Visibility: "x", Timezone: "America/Toronto", StartDate: "x", Weeks: 99, Elimination: &EliminationDraft{}},
+			wantFields: "categories.elimination.step_meters,start_date,title,visibility,weeks",
 		},
 	}
 	for _, tt := range tests {
