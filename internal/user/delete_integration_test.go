@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
 
@@ -28,6 +29,10 @@ func namedUser(t *testing.T, repo *Repository, subject, pseudo string) User {
 
 func noAbandon(context.Context) error { return nil }
 
+// deletionTime dates the deletions of the repository tests: not now, so that
+// a date written by the database instead would show.
+var deletionTime = time.Date(2026, 3, 9, 14, 30, 0, 0, time.UTC)
+
 func TestDeleteAnonymizes(t *testing.T) {
 	repo, pool := newRepository(t)
 	u := namedUser(t, repo, "email|alice", "alice_1")
@@ -36,13 +41,13 @@ func TestDeleteAnonymizes(t *testing.T) {
 	}
 	other := namedUser(t, repo, "email|bob", "bob_1")
 
-	subject, err := repo.Delete(t.Context(), u.ID, noAbandon)
+	subject, err := repo.Delete(t.Context(), u.ID, deletionTime, noAbandon)
 	if err != nil || subject != "email|alice" {
 		t.Fatalf("Delete() = %q, %v, want the former subject", subject, err)
 	}
 	var authSubject string
 	var pseudo, firstName, lastName, email, avatar, language *string
-	var anonymizedAt *time.Time
+	var anonymizedAt, deletedAt *time.Time
 	if err := pool.QueryRow(t.Context(), "SELECT auth_subject, pseudo, first_name, last_name, email, avatar_key, language, anonymized_at FROM users WHERE id = $1", u.ID).
 		Scan(&authSubject, &pseudo, &firstName, &lastName, &email, &avatar, &language, &anonymizedAt); err != nil {
 		t.Fatal(err)
@@ -53,8 +58,12 @@ func TestDeleteAnonymizes(t *testing.T) {
 	}
 	// Only the fingerprint of the subject is kept, never the subject itself.
 	sum := sha256.Sum256([]byte("email|alice"))
-	if n := count(t, pool, "SELECT count(*) FROM deleted_subjects WHERE fingerprint = $1", sum[:]); n != 1 {
-		t.Fatalf("%d fingerprints, want 1", n)
+	if err := pool.QueryRow(t.Context(), "SELECT deleted_at FROM deleted_subjects WHERE fingerprint = $1", sum[:]).Scan(&deletedAt); err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	// Both dates are the instant given by the service (its clock).
+	if !anonymizedAt.Equal(deletionTime) || !deletedAt.Equal(deletionTime) {
+		t.Fatalf("anonymized at %v, fingerprint deleted at %v, want both %v", anonymizedAt, deletedAt, deletionTime)
 	}
 	if n := count(t, pool, "SELECT count(*) FROM users WHERE auth_subject = 'email|alice'"); n != 0 {
 		t.Fatalf("%d rows still hold the subject, want 0", n)
@@ -67,16 +76,16 @@ func TestDeleteAnonymizes(t *testing.T) {
 	if _, err := repo.GetByID(t.Context(), other.ID); err != nil {
 		t.Fatalf("other user: %v", err)
 	}
-	if _, err := repo.Delete(t.Context(), u.ID, noAbandon); !errors.Is(err, errUserNotFound) {
+	if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noAbandon); !errors.Is(err, errUserNotFound) {
 		t.Fatalf("second Delete() error = %v, want errUserNotFound", err)
 	}
 }
 
 func TestDeletedSubjectNeverLogsInAgain(t *testing.T) {
 	repo, pool := newRepository(t)
-	svc := NewService(repo, nil, nil, nil, discard)
+	svc := NewService(repo, nil, nil, nil, nil, discard)
 	u := namedUser(t, repo, "email|carol", "carol_1")
-	if _, err := repo.Delete(t.Context(), u.ID, noAbandon); err != nil {
+	if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noAbandon); err != nil {
 		t.Fatal(err)
 	}
 
@@ -99,7 +108,7 @@ func TestDeleteRollsBackWhenAbandonFails(t *testing.T) {
 	u := namedUser(t, repo, "email|erin", "erin_1")
 	failure := errors.New("abandon failed")
 
-	_, err := repo.Delete(t.Context(), u.ID, func(ctx context.Context) error {
+	_, err := repo.Delete(t.Context(), u.ID, deletionTime, func(ctx context.Context) error {
 		// The abandons run in the deletion's transaction: they see the anonymization.
 		var anonymized bool
 		if err := db.Conn(ctx, repo.db).Raw("SELECT anonymized_at IS NOT NULL FROM users WHERE id = ?", u.ID).Scan(&anonymized).Error; err != nil {
@@ -132,7 +141,7 @@ func TestPatchRacingTheDeletion(t *testing.T) {
 	locked, release := make(chan struct{}), make(chan struct{})
 	deleted := make(chan error, 1)
 	go func() {
-		_, err := repo.Delete(t.Context(), u.ID, func(context.Context) error {
+		_, err := repo.Delete(t.Context(), u.ID, deletionTime, func(context.Context) error {
 			close(locked)
 			<-release
 			return nil
@@ -176,7 +185,7 @@ func TestServiceDeleteRecordsTheAuth0Deletion(t *testing.T) {
 		repo, pool := newRepository(t)
 		u := namedUser(t, repo, "email|gina", "gina_1")
 		identities := &flakyIdentities{}
-		if err := NewService(repo, abandonThen(func() {}), nil, identities, discard).Delete(t.Context(), u.ID); err != nil {
+		if err := NewService(repo, abandonThen(func() {}), nil, identities, clock.Real{}, discard).Delete(t.Context(), u.ID); err != nil {
 			t.Fatal(err)
 		}
 		if n := pending(t, pool, "email|gina"); n != 0 || !slices.Equal(identities.calls, []string{"email|gina"}) {
@@ -187,7 +196,7 @@ func TestServiceDeleteRecordsTheAuth0Deletion(t *testing.T) {
 		repo, pool := newRepository(t)
 		u := namedUser(t, repo, "email|hugo", "hugo_1")
 		identities := &flakyIdentities{failing: map[string]bool{"email|hugo": true}}
-		if err := NewService(repo, abandonThen(func() {}), nil, identities, discard).Delete(t.Context(), u.ID); err != nil {
+		if err := NewService(repo, abandonThen(func() {}), nil, identities, clock.Real{}, discard).Delete(t.Context(), u.ID); err != nil {
 			t.Fatalf("error = %v, want nil: the account is deleted", err)
 		}
 		if n := pending(t, pool, "email|hugo"); n != 1 {
@@ -198,14 +207,14 @@ func TestServiceDeleteRecordsTheAuth0Deletion(t *testing.T) {
 		repo, pool := newRepository(t)
 		u := namedUser(t, repo, "email|iris", "iris_1")
 		// The process stops right after the commit: Auth0 is never called.
-		if _, err := repo.Delete(t.Context(), u.ID, noAbandon); err != nil {
+		if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noAbandon); err != nil {
 			t.Fatal(err)
 		}
 		if n := pending(t, pool, "email|iris"); n != 1 {
 			t.Fatalf("%d pending, want 1", n)
 		}
 		identities := &flakyIdentities{}
-		res, err := NewService(repo, nil, nil, identities, discard).RetryAuth0Deletions(t.Context())
+		res, err := NewService(repo, nil, nil, identities, nil, discard).RetryAuth0Deletions(t.Context())
 		if err != nil || res != (RetryResult{Deleted: 1}) || !slices.Equal(identities.calls, []string{"email|iris"}) {
 			t.Fatalf("run = %+v, %v, Auth0 calls %v, want the deletion replayed", res, err, identities.calls)
 		}
@@ -236,7 +245,7 @@ func TestPendingAuth0DeletionsReplay(t *testing.T) {
 	}
 
 	identities := &flakyIdentities{failing: map[string]bool{"email|first": true}}
-	svc := NewService(repo, nil, nil, identities, discard)
+	svc := NewService(repo, nil, nil, identities, nil, discard)
 	if res, err := svc.RetryAuth0Deletions(ctx); err == nil || res != (RetryResult{Deleted: 1, Failed: 1}) {
 		t.Fatalf("first run = %+v, %v, want 1 deleted, 1 failed and an error", res, err)
 	}

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 )
 
 // repository is what the service needs from the storage.
@@ -17,7 +19,7 @@ type repository interface {
 	UpdateProfile(ctx context.Context, id string, changes ProfileChanges) (User, error)
 	UpdateEmail(ctx context.Context, id, email string) error
 	PublicNames(ctx context.Context, ids []string) (map[string]PublicName, error)
-	Delete(ctx context.Context, id string, abandon func(ctx context.Context) error) (string, error)
+	Delete(ctx context.Context, id string, at time.Time, abandon func(ctx context.Context) error) (string, error)
 	PendingAuth0Deletions(ctx context.Context) ([]string, error)
 	RemovePendingAuth0Deletion(ctx context.Context, subject string) error
 }
@@ -45,12 +47,13 @@ type Service struct {
 	participations Participations
 	erasers        []Eraser
 	identities     Identities
+	clock          clock.Clock
 	logger         *slog.Logger
 }
 
 // NewService returns a Service on repo.
-func NewService(repo repository, participations Participations, erasers []Eraser, identities Identities, logger *slog.Logger) *Service {
-	return &Service{repo: repo, participations: participations, erasers: erasers, identities: identities, logger: logger}
+func NewService(repo repository, participations Participations, erasers []Eraser, identities Identities, c clock.Clock, logger *slog.Logger) *Service {
+	return &Service{repo: repo, participations: participations, erasers: erasers, identities: identities, clock: c, logger: logger}
 }
 
 // GetOrCreateBySubject returns the local user of an auth subject, created
@@ -157,12 +160,13 @@ func (s *Service) PublicNames(ctx context.Context, ids []string) (map[string]Pub
 // again), its deletion at Auth0 is recorded as pending, every challenge not
 // finished is abandoned (which refuses the last creator), then every row of
 // the account kept by the other modules is erased (erasers); the row of the
-// user stays, anonymized, for the challenges it created. The user is then
+// user stays, anonymized, for the challenges it created. The deletion is
+// dated by the clock, like the other business dates. The user is then
 // deleted at Auth0 and the pending deletion removed. Nothing after the
 // commit fails the call: a deletion at Auth0 that fails, or whose record
 // cannot be removed, stays pending for the worker to replay.
 func (s *Service) Delete(ctx context.Context, actorID string) error {
-	subject, err := s.repo.Delete(ctx, actorID, func(ctx context.Context) error {
+	subject, err := s.repo.Delete(ctx, actorID, s.clock.Now(), func(ctx context.Context) error {
 		if err := s.participations.AbandonAll(ctx, actorID); err != nil {
 			return err
 		}

@@ -79,7 +79,7 @@ func newErasureFixture(t *testing.T) erasureFixture {
 		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
 		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
 	}
-	f.users = user.NewService(user.NewRepository(gdb), f.participations, f.erasers, deletedAtAuth0{}, logger)
+	f.users = user.NewService(user.NewRepository(gdb), f.participations, f.erasers, deletedAtAuth0{}, clk, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{f.users}, sports, standingsFunc(nil), clk)
 	activities = activity.NewService(activity.NewRepository(gdb), f.users, sports, participations{challenges}, activityScopes{challenges}, clk)
@@ -360,7 +360,7 @@ func TestAccountDeletionErasesNothingOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	users := user.NewService(user.NewRepository(gdb), f.participations, erasers, deletedAtAuth0{}, logger)
+	users := user.NewService(user.NewRepository(gdb), f.participations, erasers, deletedAtAuth0{}, clock.NewFake(recordNow), logger)
 	before, snapshotBefore := f.rowsOf(f.gone), f.snapshotEntries()
 
 	if err := users.Delete(t.Context(), f.gone); !errors.Is(err, failure) {
