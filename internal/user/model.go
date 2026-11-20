@@ -37,9 +37,8 @@ type ProfileChanges struct {
 	Language     *string
 }
 
-// PublicName is what the other users see of a user: never the e-mail. Every
-// field is nil for an anonymized account, and a name the user has not set
-// yet is nil too.
+// PublicName is what the other users see of a user: never the e-mail. A
+// name the user has not set yet is nil.
 type PublicName struct {
 	Pseudo    *string
 	FirstName *string

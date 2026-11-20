@@ -122,7 +122,8 @@ func (r *Repository) UpdateEmail(ctx context.Context, id, email string) error {
 // one transaction that abandon joins (ctx carries it): the row is locked,
 // the fingerprint of its subject is stored, the subject is replaced by a
 // placeholder and the pseudo, names, e-mail, avatar and language are erased,
-// the deletion at Auth0 is recorded as pending; then abandon runs. Both the
+// the deletion at Auth0 is recorded as pending; then abandon runs (the
+// abandons, then the erasure of the account's other rows). Both the
 // anonymization and the fingerprint are dated at (the service's clock). It
 // returns the former subject, for the deletion at Auth0. An unknown or
 // already anonymized user gives errUserNotFound; an error of abandon rolls

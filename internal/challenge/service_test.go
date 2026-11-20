@@ -1196,7 +1196,7 @@ func TestServiceParticipants(t *testing.T) {
 			if got := page.Items[0].Name; !reflect.DeepEqual(got, marie) {
 				t.Fatalf("first name %+v, want %+v", got, marie)
 			}
-			// No name (anonymized account): left empty, for a neutral name.
+			// No name (account deleted after the listing was read): left empty.
 			if len(page.Items) > 1 && (page.Items[1].Name != Name{} || page.Items[1].Status != ParticipantAbandoned) {
 				t.Fatalf("second item %+v, want abandoned without name", page.Items[1])
 			}

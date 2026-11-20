@@ -109,7 +109,7 @@ func TestDeleteRollsBackWhenAbandonFails(t *testing.T) {
 	failure := errors.New("abandon failed")
 
 	_, err := repo.Delete(t.Context(), u.ID, deletionTime, func(ctx context.Context) error {
-		// The abandons run in the deletion's transaction: they see the anonymization.
+		// The abandons and the erasure run in the deletion's transaction: they see the anonymization.
 		var anonymized bool
 		if err := db.Conn(ctx, repo.db).Raw("SELECT anonymized_at IS NOT NULL FROM users WHERE id = ?", u.ID).Scan(&anonymized).Error; err != nil {
 			return err

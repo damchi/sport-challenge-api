@@ -252,8 +252,8 @@ func AbandonRefusal(m Membership, visibility string, now, endsAt time.Time) (noo
 // DeletionAbandons reports whether deleting the account of a user with
 // membership m makes them abandon a challenge ending at endsAt: an active
 // participation in a challenge not finished at now. In a finished challenge
-// the participation stays active; every view leaves the deleted account
-// out (AccountDeleted).
+// it is not abandoned: like every other row of the account, the deletion
+// erases it, and every view leaves the deleted account out (AccountDeleted).
 func DeletionAbandons(m Membership, now, endsAt time.Time) bool {
 	return m.Participant == ParticipantActive && now.Before(endsAt)
 }

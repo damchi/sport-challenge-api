@@ -37,7 +37,7 @@ type repository interface {
 }
 
 // Profiles tells whether a user's profile is complete, and gives the public
-// names of users, none for an anonymized account (module user).
+// names of users, none for a deleted (anonymized) account (module user).
 type Profiles interface {
 	ProfileComplete(ctx context.Context, userID string) (bool, error)
 	Names(ctx context.Context, userIDs []string) (map[string]Name, error)

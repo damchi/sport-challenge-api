@@ -173,7 +173,8 @@ func TestConstraints(t *testing.T) {
 		{name: "unknown recipient", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(deadID), constraint: "invitation_recipients_user_id_fkey"},
 		{name: "deleting an invitation with recipients", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(userID) + `DELETE FROM invitations WHERE id = '` + invitationID + `'`, constraint: "invitation_recipients_invitation_id_fkey"},
 
-		// No cascade: results stay (anonymization, soft deletion).
+		// No cascade: a challenge is only soft-deleted, and the rows of a deleted
+		// account are erased by the code, never by the database.
 		{name: "deleting a challenge with participants", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL); DELETE FROM challenges WHERE id = '` + challengeID + `'`, constraint: "participants_challenge_id_fkey"},
 		{name: "deleting a user who created a challenge", sql: `DELETE FROM users WHERE id = '` + userID + `'`, constraint: "challenges_created_by_fkey"},
 	}

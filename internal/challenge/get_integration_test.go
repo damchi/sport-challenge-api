@@ -1074,7 +1074,8 @@ func TestParticipantsListing(t *testing.T) {
 	if _, err := svc.Abandon(t.Context(), ids[1], id); err != nil {
 		t.Fatal(err)
 	}
-	// A deleted account: abandoned and anonymized (ticket 039 does both).
+	// An anonymized account whose participation is still there (the deletion
+	// erases it): the reads leave it out all the same.
 	if _, err := pool.Exec(t.Context(), "UPDATE participants SET status = 'abandoned', abandoned_at = joined_at WHERE user_id = $1", ids[2]); err != nil {
 		t.Fatal(err)
 	}

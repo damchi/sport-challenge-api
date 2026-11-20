@@ -181,7 +181,8 @@ type Page struct {
 }
 
 // Participant is a participation in a listing, with the public name of the
-// participant (empty for an anonymized account).
+// participant (empty when the account was deleted after the listing was
+// read).
 type Participant struct {
 	UserID    string
 	Status    ParticipantStatus
@@ -191,7 +192,8 @@ type Participant struct {
 }
 
 // Name is what a user shows the others: never the e-mail. Each field is nil
-// for an anonymized account, and a name not set yet is nil too.
+// when the account was deleted between the read of the list and that of the
+// names, and for a name not set yet.
 type Name struct {
 	Pseudo    *string
 	FirstName *string
