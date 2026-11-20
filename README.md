@@ -587,7 +587,7 @@ La V2 (synchronisations) a peu d'impact sur la V1 si ces choix, presque gratuits
 
 ### V1, phase par phase (même ordre que le skill `bootstrap`)
 
-Le détail ticket par ticket (69 tickets, critères d'acceptation, commits proposés) est dans [`TASKS.md`](TASKS.md) (importé en issues GitHub, voir « Les tickets vivent dans GitHub »).
+Le détail ticket par ticket (critères d'acceptation, commits proposés) est dans [`TASKS.md`](TASKS.md) (importé en issues GitHub, voir « Les tickets vivent dans GitHub »).
 
 | Phase | Contenu | Points à ne pas oublier |
 |---|---|---|

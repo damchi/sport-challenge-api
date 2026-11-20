@@ -5,7 +5,7 @@ description: Prend la prochaine issue GitHub du backlog du backend Sport Challen
 
 # Traiter un ticket du backlog
 
-Le backlog est dans les **issues GitHub** (tickets `SC-API-001` à `SC-API-075`, numérotation non consécutive : les tickets listés dans « Tickets fusionnés » de `TASKS.md` n'existent plus). **Un ticket = un commit.** Ne traite jamais deux tickets d'affilée sans que la pull request du premier soit fusionnée ou que l'utilisateur te le demande.
+Le backlog est dans les **issues GitHub** (tickets `SC-API-NNN`, numérotation non consécutive : les tickets listés dans « Tickets fusionnés » de `TASKS.md` n'existent plus). **Un ticket = un commit.** Ne traite jamais deux tickets d'affilée sans que la pull request du premier soit fusionnée ou que l'utilisateur te le demande.
 
 ## 1. Choisir le ticket
 

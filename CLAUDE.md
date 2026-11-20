@@ -6,7 +6,7 @@ API Go d'une application de challenges sportifs entre amis : catégories avec po
 
 - `README.md` est la spécification du produit et de l'architecture. **Lis le §2 (règles fonctionnelles) et le §5 (architecture) avant toute tâche qui touche au métier ou à la structure.**
 - Légende du README : ✅ décidé · 🟡 proposition · ❓ question ouverte. Applique les ✅. Ne transforme jamais un 🟡 ou un ❓ en règle sans demander.
-- **Backlog** : issues GitHub (importées depuis `TASKS.md`, qui reste le document de référence ; 69 tickets `SC-API-001` à `SC-API-077`, numérotation non consécutive : les anciens tickets de préparation ont été fusionnés dans les tickets fonctionnels ; un ticket = un commit). Utilise le skill `next-task` pour le traiter ; le statut vit dans l'issue, pas dans `TASKS.md`.
+- **Backlog** : issues GitHub (importées depuis `TASKS.md`, qui reste le document de référence ; numérotation non consécutive : les anciens tickets de préparation ont été fusionnés dans les tickets fonctionnels ; un ticket = un commit). Utilise le skill `next-task` pour le traiter ; le statut vit dans l'issue, pas dans `TASKS.md`.
 - Contrat HTTP : `api/openapi.yaml` (spec-first : on modifie le contrat avant le code).
 - Si le code et le README se contredisent, signale-le et demande, ne tranche pas seul.
 
