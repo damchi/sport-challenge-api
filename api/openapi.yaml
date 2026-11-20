@@ -151,8 +151,9 @@ paths:
       description: |
         Final: the account is anonymized (pseudo, first name, last name,
         e-mail and avatar erased) and
-        abandons every challenge not finished; a finished challenge keeps its
-        results under a neutral name. The user is also deleted at the auth
+        abandons every challenge not finished. The account is also left out
+        of the leaderboard of every challenge, finished ones included: the
+        others move up. The user is also deleted at the auth
         provider. Every later request with a token of this account, even
         one still valid, answers 401 `account_deleted`; logging in again
         with this identity never creates a new account. The client asks for confirmation first.
@@ -626,8 +627,10 @@ paths:
         deleted challenge, gets the same 404 `challenge_not_found`.
 
         Equal values share a rank (1, 1, 3). Participants who abandoned
-        (also the excluded and the deleted accounts) are listed last in every
-        category, with `abandoned` true and no rank nor value.
+        (also the excluded) are listed last in every category, with
+        `abandoned` true and no rank nor value. A deleted account is not
+        listed at all, even in a finished challenge: the others move up, the
+        equal ones still sharing a rank.
 
         In `run_elimination`, `elimination` gives the live situation: the
         survivors first by distance, then the eliminated, the last
@@ -1577,7 +1580,7 @@ components:
         status:
           type: string
           enum: [active, abandoned]
-          description: "`abandoned` also covers an excluded participant and a deleted account."
+          description: "`abandoned` also covers an excluded participant, and a deleted account in a challenge not finished when it was deleted (in a finished one, the participation stays `active`)."
         joined_at:
           type: string
           format: date-time
@@ -1606,8 +1609,8 @@ components:
         entries:
           type: array
           description: |
-            Every participant. Ranked ones first, best first; abandoned ones
-            last. `value` is in seconds for `cumulative_time` and in meters
+            Every participant but the deleted accounts. Ranked ones first,
+            best first; abandoned ones last. `value` is in seconds for `cumulative_time` and in meters
             for the other two.
           items:
             $ref: "#/components/schemas/LeaderboardEntry"
@@ -1649,19 +1652,19 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/Pseudo"
-          description: Null for a deleted (anonymized) account; the apps show a neutral name.
+          description: Null for an account that has not set it (a deleted account is never listed).
         first_name:
           type: string
           nullable: true
           allOf:
             - $ref: "#/components/schemas/PersonName"
-          description: Null for a deleted (anonymized) account, or one that has not set it.
+          description: Null for an account that has not set it (a deleted account is never listed).
         last_name:
           type: string
           nullable: true
           allOf:
             - $ref: "#/components/schemas/PersonName"
-          description: Null for a deleted (anonymized) account, or one that has not set it.
+          description: Null for an account that has not set it (a deleted account is never listed).
         avatar:
           type: string
           nullable: true

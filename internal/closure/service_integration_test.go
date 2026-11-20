@@ -311,10 +311,15 @@ func (s staticChallenge) Challenge(context.Context, string, string) (leaderboard
 	return s.c, nil
 }
 
-type noProfiles struct{}
+// everyoneNamed names every user it is asked for: none is deleted.
+type everyoneNamed struct{}
 
-func (noProfiles) Names(context.Context, []string) (map[string]leaderboard.Name, error) {
-	return nil, nil
+func (everyoneNamed) Names(_ context.Context, ids []string) (map[string]leaderboard.Name, error) {
+	names := make(map[string]leaderboard.Name, len(ids))
+	for _, id := range ids {
+		names[id] = leaderboard.Name{}
+	}
+	return names, nil
 }
 
 // withoutSnapshots makes the leaderboard compute its ranking.
@@ -354,6 +359,12 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		s.run(b, inWeek(week+1), meters)
 	}
 	s.run(quitter, inWeek(1), 100)
+	// An account deleted between the end and the run: still active here, but
+	// no longer ranked.
+	gone := s.user("gone")
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, challengeID, gone, start)
+	s.run(gone, inWeek(1), 99000)
+	s.exec(`UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1`, gone)
 
 	service := func(now time.Time) *Service {
 		return NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(now), slog.New(slog.NewJSONHandler(io.Discard, nil)))
@@ -433,7 +444,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		},
 		) leaderboard.Leaderboard {
 			t.Helper()
-			svc := leaderboard.NewService(staticChallenge{c}, noProfiles{}, repo, clock.NewFake(end.Add(48*time.Hour)), time.Hour)
+			svc := leaderboard.NewService(staticChallenge{c}, everyoneNamed{}, repo, clock.NewFake(end.Add(48*time.Hour)), time.Hour)
 			got, err := svc.Get(t.Context(), a, challengeID)
 			if err != nil {
 				t.Fatal(err)

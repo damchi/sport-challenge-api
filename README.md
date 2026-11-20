@@ -40,7 +40,7 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Un participant est **classé dans toutes les catégories** du challenge (pas d'inscription par catégorie).
 - ✅ Abandonner (« quitter ») un challenge = **éliminé de toutes les catégories**, définitivement.
 - ✅ Un participant qui abandonne apparaît comme « a abandonné » et sort du podium.
-- ✅ Un compte supprimé est traité comme un abandon dans les challenges à venir ou en cours ; un challenge terminé garde ses résultats, sous un nom neutre (voir §6).
+- ✅ Un compte supprimé est traité comme un abandon dans les challenges à venir ou en cours, et il est **retiré des classements** de tous ses challenges, terminés compris : la personne ne veut plus que ses données soient vues, elle ne peut plus rien gagner et n'est plus comptée. Dans un challenge terminé, les autres participants remontent dans les résultats figés (les ex aequo restent ex aequo : 1, 1, 3) ; ces résultats eux-mêmes ne sont pas réécrits (voir §6).
 - ✅ **Dernier créateur** : la suppression d'un compte est **refusée** (`last_creator`, avec la liste des challenges) tant qu'il est le dernier créateur, ayant encore un compte, d'un challenge à venir ou en cours. La personne désigne d'abord un autre créateur (« ajouter un créateur »), ou, s'il n'y a personne à désigner, supprime le challenge elle-même. Un challenge terminé ne bloque rien. Un co-créateur qui a abandonné garde ses droits de créateur (§5.7) et compte donc comme autre créateur. Les liens d'invitation d'un compte supprimé sont **annulés** : une personne qui avait ouvert le lien sans rejoindre perd l'accès au challenge privé ; celles qui ont déjà rejoint restent participantes.
 - ✅ Les activités faites avant l'inscription, mais dans la fenêtre du challenge, comptent.
 
@@ -112,7 +112,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ Aucun handicap ni catégorie de niveau : tout le monde est traité à la même enseigne.
 - ✅ **V1 : mise à jour du classement au rafraîchissement** de l'écran (pas de temps réel instantané).
 - ✅ Égalités : classement **ex aequo** (1, 1, 3), sans départage arbitraire.
-- ✅ Résultats **figés** à la fin du challenge, sans délai de grâce.
+- ✅ Résultats **figés** à la fin du challenge, sans délai de grâce. Seule exception : un compte supprimé en est retiré et les autres remontent (§2.2).
 - ✅ Le classement est toujours recalculé à partir des activités brutes.
 
 ### 2.7 Badges
@@ -569,7 +569,7 @@ La V2 (synchronisations) a peu d'impact sur la V1 si ces choix, presque gratuits
 - **Loi 25 (Québec)** applicable aux utilisateurs québécois : politique de confidentialité claire en français et en anglais, consentement explicite, personne responsable de la protection des renseignements, registre des incidents, évaluation avant tout transfert hors Québec.
 - **LCAP (Canada)** pour les courriels promotionnels.
 - **RGPD** si des utilisateurs européens s'ajoutent.
-- ✅ **Suppression de compte** : anonymisation, traitée comme un abandon dans tous les challenges à venir ou en cours (un challenge terminé garde ses résultats, sous un nom neutre), refusée tant que le compte est le dernier créateur d'un challenge à venir ou en cours (§2.2) ; l'utilisateur est aussi **supprimé chez Auth0** (API de gestion, avec reprise en cas d'échec) pour que l'effacement soit réel.
+- ✅ **Suppression de compte** : anonymisation, traitée comme un abandon dans tous les challenges à venir ou en cours, et retirée des classements de tous ses challenges, terminés compris (§2.2), refusée tant que le compte est le dernier créateur d'un challenge à venir ou en cours (§2.2) ; l'utilisateur est aussi **supprimé chez Auth0** (API de gestion, avec reprise en cas d'échec) pour que l'effacement soit réel.
 - ✅ Les activités détaillées d'un participant sont visibles par les autres participants du challenge : l'app l'indique **avant** de rejoindre, et la politique de confidentialité le mentionne. Quitter un challenge (ou en être exclu) ne les cache pas : les activités datées de sa fenêtre restent visibles jusqu'à sa fin, même celles d'après le départ.
 - ✅ Le **prénom et le nom** d'un participant sont visibles des autres utilisateurs (participants et classements ; pour un challenge public, de tout utilisateur connecté) ; son **e-mail** n'est visible que de lui (§2.8). La politique de confidentialité le mentionne.
 - 🟡 Ne stocker que les **résumés d'activité** (distance, durée, type, date), pas les traces GPS.

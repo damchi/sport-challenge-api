@@ -662,8 +662,8 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 
 **Critères d'acceptation**
 - [ ] Anonymisation : pseudo effacé (et avatar, à partir de la V1.1 : le fichier est alors supprimé au mieux, en tâche de fond), `auth_subject` remplacé par une valeur de remplacement, `anonymized_at` renseigné.
-- [ ] Ses participations actives dans les challenges à venir ou en cours passent à `abandoned` (comme un abandon). ✅ Un challenge terminé garde ses résultats : la participation reste active, sous le nom neutre du compte anonymisé (comme un abandon après la fin, refusé par `challenge_ended`).
-- [ ] Ses activités restent, rattachées au compte anonymisé, pour ne pas fausser les résultats.
+- [ ] Ses participations actives dans les challenges à venir ou en cours passent à `abandoned` (comme un abandon). Dans un challenge terminé, la participation reste active (comme un abandon après la fin, refusé par `challenge_ended`) ; ✅ le compte est toutefois retiré des classements (SC-API-113).
+- [ ] Ses activités restent, rattachées au compte anonymisé ; elles ne comptent plus dans aucun classement (SC-API-113).
 - [ ] Les requêtes suivantes avec son jeton renvoient 401 `account_deleted`.
 - [ ] **Suppression définitive** : l'ancien `sub` est conservé sous forme d'empreinte (SHA-256, jamais en clair), par exemple dans une table `deleted_subjects` (migration incluse dans ce ticket). `user.GetOrCreateBySubject` (ticket 019) vérifie cette empreinte **avant** d'insérer et renvoie `account_deleted` sans créer de compte, même si l'ancien jeton est encore valide ou si la suppression chez Auth0 est en attente.
 - [ ] Une transaction couvre l'anonymisation, l'empreinte du `sub` et les abandons. Les participations passent à `abandoned` sous le verrou de chaque challenge (`withLockedMembership`, comme rejoindre, abandonner et exclure) : sinon une exclusion concurrente ne trouverait plus de participation active et répondrait 500.
@@ -963,7 +963,7 @@ Les 7 tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` n
 **Critères d'acceptation**
 - [ ] Pour un challenge terminé, le classement est lu depuis `result_snapshot`.
 - [ ] Test : une activité dans une semaine terminée est refusée **même si le worker n'a pas encore tourné**.
-- [ ] Test : après la fin du challenge, le classement ne change plus.
+- [ ] Test : après la fin du challenge, le classement ne change plus (seule exception, plus tard : un compte supprimé en est retiré, SC-API-113).
 
 **Tests** : intégration avec `FakeClock`.
 **Revue** : `go-reviewer`, `spec-guardian`.

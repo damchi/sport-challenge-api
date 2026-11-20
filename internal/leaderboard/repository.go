@@ -28,14 +28,17 @@ func NewRepository(gdb *gorm.DB) *Repository {
 const statusAbandoned = "abandoned"
 
 // Participants returns every participant of challenge challengeID, active or
-// abandoned, in order of arrival.
+// abandoned, in order of arrival. A deleted (anonymized) account is left out:
+// it is no longer ranked anywhere, even in a challenge that is over.
 func (r *Repository) Participants(ctx context.Context, challengeID string) ([]scoring.Participant, error) {
 	var rows []struct {
 		UserID string
 		Status string
 	}
 	err := r.db.WithContext(ctx).Raw(
-		`SELECT user_id, status FROM participants WHERE challenge_id = @id ORDER BY joined_at, user_id`,
+		`SELECT p.user_id, p.status FROM participants p
+		JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
+		WHERE p.challenge_id = @id ORDER BY p.joined_at, p.user_id`,
 		map[string]any{"id": challengeID},
 	).Scan(&rows).Error
 	if err != nil {
@@ -50,7 +53,8 @@ func (r *Repository) Participants(ctx context.Context, challengeID string) ([]sc
 
 // Activities returns, in one query, the totals of the activities not deleted
 // of the active participants of a challenge, started in the window w (those
-// of an abandoned participant no longer count), never each activity:
+// of an abandoned participant or a deleted account no longer count), never
+// each activity:
 //   - for weeklySport, the sport of the elimination category, per participant
 //     and week, each total as one activity starting at the start of its week;
 //   - for the other sports, per participant and sport, as one activity
@@ -84,6 +88,7 @@ func (r *Repository) Activities(ctx context.Context, challengeID string, w scori
 			CASE WHEN a.sport_code = @weekly THEN width_bucket(a.started_at, CAST(@starts AS timestamptz[])) ELSE 0 END AS week,
 			SUM(a.duration_seconds) AS duration_seconds, SUM(a.distance_meters) AS distance_meters
 		FROM participants p
+		JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
 		JOIN activities a ON a.user_id = p.user_id
 		WHERE p.challenge_id = @id AND p.status = 'active'
 			AND a.deleted_at IS NULL AND a.started_at >= @from AND a.started_at < @to

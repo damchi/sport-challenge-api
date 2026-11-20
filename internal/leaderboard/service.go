@@ -33,8 +33,9 @@ type Challenges interface {
 	Challenge(ctx context.Context, actorID, challengeID string) (Challenge, error)
 }
 
-// Profiles gives the public name of each user of ids; an anonymized account
-// has none (module user).
+// Profiles gives the public name of each user of ids; an anonymized
+// (deleted) account has none, which leaves it out of the frozen results
+// (module user).
 type Profiles interface {
 	Names(ctx context.Context, ids []string) (map[string]Name, error)
 }
@@ -58,8 +59,9 @@ func NewService(challenges Challenges, profiles Profiles, repo repository, c clo
 // Get returns the ranking of every category of challenge id, in position
 // order, as actorID may read it (the rule is the challenge module's, and
 // nothing is loaded before it passes). Abandoned participants are listed in
-// each category, unranked. The weeks are judged at the instant of the
-// clock. Once the challenge is over, the frozen results are served; until
+// each category, unranked; deleted accounts are not listed at all. The weeks
+// are judged at the instant of the clock. Once the challenge is over, the
+// frozen results are served; until
 // the worker has frozen them, the ranking is computed, which gives the same
 // result: the weeks that ended are locked by the clock, not by the worker.
 func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, error) {
@@ -148,7 +150,8 @@ type frozenRanking struct {
 
 // frozen builds the leaderboard of a challenge that is over from its result
 // snapshots, and reports false when they are not all there yet. The names
-// are read now: an account anonymized since shows under a neutral name.
+// are read now: an account deleted since (it has no name any more) is left
+// out, and the participants after it move up.
 func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, error) {
 	if len(c.Categories) == 0 {
 		return Leaderboard{}, false, nil
@@ -184,18 +187,31 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 
 	board := Leaderboard{ComputedAt: createdAt, Categories: make([]CategoryRanking, len(c.Categories))}
 	for i, cat := range c.Categories {
-		ranked := make([]Ranked, len(rankings[i].Entries))
-		for j, e := range rankings[i].Entries {
-			ranked[j] = Ranked{Entry: scoring.Entry{UserID: e.UserID, Rank: e.Rank, Value: e.Value, Abandoned: e.Abandoned}}
+		ranked := make([]Ranked, 0, len(rankings[i].Entries))
+		// The ranks are given again without the deleted accounts, in the
+		// frozen order: equal ones still share a rank (1, 1, 3).
+		var frozenRank, rank int
+		for _, e := range rankings[i].Entries {
+			name, ok := names[e.UserID]
+			if !ok {
+				continue
+			}
+			r := Ranked{Entry: scoring.Entry{UserID: e.UserID, Value: e.Value, Abandoned: e.Abandoned}, Name: name}
+			if e.Rank > 0 {
+				if e.Rank != frozenRank {
+					frozenRank, rank = e.Rank, len(ranked)+1
+				}
+				r.Rank = rank
+			}
 			// As computed: a survivor of the elimination category has an empty
 			// progress once the challenge is over, an abandoned one has none.
 			if cat.Type == CategoryRunElimination && !e.Abandoned {
-				ranked[j].Progress = &scoring.Progress{}
+				r.Progress = &scoring.Progress{}
 				if e.EliminatedWeek > 0 {
-					ranked[j].Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
+					r.Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
 				}
 			}
-			ranked[j].Name = names[e.UserID]
+			ranked = append(ranked, r)
 		}
 		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
 	}

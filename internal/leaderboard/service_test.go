@@ -97,6 +97,7 @@ func twoWeeks(t *testing.T) Challenge {
 var (
 	annName = Name{Pseudo: pseudo("Ann"), FirstName: pseudo("Ann"), LastName: pseudo("Archer")}
 	bobName = Name{Pseudo: pseudo("Bob"), FirstName: pseudo("Bob"), LastName: pseudo("Bélanger")}
+	catName = Name{Pseudo: pseudo("Cat")}
 	pseudos = fakeProfiles{names: map[string]Name{"a": annName, "b": bobName}}
 )
 
@@ -122,7 +123,7 @@ func TestGetRanksEveryCategory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// c is an anonymized account: no pseudo.
+	// c abandoned, and the fake gives it no name: the live path lists it.
 	want := Leaderboard{ComputedAt: now, Categories: []CategoryRanking{
 		{Type: CategoryCumulativeTime, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
@@ -305,8 +306,9 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 		},
 		frozenAt: frozenAt,
 	}
-	// Long after the end, and the pseudo of c is gone.
-	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
+	// Long after the end.
+	profiles := fakeProfiles{names: map[string]Name{"a": annName, "b": bobName, "c": catName}}
+	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
 
 	got, err := svc.Get(t.Context(), "actor", "c1")
 	if err != nil {
@@ -315,16 +317,16 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 	want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{
 		{Type: CategoryCumulativeTime, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
-			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}, Name: catName},
 		}},
 		{Type: CategoryCumulativeDistance, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
-			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}, Name: catName},
 		}},
 		{Type: CategoryRunElimination, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Name: bobName},
-			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
+			{Entry: scoring.Entry{UserID: "c", Abandoned: true}, Name: catName},
 		}},
 	}}
 	if !reflect.DeepEqual(got, want) {
@@ -332,6 +334,44 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 	}
 	if repo.calls != 0 {
 		t.Fatalf("activities read %d times, want the snapshots alone", repo.calls)
+	}
+}
+
+// TestGetFrozenLeavesOutDeletedAccounts: an account deleted after the end
+// (it has no public name any more) is left out of the frozen results, and
+// the others move up, equal values still sharing a rank.
+func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
+	c := twoWeeks(t)
+	repo := &fakeRepo{snapshots: map[string]json.RawMessage{
+		CategoryCumulativeTime: json.RawMessage(`{"entries":[{"user_id":"d","rank":1,"value":10000},` +
+			`{"user_id":"a","rank":2,"value":9000},{"user_id":"b","rank":2,"value":9000},{"user_id":"e","rank":0,"value":0,"abandoned":true}]}`),
+		CategoryCumulativeDistance: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":28000},` +
+			`{"user_id":"d","rank":1,"value":28000},{"user_id":"b","rank":3,"value":5000}]}`),
+		CategoryRunElimination: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":22000},` +
+			`{"user_id":"d","rank":2,"value":9000,"eliminated_week":2},{"user_id":"b","rank":3,"value":5000,"eliminated_week":1}]}`),
+	}}
+	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt), time.Hour)
+
+	got, err := svc.Get(t.Context(), "actor", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []CategoryRanking{
+		{Type: CategoryCumulativeTime, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 9000}, Name: bobName},
+		}},
+		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
+		}},
+		{Type: CategoryRunElimination, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 1}}, Name: bobName},
+		}},
+	}
+	if !reflect.DeepEqual(got.Categories, want) {
+		t.Fatalf("Get() = %+v, want %+v", got.Categories, want)
 	}
 }
 
