@@ -11,8 +11,9 @@ import (
 // the participant is eliminated from this category, for good.
 //
 // Sport and StepMeters are the frozen settings of the category. Only the
-// runs count. A week is judged at the exact instant it ends, never before;
-// there is no elimination in week 1, which has no reference.
+// runs count. A week is judged when it locks (Window.WeekLocksAt), 7 am on
+// the first day of the next week, never before: until then the minimum of the next week
+// may still rise. There is no elimination in week 1, which has no reference.
 //
 // Value is the cumulative distance of a survivor, and of an eliminated
 // participant up to the week of the elimination: later runs change nothing.
@@ -32,7 +33,7 @@ var _ Scorer = Elimination{}
 func (e Elimination) Score(w Window, participants []Participant, activities []Activity) []Entry {
 	weeks := w.Weeks()
 	weekly := e.weeklyDistances(w, participants, activities)
-	judged := w.EndedWeeks()
+	judged := w.LockedWeeks()
 
 	week, weekEnd := w.CurrentWeek()
 	progress := make(map[string]*Progress, len(participants))
@@ -68,14 +69,14 @@ type Eliminated struct {
 	MinimumMeters int
 }
 
-// Eliminations lists the participants eliminated in the weeks judged at the
+// Eliminations lists the participants eliminated in the weeks locked at the
 // instant of the window, by week then participant; an abandoned participant
 // is left out (shown as abandoned, not as eliminated). A week judged keeps
 // its eliminations whenever it is computed: running it later only adds the
-// weeks that ended since.
+// weeks that locked since.
 func (e Elimination) Eliminations(w Window, participants []Participant, activities []Activity) []Eliminated {
 	weekly := e.weeklyDistances(w, participants, activities)
-	judged := w.EndedWeeks()
+	judged := w.LockedWeeks()
 	var out []Eliminated
 	for _, p := range participants {
 		if p.Abandoned {

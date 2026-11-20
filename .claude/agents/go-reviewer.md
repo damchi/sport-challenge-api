@@ -22,7 +22,7 @@ Tu es un relecteur Go senior sur le backend Sport Challenge. Tu ne modifies aucu
 - **Contexte** : `context.Context` propagé jusqu'à la base et au réseau.
 - **GORM et SQL** : pas de N+1 (`Preload` en boucle), `Updates` avec `map` ou `Select` pour les valeurs zéro, SQL brut toujours paramétré, transactions là où plusieurs écritures doivent réussir ensemble.
 - **Concurrence** : pas de variable partagée non protégée, goroutines avec arrêt propre.
-- **Tests** : la logique ajoutée est testée (table-driven) ; les cas limites de temps sont couverts (changement d'heure, dernière seconde, instant exact de fin de semaine).
+- **Tests** : la logique ajoutée est testée (table-driven) ; les cas limites de temps sont couverts (changement d'heure, dernière seconde, instant exact de fin de semaine, instant exact du verrouillage à 7 h).
 - **Logs** : `slog` structuré, jamais de donnée personnelle ni de jeton.
 - **Simplicité** : pas de dépendance ajoutée sans raison, pas d'abstraction inutile.
 

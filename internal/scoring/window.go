@@ -73,18 +73,33 @@ func (w Window) CurrentWeek() (int, time.Time) {
 	return n, end
 }
 
-// EndedWeeks returns how many weeks have ended at Now: a week ends at its
-// exact last instant, with no grace period. Weeks end in order, so these
-// are weeks 1 to EndedWeeks.
-func (w Window) EndedWeeks() int {
-	ended := 0
+// lockHour is the local hour a week locks at, on the first day of the next
+// week (README §2.3): the activities of the week can still be entered,
+// changed and deleted until then, and it is judged then.
+const lockHour = 7
+
+// WeekLocksAt returns the instant week n locks, in UTC: 7 am, local time,
+// on the day its end falls on (the first day of the next week; for the last
+// week, the first day after the challenge). The only place of the rule.
+// n must stay within the window.
+func (w Window) WeekLocksAt(n int) time.Time {
+	_, end := w.WeekBounds(n)
+	y, m, d := end.In(w.Location).Date()
+	return firstInstantAt(y, m, d, lockHour, w.Location)
+}
+
+// LockedWeeks returns how many weeks are locked at Now, so judged: a week
+// is judged when it locks (WeekLocksAt), never before. Weeks lock in order,
+// so these are weeks 1 to LockedWeeks.
+func (w Window) LockedWeeks() int {
+	locked := 0
 	for n := 1; n <= w.Weeks(); n++ {
-		if _, end := w.WeekBounds(n); w.Now.Before(end) {
+		if w.Now.Before(w.WeekLocksAt(n)) {
 			break
 		}
-		ended = n
+		locked = n
 	}
-	return ended
+	return locked
 }
 
 // RegistrationDeadline is the end of week 1, when joining closes.
@@ -109,4 +124,38 @@ func StartOfDay(year int, month time.Month, day int, loc *time.Location) time.Ti
 		_, t = t.ZoneBounds()
 	}
 	return t.UTC()
+}
+
+// firstInstantAt returns, in UTC, the first instant that shows hour:00 on
+// the local day year-month-day in loc. Where a time change skips that hour,
+// it is the first instant after the gap; where it repeats it, the first of
+// the two (README §2.3). time.Date picks either side in both cases.
+func firstInstantAt(year int, month time.Month, day, hour int, loc *time.Location) time.Time {
+	want := time.Date(year, month, day, hour, 0, 0, 0, time.UTC)
+	t := time.Date(year, month, day, hour, 0, 0, 0, loc)
+	switch shown := wallClock(t); {
+	case shown.Before(want):
+		// In the gap, read before the change: the gap ends with the zone.
+		_, t = t.ZoneBounds()
+	case shown.After(want):
+		// In the gap, read after the change: the gap ends where it starts.
+		t, _ = t.ZoneBounds()
+	default:
+		// Repeated, the zone before the change may show it first.
+		if start, _ := t.ZoneBounds(); !start.IsZero() {
+			_, offset := start.Add(-time.Nanosecond).Zone()
+			first := want.Add(-time.Duration(offset) * time.Second)
+			if first.Before(start) && wallClock(first.In(loc)).Equal(want) {
+				t = first
+			}
+		}
+	}
+	return t.UTC()
+}
+
+// wallClock is the local date and time t shows, as if it were UTC.
+func wallClock(t time.Time) time.Time {
+	y, m, d := t.Date()
+	h, mi, sec := t.Clock()
+	return time.Date(y, m, d, h, mi, sec, t.Nanosecond(), time.UTC)
 }

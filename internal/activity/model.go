@@ -28,7 +28,7 @@ type Recorded struct {
 	// Created is false when the idempotency key gave an activity recorded
 	// before: nothing was written.
 	Created bool
-	// Locked is true once its week has ended in a challenge where it counts
+	// Locked is true once its week is locked in a challenge where it counts
 	// (IsLocked): it can no longer be changed nor deleted.
 	Locked bool
 }

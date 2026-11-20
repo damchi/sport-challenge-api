@@ -193,7 +193,9 @@ paths:
         most recent first (`started_at`, then `id`). `from` and `to` keep
         those started in `[from, to)`; `to` must come after `from`. Each one
         lists the challenges where it counts now and whether it is `locked`
-        (its week has ended in one of them).
+        (its week is locked in one of them: 7 am, local time of that
+        challenge, on the first day of the next week, the day of its
+        `week_ends_at`).
       tags: [activities]
       parameters:
         - name: from
@@ -646,7 +648,11 @@ paths:
         week reaches the minimum, else `at_risk` when the end of the week is
         at most the configured threshold (24 h by default) away, else
         `in_progress`; `eliminated` once eliminated. There is no minimum and
-        no status in week 1, nor outside the weeks of the challenge.
+        no status in week 1, nor outside the weeks of the challenge. A week
+        is judged when it locks, at 7 am on the first day of the next week
+        (the day of `week_ends_at`): until
+        then nobody is eliminated for it, and the minimum of the current
+        week may still rise.
       tags: [challenges]
       parameters:
         - name: challengeId
@@ -741,8 +747,10 @@ paths:
         `contributions` and `locked` are read from this challenge only, never
         from the other challenges of the participant: `contributions` holds
         it when the activity counts in it (never for a participant who
-        abandoned: empty), and `locked` is true once its week has ended in
-        it, where it counts (never for a participant who abandoned). The
+        abandoned: empty), and `locked` is true once its week is locked in
+        it (7 am, local time of the challenge, on the first day of the next
+        week),
+        where it counts (never for a participant who abandoned). The
         author's own listing (`/me/activities`) may still show an activity
         locked by another challenge.
       tags: [activities]
@@ -987,8 +995,12 @@ paths:
         to a challenge: it counts in every challenge, not deleted, where the
         user is an active participant and whose window holds `started_at`
         (`contributions`, possibly empty). An activity outside every window
-        is recorded all the same. It is refused (`week_locked`) when its week
-        has ended in one of those challenges, finished ones included. Its end
+        is recorded all the same. It counts wholly for the week it starts in,
+        even when it ends in the next one. It is refused (`week_locked`) when
+        its week is locked in one of those challenges, finished ones
+        included: a week locks at 7 am, local time of the challenge, on the
+        first day of the next week (the day of `week_ends_at`; the last one
+        on the day of the challenge's `ends_at`). Its end
         (`started_at` plus `duration_seconds`) is never in the future (5
         minutes of tolerance) and `started_at` never before 2000-01-01
         (`validation_failed`). It never overlaps another activity of the user
@@ -1038,7 +1050,7 @@ paths:
             The profile is incomplete (`profile_incomplete`), the sport needs
             a distance (`distance_required`) or takes none
             (`distance_not_allowed`), the activity overlaps another of the
-            user (`activity_overlap`), or the week of `started_at` has ended
+            user (`activity_overlap`), or the week of `started_at` is locked
             in a challenge where the activity counts (`week_locked`).
           content:
             application/json:
@@ -1067,7 +1079,7 @@ paths:
         (`sport_label`, `distance_meters`). The source and the
         `Idempotency-Key` of the creation stay. It is refused
         (`week_locked`) when the week of the current `started_at`, or of the
-        new one, has ended in a challenge where the activity counts, and
+        new one, is locked in a challenge where the activity counts, and
         (`activity_overlap`) when it would overlap another activity of the
         user.
       tags: [activities]
@@ -1095,7 +1107,7 @@ paths:
             The sport needs a distance (`distance_required`) or takes none
             (`distance_not_allowed`), it would overlap another activity of
             the user (`activity_overlap`), or the week of the current or the
-            new `started_at` has ended in a challenge where the activity
+            new `started_at` is locked in a challenge where the activity
             counts (`week_locked`).
           content:
             application/json:
@@ -1111,7 +1123,7 @@ paths:
       description: |
         Author only, as for the update (404 `activity_not_found`). The
         activity stops counting at once; it is refused (`week_locked`) when
-        its week has ended in a challenge where it counts. Deleting it again
+        its week is locked in a challenge where it counts. Deleting it again
         answers 404.
       tags: [activities]
       responses:
@@ -1124,7 +1136,7 @@ paths:
         "404":
           $ref: "#/components/responses/ActivityNotFound"
         "422":
-          description: The week of the activity has ended in a challenge where it counts (`week_locked`).
+          description: The week of the activity is locked in a challenge where it counts (`week_locked`).
           content:
             application/json:
               schema:
@@ -1624,7 +1636,7 @@ components:
         computed_at:
           type: string
           format: date-time
-          description: The instant the ranking was computed at; weeks are judged at it.
+          description: The instant the ranking was computed at; the weeks locked at it are judged.
         categories:
           type: array
           description: The 3 categories, in the order of the challenge.
@@ -1717,12 +1729,12 @@ components:
           type: integer
           minimum: 2
           nullable: true
-          description: The week the participant was eliminated at the end of; null if not eliminated.
+          description: The week the participant was eliminated in, judged when it locked; null if not eliminated.
         minimum_meters:
           type: integer
           minimum: 0
           nullable: true
-          description: The distance the current week needs; null in week 1, when eliminated, or outside the weeks.
+          description: The distance the current week needs; null in week 1, when eliminated, or outside the weeks. Until the week before locks, it may still rise.
         run_meters:
           type: integer
           minimum: 0
@@ -2059,8 +2071,9 @@ components:
         locked:
           type: boolean
           description: |
-            True once the week of the activity has ended in a challenge where
-            it counts: it can no longer be changed nor deleted.
+            True once the week of the activity is locked in a challenge where
+            it counts, at 7 am, local time of the challenge, on the first day
+            of the next week: it can no longer be changed nor deleted.
     ActivityContribution:
       type: object
       required: [challenge_id, challenge_title, distance_meters, duration_seconds]

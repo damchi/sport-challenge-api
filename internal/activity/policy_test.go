@@ -69,7 +69,7 @@ func TestIsLocked(t *testing.T) {
 	}
 	vancouverStart := time.Date(2026, 6, 1, 0, 0, 0, 0, pacific)
 	vancouver := Participation{StartsAt: vancouverStart.UTC(), EndsAt: vancouverStart.AddDate(0, 0, 21).UTC(), Location: pacific, Active: true}
-	vancouverEnd1 := time.Date(2026, 6, 8, 0, 0, 0, 0, pacific).UTC()
+	vancouverLock1 := time.Date(2026, 6, 8, 7, 0, 0, 0, pacific).UTC()
 
 	noZone := monday
 	noZone.Location = nil
@@ -80,12 +80,14 @@ func TestIsLocked(t *testing.T) {
 	notActive := monday
 	notActive.Active = false
 
-	tuesday := toronto(t, 2026, 6, 2, 10)      // week 1 of monday, before thursday starts
-	friday := toronto(t, 2026, 6, 5, 10)       // week 1 of both
-	endMonday1 := toronto(t, 2026, 6, 8, 0)    // end of week 1 of monday
-	endThursday1 := toronto(t, 2026, 6, 11, 0) // end of week 1 of thursday
-	endSpring1 := toronto(t, 2026, 3, 9, 0)    // 167 h after the start
-	endFall1 := toronto(t, 2026, 11, 2, 0)     // 169 h after the start
+	// A week locks at 7 am, local time, on the day after it ends.
+	tuesday := toronto(t, 2026, 6, 2, 10)       // week 1 of monday, before thursday starts
+	friday := toronto(t, 2026, 6, 5, 10)        // week 1 of both
+	endMonday1 := toronto(t, 2026, 6, 8, 0)     // end of week 1 of monday
+	lockMonday1 := toronto(t, 2026, 6, 8, 7)    // week 1 of monday locks
+	lockThursday1 := toronto(t, 2026, 6, 11, 7) // week 1 of thursday locks
+	lockSpring1 := toronto(t, 2026, 3, 9, 7)    // in EDT, 11:00 UTC
+	lockFall1 := toronto(t, 2026, 11, 2, 7)     // in EST, 12:00 UTC
 	sec := time.Second
 
 	tests := []struct {
@@ -95,48 +97,53 @@ func TestIsLocked(t *testing.T) {
 		challenges []Participation
 		want       bool
 	}{
-		{name: "no challenge", now: endMonday1, startedAt: tuesday},
-		{name: "one second before the end of the week", now: endMonday1.Add(-sec), startedAt: tuesday, challenges: []Participation{monday}},
-		{name: "at the end of the week", now: endMonday1, startedAt: tuesday, challenges: []Participation{monday}, want: true},
-		{name: "last second of the week, judged at its end", now: endMonday1, startedAt: endMonday1.Add(-sec), challenges: []Participation{monday}, want: true},
-		{name: "first second of the next week stays open", now: endMonday1, startedAt: endMonday1, challenges: []Participation{monday}},
-		{name: "week 1 ended: locked from the start of the window", now: endMonday1, startedAt: monday.StartsAt, challenges: []Participation{monday}, want: true},
-		{name: "week 2 open while week 1 is locked", now: endMonday1.Add(time.Hour), startedAt: endMonday1.Add(time.Minute), challenges: []Participation{monday}},
-		{name: "week 2 locked at its end", now: toronto(t, 2026, 6, 15, 0), startedAt: endMonday1.Add(time.Minute), challenges: []Participation{monday}, want: true},
-		{name: "before the window: counts nowhere", now: endMonday1, startedAt: monday.StartsAt.Add(-sec), challenges: []Participation{monday}},
+		{name: "no challenge", now: lockMonday1, startedAt: tuesday},
+		{name: "at the end of the week: still open", now: endMonday1, startedAt: tuesday, challenges: []Participation{monday}},
+		{name: "one second before 7 am", now: lockMonday1.Add(-sec), startedAt: tuesday, challenges: []Participation{monday}},
+		{name: "at 7 am on the day after", now: lockMonday1, startedAt: tuesday, challenges: []Participation{monday}, want: true},
+		{name: "across the end of the week: open until 7 am", now: lockMonday1.Add(-sec), startedAt: endMonday1.Add(-30 * time.Minute), challenges: []Participation{monday}},
+		{name: "across the end of the week: locked with the week it starts in", now: lockMonday1, startedAt: endMonday1.Add(-sec), challenges: []Participation{monday}, want: true},
+		{name: "first second of the next week stays open", now: lockMonday1, startedAt: endMonday1, challenges: []Participation{monday}},
+		{name: "week 1 locked from the start of the window", now: lockMonday1, startedAt: monday.StartsAt, challenges: []Participation{monday}, want: true},
+		{name: "week 2 open while week 1 is locked", now: lockMonday1.Add(time.Hour), startedAt: endMonday1.Add(time.Minute), challenges: []Participation{monday}},
+		{name: "week 2 open at its end", now: toronto(t, 2026, 6, 15, 0), startedAt: endMonday1.Add(time.Minute), challenges: []Participation{monday}},
+		{name: "week 2 locked at 7 am the day after", now: toronto(t, 2026, 6, 15, 7), startedAt: endMonday1.Add(time.Minute), challenges: []Participation{monday}, want: true},
+		{name: "before the window: counts nowhere", now: lockMonday1, startedAt: monday.StartsAt.Add(-sec), challenges: []Participation{monday}},
 
 		// Two challenges whose weeks are shifted: one is enough to lock.
-		{name: "shifted weeks: open in both", now: endMonday1.Add(-sec), startedAt: friday, challenges: []Participation{monday, thursday}},
-		{name: "shifted weeks: locked by the first to end", now: endMonday1, startedAt: friday, challenges: []Participation{monday, thursday}, want: true},
-		{name: "shifted weeks: order does not matter", now: endMonday1, startedAt: friday, challenges: []Participation{thursday, monday}, want: true},
-		{name: "shifted weeks: outside the second window", now: endThursday1.Add(-sec), startedAt: tuesday, challenges: []Participation{thursday}},
-		{name: "shifted weeks: second challenge only", now: endThursday1, startedAt: friday, challenges: []Participation{thursday}, want: true},
+		{name: "shifted weeks: open in both", now: lockMonday1.Add(-sec), startedAt: friday, challenges: []Participation{monday, thursday}},
+		{name: "shifted weeks: locked by the first to lock", now: lockMonday1, startedAt: friday, challenges: []Participation{monday, thursday}, want: true},
+		{name: "shifted weeks: order does not matter", now: lockMonday1, startedAt: friday, challenges: []Participation{thursday, monday}, want: true},
+		{name: "shifted weeks: outside the second window", now: lockThursday1.Add(-sec), startedAt: tuesday, challenges: []Participation{thursday}},
+		{name: "shifted weeks: second challenge only", now: lockThursday1, startedAt: friday, challenges: []Participation{thursday}, want: true},
 
-		// Two time zones: the same Monday ends 3 hours later in Vancouver.
-		{name: "time zones: open in Vancouver after Toronto's midnight", now: endMonday1, startedAt: tuesday, challenges: []Participation{vancouver}},
-		{name: "time zones: locked at Vancouver's midnight", now: vancouverEnd1, startedAt: tuesday, challenges: []Participation{vancouver}, want: true},
-		{name: "time zones: Toronto locks first", now: endMonday1, startedAt: tuesday, challenges: []Participation{vancouver, monday}, want: true},
+		// Two time zones: each locks at 7 am in its own, 3 hours later in Vancouver.
+		{name: "time zones: open in Vancouver after Toronto's 7 am", now: lockMonday1, startedAt: tuesday, challenges: []Participation{vancouver}},
+		{name: "time zones: locked at Vancouver's 7 am", now: vancouverLock1, startedAt: tuesday, challenges: []Participation{vancouver}, want: true},
+		{name: "time zones: Toronto locks first", now: lockMonday1, startedAt: tuesday, challenges: []Participation{vancouver, monday}, want: true},
 
-		// Time changes: weeks end at local midnight, 7 local days later.
-		{name: "spring forward: one second before (167 h)", now: endSpring1.Add(-sec), startedAt: springForward.StartsAt, challenges: []Participation{springForward}},
-		{name: "spring forward: at the end", now: endSpring1, startedAt: springForward.StartsAt, challenges: []Participation{springForward}, want: true},
-		{name: "spring forward: not 7 × 24 h", now: springForward.StartsAt.Add(7*24*time.Hour - sec), startedAt: springForward.StartsAt, challenges: []Participation{springForward}, want: true},
-		{name: "fall back: one second before (169 h)", now: endFall1.Add(-sec), startedAt: fallBack.StartsAt, challenges: []Participation{fallBack}},
-		{name: "fall back: at the end", now: endFall1, startedAt: fallBack.StartsAt, challenges: []Participation{fallBack}, want: true},
-		{name: "fall back: still open after 7 × 24 h", now: fallBack.StartsAt.Add(7 * 24 * time.Hour), startedAt: fallBack.StartsAt, challenges: []Participation{fallBack}},
+		// Time changes: 7 am local, 7 local days after the start of the week.
+		{name: "spring forward: one second before 7 am", now: lockSpring1.Add(-sec), startedAt: springForward.StartsAt, challenges: []Participation{springForward}},
+		{name: "spring forward: at 7 am", now: lockSpring1, startedAt: springForward.StartsAt, challenges: []Participation{springForward}, want: true},
+		{name: "spring forward: not 7 × 24 h + 7 h", now: springForward.StartsAt.Add(7*24*time.Hour + 7*time.Hour - sec), startedAt: springForward.StartsAt, challenges: []Participation{springForward}, want: true},
+		{name: "fall back: one second before 7 am", now: lockFall1.Add(-sec), startedAt: fallBack.StartsAt, challenges: []Participation{fallBack}},
+		{name: "fall back: at 7 am", now: lockFall1, startedAt: fallBack.StartsAt, challenges: []Participation{fallBack}, want: true},
+		{name: "fall back: still open after 7 × 24 h + 7 h", now: fallBack.StartsAt.Add(7*24*time.Hour + 7*time.Hour), startedAt: fallBack.StartsAt, challenges: []Participation{fallBack}},
 
-		// A finished challenge locks its window.
-		{name: "finished challenge", now: toronto(t, 2026, 11, 9, 12), startedAt: toronto(t, 2026, 5, 10, 8), challenges: []Participation{finished}, want: true},
+		// The last week of a finished challenge: open until 7 am the day after the end.
+		{name: "finished challenge: last week open until 7 am", now: toronto(t, 2026, 5, 11, 6), startedAt: toronto(t, 2026, 5, 10, 8), challenges: []Participation{finished}},
+		{name: "finished challenge: locked from 7 am the day after the end", now: toronto(t, 2026, 5, 11, 7), startedAt: toronto(t, 2026, 5, 10, 8), challenges: []Participation{finished}, want: true},
+		{name: "finished challenge, long after", now: toronto(t, 2026, 11, 9, 12), startedAt: toronto(t, 2026, 5, 10, 8), challenges: []Participation{finished}, want: true},
 		{name: "after a finished challenge: counts nowhere", now: toronto(t, 2026, 11, 9, 12), startedAt: finished.EndsAt, challenges: []Participation{finished}},
 
 		// Broken data fails closed or counts nowhere, never panics.
 		{name: "no time zone: locked", now: endMonday1.Add(-sec), startedAt: tuesday, challenges: []Participation{noZone}, want: true},
-		{name: "no time zone: outside its window, counts nowhere", now: endMonday1, startedAt: noZone.StartsAt.Add(-sec), challenges: []Participation{noZone}},
-		{name: "empty window: counts nowhere", now: endMonday1, startedAt: tuesday, challenges: []Participation{emptyWindow}},
+		{name: "no time zone: outside its window, counts nowhere", now: lockMonday1, startedAt: noZone.StartsAt.Add(-sec), challenges: []Participation{noZone}},
+		{name: "empty window: counts nowhere", now: lockMonday1, startedAt: tuesday, challenges: []Participation{emptyWindow}},
 
 		// Ignored: where the activity does not count.
-		{name: "not an active participant: ignored", now: endMonday1, startedAt: tuesday, challenges: []Participation{notActive}},
-		{name: "ignored challenge does not hide an active one", now: endMonday1, startedAt: tuesday, challenges: []Participation{notActive, monday}, want: true},
+		{name: "not an active participant: ignored", now: lockMonday1, startedAt: tuesday, challenges: []Participation{notActive}},
+		{name: "ignored challenge does not hide an active one", now: lockMonday1, startedAt: tuesday, challenges: []Participation{notActive, monday}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -128,7 +128,8 @@ func insertEliminations(tx *gorm.DB, challengeID, categoryID string, eliminated 
 }
 
 // EndedChallenges lists the challenges not deleted whose end is reached at
-// now and that have no result snapshot, each with its categories. The
+// now and that have no result snapshot, each with its categories. Their last
+// week may not be locked yet: the service checks it, in the time zone. The
 // snapshots of a challenge are written together, so none means none.
 func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]EndedChallenge, error) {
 	var rows []struct {

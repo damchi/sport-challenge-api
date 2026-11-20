@@ -64,8 +64,10 @@ func Contributions(a Activity, challenges []Participation) []Contribution {
 }
 
 // IsLocked reports whether an activity started at startedAt is locked at now
-// (from platform/clock, never the worker): its week has ended in at least
-// one challenge where it counts (Contributions).
+// (from platform/clock, never the worker): its week is locked in at least
+// one challenge where it counts (Contributions), from 7 am, local time of
+// that challenge, on the first day of the next week (scoring.Window.WeekLocksAt).
+// An activity across the end of a week belongs to the week it starts in.
 func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 	for _, c := range challenges {
 		if !counts(c, startedAt) {
@@ -77,7 +79,7 @@ func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 			return true
 		}
 		w := window(c)
-		if _, end := w.WeekBounds(w.WeekOf(startedAt)); !now.Before(end) {
+		if !now.Before(w.WeekLocksAt(w.WeekOf(startedAt))) {
 			return true
 		}
 	}

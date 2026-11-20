@@ -282,11 +282,10 @@ func TestWeeks(t *testing.T) {
 	}
 }
 
-func TestEndedWeeks(t *testing.T) {
+func TestLockedWeeks(t *testing.T) {
 	// 3 weeks across the time change of March 8: week 1 lasts 168 h, week 2 167 h.
 	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 3)
 	_, end1 := w.WeekBounds(1)
-	_, end2 := w.WeekBounds(2)
 	tests := []struct {
 		name string
 		now  time.Time
@@ -294,21 +293,88 @@ func TestEndedWeeks(t *testing.T) {
 	}{
 		{name: "before the start", now: w.Start.Add(-time.Hour)},
 		{name: "at the start", now: w.Start},
-		{name: "last instant of week 1", now: end1.Add(-time.Nanosecond)},
-		{name: "exact end of week 1, no grace", now: end1, want: 1},
-		{name: "an hour after the end of week 1", now: end1.Add(time.Hour), want: 1},
-		{name: "last instant of week 2", now: end2.Add(-time.Nanosecond), want: 1},
-		{name: "exact end of week 2", now: end2, want: 2},
-		{name: "last instant of the challenge", now: w.End.Add(-time.Nanosecond), want: 2},
-		{name: "end of the challenge", now: w.End, want: 3},
+		{name: "exact end of week 1: not locked yet", now: end1},
+		{name: "last instant before 7 am", now: w.WeekLocksAt(1).Add(-time.Nanosecond)},
+		{name: "7 am on the day after week 1", now: w.WeekLocksAt(1), want: 1},
+		{name: "last instant before week 2 locks", now: w.WeekLocksAt(2).Add(-time.Nanosecond), want: 1},
+		{name: "week 2 locked", now: w.WeekLocksAt(2), want: 2},
+		{name: "end of the challenge: the last week not locked yet", now: w.End, want: 2},
+		{name: "7 am on the day after the end", now: w.WeekLocksAt(3), want: 3},
 		{name: "long after the end", now: w.End.AddDate(1, 0, 0), want: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := w
 			w.Now = tt.now
-			if got := w.EndedWeeks(); got != tt.want {
-				t.Fatalf("EndedWeeks() = %d, want %d", got, tt.want)
+			if got := w.LockedWeeks(); got != tt.want {
+				t.Fatalf("LockedWeeks() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWeekLocksAt checks that a week locks at 7 am, local time of the
+// challenge, on the first day of the next week (the day after the end for
+// the last one), whatever the time changes in between.
+func TestWeekLocksAt(t *testing.T) {
+	tests := []struct {
+		name  string
+		zone  string
+		day   [3]int
+		weeks int
+		week  int
+		want  string // the instant in UTC
+	}{
+		{name: "Montreal in winter", zone: "America/Montreal", day: [3]int{2026, 1, 5}, weeks: 2, week: 1, want: "2026-01-12T12:00:00Z"},
+		{name: "Montreal, the week of the spring time change", zone: "America/Montreal", day: [3]int{2026, 3, 2}, weeks: 2, week: 1, want: "2026-03-09T11:00:00Z"},
+		{name: "Montreal, the week of the fall time change", zone: "America/Montreal", day: [3]int{2026, 10, 26}, weeks: 2, week: 1, want: "2026-11-02T12:00:00Z"},
+		{name: "the last week: the day after the end", zone: "America/Montreal", day: [3]int{2026, 1, 5}, weeks: 2, week: 2, want: "2026-01-19T12:00:00Z"},
+		{name: "a week starting on a Thursday", zone: "Europe/Paris", day: [3]int{2026, 6, 4}, weeks: 3, week: 2, want: "2026-06-18T05:00:00Z"},
+		// Midnight is skipped on 2027-09-05 in Santiago: the week ends at
+		// 01:00, it still locks at 7 am that day.
+		{name: "midnight skipped: still 7 am", zone: "America/Santiago", day: [3]int{2027, 8, 29}, weeks: 2, week: 1, want: "2027-09-05T10:00:00Z"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := window(t, tt.zone, tt.day, tt.weeks)
+			got := w.WeekLocksAt(tt.week)
+			if got.Location() != time.UTC {
+				t.Fatalf("WeekLocksAt(%d) = %s, want it in UTC", tt.week, got)
+			}
+			if f := got.Format(time.RFC3339); f != tt.want {
+				t.Fatalf("WeekLocksAt(%d) = %s (%s local), want %s", tt.week, f, got.In(w.Location).Format(time.DateTime), tt.want)
+			}
+			if _, end := w.WeekBounds(tt.week); !got.After(end) {
+				t.Fatalf("WeekLocksAt(%d) = %s, not after the end of the week %s", tt.week, got, end)
+			}
+		})
+	}
+}
+
+// TestFirstInstantAt checks the first instant of a local hour on hours that a
+// time change skips or repeats; 7 am never is in the zones of the database,
+// so the rule is checked on the hours of real time changes.
+func TestFirstInstantAt(t *testing.T) {
+	tests := []struct {
+		name  string
+		zone  string
+		day   [3]int
+		hour  int
+		want  string // the instant in UTC
+		local string
+	}{
+		{name: "an ordinary hour", zone: "America/Toronto", day: [3]int{2026, 3, 9}, hour: 7, want: "2026-03-09T11:00:00Z", local: "07:00"},
+		{name: "skipped: the end of the gap", zone: "America/Toronto", day: [3]int{2026, 3, 8}, hour: 2, want: "2026-03-08T07:00:00Z", local: "03:00"},
+		{name: "repeated: the first time", zone: "America/Toronto", day: [3]int{2026, 11, 1}, hour: 1, want: "2026-11-01T05:00:00Z", local: "01:00"},
+		{name: "midnight skipped", zone: "America/Santiago", day: [3]int{2027, 9, 5}, hour: 0, want: "2027-09-05T04:00:00Z", local: "01:00"},
+		{name: "midnight repeated: the first time", zone: "America/Havana", day: [3]int{2026, 11, 1}, hour: 0, want: "2026-11-01T04:00:00Z", local: "00:00"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			loc := load(t, tt.zone)
+			got := firstInstantAt(tt.day[0], time.Month(tt.day[1]), tt.day[2], tt.hour, loc)
+			if f, l := got.Format(time.RFC3339), got.In(loc).Format("15:04"); f != tt.want || l != tt.local {
+				t.Fatalf("firstInstantAt = %s (%s local), want %s (%s local)", f, l, tt.want, tt.local)
 			}
 		})
 	}

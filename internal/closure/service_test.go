@@ -120,6 +120,8 @@ func TestCloseWeeks(t *testing.T) {
 	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc}
 	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
 	weekEnd := func(n int) time.Time { _, e := w.WeekBounds(n); return e }
+	// A week is closed once it locks, 7 am on the day after it ends.
+	locked := w.WeekLocksAt
 	runs := func(user string, distances ...int) []scoring.Activity {
 		var as []scoring.Activity
 		for i, d := range distances {
@@ -146,9 +148,9 @@ func TestCloseWeeks(t *testing.T) {
 	wantWeek2 := scoring.Eliminated{UserID: "a", Week: 2, RunMeters: 6999, MinimumMeters: 7000}
 	wantWeek3 := scoring.Eliminated{UserID: "c", Week: 3, RunMeters: 8999, MinimumMeters: 9000}
 
-	t.Run("the exact end of a week closes it", func(t *testing.T) {
+	t.Run("the lock of a week closes it", func(t *testing.T) {
 		repo, data := newFakeRepo(c), &fakeData{participants: participants, activities: activities}
-		got, err := run(t, repo, data, weekEnd(2))
+		got, err := run(t, repo, data, locked(2))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +163,7 @@ func TestCloseWeeks(t *testing.T) {
 		if !reflect.DeepEqual(repo.recorded["c1"], []scoring.Eliminated{wantWeek2}) {
 			t.Fatalf("eliminations = %+v, want %+v", repo.recorded["c1"], wantWeek2)
 		}
-		if at := repo.closedAt["c1/2"]; !at.Equal(weekEnd(2)) {
+		if at := repo.closedAt["c1/2"]; !at.Equal(locked(2)) {
 			t.Fatalf("closed at %v, want the instant of the clock", at)
 		}
 		if data.weekly != "run" {
@@ -169,9 +171,20 @@ func TestCloseWeeks(t *testing.T) {
 		}
 	})
 
-	t.Run("nothing closes the nanosecond before", func(t *testing.T) {
+	t.Run("the exact end of a week does not close it", func(t *testing.T) {
 		repo, data := newFakeRepo(c), &fakeData{participants: participants, activities: activities}
-		got, err := run(t, repo, data, weekEnd(1).Add(-time.Nanosecond))
+		got, err := run(t, repo, data, weekEnd(2))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(repo.closed["c1"], []int{1}) || len(repo.recorded["c1"]) != 0 || got.Eliminations != 0 {
+			t.Fatalf("result = %+v, closed = %v, eliminations = %+v, want week 1 only", got, repo.closed["c1"], repo.recorded["c1"])
+		}
+	})
+
+	t.Run("nothing closes the nanosecond before the lock", func(t *testing.T) {
+		repo, data := newFakeRepo(c), &fakeData{participants: participants, activities: activities}
+		got, err := run(t, repo, data, locked(1).Add(-time.Nanosecond))
 		if err != nil || got != (Result{}) || len(repo.closed["c1"]) != 0 {
 			t.Fatalf("result = %+v, err = %v, closed = %v, want nothing", got, err, repo.closed["c1"])
 		}
@@ -182,12 +195,12 @@ func TestCloseWeeks(t *testing.T) {
 
 	t.Run("running again changes nothing", func(t *testing.T) {
 		repo, data := newFakeRepo(c), &fakeData{participants: participants, activities: activities}
-		if _, err := run(t, repo, data, weekEnd(3)); err != nil {
+		if _, err := run(t, repo, data, locked(3)); err != nil {
 			t.Fatal(err)
 		}
 		closed, recorded := append([]int(nil), repo.closed["c1"]...), append([]scoring.Eliminated(nil), repo.recorded["c1"]...)
 		data.loads = 0
-		got, err := run(t, repo, data, weekEnd(3).Add(time.Minute))
+		got, err := run(t, repo, data, locked(3).Add(time.Minute))
 		if err != nil || got != (Result{}) {
 			t.Fatalf("second run = %+v, err = %v, want nothing done", got, err)
 		}
@@ -201,10 +214,10 @@ func TestCloseWeeks(t *testing.T) {
 
 	t.Run("an hour late or on time gives the same eliminations", func(t *testing.T) {
 		onTime, late := newFakeRepo(c), newFakeRepo(c)
-		if _, err := run(t, onTime, &fakeData{participants: participants, activities: activities}, weekEnd(3)); err != nil {
+		if _, err := run(t, onTime, &fakeData{participants: participants, activities: activities}, locked(3)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := run(t, late, &fakeData{participants: participants, activities: activities}, weekEnd(3).Add(time.Hour)); err != nil {
+		if _, err := run(t, late, &fakeData{participants: participants, activities: activities}, locked(3).Add(time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(onTime.recorded, late.recorded) || !reflect.DeepEqual(onTime.closed, late.closed) {
@@ -219,11 +232,11 @@ func TestCloseWeeks(t *testing.T) {
 		stepwise, once := newFakeRepo(c), newFakeRepo(c)
 		data := &fakeData{participants: participants, activities: activities}
 		for n := 1; n <= 3; n++ {
-			if _, err := run(t, stepwise, data, weekEnd(n)); err != nil {
+			if _, err := run(t, stepwise, data, locked(n)); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if _, err := run(t, once, data, weekEnd(3)); err != nil {
+		if _, err := run(t, once, data, locked(3)); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(stepwise.recorded, once.recorded) || !reflect.DeepEqual(stepwise.closed["c1"], once.closed["c1"]) {
@@ -234,7 +247,7 @@ func TestCloseWeeks(t *testing.T) {
 	t.Run("a week already closed is not closed again", func(t *testing.T) {
 		repo := newFakeRepo(c)
 		repo.closed["c1"] = []int{1}
-		got, err := run(t, repo, &fakeData{participants: participants, activities: activities}, weekEnd(2))
+		got, err := run(t, repo, &fakeData{participants: participants, activities: activities}, locked(2))
 		if err != nil || got.Weeks != 1 {
 			t.Fatalf("result = %+v, err = %v, want only week 2", got, err)
 		}
@@ -242,7 +255,7 @@ func TestCloseWeeks(t *testing.T) {
 
 	t.Run("the recorded eliminations are the ones of the scorer", func(t *testing.T) {
 		repo, data := newFakeRepo(c), &fakeData{participants: participants, activities: activities}
-		now := weekEnd(3)
+		now := locked(3)
 		if _, err := run(t, repo, data, now); err != nil {
 			t.Fatal(err)
 		}
@@ -297,7 +310,7 @@ func TestCloseWeeks(t *testing.T) {
 		other.ID = "c2"
 		repo := newFakeRepo(c, other)
 		repo.failOn = "c1"
-		got, err := run(t, repo, &fakeData{participants: participants, activities: activities}, weekEnd(2))
+		got, err := run(t, repo, &fakeData{participants: participants, activities: activities}, locked(2))
 		if err == nil {
 			t.Fatal("error = nil, want the failure of c1")
 		}
@@ -309,7 +322,7 @@ func TestCloseWeeks(t *testing.T) {
 	t.Run("an unknown time zone is an error", func(t *testing.T) {
 		broken := c
 		broken.Timezone = "Mars/Olympus"
-		if _, err := run(t, newFakeRepo(broken), &fakeData{}, weekEnd(2)); err == nil {
+		if _, err := run(t, newFakeRepo(broken), &fakeData{}, locked(2)); err == nil {
 			t.Fatal("error = nil, want the unknown time zone")
 		}
 	})
@@ -322,6 +335,9 @@ func TestFinalizeChallenges(t *testing.T) {
 	}
 	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
 	end := start.AddDate(0, 0, 28).UTC()
+	// The last week locks at 7 am on the day after the end: the results are
+	// frozen then.
+	lock := time.Date(2026, 3, 30, 7, 0, 0, 0, loc).UTC()
 	c := EndedChallenge{
 		ID: "c1", Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end,
 		Categories: []Category{
@@ -371,14 +387,14 @@ func TestFinalizeChallenges(t *testing.T) {
 		return payload{}
 	}
 
-	t.Run("the exact end freezes the ranking of every category", func(t *testing.T) {
+	t.Run("the lock of the last week freezes the ranking of every category", func(t *testing.T) {
 		repo := newFakeRepo()
 		repo.ended = []EndedChallenge{c}
-		got, err := finalize(t, repo, end)
+		got, err := finalize(t, repo, lock)
 		if err != nil || got != (FinalizeResult{Challenges: 1}) {
 			t.Fatalf("result = %+v, err = %v, want 1 challenge", got, err)
 		}
-		if !repo.snapshotAt.Equal(end) {
+		if !repo.snapshotAt.Equal(lock) {
 			t.Fatalf("snapshot at %v, want the instant of the clock", repo.snapshotAt)
 		}
 		// The last week is closed with the results (SC-API-089): only its
@@ -410,7 +426,7 @@ func TestFinalizeChallenges(t *testing.T) {
 		repo.ended = []EndedChallenge{c}
 		keepUp := append(runs("a", 5000, 7000, 9000, 11000), runs("b", 5000, 7000, 9000, 11000)...)
 		data := &fakeData{participants: participants, activities: keepUp}
-		svc := NewService(repo, data, clock.NewFake(end), discard())
+		svc := NewService(repo, data, clock.NewFake(lock), discard())
 		if _, err := svc.FinalizeChallenges(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -422,27 +438,33 @@ func TestFinalizeChallenges(t *testing.T) {
 		}
 	})
 
-	t.Run("nothing is frozen the nanosecond before the end", func(t *testing.T) {
-		repo := newFakeRepo()
-		repo.ended = []EndedChallenge{c}
-		got, err := finalize(t, repo, end.Add(-time.Nanosecond))
-		if err != nil || got != (FinalizeResult{}) || len(repo.snapshots) != 0 {
-			t.Fatalf("result = %+v, err = %v, snapshots = %v, want nothing", got, err, repo.snapshots)
-		}
-	})
+	for name, at := range map[string]time.Time{
+		"nothing is frozen the nanosecond before the end":         end.Add(-time.Nanosecond),
+		"nothing is frozen at the end, before the lock":           end,
+		"nothing is frozen the nanosecond before the lock (7 am)": lock.Add(-time.Nanosecond),
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeRepo()
+			repo.ended = []EndedChallenge{c}
+			got, err := finalize(t, repo, at)
+			if err != nil || got != (FinalizeResult{}) || len(repo.snapshots) != 0 {
+				t.Fatalf("result = %+v, err = %v, snapshots = %v, want nothing", got, err, repo.snapshots)
+			}
+		})
+	}
 
 	t.Run("running again, even later, changes nothing", func(t *testing.T) {
 		repo := newFakeRepo()
 		repo.ended = []EndedChallenge{c}
-		if _, err := finalize(t, repo, end); err != nil {
+		if _, err := finalize(t, repo, lock); err != nil {
 			t.Fatal(err)
 		}
 		before := repo.snapshots["c1"]
-		got, err := finalize(t, repo, end.Add(time.Hour))
+		got, err := finalize(t, repo, lock.Add(time.Hour))
 		if err != nil || got != (FinalizeResult{}) {
 			t.Fatalf("second run = %+v, err = %v, want nothing done", got, err)
 		}
-		if !reflect.DeepEqual(repo.snapshots["c1"], before) || !repo.snapshotAt.Equal(end) {
+		if !reflect.DeepEqual(repo.snapshots["c1"], before) || !repo.snapshotAt.Equal(lock) {
 			t.Fatalf("second run changed the snapshots")
 		}
 	})
@@ -452,7 +474,7 @@ func TestFinalizeChallenges(t *testing.T) {
 		repo.ended = []EndedChallenge{c}
 		// The listing is stale: the challenge was finalized since it was read.
 		repo.snapshots["c1"] = []Snapshot{{CategoryID: "cat1"}}
-		svc := NewService(staleRepo{repo}, &fakeData{participants: participants, activities: activities}, clock.NewFake(end), discard())
+		svc := NewService(staleRepo{repo}, &fakeData{participants: participants, activities: activities}, clock.NewFake(lock), discard())
 		got, err := svc.FinalizeChallenges(t.Context())
 		if err != nil || got != (FinalizeResult{}) {
 			t.Fatalf("result = %+v, err = %v, want nothing done", got, err)
@@ -462,10 +484,10 @@ func TestFinalizeChallenges(t *testing.T) {
 	t.Run("an hour late gives the same ranking", func(t *testing.T) {
 		onTime, late := newFakeRepo(), newFakeRepo()
 		onTime.ended, late.ended = []EndedChallenge{c}, []EndedChallenge{c}
-		if _, err := finalize(t, onTime, end); err != nil {
+		if _, err := finalize(t, onTime, lock); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := finalize(t, late, end.Add(time.Hour)); err != nil {
+		if _, err := finalize(t, late, lock.Add(time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(onTime.snapshots, late.snapshots) {
@@ -479,7 +501,7 @@ func TestFinalizeChallenges(t *testing.T) {
 		repo := newFakeRepo()
 		repo.ended = []EndedChallenge{c, other}
 		repo.failOn = "c1"
-		got, err := finalize(t, repo, end)
+		got, err := finalize(t, repo, lock)
 		if err == nil || got != (FinalizeResult{Challenges: 1}) {
 			t.Fatalf("result = %+v, err = %v, want 1 challenge and an error", got, err)
 		}
@@ -493,7 +515,7 @@ func TestFinalizeChallenges(t *testing.T) {
 		broken.Categories = []Category{{ID: "cat9", Type: "fastest"}}
 		repo := newFakeRepo()
 		repo.ended = []EndedChallenge{broken}
-		if _, err := finalize(t, repo, end); err == nil || len(repo.snapshots) != 0 {
+		if _, err := finalize(t, repo, lock); err == nil || len(repo.snapshots) != 0 {
 			t.Fatalf("err = %v, snapshots = %v, want an error and nothing recorded", err, repo.snapshots)
 		}
 	})

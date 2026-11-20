@@ -124,13 +124,34 @@ func TestChangeActivityWeekLocked(t *testing.T) {
 		t.Fatalf("started_at %s, want it unchanged", s.startedAt)
 	}
 
-	// Recorded before the week ended: locked from then on.
-	later := NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations{challengeOf(t, "c1")}, nil, clock.NewFake(toronto(t, 2026, 6, 15, 0)))
-	_, err = later.Update(t.Context(), f.user, rec.ID, run(toronto(t, 2026, 6, 10, 9)))
+	// Week 2 ends on Monday 2026-06-15 and locks at 7 am that day: from then
+	// on, nothing changes.
+	at := func(now time.Time) *Service {
+		return NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations{challengeOf(t, "c1")}, nil, clock.NewFake(now))
+	}
+	locked := at(toronto(t, 2026, 6, 15, 7))
+	_, err = locked.Update(t.Context(), f.user, rec.ID, run(toronto(t, 2026, 6, 10, 9)))
 	wantCode(t, err, apperr.CodeWeekLocked)
-	wantCode(t, later.Delete(t.Context(), f.user, rec.ID), apperr.CodeWeekLocked)
+	wantCode(t, locked.Delete(t.Context(), f.user, rec.ID), apperr.CodeWeekLocked)
 	if s := f.stored(rec.ID); s.deletedAt != nil || !s.startedAt.Equal(rec.StartedAt) {
 		t.Fatalf("stored %+v, want it unchanged", s)
+	}
+
+	// Until 7 am, after the end of the week, it can still be changed (into a
+	// run across the end of the week) and deleted.
+	open := at(toronto(t, 2026, 6, 15, 7).Add(-time.Minute))
+	across := toronto(t, 2026, 6, 15, 0).Add(-15 * time.Minute)
+	if _, err := open.Update(t.Context(), f.user, rec.ID, run(across)); err != nil {
+		t.Fatalf("update before 7 am: %v", err)
+	}
+	if s := f.stored(rec.ID); !s.startedAt.Equal(across) {
+		t.Fatalf("started_at %s, want %s", s.startedAt, across)
+	}
+	if err := open.Delete(t.Context(), f.user, rec.ID); err != nil {
+		t.Fatalf("delete before 7 am: %v", err)
+	}
+	if s := f.stored(rec.ID); s.deletedAt == nil {
+		t.Fatalf("stored %+v, want it deleted", s)
 	}
 }
 

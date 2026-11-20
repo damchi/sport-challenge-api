@@ -12,9 +12,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
+	"github.com/damchi/sport-challenge-api/internal/closure"
+	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
@@ -32,6 +35,8 @@ var recordNow = time.Date(2026, 6, 11, 16, 0, 0, 0, time.UTC)
 type recording struct {
 	t          *testing.T
 	pool       *pgxpool.Pool
+	gdb        *gorm.DB
+	clock      *clock.FakeClock
 	activities *activity.Service
 	user       string
 }
@@ -54,7 +59,7 @@ func newRecording(t *testing.T) recording {
 	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ('email|runner', 'runner', 'Rose', 'Runner') RETURNING id").Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	return recording{t: t, pool: pool, activities: activities, user: id}
+	return recording{t: t, pool: pool, gdb: gdb, clock: clk, activities: activities, user: id}
 }
 
 // toronto is local time in Toronto, in UTC.
@@ -215,6 +220,81 @@ func TestRecordWeekLocked(t *testing.T) {
 	}
 	if r.count() != 0 {
 		t.Fatalf("%d rows, want none", r.count())
+	}
+}
+
+// TestRunAcrossTheEndOfAWeek follows SC-API-121 end to end: a run from
+// Sunday 23:30 to Monday 00:30 can be entered once done, until 7 am on
+// Monday, when its week locks; it counts for the week it started in, and the
+// week is judged, its eliminations recorded, at 7 am, not at its end.
+func TestRunAcrossTheEndOfAWeek(t *testing.T) {
+	r := newRecording(t)
+	id := r.challenge([3]int{2026, 6, 1}, 3, "active", false) // week 2 ends on Monday 2026-06-15
+	if _, err := r.pool.Exec(t.Context(), `INSERT INTO categories (challenge_id, type, position, params)
+		VALUES ($1, 'run_elimination', 1, '{"sport": "run", "step_meters": 2000}')`, id); err != nil {
+		t.Fatal(err)
+	}
+	other := r.newUser("other")
+	r.join(id, other, "active")
+	// Both run 5 km in week 1 and 4 km in week 2: 3 km short of the minimum.
+	for _, u := range []string{r.user, other} {
+		for _, at := range []time.Time{toronto(t, 2026, 6, 2, 7), toronto(t, 2026, 6, 9, 7)} {
+			meters := 5000
+			if at.After(toronto(t, 2026, 6, 8, 0)) {
+				meters = 4000
+			}
+			if _, err := r.pool.Exec(t.Context(), `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters)
+				VALUES ($1, 'run', $2, 1800, $3)`, u, at, meters); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	weekEnd, lock := toronto(t, 2026, 6, 15, 0), toronto(t, 2026, 6, 15, 7)
+	worker := closure.NewService(closure.NewRepository(r.gdb), leaderboard.NewRepository(r.gdb), r.clock, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	eliminated := func() []string {
+		t.Helper()
+		var users []string
+		rows, err := r.pool.Query(t.Context(), "SELECT user_id FROM elimination WHERE challenge_id = $1 AND week_number = 2 ORDER BY user_id", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var u string
+			if err := rows.Scan(&u); err != nil {
+				t.Fatal(err)
+			}
+			users = append(users, u)
+		}
+		return users
+	}
+
+	// Entered at 6:30 am on Monday, after the end of its week, before 7 am.
+	r.clock.Set(weekEnd.Add(6*time.Hour + 30*time.Minute))
+	d := 3000
+	across := activity.Draft{SportCode: "run", StartedAt: weekEnd.Add(-30 * time.Minute), DurationSeconds: 3600, DistanceMeters: &d}
+	rec, err := r.activities.Record(t.Context(), r.user, nil, across)
+	if err != nil || len(rec.Contributions) != 1 || rec.Locked {
+		t.Fatalf("Record() = %+v, %v, want it counting in the challenge, not locked", rec, err)
+	}
+	if _, err := worker.CloseWeeks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := eliminated(); len(got) != 0 {
+		t.Fatalf("eliminated in week 2 before 7 am: %v, want nobody", got)
+	}
+
+	// From 7 am, the week is locked and judged: the run counts for week 2.
+	r.clock.Set(lock)
+	late := across
+	late.StartedAt = weekEnd.Add(-2 * time.Hour)
+	_, err = r.activities.Record(t.Context(), other, nil, late)
+	wantLocked(t, err)
+	if _, err := worker.CloseWeeks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := eliminated(); !slices.Equal(got, []string{other}) {
+		t.Fatalf("eliminated in week 2: %v, want only %s, who did not reach 7 km", got, other)
 	}
 }
 

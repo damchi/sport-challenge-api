@@ -143,7 +143,8 @@ func TestGetRanksEveryCategory(t *testing.T) {
 			act("c", "run", at(2, 7), 3600, 99000),
 		},
 	}
-	now := c.EndsAt
+	// The last week locks at 7 am on the day after the end.
+	now := at(15, 7)
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), 24*time.Hour)
 
 	got, err := svc.Get(t.Context(), "actor", "c1")
@@ -192,7 +193,7 @@ func TestWeeklySport(t *testing.T) {
 func TestGetJudgesWeeksAtTheClockInstant(t *testing.T) {
 	c := twoWeeks(t)
 	loc := toronto(t)
-	// a runs 5 km then 6.999 km: eliminated, once week 2 ends. b runs 1 km
+	// a runs 5 km then 6.999 km: eliminated, once week 2 locks. b runs 1 km
 	// then 3 km: exactly the minimum.
 	repo := &fakeRepo{
 		participants: []scoring.Participant{{UserID: "a"}, {UserID: "b"}},
@@ -203,7 +204,9 @@ func TestGetJudgesWeeksAtTheClockInstant(t *testing.T) {
 			{UserID: "b", SportCode: "run", StartedAt: time.Date(2026, 6, 9, 7, 0, 0, 0, loc), DurationSeconds: 60, DistanceMeters: meters(3000)},
 		},
 	}
-	fake := clock.NewFake(c.EndsAt.Add(-time.Second))
+	// The last week locks at 7 am on the day after the end.
+	lock := time.Date(2026, 6, 15, 7, 0, 0, 0, loc).UTC()
+	fake := clock.NewFake(c.EndsAt)
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, fake, 24*time.Hour)
 
 	rank := func() []Ranked {
@@ -215,11 +218,15 @@ func TestGetJudgesWeeksAtTheClockInstant(t *testing.T) {
 		return got.Categories[2].Entries
 	}
 	if got := rank(); got[0].UserID != "a" {
-		t.Fatalf("one second before the end: %+v, want a (not yet judged) first", got)
+		t.Fatalf("at the end: %+v, want a (not yet judged) first", got)
 	}
-	fake.Set(c.EndsAt)
+	fake.Set(lock.Add(-time.Second))
+	if got := rank(); got[0].UserID != "a" {
+		t.Fatalf("one second before 7 am: %+v, want a (not yet judged) first", got)
+	}
+	fake.Set(lock)
 	if got := rank(); got[0].UserID != "b" {
-		t.Fatalf("at the end of week 2: %+v, want b first, a eliminated", got)
+		t.Fatalf("at 7 am the day after week 2: %+v, want b first, a eliminated", got)
 	}
 }
 
@@ -638,8 +645,19 @@ func TestStandings(t *testing.T) {
 			}},
 		},
 		{
-			name: "at the exact end of week 2: week 3, already eliminated",
+			name: "at the exact end of week 2: week 3, not eliminated before 7 am, a minimum that may still rise",
 			now:  endOf(2), participants: everyone, activities: append(week1, run("a", 9, 6000), run("b", 9, 7000)),
+			want: &Standing{Week: 3, WeekEndsAt: endOf(3), Categories: []Place{
+				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
+				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000}, RankedCount: 2},
+				{Type: CategoryRunElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
+					Status: scoring.StatusInProgress, MinimumMeters: minimum(8000), RunMeters: 0, WeekEndsAt: endOf(3),
+				}}, RankedCount: 2},
+			}},
+		},
+		{
+			name: "at 7 am the day after week 2: eliminated",
+			now:  at(15, 7), participants: everyone, activities: append(week1, run("a", 9, 6000), run("b", 9, 7000)),
 			want: &Standing{Week: 3, WeekEndsAt: endOf(3), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000}, RankedCount: 2},
