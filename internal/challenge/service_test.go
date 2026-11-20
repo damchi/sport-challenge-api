@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -349,6 +350,41 @@ func TestServiceCreate(t *testing.T) {
 	}
 	if p := c.Categories[2].Params; p.Sport != "run" || p.StepMeters != 2000 {
 		t.Errorf("elimination params %+v, want run with a 2000 m step", p)
+	}
+}
+
+// TestServiceCreateOptionalCategories: the cumulative time is always there,
+// the others only when chosen, each at the position of its type.
+func TestServiceCreateOptionalCategories(t *testing.T) {
+	type placed struct {
+		Type     string
+		Position int
+	}
+	tests := []struct {
+		name  string
+		draft Draft
+		want  []placed
+	}{
+		{"cumulative time only", with(func(d *Draft) { d.Distance = false; d.Elimination = nil }), []placed{{CategoryCumulativeTime, 1}}},
+		{"elimination only", with(func(d *Draft) { d.Distance = false }), []placed{{CategoryCumulativeTime, 1}, {CategoryElimination, 3}}},
+		{"distance only", with(func(d *Draft) { d.Elimination = nil }), []placed{{CategoryCumulativeTime, 1}, {CategoryCumulativeDistance, 2}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{}
+			svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now))
+			c, err := svc.Create(t.Context(), actor, tt.draft)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]placed, len(repo.created.Categories))
+			for i, cat := range repo.created.Categories {
+				got[i] = placed{cat.Type, cat.Position}
+			}
+			if !slices.Equal(got, tt.want) || len(c.Categories) != len(tt.want) {
+				t.Fatalf("stored categories %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -625,3 +625,67 @@ func TestSaveSnapshotsOfAnAccountDeletedSinceTheRanking(t *testing.T) {
 		t.Fatalf("closed weeks = %v, want [4]", weeks)
 	}
 }
+
+// TestChallengeWithoutElimination: a challenge without the elimination
+// category has no week to judge, so close-weeks leaves it alone; once its
+// last week locks, finalize-challenges still freezes its categories and
+// closes that week, with no elimination.
+func TestChallengeWithoutElimination(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	// The last week (4) locks at 7 am on the day after the end.
+	lock := time.Date(2026, 3, 30, 7, 0, 0, 0, loc).UTC()
+	a, b := s.user("a"), s.user("b")
+	var id string
+	s.scan(&id, `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Spring', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, start.AddDate(0, 0, 28), a)
+	s.exec(`INSERT INTO categories (challenge_id, type, position) VALUES ($1, 'cumulative_time', 1)`, id)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $4), ($1, $3, $4)`, id, a, b, start)
+	// b runs less every week: an elimination would judge it out.
+	for week, meters := range []int{9000, 5000, 3000, 1000} {
+		s.run(b, start.AddDate(0, 0, 7*week).Add(time.Hour), meters)
+	}
+	s.run(a, start.Add(time.Hour), 1000)
+	s.run(a, start.Add(2*time.Hour), 1000)
+
+	service := func(now time.Time) *Service {
+		return NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(now), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	}
+
+	t.Run("close-weeks leaves it alone", func(t *testing.T) {
+		got, err := service(lock.Add(time.Hour)).CloseWeeks(t.Context())
+		if err != nil || got != (Result{}) {
+			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
+		}
+		if weeks := s.closedWeeks(id); len(weeks) != 0 {
+			t.Fatalf("closed weeks %v, want none", weeks)
+		}
+	})
+
+	t.Run("finalize-challenges freezes its only category and closes the last week", func(t *testing.T) {
+		got, err := service(lock).FinalizeChallenges(t.Context())
+		if err != nil || got != (FinalizeResult{Challenges: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 challenge", got, err)
+		}
+		snaps := s.snapshots(id)
+		want := payload{Entries: []payloadEntry{{UserID: b, Rank: 1, Value: 7200}, {UserID: a, Rank: 2, Value: 3600}}}
+		if len(snaps) != 1 || snaps[0].Type != "cumulative_time" || !reflect.DeepEqual(snaps[0].Payload, want) {
+			t.Fatalf("snapshots %+v, want the cumulative time alone, %+v", snaps, want)
+		}
+		if weeks, elims := s.closedWeeks(id), s.eliminations(id); !reflect.DeepEqual(weeks, []int{4}) || len(elims) != 0 {
+			t.Fatalf("closed weeks %v, eliminations %+v, want week 4 and none", weeks, elims)
+		}
+		if got, err := service(lock.Add(time.Hour)).FinalizeChallenges(t.Context()); err != nil || got != (FinalizeResult{}) {
+			t.Fatalf("second run: result = %+v, err = %v, want nothing", got, err)
+		}
+	})
+}

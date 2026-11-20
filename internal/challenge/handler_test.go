@@ -3,11 +3,13 @@ package challenge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -95,7 +97,7 @@ func newTestService(profileComplete bool) (*Service, *fakeRepository) {
 	return NewService(repo, fakeProfiles{complete: profileComplete}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now)), repo
 }
 
-const validBody = `{"title":"Spring run","visibility":"public","timezone":"America/Toronto","start_date":"2026-03-04","weeks":6,"elimination_step_meters":2000,"distance_factors":{"ride":0.25}}`
+const validBody = `{"title":"Spring run","visibility":"public","timezone":"America/Toronto","start_date":"2026-03-04","weeks":6,"categories":{"cumulative_distance":{},"elimination":{"step_meters":2000}},"distance_factors":{"ride":0.25}}`
 
 func TestCreateChallenge(t *testing.T) {
 	svc, repo := newTestService(true)
@@ -120,6 +122,41 @@ func TestCreateChallenge(t *testing.T) {
 	}
 	if out["reference_sport"] != "run" {
 		t.Fatalf("reference_sport %v, want run by default", out["reference_sport"])
+	}
+}
+
+// TestCreateChallengeOptionalCategories: the answer, checked against the
+// contract, holds the chosen categories only, at the position of their type.
+func TestCreateChallengeOptionalCategories(t *testing.T) {
+	tests := []struct {
+		name       string
+		categories string // the categories member of the body, empty for none
+		want       []string
+	}{
+		{"cumulative time only", "", []string{"cumulative_time@1"}},
+		{"no optional category chosen", `"categories":{},`, []string{"cumulative_time@1"}},
+		{"elimination", `"categories":{"elimination":{"step_meters":1500}},`, []string{"cumulative_time@1", "elimination@3"}},
+		{"distance", `"categories":{"cumulative_distance":{}},`, []string{"cumulative_time@1", "cumulative_distance@2"}},
+		{"every category", `"categories":{"cumulative_distance":{},"elimination":{"step_meters":1500}},`, []string{"cumulative_time@1", "cumulative_distance@2", "elimination@3"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newTestService(true)
+			body := `{"title":"Spring run","visibility":"public","timezone":"America/Toronto","start_date":"2026-03-04",` + tt.categories + `"weeks":6}`
+			rec, out := post(t, svc, body)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status %d, want 201: %s", rec.Code, rec.Body)
+			}
+			cats, _ := out["categories"].([]any)
+			got := make([]string, len(cats))
+			for i, c := range cats {
+				cat, _ := c.(map[string]any)
+				got[i] = fmt.Sprintf("%v@%v", cat["type"], cat["position"])
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("categories %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -174,7 +211,14 @@ func TestCreateChallengeRefusals(t *testing.T) {
 		{name: "factor out of range", complete: true, body: strings.Replace(validBody, `"ride":0.25`, `"ride":0.123`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors.ride"},
 		{name: "missing title", complete: true, body: strings.Replace(validBody, `"title":"Spring run",`, "", 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
 		{name: "NUL in the title: 400, not a 500 from the database", complete: true, body: strings.Replace(validBody, `"Spring run"`, `"Spring\u0000run"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "title"},
-		{name: "categories chosen by the client (D2)", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"categories":[]`, 1), wantStatus: 400, wantCode: "validation_failed"},
+		{name: "categories as a list", complete: true, body: strings.Replace(validBody, `"categories":{"cumulative_distance":{},"elimination":{"step_meters":2000}}`, `"categories":[]`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories"},
+		{name: "unknown category", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{}`, `"cumulative_time":{}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories"},
+		{name: "settings of the cumulative distance", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{}`, `"cumulative_distance":{"factors":{}}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.cumulative_distance"},
+		{name: "elimination step of 0", complete: true, body: strings.Replace(validBody, `"step_meters":2000`, `"step_meters":0`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.step_meters"},
+		{name: "elimination step over 100 km", complete: true, body: strings.Replace(validBody, `"step_meters":2000`, `"step_meters":100001`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.step_meters"},
+		{name: "elimination without step", complete: true, body: strings.Replace(validBody, `{"step_meters":2000}`, `{}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.step_meters"},
+		{name: "factors without the cumulative distance", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{},`, "", 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors"},
+		{name: "former elimination_step_meters", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"elimination_step_meters":2000`, 1), wantStatus: 400, wantCode: "validation_failed"},
 		{name: "factor over 2: refused by the contract, key not echoed", complete: true, body: strings.Replace(validBody, `"ride":0.25`, `"ride":3`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors"},
 		{name: "description over 2000 characters", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"description":"`+strings.Repeat("é", 2001)+`"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "description"},
 		{name: "not JSON", complete: true, body: "title=Spring", wantStatus: 400, wantCode: "validation_failed"},
