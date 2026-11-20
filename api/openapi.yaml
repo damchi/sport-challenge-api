@@ -1976,7 +1976,10 @@ components:
         weeks:
           description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         elimination_step_meters:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
+          description: |
+            Former creation field, now `categories.elimination.step_meters`;
+            kept so that a client still sending it is told the step is frozen:
+            422 `field_not_editable`, and `null` 400 `validation_failed`.
         reference_sport:
           description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         distance_factors:
@@ -2143,8 +2146,8 @@ components:
             The distance brought to the cumulative distance category: the
             distance times the factor of the sport in this challenge, rounded
             to the meter (half up) as the ranking rounds a total. Null when
-            the sport has no factor in this challenge or the activity no
-            distance. The ranking rounds the total once, so it may differ by
+            the challenge has no cumulative distance category, the sport no
+            factor in this challenge, or the activity no distance. The ranking rounds the total once, so it may differ by
             a meter or so from the sum of these values.
         duration_seconds:
           type: integer

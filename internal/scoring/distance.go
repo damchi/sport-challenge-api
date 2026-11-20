@@ -2,8 +2,8 @@ package scoring
 
 import "math"
 
-// Distance is category 2, cumulative distance: the distances of the
-// activities brought back to a running distance by the factor of their
+// Distance is the cumulative distance category: the distances of the
+// activities brought back to the reference sport by the factor of their
 // sport, in meters.
 //
 // Factors are the frozen settings of the category, by sport code: every
