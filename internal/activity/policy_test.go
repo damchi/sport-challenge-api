@@ -192,7 +192,8 @@ func TestContributions(t *testing.T) {
 
 // TestContributionsWeighDistance checks what an activity brings to each
 // challenge: its duration, and its distance weighted by the factor of the
-// challenge (scoring.Distance).
+// challenge (scoring.Distance); none in a challenge without the cumulative
+// distance, which has no factors.
 func TestContributionsWeighDistance(t *testing.T) {
 	// Both from Monday 2026-06-01: an activity on Tuesday counts in both.
 	run := participation(t, [3]int{2026, 6, 1}, 3)
@@ -201,6 +202,8 @@ func TestContributionsWeighDistance(t *testing.T) {
 	bike := participation(t, [3]int{2026, 6, 1}, 3)
 	bike.ChallengeID, bike.Title = "bike", "Vélo d'été"
 	bike.Factors = map[string]float64{"run": 1, "ride": 1}
+	timeOnly := participation(t, [3]int{2026, 6, 1}, 3)
+	timeOnly.ChallengeID, timeOnly.Title = "time", "Temps seul"
 	at := toronto(t, 2026, 6, 2, 10)
 	m := func(v int) *int { return &v }
 
@@ -213,24 +216,28 @@ func TestContributionsWeighDistance(t *testing.T) {
 		{name: "ride ×0.3 in one, ×1 in the other", sport: "ride", distance: m(20000), want: []Contribution{
 			{ChallengeID: "run", ChallengeTitle: "Défi 100 km", DistanceMeters: m(6000), DurationSeconds: 3600},
 			{ChallengeID: "bike", ChallengeTitle: "Vélo d'été", DistanceMeters: m(20000), DurationSeconds: 3600},
+			{ChallengeID: "time", ChallengeTitle: "Temps seul", DurationSeconds: 3600},
 		}},
 		{name: "rounded to the meter", sport: "ride", distance: m(1001), want: []Contribution{
 			{ChallengeID: "run", ChallengeTitle: "Défi 100 km", DistanceMeters: m(300), DurationSeconds: 3600},
 			{ChallengeID: "bike", ChallengeTitle: "Vélo d'été", DistanceMeters: m(1001), DurationSeconds: 3600},
+			{ChallengeID: "time", ChallengeTitle: "Temps seul", DurationSeconds: 3600},
 		}},
 		{name: "sport without distance: duration only", sport: "yoga", want: []Contribution{
 			{ChallengeID: "run", ChallengeTitle: "Défi 100 km", DurationSeconds: 3600},
 			{ChallengeID: "bike", ChallengeTitle: "Vélo d'été", DurationSeconds: 3600},
+			{ChallengeID: "time", ChallengeTitle: "Temps seul", DurationSeconds: 3600},
 		}},
 		{name: "sport without a factor in the challenge", sport: "rowing", distance: m(5000), want: []Contribution{
 			{ChallengeID: "run", ChallengeTitle: "Défi 100 km", DurationSeconds: 3600},
 			{ChallengeID: "bike", ChallengeTitle: "Vélo d'été", DurationSeconds: 3600},
+			{ChallengeID: "time", ChallengeTitle: "Temps seul", DurationSeconds: 3600},
 		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := Activity{SportCode: tt.sport, StartedAt: at, DurationSeconds: 3600, DistanceMeters: tt.distance}
-			got := Contributions(a, []Participation{run, bike})
+			got := Contributions(a, []Participation{run, bike, timeOnly})
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Contributions = %+v, want %+v", got, tt.want)
 			}
