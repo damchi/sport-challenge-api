@@ -433,8 +433,8 @@ paths:
         challenge is frozen at creation and answers 422 `field_not_editable`
         with the fields in `params.fields`. An absent field is left as is;
         an empty `description` removes it. `null` is refused for `title` and
-        `description`; a frozen field sent as `null` answers 422
-        `field_not_editable` too.
+        `description`, and a frozen field sent as `null` answers 400
+        `validation_failed` with the field in `params.fields`.
       tags: [challenges]
       parameters:
         - name: challengeId
@@ -1916,35 +1916,25 @@ components:
             U+200C, U+200D, U+200E, U+200F and the tags of flags (U+E0020 to
             U+E007F).
         visibility:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         members_can_invite:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         timezone:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         start_date:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         weeks:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         elimination_step_meters:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         distance_factors:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         categories:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         starts_at:
-          $ref: "#/components/schemas/FrozenField"
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         ends_at:
-          $ref: "#/components/schemas/FrozenField"
-    FrozenField:
-      description: |
-        Frozen at creation; sending it, even as `null`, answers 422
-        `field_not_editable`.
-      nullable: true
-      # Tells an absent field from one sent as null, which is refused too.
-      x-go-type: nullable.Nullable[any]
-      x-go-type-skip-optional-pointer: true
-      x-go-type-import:
-        path: github.com/oapi-codegen/nullable
+          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
     CreatorAdd:
       type: object
       required: [user_id]

@@ -247,15 +247,14 @@ func (h *Handler) UpdateChallenge(ctx context.Context, req api.UpdateChallengeRe
 	b := req.Body
 	// The fields frozen at creation, by their contract name.
 	var frozen []string
-	for name, value := range map[string]api.FrozenField{
+	for name, value := range map[string]any{
 		"categories": b.Categories, "distance_factors": b.DistanceFactors,
 		"elimination_step_meters": b.EliminationStepMeters, "ends_at": b.EndsAt,
 		"members_can_invite": b.MembersCanInvite, "start_date": b.StartDate,
 		"starts_at": b.StartsAt, "timezone": b.Timezone,
 		"visibility": b.Visibility, "weeks": b.Weeks,
 	} {
-		// Sent even as null: IsSpecified tells it from an absent field.
-		if value.IsSpecified() {
+		if value != nil {
 			frozen = append(frozen, name)
 		}
 	}

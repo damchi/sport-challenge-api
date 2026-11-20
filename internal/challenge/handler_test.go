@@ -539,8 +539,8 @@ func TestUpdateChallenge(t *testing.T) {
 	}
 }
 
-// TestUpdateChallengeFrozenFieldNull: a frozen field sent as null is sent all
-// the same, so it is refused like any other value and nothing is written.
+// TestUpdateChallengeFrozenFieldNull: a frozen field sent as null is refused
+// by the contract, and nothing is written.
 func TestUpdateChallengeFrozenFieldNull(t *testing.T) {
 	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111"
 	for _, field := range []string{
@@ -553,8 +553,8 @@ func TestUpdateChallengeFrozenFieldNull(t *testing.T) {
 			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodPatch, target, `{"title":"New title","`+field+`":null}`)
 			e, _ := out["error"].(map[string]any)
 			params, _ := e["params"].(map[string]any)
-			if rec.Code != http.StatusUnprocessableEntity || e["code"] != "field_not_editable" || params["fields"] != field {
-				t.Fatalf("got %d %v, want 422 field_not_editable fields %q", rec.Code, out, field)
+			if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || params["fields"] != field {
+				t.Fatalf("got %d %v, want 400 validation_failed fields %q", rec.Code, out, field)
 			}
 			if repo.updated != nil {
 				t.Fatal("challenge written despite the refusal")
