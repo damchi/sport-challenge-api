@@ -151,11 +151,13 @@ paths:
       summary: Delete my account
       description: |
         Final: the account is anonymized (pseudo, first name, last name,
-        e-mail and avatar erased) and
-        abandons every challenge not finished. The account is also left out
-        of the leaderboard of every challenge, finished ones included: the
-        others move up. The user is also deleted at the auth
-        provider. Every later request with a token of this account, even
+        e-mail, avatar and language erased) and every row tied to it is erased, in
+        every challenge, finished ones included: its activities,
+        participations, eliminations, creator roles, its entries in the
+        frozen results (the others move up) and its invitation links
+        (people who already joined through them stay participants). The
+        challenges it created stay. A failure erases nothing. The user is
+        also deleted at the auth provider. Every later request with a token of this account, even
         one still valid, answers 401 `account_deleted`; logging in again
         with this identity never creates a new account. The client asks for confirmation first.
         A 500 may come after the account is deleted: retrying then answers

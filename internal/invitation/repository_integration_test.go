@@ -182,16 +182,17 @@ func TestRepositoryLinkAuthorMayStillInvite(t *testing.T) {
 			if tt.status != "" {
 				join(t, pool, challenge, author, tt.status)
 			}
-			if tt.deleted {
-				if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", author); err != nil {
-					t.Fatal(err)
-				}
-			}
 			if _, err := pool.Exec(t.Context(), "UPDATE challenges SET members_can_invite = $1 WHERE id = $2", tt.membersCanInvite, challenge); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := repo.Create(t.Context(), Invitation{ChallengeID: challenge, InvitedBy: author, TokenHash: hashOf("t"), ExpiresAt: deadline, CreatedAt: now.Add(-time.Hour)}); err != nil {
 				t.Fatal(err)
+			}
+			// Deleted after creating it: a deleted account creates nothing.
+			if tt.deleted {
+				if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", author); err != nil {
+					t.Fatal(err)
+				}
 			}
 			guest := insertUser(t, pool, "email|guest")
 			_, err := repo.Link(t.Context(), hashOf("t"), guest, now)
@@ -212,4 +213,32 @@ func countLinks(t *testing.T, pool *pgxpool.Pool, user string) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// TestRepositoryWritesOfADeletedAccount: an account deleted (anonymized)
+// before the write, its deletion having erased its invitations and links,
+// creates no invitation and opens no link: nothing of it is left behind.
+func TestRepositoryWritesOfADeletedAccount(t *testing.T) {
+	repo, pool, creator, challenge := setup(t)
+	if _, err := repo.Create(t.Context(), Invitation{ChallengeID: challenge, InvitedBy: creator, TokenHash: hashOf("t"), ExpiresAt: deadline, CreatedAt: now.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	gone := insertUser(t, pool, "email|gone")
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", gone); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := repo.Create(t.Context(), Invitation{ChallengeID: challenge, InvitedBy: gone, TokenHash: hashOf("g"), ExpiresAt: deadline, CreatedAt: now}); !errors.Is(err, errAccountDeleted) {
+		t.Fatalf("Create() = %v, want errAccountDeleted", err)
+	}
+	if _, err := repo.Link(t.Context(), hashOf("t"), gone, now); !errors.Is(err, errAccountDeleted) {
+		t.Fatalf("Link() = %v, want errAccountDeleted", err)
+	}
+	var invitations int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM invitations WHERE invited_by = $1", gone).Scan(&invitations); err != nil {
+		t.Fatal(err)
+	}
+	if n := countLinks(t, pool, gone); invitations != 0 || n != 0 {
+		t.Fatalf("%d invitations, %d links of the deleted account, want none", invitations, n)
+	}
 }

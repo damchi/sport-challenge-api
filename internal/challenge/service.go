@@ -32,6 +32,7 @@ type repository interface {
 	ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error)
 	LastCreatorChallenges(ctx context.Context, userID string, now time.Time) ([]string, error)
 	Memberships(ctx context.Context, userID string) ([]UserChallenge, error)
+	EraseUser(ctx context.Context, userID string) error
 }
 
 // Profiles tells whether a user's profile is complete, and gives the public
@@ -412,6 +413,19 @@ func (s *Service) AbandonAll(ctx context.Context, userID string) error {
 		if err != nil && !errors.Is(err, errChallengeNotFound) {
 			return fmt.Errorf("abandon all: %w", err)
 		}
+	}
+	return nil
+}
+
+// EraseUser deletes every row of userID in the challenges, finished ones
+// included, for the deletion of their account (README §6): participations,
+// creator roles, eliminations and entries in the frozen results. The
+// challenges they created stay. Called in the transaction of the account
+// deletion, after AbandonAll. It checks no actor: never expose it on a
+// route, only user.Service.Delete calls it.
+func (s *Service) EraseUser(ctx context.Context, userID string) error {
+	if err := s.repo.EraseUser(ctx, userID); err != nil {
+		return fmt.Errorf("erase user: %w", err)
 	}
 	return nil
 }

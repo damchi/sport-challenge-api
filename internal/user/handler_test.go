@@ -31,7 +31,7 @@ func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
 // contract validation, then the handler on repo.
 func newMeRouter(t *testing.T, repo repository) *gin.Engine {
 	t.Helper()
-	return newMeRouterFor(t, NewService(repo, nil, nil, discard))
+	return newMeRouterFor(t, NewService(repo, nil, nil, nil, discard))
 }
 
 // newMeRouterFor serves the /me operations of svc.
@@ -227,7 +227,7 @@ func TestPatchMeRequiresAJSONBody(t *testing.T) {
 func TestDeleteMe(t *testing.T) {
 	repo := fakeRepository{user: User{ID: meID, AuthSubject: "email|123"}, deleted: new(string)}
 	identities := &fakeIdentities{}
-	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{}, identities, discard)), http.MethodDelete, "")
+	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{}, nil, identities, discard)), http.MethodDelete, "")
 	if res.status != http.StatusNoContent || *repo.deleted != meID {
 		t.Fatalf("got %d, deleted %q, want 204 for the user of the token", res.status, *repo.deleted)
 	}
@@ -241,7 +241,7 @@ func TestDeleteMeLastCreator(t *testing.T) {
 	refusal.Params = map[string]string{apperr.ChallengesParam: "c1,c2"}
 	repo := fakeRepository{user: User{ID: meID, AuthSubject: "email|123"}, deleted: new(string)}
 	identities := &fakeIdentities{}
-	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{err: refusal}, identities, discard)), http.MethodDelete, "")
+	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{err: refusal}, nil, identities, discard)), http.MethodDelete, "")
 	if res.status != http.StatusUnprocessableEntity || res.code != "last_creator" {
 		t.Fatalf("got %d %s, want 422 last_creator", res.status, res.code)
 	}
@@ -256,7 +256,7 @@ func TestDeleteMeLastCreator(t *testing.T) {
 
 func TestDeleteMeConcurrentlyDeleted(t *testing.T) {
 	repo := fakeRepository{deleteErr: errUserNotFound}
-	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{}, &fakeIdentities{}, discard)), http.MethodDelete, "")
+	res := do(t, newMeRouterFor(t, NewService(repo, &fakeParticipations{}, nil, &fakeIdentities{}, discard)), http.MethodDelete, "")
 	if res.status != http.StatusUnauthorized || res.code != "account_deleted" {
 		t.Fatalf("got %d %s, want 401 account_deleted", res.status, res.code)
 	}

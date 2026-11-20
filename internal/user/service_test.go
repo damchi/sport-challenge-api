@@ -71,6 +71,23 @@ func (f *fakeParticipations) AbandonAll(_ context.Context, userID string) error 
 	return f.err
 }
 
+// fakeEraser records, in calls, its name once AbandonAll ran (or "early").
+type fakeEraser struct {
+	name           string
+	participations *fakeParticipations
+	calls          *[]string
+	err            error
+}
+
+func (f fakeEraser) EraseUser(_ context.Context, userID string) error {
+	call := f.name
+	if f.participations.abandoned != userID {
+		call = "early"
+	}
+	*f.calls = append(*f.calls, call)
+	return f.err
+}
+
 type fakeIdentities struct {
 	deleted string
 	err     error
@@ -127,7 +144,7 @@ func TestServicePublicNames(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo, nil, nil, discard).PublicNames(t.Context(), tt.ids)
+			got, err := NewService(tt.repo, nil, nil, nil, discard).PublicNames(t.Context(), tt.ids)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
@@ -165,7 +182,7 @@ func TestServiceGetOrCreateBySubjectKeepsTheEmail(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var written string
 			repo := fakeRepository{user: User{ID: "u-1", Email: tt.stored}, email: &written, emailErr: tt.emailErr}
-			got, err := NewService(repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", tt.token)
+			got, err := NewService(repo, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", tt.token)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -197,7 +214,7 @@ func TestServiceGetOrCreateBySubject(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", "")
+			got, err := NewService(tt.repo, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", "")
 
 			switch {
 			case tt.wantCode != "":
@@ -241,7 +258,7 @@ func TestServiceProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo, nil, nil, discard).Profile(t.Context(), "u-1")
+			got, err := NewService(tt.repo, nil, nil, nil, discard).Profile(t.Context(), "u-1")
 			var appErr *apperr.Error
 			switch {
 			case tt.wantCode != "":
@@ -287,7 +304,7 @@ func TestServiceUpdateProfile(t *testing.T) {
 			written = sentinel
 			repo := fakeRepository{user: stored, err: tt.repoErr, changes: &written}
 
-			got, err := NewService(repo, nil, nil, discard).UpdateProfile(t.Context(), "u-1", tt.changes)
+			got, err := NewService(repo, nil, nil, nil, discard).UpdateProfile(t.Context(), "u-1", tt.changes)
 
 			if wrote := written != sentinel; wrote != tt.wantWritten {
 				t.Fatalf("repository called = %v, want %v", wrote, tt.wantWritten)
@@ -335,7 +352,7 @@ func TestServiceProfileComplete(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo, nil, nil, discard).ProfileComplete(t.Context(), "u-1")
+			got, err := NewService(tt.repo, nil, nil, nil, discard).ProfileComplete(t.Context(), "u-1")
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("ProfileComplete() = %v, %v, want %v (error %v)", got, err, tt.want, tt.wantErr)
 			}
@@ -353,6 +370,7 @@ func TestServiceDelete(t *testing.T) {
 		name           string
 		deleteErr      error
 		abandonErr     error
+		eraseErr       error
 		auth0Err       error
 		pendingErr     error
 		wantCode       apperr.Code
@@ -366,6 +384,8 @@ func TestServiceDelete(t *testing.T) {
 		{name: "Auth0 fails and the record too", auth0Err: auth0Err, pendingErr: storageErr, wantErr: storageErr, wantAuth0: true, wantAnonymized: true},
 		// The abandons fail: everything rolls back, nothing is deleted at Auth0.
 		{name: "abandon failure", abandonErr: storageErr, wantErr: storageErr},
+		// An erasure fails: the same, the erasers after it do not run.
+		{name: "erasure failure", eraseErr: storageErr, wantErr: storageErr},
 		{name: "deleted meanwhile", deleteErr: fmt.Errorf("delete user: %w", errUserNotFound), wantCode: apperr.CodeAccountDeleted},
 		{name: "storage failure", deleteErr: storageErr, wantErr: storageErr},
 	}
@@ -377,10 +397,15 @@ func TestServiceDelete(t *testing.T) {
 				deleteErr: tt.deleteErr, pending: &pending, pendingErr: tt.pendingErr,
 			}
 			participations := &fakeParticipations{err: tt.abandonErr}
+			var erased []string
+			erasers := []Eraser{
+				fakeEraser{name: "first", participations: participations, calls: &erased, err: tt.eraseErr},
+				fakeEraser{name: "second", participations: participations, calls: &erased},
+			}
 			identities := &fakeIdentities{err: tt.auth0Err}
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, nil))
-			err := NewService(repo, participations, identities, logger).Delete(t.Context(), "u-1")
+			err := NewService(repo, participations, erasers, identities, logger).Delete(t.Context(), "u-1")
 			switch {
 			case tt.wantCode != "":
 				if !errors.Is(err, apperr.New(tt.wantCode, nil)) {
@@ -391,6 +416,18 @@ func TestServiceDelete(t *testing.T) {
 			}
 			if tt.wantAnonymized && (*repo.deleted != "u-1" || participations.abandoned != "u-1") {
 				t.Fatalf("anonymized %q, abandoned %q, want both for u-1", *repo.deleted, participations.abandoned)
+			}
+			// The erasers run after the abandons, in order, and stop at a failure.
+			var wantErased []string
+			switch {
+			case tt.deleteErr != nil || tt.abandonErr != nil:
+			case tt.eraseErr != nil:
+				wantErased = []string{"first"}
+			default:
+				wantErased = []string{"first", "second"}
+			}
+			if !slices.Equal(erased, wantErased) {
+				t.Fatalf("erasers called %v, want %v", erased, wantErased)
 			}
 			if got := identities.deleted == "email|1"; got != tt.wantAuth0 {
 				t.Fatalf("deleted at Auth0: %v, want %v", got, tt.wantAuth0)
@@ -414,7 +451,7 @@ func TestServiceDeleteSurvivesTheClientLeaving(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	identities := &ctxIdentities{}
 	repo := fakeRepository{user: User{ID: "u-1", AuthSubject: "email|1"}}
-	err := NewService(repo, abandonThen(cancel), identities, discard).Delete(ctx, "u-1")
+	err := NewService(repo, abandonThen(cancel), nil, identities, discard).Delete(ctx, "u-1")
 	if err != nil || identities.ctxErr != nil {
 		t.Fatalf("error %v, Auth0 called with a context error %v, want neither", err, identities.ctxErr)
 	}
@@ -475,7 +512,7 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 	t.Run("success removes every pending deletion", func(t *testing.T) {
 		repo := &pendingRepository{subjects: []string{"email|1", "email|2"}}
 		identities := &flakyIdentities{}
-		got, err := NewService(repo, nil, identities, discard).RetryAuth0Deletions(t.Context())
+		got, err := NewService(repo, nil, nil, identities, discard).RetryAuth0Deletions(t.Context())
 		if err != nil || got != (RetryResult{Deleted: 2}) {
 			t.Fatalf("result = %+v, err = %v, want 2 deleted", got, err)
 		}
@@ -487,7 +524,7 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 	t.Run("a failure stays pending, then the next run succeeds", func(t *testing.T) {
 		repo := &pendingRepository{subjects: []string{"email|1", "email|2"}}
 		identities := &flakyIdentities{failing: map[string]bool{"email|1": true}}
-		svc := NewService(repo, nil, identities, discard)
+		svc := NewService(repo, nil, nil, identities, discard)
 		got, err := svc.RetryAuth0Deletions(t.Context())
 		if err == nil || got != (RetryResult{Deleted: 1, Failed: 1}) {
 			t.Fatalf("result = %+v, err = %v, want 1 deleted, 1 failed and an error", got, err)
@@ -510,7 +547,7 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 	t.Run("running again with nothing pending does nothing", func(t *testing.T) {
 		repo := &pendingRepository{}
 		identities := &flakyIdentities{}
-		got, err := NewService(repo, nil, identities, discard).RetryAuth0Deletions(t.Context())
+		got, err := NewService(repo, nil, nil, identities, discard).RetryAuth0Deletions(t.Context())
 		if err != nil || got != (RetryResult{}) || len(identities.calls) != 0 {
 			t.Fatalf("result = %+v, err = %v, calls %v, want nothing", got, err, identities.calls)
 		}
@@ -518,7 +555,7 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 
 	t.Run("a record that cannot be removed is an error", func(t *testing.T) {
 		repo := &pendingRepository{subjects: []string{"email|1"}, removeErr: storageErr}
-		got, err := NewService(repo, nil, &flakyIdentities{}, discard).RetryAuth0Deletions(t.Context())
+		got, err := NewService(repo, nil, nil, &flakyIdentities{}, discard).RetryAuth0Deletions(t.Context())
 		if !errors.Is(err, storageErr) || got != (RetryResult{Failed: 1}) {
 			t.Fatalf("result = %+v, err = %v, want 1 failed with the storage error", got, err)
 		}
@@ -527,7 +564,7 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 	t.Run("storage failure when listing", func(t *testing.T) {
 		repo := &pendingRepository{listErr: storageErr}
 		identities := &flakyIdentities{}
-		_, err := NewService(repo, nil, identities, discard).RetryAuth0Deletions(t.Context())
+		_, err := NewService(repo, nil, nil, identities, discard).RetryAuth0Deletions(t.Context())
 		if !errors.Is(err, storageErr) || len(identities.calls) != 0 {
 			t.Fatalf("err = %v, calls %v, want the storage error and no call", err, identities.calls)
 		}

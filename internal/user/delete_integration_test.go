@@ -30,7 +30,7 @@ func noAbandon(context.Context) error { return nil }
 func TestDeleteAnonymizes(t *testing.T) {
 	repo, pool := newRepository(t)
 	u := namedUser(t, repo, "email|alice", "alice_1")
-	if _, err := pool.Exec(t.Context(), "UPDATE users SET avatar_key = 'avatars/alice.png', first_name = 'Alice', last_name = 'Martin', email = 'alice@example.com' WHERE id = $1", u.ID); err != nil {
+	if _, err := pool.Exec(t.Context(), "UPDATE users SET avatar_key = 'avatars/alice.png', first_name = 'Alice', last_name = 'Martin', email = 'alice@example.com', language = 'fr' WHERE id = $1", u.ID); err != nil {
 		t.Fatal(err)
 	}
 	other := namedUser(t, repo, "email|bob", "bob_1")
@@ -40,13 +40,13 @@ func TestDeleteAnonymizes(t *testing.T) {
 		t.Fatalf("Delete() = %q, %v, want the former subject", subject, err)
 	}
 	var authSubject string
-	var pseudo, firstName, lastName, email, avatar *string
+	var pseudo, firstName, lastName, email, avatar, language *string
 	var anonymizedAt *time.Time
-	if err := pool.QueryRow(t.Context(), "SELECT auth_subject, pseudo, first_name, last_name, email, avatar_key, anonymized_at FROM users WHERE id = $1", u.ID).
-		Scan(&authSubject, &pseudo, &firstName, &lastName, &email, &avatar, &anonymizedAt); err != nil {
+	if err := pool.QueryRow(t.Context(), "SELECT auth_subject, pseudo, first_name, last_name, email, avatar_key, language, anonymized_at FROM users WHERE id = $1", u.ID).
+		Scan(&authSubject, &pseudo, &firstName, &lastName, &email, &avatar, &language, &anonymizedAt); err != nil {
 		t.Fatal(err)
 	}
-	if authSubject != "deleted|"+u.ID || pseudo != nil || firstName != nil || lastName != nil || email != nil || avatar != nil || anonymizedAt == nil {
+	if authSubject != "deleted|"+u.ID || pseudo != nil || firstName != nil || lastName != nil || email != nil || avatar != nil || language != nil || anonymizedAt == nil {
 		t.Fatalf("row %q, pseudo %v, names %v %v, email set %t, avatar %v, anonymized %v: want the placeholder subject, nothing personal left, anonymized",
 			authSubject, pseudo, firstName, lastName, email != nil, avatar, anonymizedAt)
 	}
@@ -69,7 +69,7 @@ func TestDeleteAnonymizes(t *testing.T) {
 
 func TestDeletedSubjectNeverLogsInAgain(t *testing.T) {
 	repo, pool := newRepository(t)
-	svc := NewService(repo, nil, nil, discard)
+	svc := NewService(repo, nil, nil, nil, discard)
 	u := namedUser(t, repo, "email|carol", "carol_1")
 	if _, err := repo.Delete(t.Context(), u.ID, noAbandon); err != nil {
 		t.Fatal(err)
@@ -194,7 +194,7 @@ func TestPendingAuth0DeletionsReplay(t *testing.T) {
 	}
 
 	identities := &flakyIdentities{failing: map[string]bool{"email|first": true}}
-	svc := NewService(repo, nil, identities, discard)
+	svc := NewService(repo, nil, nil, identities, discard)
 	if res, err := svc.RetryAuth0Deletions(ctx); err == nil || res != (RetryResult{Deleted: 1, Failed: 1}) {
 		t.Fatalf("first run = %+v, %v, want 1 deleted, 1 failed and an error", res, err)
 	}

@@ -29,6 +29,7 @@ type repository interface {
 	// and returns its challenge; errInvalid otherwise. Linking twice
 	// changes nothing.
 	Link(ctx context.Context, tokenHash []byte, userID string, now time.Time) (string, error)
+	EraseUser(ctx context.Context, userID string) error
 }
 
 // Challenge is what an invitation shows of its challenge: a limited
@@ -67,6 +68,17 @@ func NewService(challenges Challenges, repo repository, c clock.Clock) *Service 
 	return &Service{challenges: challenges, repo: repo, clock: c}
 }
 
+// EraseUser deletes the invitations of userID and every link to them, and
+// the links of userID to other invitations, for the deletion of their
+// account (README §2.2), in its transaction (ctx carries it). It checks no
+// actor: never expose it on a route, only user.Service.Delete calls it.
+func (s *Service) EraseUser(ctx context.Context, userID string) error {
+	if err := s.repo.EraseUser(ctx, userID); err != nil {
+		return fmt.Errorf("erase user: %w", err)
+	}
+	return nil
+}
+
 // Create creates an invitation of actorID to challenge challengeID, valid
 // until the end of week 1, and returns it with its token: the only time the
 // token exists in clear, as only its hash is stored. The rule is the
@@ -89,6 +101,9 @@ func (s *Service) Create(ctx context.Context, actorID, challengeID string) (Invi
 		ExpiresAt:   deadline,
 		CreatedAt:   s.clock.Now(),
 	})
+	if errors.Is(err, errAccountDeleted) {
+		return Invitation{}, "", apperr.New(apperr.CodeAccountDeleted, err)
+	}
 	if err != nil {
 		return Invitation{}, "", fmt.Errorf("create invitation: %w", err)
 	}
@@ -110,6 +125,9 @@ func (s *Service) Link(ctx context.Context, actorID, token string) (string, erro
 	challengeID, err := s.repo.Link(ctx, hash[:], actorID, s.clock.Now())
 	if errors.Is(err, errInvalid) {
 		return "", apperr.New(apperr.CodeInvitationInvalid, nil)
+	}
+	if errors.Is(err, errAccountDeleted) {
+		return "", apperr.New(apperr.CodeAccountDeleted, err)
 	}
 	if err != nil {
 		return "", fmt.Errorf("link invitation: %w", err)

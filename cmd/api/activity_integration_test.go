@@ -45,7 +45,7 @@ func newRecording(t *testing.T) recording {
 		t.Fatal(err)
 	}
 	clk := clock.NewFake(recordNow)
-	users := user.NewService(user.NewRepository(gdb), nil, nil, logger)
+	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, clk)
 	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)

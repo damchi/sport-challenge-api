@@ -28,6 +28,13 @@ type Participations interface {
 	AbandonAll(ctx context.Context, userID string) error
 }
 
+// Eraser deletes the rows of a user kept by another module (challenge,
+// activity, invitation), in the transaction of the account deletion that
+// ctx carries.
+type Eraser interface {
+	EraseUser(ctx context.Context, userID string) error
+}
+
 // Identities deletes a user at the auth provider (Auth0 Management API).
 type Identities interface {
 	DeleteUser(ctx context.Context, subject string) error
@@ -37,13 +44,14 @@ type Identities interface {
 type Service struct {
 	repo           repository
 	participations Participations
+	erasers        []Eraser
 	identities     Identities
 	logger         *slog.Logger
 }
 
 // NewService returns a Service on repo.
-func NewService(repo repository, participations Participations, identities Identities, logger *slog.Logger) *Service {
-	return &Service{repo: repo, participations: participations, identities: identities, logger: logger}
+func NewService(repo repository, participations Participations, erasers []Eraser, identities Identities, logger *slog.Logger) *Service {
+	return &Service{repo: repo, participations: participations, erasers: erasers, identities: identities, logger: logger}
 }
 
 // GetOrCreateBySubject returns the local user of an auth subject, created
@@ -145,14 +153,25 @@ func (s *Service) PublicNames(ctx context.Context, ids []string) (map[string]Pub
 }
 
 // Delete deletes the account of user actorID (README §6): in one
-// transaction, the account is anonymized (pseudo, names, e-mail and avatar
-// erased, subject replaced, its fingerprint kept so that it never logs in
-// again) and every challenge not finished is abandoned. The user is then deleted at Auth0; if
+// transaction, the account is anonymized (pseudo, names, e-mail, avatar and
+// language erased, subject replaced, its fingerprint kept so that it never logs in
+// again), every challenge not finished is abandoned (which refuses the last
+// creator), then every row of the account kept by the other modules is
+// erased (erasers); the row of the user stays, anonymized, for the
+// challenges it created. The user is then deleted at Auth0; if
 // that fails, the deletion is recorded for the worker to replay. Only a
 // failure to record it fails the call, the account being deleted already.
 func (s *Service) Delete(ctx context.Context, actorID string) error {
 	subject, err := s.repo.Delete(ctx, actorID, func(ctx context.Context) error {
-		return s.participations.AbandonAll(ctx, actorID)
+		if err := s.participations.AbandonAll(ctx, actorID); err != nil {
+			return err
+		}
+		for _, e := range s.erasers {
+			if err := e.EraseUser(ctx, actorID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	// Deleted meanwhile by a concurrent request: the account is gone.
 	if errors.Is(err, errUserNotFound) {

@@ -16,6 +16,7 @@ type repository interface {
 	Update(ctx context.Context, actorID, id string, a Activity, decide func(ctx context.Context, current Activity) error) (Activity, error)
 	Delete(ctx context.Context, actorID, id string, at time.Time, decide func(ctx context.Context, current Activity) error) error
 	List(ctx context.Context, q ListQuery) ([]Activity, error)
+	EraseUser(ctx context.Context, userID string) error
 }
 
 // Profiles tells whether a user's profile is complete (module user).
@@ -163,6 +164,18 @@ func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (
 		Contributions: Contributions(stored, challenges),
 		Locked:        IsLocked(s.clock.Now(), stored.StartedAt, challenges),
 	}, nil
+}
+
+// EraseUser deletes every activity of userID, for the deletion of their
+// account (README §6), in its transaction (ctx carries it). No week lock
+// applies: the account leaves every challenge, finished ones included. It
+// checks no actor: never expose it on a route, only user.Service.Delete
+// calls it.
+func (s *Service) EraseUser(ctx context.Context, userID string) error {
+	if err := s.repo.EraseUser(ctx, userID); err != nil {
+		return fmt.Errorf("erase user: %w", err)
+	}
+	return nil
 }
 
 // Delete marks activity id of actorID deleted: it counts nowhere from then

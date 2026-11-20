@@ -558,3 +558,35 @@ func (r *Repository) UpdateText(ctx context.Context, id string, changes TextChan
 	}
 	return nil
 }
+
+// eraseSnapshotEntriesQuery removes the entries of @user from the frozen
+// results of the challenges they joined, keeping the order of the others.
+// The ranks are not rewritten: they are computed again when served.
+const eraseSnapshotEntriesQuery = `UPDATE result_snapshot rs
+SET payload = jsonb_set(rs.payload, '{entries}', COALESCE(
+	(SELECT jsonb_agg(e ORDER BY n) FROM jsonb_array_elements(rs.payload->'entries') WITH ORDINALITY AS t(e, n)
+		WHERE e->>'user_id' <> CAST(@user AS text)),
+	'[]'::jsonb))
+WHERE rs.challenge_id IN (SELECT challenge_id FROM participants WHERE user_id = CAST(@user AS uuid))
+	AND rs.payload->'entries' @> jsonb_build_array(jsonb_build_object('user_id', CAST(@user AS text)))`
+
+// EraseUser deletes every row of userID in the challenge tables: their
+// entries in the frozen results, eliminations, creator roles and
+// participations, in that order (an elimination references its
+// participation). The challenges userID created stay. It runs in the
+// transaction of ctx (account deletion).
+func (r *Repository) EraseUser(ctx context.Context, userID string) error {
+	tx := db.Conn(ctx, r.db)
+	steps := []struct{ name, query string }{
+		{"erase result snapshot entries", eraseSnapshotEntriesQuery},
+		{"delete eliminations", "DELETE FROM elimination WHERE user_id = CAST(@user AS uuid)"},
+		{"delete creator roles", "DELETE FROM challenge_creators WHERE user_id = CAST(@user AS uuid)"},
+		{"delete participations", "DELETE FROM participants WHERE user_id = CAST(@user AS uuid)"},
+	}
+	for _, s := range steps {
+		if err := tx.Exec(s.query, map[string]any{"user": userID}).Error; err != nil {
+			return fmt.Errorf("%s: %w", s.name, err)
+		}
+	}
+	return nil
+}

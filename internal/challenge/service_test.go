@@ -64,6 +64,9 @@ func (f *fakeRepository) Memberships(context.Context, string) ([]UserChallenge, 
 	return f.memberships, f.membershipsErr
 }
 
+// EraseUser is covered by the integration tests.
+func (f *fakeRepository) EraseUser(context.Context, string) error { return nil }
+
 type participantsCall struct {
 	limit int
 	after *ParticipantPosition
