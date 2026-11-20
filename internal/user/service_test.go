@@ -495,6 +495,7 @@ func TestServiceDeleteBoundsThePendingRemoval(t *testing.T) {
 			}
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			start := time.Now()
 			err := NewService(repo, participations, nil, &ctxIdentities{}, clock.Real{}, logger).Delete(ctx, "u-1")
 			end := time.Now()
 			if err != nil {
@@ -503,8 +504,8 @@ func TestServiceDeleteBoundsThePendingRemoval(t *testing.T) {
 			if !repo.called || repo.ctxErr != nil {
 				t.Fatalf("removal called %v with a context error %v, want called, not cancelled", repo.called, repo.ctxErr)
 			}
-			// Set when the removal starts, so at most the timeout after the call ends.
-			if !repo.hasDeadline || repo.deadline.After(end.Add(pendingRemovalTimeout)) {
+			// Set when the removal starts: the timeout after a moment of the call.
+			if !repo.hasDeadline || repo.deadline.Before(start.Add(pendingRemovalTimeout)) || repo.deadline.After(end.Add(pendingRemovalTimeout)) {
 				t.Fatalf("removal deadline %v (set %v), want within %v", repo.deadline.Sub(end), repo.hasDeadline, pendingRemovalTimeout)
 			}
 			if tt.wantLog == "" && logs.Len() > 0 {
