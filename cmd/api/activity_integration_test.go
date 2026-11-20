@@ -231,7 +231,7 @@ func TestRunAcrossTheEndOfAWeek(t *testing.T) {
 	r := newRecording(t)
 	id := r.challenge([3]int{2026, 6, 1}, 3, "active", false) // week 2 ends on Monday 2026-06-15
 	if _, err := r.pool.Exec(t.Context(), `INSERT INTO categories (challenge_id, type, position, params)
-		VALUES ($1, 'run_elimination', 1, '{"sport": "run", "step_meters": 2000}')`, id); err != nil {
+		VALUES ($1, 'elimination', 1, '{"sport": "run", "step_meters": 2000}')`, id); err != nil {
 		t.Fatal(err)
 	}
 	other := r.newUser("other")

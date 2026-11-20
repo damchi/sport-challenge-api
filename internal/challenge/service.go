@@ -122,7 +122,7 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		Categories: []Category{
 			{Type: CategoryCumulativeTime, Position: 1, Params: Params{}},
 			{Type: CategoryCumulativeDistance, Position: 2, Params: Params{Factors: factors}},
-			{Type: CategoryRunElimination, Position: 3, Params: Params{Sport: referenceSport, StepMeters: draft.EliminationStepMeters}},
+			{Type: CategoryElimination, Position: 3, Params: Params{Sport: referenceSport, StepMeters: draft.EliminationStepMeters}},
 		},
 	}, now)
 	if errors.Is(err, errAccountDeleted) {

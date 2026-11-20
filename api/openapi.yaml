@@ -642,7 +642,7 @@ paths:
         listed at all, even in a finished challenge: the others move up, the
         equal ones still sharing a rank.
 
-        In `run_elimination`, `elimination` gives the live situation: the
+        In the `elimination` category, `elimination` gives the live situation: the
         survivors first by distance, then the eliminated, the last
         eliminated first. `status` is `reached` once the distance of the
         week reaches the minimum, else `at_risk` when the end of the week is
@@ -1478,7 +1478,7 @@ components:
           type: integer
           minimum: 1
           maximum: 100000
-          description: Increment X of the run elimination category, in meters.
+          description: Increment X of the elimination category, in meters.
         distance_factors:
           type: object
           description: |
@@ -1532,7 +1532,7 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, run_elimination]
+          enum: [cumulative_time, cumulative_distance, elimination]
         position:
           type: integer
           minimum: 1
@@ -1552,10 +1552,10 @@ components:
             format: double
         sport:
           type: string
-          description: run_elimination only, always `run`.
+          description: Elimination category only, always `run`.
         step_meters:
           type: integer
-          description: run_elimination only, increment X in meters.
+          description: Elimination category only, increment X in meters.
     ChallengePage:
       type: object
       required: [items, next_cursor]
@@ -1649,7 +1649,7 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, run_elimination]
+          enum: [cumulative_time, cumulative_distance, elimination]
         entries:
           type: array
           description: |
@@ -1682,7 +1682,7 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/EliminationProgress"
-          description: Only in `run_elimination`, and null for a participant who abandoned.
+          description: Only in the `elimination` category, and null for a participant who abandoned.
     LeaderboardUser:
       type: object
       required: [id, pseudo, first_name, last_name, avatar]
@@ -1814,7 +1814,7 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, run_elimination]
+          enum: [cumulative_time, cumulative_distance, elimination]
         rank:
           type: integer
           minimum: 1
@@ -1828,7 +1828,7 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/EliminationProgress"
-          description: Only in `run_elimination`, as in the leaderboard; null in the other categories.
+          description: Only in the `elimination` category, as in the leaderboard; null in the other categories.
     ChallengeDetail:
       type: object
       required: [id, title, description, visibility, members_can_invite, timezone, starts_at, ends_at, categories, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at]

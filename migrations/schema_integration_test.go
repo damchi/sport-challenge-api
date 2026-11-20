@@ -37,10 +37,10 @@ INSERT INTO challenges (id, title, visibility, timezone, starts_at, ends_at, cre
 VALUES ('` + challengeID + `', 'Spring', 'public', 'America/Montreal',
         '2026-12-01 05:00Z', '2026-12-15 05:00Z', '` + userID + `');`
 
-// eliminationFixture is the run elimination category of the fixture challenge
+// eliminationFixture is the elimination category of the fixture challenge
 // and its only participant.
 const eliminationFixture = `
-INSERT INTO categories (id, challenge_id, type, position) VALUES ('` + categoryID + `', '` + challengeID + `', 'run_elimination', 3);
+INSERT INTO categories (id, challenge_id, type, position) VALUES ('` + categoryID + `', '` + challengeID + `', 'elimination', 3);
 INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL);`
 
 // otherChallengeFixture is a second challenge of the same creator.
@@ -91,13 +91,17 @@ func TestConstraints(t *testing.T) {
 		{name: "unknown creator", sql: `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by) VALUES ('T', 'public', 'UTC', '2026-12-01Z', '2026-12-15Z', '00000000-0000-0000-0000-00000000dead')`, constraint: "challenges_created_by_fkey"},
 
 		// categories (000004)
-		{name: "the 3 categories", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_distance', 2), ('` + challengeID + `', 'run_elimination', 3)`},
+		{name: "the 3 categories", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_distance', 2), ('` + challengeID + `', 'elimination', 3)`},
 		{name: "unknown category type", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'fastest', 1)`, constraint: "categories_type_check"},
 		{name: "position 4", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 4)`, constraint: "categories_position_check"},
 		{name: "position 0", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 0)`, constraint: "categories_position_check"},
 		{name: "params not an object", sql: `INSERT INTO categories (challenge_id, type, position, params) VALUES ('` + challengeID + `', 'cumulative_time', 1, '[]')`, constraint: "categories_params_check"},
 		{name: "same type twice", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_time', 2)`, constraint: "categories_challenge_type_key"},
-		{name: "same position twice", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'run_elimination', 1)`, constraint: "categories_challenge_position_key"},
+		{name: "same position twice", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'elimination', 1)`, constraint: "categories_challenge_position_key"},
+
+		// categories and elimination renamed (000012)
+		{name: "former run elimination type", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'run_elimination', 3)`, constraint: "categories_type_check"},
+		{name: "former run elimination type recorded", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, category_type, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 'run_elimination', 2, 4000, 6000)`, constraint: "elimination_category_type_check"},
 
 		// participants (000004)
 		{name: "active participant", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL)`},
@@ -146,19 +150,19 @@ func TestConstraints(t *testing.T) {
 		{name: "negative required distance", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 2, 0, -1)`, constraint: "elimination_required_meters_check"},
 		{name: "elimination from an unknown category", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + deadID + `', '` + userID + `', 2, 4000, 6000)`, constraint: "elimination_category_fkey"},
 		{name: "elimination of a non-participant", sql: eliminationFixture + `INSERT INTO users (id, auth_subject) VALUES ('` + otherUserID + `', 'schema|2');INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + otherUserID + `', 2, 4000, 6000)`, constraint: "elimination_participant_fkey"},
-		{name: "category of another challenge", sql: eliminationFixture + otherChallengeFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + otherChallengeID + `', '` + categoryID + `', '` + userID + `', 2, 4000, 6000)`, constraint: "elimination_category_fkey"},
-		{name: "category that is not a run elimination", sql: eliminationFixture + `INSERT INTO categories (id, challenge_id, type, position) VALUES ('` + timeCategoryID + `', '` + challengeID + `', 'cumulative_time', 1);INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + timeCategoryID + `', '` + userID + `', 2, 4000, 6000)`, constraint: "elimination_category_fkey"},
+		{name: "category of another challenge", sql: eliminationFixture + otherChallengeFixture + `INSERT INTO participants VALUES ('` + otherChallengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL);INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + otherChallengeID + `', '` + categoryID + `', '` + userID + `', 2, 4000, 6000)`, constraint: "elimination_category_fkey"},
+		{name: "category that is not an elimination", sql: eliminationFixture + `INSERT INTO categories (id, challenge_id, type, position) VALUES ('` + timeCategoryID + `', '` + challengeID + `', 'cumulative_time', 1);INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + timeCategoryID + `', '` + userID + `', 2, 4000, 6000)`, constraint: "elimination_category_fkey"},
 		{name: "another category type recorded", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, category_type, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 'cumulative_time', 2, 4000, 6000)`, constraint: "elimination_category_type_check"},
 		{name: "elimination of an unknown user", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + deadID + `', 2, 4000, 6000)`, constraint: "elimination_participant_fkey"},
 		{name: "deleting a category with eliminations", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 2, 4000, 6000); DELETE FROM categories WHERE id = '` + categoryID + `'`, constraint: "elimination_category_fkey"},
 
 		// result_snapshot (000008)
-		{name: "snapshot of a category", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "run_elimination")},
-		{name: "category snapshotted twice", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "run_elimination") + snapshotRow(categoryID, challengeID, "run_elimination"), constraint: "result_snapshot_pkey"},
-		{name: "snapshot of an unknown category", sql: snapshotRow(deadID, challengeID, "run_elimination"), constraint: "result_snapshot_category_fkey"},
-		{name: "snapshot with another challenge", sql: eliminationFixture + otherChallengeFixture + snapshotRow(categoryID, otherChallengeID, "run_elimination"), constraint: "result_snapshot_category_fkey"},
+		{name: "snapshot of a category", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "elimination")},
+		{name: "category snapshotted twice", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "elimination") + snapshotRow(categoryID, challengeID, "elimination"), constraint: "result_snapshot_pkey"},
+		{name: "snapshot of an unknown category", sql: snapshotRow(deadID, challengeID, "elimination"), constraint: "result_snapshot_category_fkey"},
+		{name: "snapshot with another challenge", sql: eliminationFixture + otherChallengeFixture + snapshotRow(categoryID, otherChallengeID, "elimination"), constraint: "result_snapshot_category_fkey"},
 		{name: "snapshot with another type", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "cumulative_time"), constraint: "result_snapshot_category_fkey"},
-		{name: "deleting a category with a snapshot", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "run_elimination") + `DELETE FROM categories WHERE id = '` + categoryID + `'`, constraint: "result_snapshot_category_fkey"},
+		{name: "deleting a category with a snapshot", sql: eliminationFixture + snapshotRow(categoryID, challengeID, "elimination") + `DELETE FROM categories WHERE id = '` + categoryID + `'`, constraint: "result_snapshot_category_fkey"},
 		// invitations and invitation_recipients (000009)
 		{name: "invitation", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL")},
 		{name: "revoked invitation", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "'2026-12-02Z'")},
@@ -243,6 +247,45 @@ func TestErasureIndexes(t *testing.T) {
 				t.Fatalf("plan of %q does not use %s: %s", tt.query, tt.index, plan)
 			}
 		})
+	}
+}
+
+// TestRenameElimination applies 000012 to rows recorded as run_elimination,
+// then rolls it back: the category, its eliminations and its snapshot follow
+// the type both ways.
+func TestRenameElimination(t *testing.T) {
+	pool, _ := testdb.NewEmpty(t)
+	ups := migrationFiles(t, "up")
+	i := slices.Index(ups, "000012_rename_elimination_category.up.sql")
+	if i < 0 {
+		t.Fatal("no 000012 up migration")
+	}
+	run(t, pool, ups[:i], false)
+	if _, err := pool.Exec(t.Context(), fixture+strings.ReplaceAll(eliminationFixture, "'elimination'", "'run_elimination'")+
+		`INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters) VALUES ('`+challengeID+`', '`+categoryID+`', '`+userID+`', 2, 4000, 6000);`+
+		snapshotRow(categoryID, challengeID, "run_elimination")); err != nil {
+		t.Fatal(err)
+	}
+
+	types := func() []string {
+		t.Helper()
+		var category, elimination, snapshot string
+		if err := pool.QueryRow(t.Context(), `SELECT
+			(SELECT type FROM categories WHERE id = $1),
+			(SELECT category_type FROM elimination WHERE category_id = $1),
+			(SELECT category_type FROM result_snapshot WHERE category_id = $1)`, categoryID).Scan(&category, &elimination, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return []string{category, elimination, snapshot}
+	}
+
+	run(t, pool, []string{ups[i]}, false)
+	if got, want := types(), []string{"elimination", "elimination", "elimination"}; !slices.Equal(got, want) {
+		t.Fatalf("types after up = %v, want %v", got, want)
+	}
+	run(t, pool, []string{"000012_rename_elimination_category.down.sql"}, false)
+	if got, want := types(), []string{"run_elimination", "run_elimination", "run_elimination"}; !slices.Equal(got, want) {
+		t.Fatalf("types after down = %v, want %v", got, want)
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 const (
 	CategoryCumulativeTime     = "cumulative_time"
 	CategoryCumulativeDistance = "cumulative_distance"
-	CategoryRunElimination     = "run_elimination"
+	CategoryElimination        = "elimination"
 )
 
 // Challenge is a row of the challenges table with its categories.
@@ -49,7 +49,7 @@ type Category struct {
 type Params struct {
 	// Factors is the distance factor by sport code (cumulative_distance).
 	Factors map[string]float64 `json:"factors,omitempty"`
-	// Sport and StepMeters are the run elimination settings.
+	// Sport and StepMeters are the elimination settings.
 	Sport      string `json:"sport,omitempty"`
 	StepMeters int    `json:"step_meters,omitempty"`
 }

@@ -105,7 +105,7 @@ func newErasureFixture(t *testing.T) erasureFixture {
 		for _, c := range []struct{ typ, params string }{
 			{challenge.CategoryCumulativeTime, `{}`},
 			{challenge.CategoryCumulativeDistance, `{"factors": {"run": 1}}`},
-			{challenge.CategoryRunElimination, `{"sport": "run", "step_meters": 2000}`},
+			{challenge.CategoryElimination, `{"sport": "run", "step_meters": 2000}`},
 		} {
 			f.exec(`INSERT INTO categories (challenge_id, type, position, params)
 				VALUES ($1, $2, (SELECT count(*) + 1 FROM categories WHERE challenge_id = $1), $3::jsonb)`, id, c.typ, c.params)
