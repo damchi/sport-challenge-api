@@ -27,11 +27,11 @@ type fakeRepository struct {
 	email    *string
 	emailErr error
 	// deleted records the user Delete anonymized, when set; deleteErr fails
-	// Delete, pending records AddPendingAuth0Deletion and pendingErr fails it.
-	deleted    *string
-	deleteErr  error
-	pending    *[]string
-	pendingErr error
+	// Delete, removed records RemovePendingAuth0Deletion and removeErr fails it.
+	deleted   *string
+	deleteErr error
+	removed   *[]string
+	removeErr error
 }
 
 func (f fakeRepository) Delete(ctx context.Context, id string, abandon func(context.Context) error) (string, error) {
@@ -47,19 +47,17 @@ func (f fakeRepository) Delete(ctx context.Context, id string, abandon func(cont
 	return f.user.AuthSubject, nil
 }
 
-func (f fakeRepository) AddPendingAuth0Deletion(_ context.Context, subject string) error {
-	if f.pendingErr != nil {
-		return f.pendingErr
+func (f fakeRepository) PendingAuth0Deletions(context.Context) ([]string, error) { return nil, f.err }
+
+func (f fakeRepository) RemovePendingAuth0Deletion(_ context.Context, subject string) error {
+	if f.removeErr != nil {
+		return f.removeErr
 	}
-	if f.pending != nil {
-		*f.pending = append(*f.pending, subject)
+	if f.removed != nil {
+		*f.removed = append(*f.removed, subject)
 	}
 	return nil
 }
-
-func (f fakeRepository) PendingAuth0Deletions(context.Context) ([]string, error) { return nil, f.err }
-
-func (f fakeRepository) RemovePendingAuth0Deletion(context.Context, string) error { return f.err }
 
 type fakeParticipations struct {
 	abandoned string
@@ -372,16 +370,19 @@ func TestServiceDelete(t *testing.T) {
 		abandonErr     error
 		eraseErr       error
 		auth0Err       error
-		pendingErr     error
+		removeErr      error
 		wantCode       apperr.Code
 		wantErr        error
 		wantAuth0      bool
-		wantPending    bool
+		wantRemoved    bool
+		wantLog        string
 		wantAnonymized bool
 	}{
-		{name: "deleted, then at Auth0", wantAuth0: true, wantAnonymized: true},
-		{name: "Auth0 fails: recorded for the worker", auth0Err: auth0Err, wantAuth0: true, wantPending: true, wantAnonymized: true},
-		{name: "Auth0 fails and the record too", auth0Err: auth0Err, pendingErr: storageErr, wantErr: storageErr, wantAuth0: true, wantAnonymized: true},
+		{name: "deleted, then at Auth0: no longer pending", wantAuth0: true, wantRemoved: true, wantAnonymized: true},
+		// The deletion recorded in the transaction stays for the worker.
+		{name: "Auth0 fails: kept for the worker", auth0Err: auth0Err, wantAuth0: true, wantLog: "kept for retry", wantAnonymized: true},
+		// Done at Auth0 but still pending: the worker replays it, harmlessly.
+		{name: "pending record not removed", removeErr: storageErr, wantAuth0: true, wantLog: "not removed", wantAnonymized: true},
 		// The abandons fail: everything rolls back, nothing is deleted at Auth0.
 		{name: "abandon failure", abandonErr: storageErr, wantErr: storageErr},
 		// An erasure fails: the same, the erasers after it do not run.
@@ -391,10 +392,10 @@ func TestServiceDelete(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var pending []string
+			var removed []string
 			repo := fakeRepository{
 				user: User{ID: "u-1", AuthSubject: "email|1"}, deleted: new(string),
-				deleteErr: tt.deleteErr, pending: &pending, pendingErr: tt.pendingErr,
+				deleteErr: tt.deleteErr, removed: &removed, removeErr: tt.removeErr,
 			}
 			participations := &fakeParticipations{err: tt.abandonErr}
 			var erased []string
@@ -432,12 +433,12 @@ func TestServiceDelete(t *testing.T) {
 			if got := identities.deleted == "email|1"; got != tt.wantAuth0 {
 				t.Fatalf("deleted at Auth0: %v, want %v", got, tt.wantAuth0)
 			}
-			if got := len(pending) == 1 && pending[0] == "email|1"; got != tt.wantPending {
-				t.Fatalf("pending %v, want recorded: %v", pending, tt.wantPending)
+			if got := slices.Equal(removed, []string{"email|1"}); got != tt.wantRemoved {
+				t.Fatalf("removed %v, want the pending deletion removed: %v", removed, tt.wantRemoved)
 			}
-			// A failure at Auth0 leaves a trace, never the subject.
-			if got := strings.Contains(logs.String(), "recorded for retry"); got != tt.wantPending {
-				t.Fatalf("logs %q, want the warning: %v", logs.String(), tt.wantPending)
+			// A failure after the commit leaves a trace, never the subject.
+			if tt.wantLog == "" && logs.Len() > 0 || !strings.Contains(logs.String(), tt.wantLog) {
+				t.Fatalf("logs %q, want %q", logs.String(), tt.wantLog)
 			}
 			if strings.Contains(logs.String(), "email|1") {
 				t.Fatalf("logs %q carry the subject", logs.String())

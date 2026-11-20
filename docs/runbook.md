@@ -88,6 +88,8 @@ Les tâches sont idempotentes : une relance ne refait pas un travail déjà fait
   gcloud run jobs execute sc-worker-retry-auth0-deletions --project=sport-challenge-prod --region=northamerica-northeast1 --wait
   ```
 
+  Chaque suppression de compte est enregistrée en attente dans sa transaction et retirée une fois faite chez Auth0 : une ligne qui reste dans `pending_auth0_deletions` vient d'un appel à Auth0 échoué ou interrompu (arrêt de l'instance, déploiement).
+
   À faire après une panne d'Auth0, après une rotation du secret Auth0 (§5), ou si des comptes supprimés peuvent encore se connecter.
 - Une semaine déjà terminée se juge selon l'horloge, jamais selon le passage du worker : une relance tardive donne le même résultat qu'une exécution à l'heure.
 - **Tester une fin de semaine sans attendre** : seulement en local (`CLOCK_OFFSET` n'est accepté qu'avec `ENV=local`). Les tests d'intégration couvrent le scénario complet avec une horloge simulée (`internal/closure/service_integration_test.go` : élimination semaine par semaine, relance sans effet, abandon, résultats figés). Pour le voir à la main, en local : avancer l'horloge de l'API et du worker du même décalage (`CLOCK_OFFSET=168h make run`, puis `CLOCK_OFFSET=168h make worker TASK=close-weeks`) ; une activité datée d'une semaine terminée doit alors être refusée (`week_locked`) avant même le passage du worker.

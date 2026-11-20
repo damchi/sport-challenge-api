@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -57,6 +58,10 @@ func TestDeleteAnonymizes(t *testing.T) {
 	}
 	if n := count(t, pool, "SELECT count(*) FROM users WHERE auth_subject = 'email|alice'"); n != 0 {
 		t.Fatalf("%d rows still hold the subject, want 0", n)
+	}
+	// The deletion at Auth0 is pending from the commit on.
+	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = 'email|alice'"); n != 1 {
+		t.Fatalf("%d pending deletions, want 1", n)
 	}
 	// The other user is untouched; the pseudo is free again.
 	if _, err := repo.GetByID(t.Context(), other.ID); err != nil {
@@ -114,6 +119,9 @@ func TestDeleteRollsBackWhenAbandonFails(t *testing.T) {
 	if n := count(t, pool, "SELECT count(*) FROM deleted_subjects"); n != 0 {
 		t.Fatalf("%d fingerprints, want none", n)
 	}
+	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions"); n != 0 {
+		t.Fatalf("%d pending deletions, want none", n)
+	}
 }
 
 func TestPatchRacingTheDeletion(t *testing.T) {
@@ -159,16 +167,52 @@ func TestPatchRacingTheDeletion(t *testing.T) {
 	}
 }
 
-func TestAddPendingAuth0Deletion(t *testing.T) {
-	repo, pool := newRepository(t)
-	for range 2 {
-		if err := repo.AddPendingAuth0Deletion(t.Context(), "email|gina"); err != nil {
+func TestServiceDeleteRecordsTheAuth0Deletion(t *testing.T) {
+	pending := func(t *testing.T, pool *pgxpool.Pool, subject string) int {
+		t.Helper()
+		return count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = $1", subject)
+	}
+	t.Run("done at Auth0: no longer pending", func(t *testing.T) {
+		repo, pool := newRepository(t)
+		u := namedUser(t, repo, "email|gina", "gina_1")
+		identities := &flakyIdentities{}
+		if err := NewService(repo, abandonThen(func() {}), nil, identities, discard).Delete(t.Context(), u.ID); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = 'email|gina'"); n != 1 {
-		t.Fatalf("%d pending rows, want 1", n)
-	}
+		if n := pending(t, pool, "email|gina"); n != 0 || !slices.Equal(identities.calls, []string{"email|gina"}) {
+			t.Fatalf("%d pending, Auth0 calls %v, want none pending and one call", n, identities.calls)
+		}
+	})
+	t.Run("Auth0 fails: kept for the worker", func(t *testing.T) {
+		repo, pool := newRepository(t)
+		u := namedUser(t, repo, "email|hugo", "hugo_1")
+		identities := &flakyIdentities{failing: map[string]bool{"email|hugo": true}}
+		if err := NewService(repo, abandonThen(func() {}), nil, identities, discard).Delete(t.Context(), u.ID); err != nil {
+			t.Fatalf("error = %v, want nil: the account is deleted", err)
+		}
+		if n := pending(t, pool, "email|hugo"); n != 1 {
+			t.Fatalf("%d pending, want 1", n)
+		}
+	})
+	t.Run("stopped between the commit and Auth0: replayed by the worker", func(t *testing.T) {
+		repo, pool := newRepository(t)
+		u := namedUser(t, repo, "email|iris", "iris_1")
+		// The process stops right after the commit: Auth0 is never called.
+		if _, err := repo.Delete(t.Context(), u.ID, noAbandon); err != nil {
+			t.Fatal(err)
+		}
+		if n := pending(t, pool, "email|iris"); n != 1 {
+			t.Fatalf("%d pending, want 1", n)
+		}
+		identities := &flakyIdentities{}
+		res, err := NewService(repo, nil, nil, identities, discard).RetryAuth0Deletions(t.Context())
+		if err != nil || res != (RetryResult{Deleted: 1}) || !slices.Equal(identities.calls, []string{"email|iris"}) {
+			t.Fatalf("run = %+v, %v, Auth0 calls %v, want the deletion replayed", res, err, identities.calls)
+		}
+		if n := pending(t, pool, "email|iris"); n != 0 {
+			t.Fatalf("%d pending, want 0", n)
+		}
+	})
 }
 
 func count(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int {
@@ -183,10 +227,8 @@ func count(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int {
 func TestPendingAuth0DeletionsReplay(t *testing.T) {
 	repo, pool := newRepository(t)
 	ctx := t.Context()
-	for _, subject := range []string{"email|first", "email|second"} {
-		if err := repo.AddPendingAuth0Deletion(ctx, subject); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := pool.Exec(ctx, "INSERT INTO pending_auth0_deletions (auth_subject) VALUES ('email|first'), ('email|second')"); err != nil {
+		t.Fatal(err)
 	}
 	got, err := repo.PendingAuth0Deletions(ctx)
 	if err != nil || len(got) != 2 {
