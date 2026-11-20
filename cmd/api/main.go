@@ -41,6 +41,17 @@ const shutdownTimeout = 8 * time.Second
 // startupPingTimeout bounds the database check done at startup.
 const startupPingTimeout = 5 * time.Second
 
+// poolSize is the number of database connections of one instance. 3
+// instances at most hold 12 of the 22 that db-f1-micro leaves to the
+// application, next to the worker and migrate jobs (docs/deploiement.md).
+// Raise it only with that budget.
+const poolSize = 4
+
+// requestTimeout bounds each request, waiting for a connection of the pool
+// included. It stays under the WriteTimeout of the server (30 s), so the
+// error still reaches the client.
+const requestTimeout = 25 * time.Second
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -69,7 +80,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 
-	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL, poolSize)
 	if err != nil {
 		return err
 	}
@@ -448,6 +459,7 @@ func newRouter(logger *slog.Logger, opts routerOptions, handler api.StrictServer
 		"GET /ready",
 	}
 	router := httpx.NewRouter(logger)
+	router.Use(httpx.Timeout(requestTimeout))
 	if err := router.SetTrustedProxies(opts.trustedProxies); err != nil {
 		return nil, fmt.Errorf("trusted proxies: %w", err)
 	}

@@ -74,6 +74,9 @@ func run(args []string, getenv func(string) string) error {
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer func() { _ = db.Close() }()
+	// golang-migrate holds a single connection for the whole run: no more is
+	// opened, as counted in the budget of docs/deploiement.md.
+	db.SetMaxOpenConns(1)
 	driver, err := pgxdriver.WithInstance(db, &pgxdriver.Config{})
 	if err != nil {
 		return fmt.Errorf("connect to the database: %w", err)
