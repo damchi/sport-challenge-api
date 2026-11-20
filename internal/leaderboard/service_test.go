@@ -181,6 +181,79 @@ func TestGetRanksEveryCategory(t *testing.T) {
 	}
 }
 
+// TestTimeOnlyChallenge: a challenge with the cumulative time alone is ranked,
+// frozen and placed in that category only, and nothing is summed per week.
+func TestTimeOnlyChallenge(t *testing.T) {
+	c := threeWeeks(t)
+	c.Categories = c.Categories[:1]
+	loc := toronto(t)
+	at := func(day, hour int) time.Time { return time.Date(2026, 6, day, hour, 0, 0, 0, loc).UTC() }
+	activities := []scoring.Activity{
+		{UserID: "a", SportCode: "ride", StartedAt: at(2, 7), DurationSeconds: 3600, DistanceMeters: meters(30000)},
+		{UserID: "b", SportCode: "yoga", StartedAt: at(3, 7), DurationSeconds: 1800},
+	}
+	participants := []scoring.Participant{{UserID: "a"}, {UserID: "b"}}
+
+	t.Run("live", func(t *testing.T) {
+		repo := &fakeRepo{participants: participants, activities: activities}
+		now := at(4, 12)
+		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), 24*time.Hour)
+		got, err := svc.Get(t.Context(), "actor", "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := Leaderboard{ComputedAt: now, Categories: []CategoryRanking{{Type: CategoryCumulativeTime, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 1800}, Name: bobName},
+		}}}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Get() = %+v, want %+v", got, want)
+		}
+		if repo.weekly != "" {
+			t.Fatalf("weekly sport = %q, want none without an elimination category", repo.weekly)
+		}
+	})
+
+	t.Run("frozen", func(t *testing.T) {
+		frozenAt := c.EndsAt.Add(time.Hour)
+		repo := &fakeRepo{
+			snapshots: map[string]json.RawMessage{
+				CategoryCumulativeTime: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":3600,"abandoned":false}]}`),
+			},
+			frozenAt: frozenAt,
+		}
+		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
+		got, err := svc.Get(t.Context(), "actor", "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{{Type: CategoryCumulativeTime, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, Name: annName},
+		}}}}
+		if !reflect.DeepEqual(got, want) || repo.calls != 0 {
+			t.Fatalf("Get() = %+v after %d reads, want %+v from the snapshot alone", got, repo.calls, want)
+		}
+	})
+
+	t.Run("standings", func(t *testing.T) {
+		repo := &fakeRepo{participants: participants, activities: activities}
+		svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), 24*time.Hour)
+		got, err := svc.Standings(t.Context(), "b", []Challenge{c}, at(4, 12))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := Standing{Week: 1, WeekEndsAt: at(8, 0), Categories: []Place{
+			{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 1800}, RankedCount: 2},
+		}}
+		if st := got["c1"]; !reflect.DeepEqual(st, want) {
+			t.Fatalf("Standings() = %+v, want %+v", st, want)
+		}
+		if len(repo.scopes) != 1 || repo.scopes[0].WeeklySport != "" {
+			t.Fatalf("scopes %+v, want one with no weekly sport", repo.scopes)
+		}
+	})
+}
+
 func TestWeeklySport(t *testing.T) {
 	if got := weeklySport(twoWeeks(t).Categories); got != "run" {
 		t.Fatalf("with an elimination category: %q, want run", got)

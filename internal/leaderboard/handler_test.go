@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -153,6 +154,42 @@ func TestGetLeaderboardAnswersEveryCategory(t *testing.T) {
 	annLine := elimination[0].(map[string]any)["elimination"].(map[string]any)
 	if annLine["status"] != "in_progress" || annLine["minimum_meters"] != 7000.0 || annLine["run_meters"] != 4000.0 || annLine["eliminated_week"] != nil || annLine["week_ends_at"] == nil {
 		t.Fatalf("ann's progress %v, want in progress, 4000 of 7000 m, no elimination", annLine)
+	}
+}
+
+// TestGetLeaderboardAnswersTheCategoriesOfTheChallenge: 1, 2 or 3
+// categories, the answer holds those of the challenge, in their order, and
+// matches the contract.
+func TestGetLeaderboardAnswersTheCategoriesOfTheChallenge(t *testing.T) {
+	all := twoWeeks(t).Categories
+	tests := []struct {
+		name       string
+		categories []Category
+		want       []string
+	}{
+		{"cumulative time only", all[:1], []string{"cumulative_time"}},
+		{"with the distance", all[:2], []string{"cumulative_time", "cumulative_distance"}},
+		{"with the elimination", []Category{all[0], all[2]}, []string{"cumulative_time", "elimination"}},
+		{"every category", all, []string{"cumulative_time", "cumulative_distance", "elimination"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := twoWeeks(t)
+			c.Categories = tt.categories
+			svc := handlerService(t, &fakeChallenges{c: c})
+			rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/leaderboard", true)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d (%s), want 200", rec.Code, rec.Body)
+			}
+			categories := body["categories"].([]any)
+			got := make([]string, len(categories))
+			for i, cat := range categories {
+				got[i], _ = cat.(map[string]any)["type"].(string)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("categories %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

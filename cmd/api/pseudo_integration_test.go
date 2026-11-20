@@ -57,7 +57,7 @@ func TestEverythingWorksWithoutAPseudo(t *testing.T) {
 	// recordNow is Thursday 2026-06-11 in Toronto: the challenge starts today.
 	c, err := challenges.Create(t.Context(), creator, challenge.Draft{
 		Title: "No pseudo", Visibility: "public", Timezone: "America/Toronto",
-		StartDate: "2026-06-11", Weeks: 2, EliminationStepMeters: 2000,
+		StartDate: "2026-06-11", Weeks: 2,
 	})
 	if err != nil {
 		t.Fatalf("Create() without a pseudo: %v", err)

@@ -110,8 +110,15 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		return Challenge{}, err
 	}
 
-	factors := referenceFactors(suggested, reference)
-	maps.Copy(factors, draft.DistanceFactors)
+	categories := []Category{{Type: CategoryCumulativeTime, Position: positionTime, Params: Params{}}}
+	if draft.Distance {
+		factors := referenceFactors(suggested, reference)
+		maps.Copy(factors, draft.DistanceFactors)
+		categories = append(categories, Category{Type: CategoryCumulativeDistance, Position: positionDistance, Params: Params{Factors: factors}})
+	}
+	if e := draft.Elimination; e != nil {
+		categories = append(categories, Category{Type: CategoryElimination, Position: positionElimination, Params: Params{Sport: reference, StepMeters: e.StepMeters}})
+	}
 
 	// An empty description is no description, as on edit.
 	description := draft.Description
@@ -128,11 +135,7 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		StartsAt:         window.StartsAt,
 		EndsAt:           window.EndsAt,
 		CreatedBy:        actorID,
-		Categories: []Category{
-			{Type: CategoryCumulativeTime, Position: 1, Params: Params{}},
-			{Type: CategoryCumulativeDistance, Position: 2, Params: Params{Factors: factors}},
-			{Type: CategoryElimination, Position: 3, Params: Params{Sport: reference, StepMeters: draft.EliminationStepMeters}},
-		},
+		Categories:       categories,
 	}, now)
 	if errors.Is(err, errAccountDeleted) {
 		return Challenge{}, apperr.New(apperr.CodeAccountDeleted, nil)

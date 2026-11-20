@@ -326,8 +326,10 @@ paths:
       operationId: createChallenge
       summary: Create a challenge
       description: |
-        Creates a challenge with its 3 categories; the creator becomes its
-        first participant. Requires a complete profile (`profile_incomplete`).
+        Creates a challenge with its categories: the cumulative time always,
+        the cumulative distance and the elimination when chosen in
+        `categories`; the creator becomes its first participant. Requires a
+        complete profile (`profile_incomplete`).
         The window starts at local midnight of `start_date` in `timezone` and
         lasts `weeks` local weeks. Distance factors not given keep the
         catalogue's suggested factor brought back to `reference_sport`; all
@@ -630,7 +632,7 @@ paths:
       operationId: getLeaderboard
       summary: Get the leaderboard
       description: |
-        The ranking of each of the 3 categories, always computed from the
+        The ranking of each category of the challenge, always computed from the
         raw activities at `computed_at`. Visible to whoever sees the
         challenge: every user for a public one (a non-participant sees the
         ranking only); its creators, participants (abandoned included) and
@@ -1429,7 +1431,7 @@ components:
           example: 0.3
     ChallengeCreate:
       type: object
-      required: [title, visibility, timezone, start_date, weeks, elimination_step_meters]
+      required: [title, visibility, timezone, start_date, weeks]
       additionalProperties: false
       properties:
         title:
@@ -1475,11 +1477,8 @@ components:
           minimum: 2
           maximum: 52
           description: Duration in whole weeks.
-        elimination_step_meters:
-          type: integer
-          minimum: 1
-          maximum: 100000
-          description: Increment X of the elimination category, in meters.
+        categories:
+          $ref: "#/components/schemas/CategoriesCreate"
         reference_sport:
           type: string
           description: |
@@ -1494,7 +1493,9 @@ components:
           type: object
           description: |
             Factors chosen by the creator, by sport code (distance sports only,
-            0.1 to 2, two decimals at most). Send only the factors the creator
+            0.1 to 2, two decimals at most), for the cumulative distance:
+            without that category, sending them answers 400
+            `validation_failed` on `distance_factors`. Send only the factors the creator
             changed: sports not given keep their suggested factor brought back
             to the reference sport, min(1, factor / factor of the reference),
             rounded to two decimals and never under 0.1. The reference sport is
@@ -1506,6 +1507,33 @@ components:
             maximum: 2
           example:
             ride: 0.25
+    CategoriesCreate:
+      type: object
+      additionalProperties: false
+      description: |
+        The optional categories the creator chooses, each present to be
+        part of the challenge; the cumulative time is always there. Absent,
+        the challenge has the cumulative time only. Frozen at creation.
+      properties:
+        cumulative_distance:
+          $ref: "#/components/schemas/CumulativeDistanceCreate"
+        elimination:
+          $ref: "#/components/schemas/EliminationCreate"
+    CumulativeDistanceCreate:
+      type: object
+      additionalProperties: false
+      description: Cumulative distance, with the factors of `distance_factors`; no settings of its own.
+    EliminationCreate:
+      type: object
+      required: [step_meters]
+      additionalProperties: false
+      description: Elimination, run in the reference sport.
+      properties:
+        step_meters:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: Increment X, in meters.
     Challenge:
       type: object
       required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories]
@@ -1539,6 +1567,7 @@ components:
           description: End of the window (excluded), in UTC.
         categories:
           type: array
+          description: The categories of the challenge, in their order.
           items:
             $ref: "#/components/schemas/Category"
     Category:
@@ -1553,6 +1582,7 @@ components:
           type: integer
           minimum: 1
           maximum: 3
+          description: Fixed by type, gaps left by the missing categories (cumulative_time 1, cumulative_distance 2, elimination 3).
         params:
           $ref: "#/components/schemas/CategoryParams"
     CategoryParams:
@@ -1655,7 +1685,7 @@ components:
           description: The instant the ranking was computed at; the weeks locked at it are judged.
         categories:
           type: array
-          description: The 3 categories, in the order of the challenge.
+          description: The categories of the challenge, in their order.
           items:
             $ref: "#/components/schemas/CategoryRanking"
     CategoryRanking:
@@ -1820,7 +1850,7 @@ components:
           description: End of the current week.
         rankings:
           type: array
-          description: The user's line in each of the 3 categories, in the order of the challenge.
+          description: The user's line in each category of the challenge, in their order.
           items:
             $ref: "#/components/schemas/MyRanking"
     MyRanking:
@@ -1876,6 +1906,7 @@ components:
           format: date-time
         categories:
           type: array
+          description: The categories of the challenge, in their order.
           items:
             $ref: "#/components/schemas/Category"
         my_role:
@@ -1945,7 +1976,10 @@ components:
         weeks:
           description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         elimination_step_meters:
-          description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
+          description: |
+            Former creation field, now `categories.elimination.step_meters`;
+            kept so that a client still sending it is told the step is frozen:
+            422 `field_not_editable`, and `null` 400 `validation_failed`.
         reference_sport:
           description: Frozen at creation; sending it answers 422 `field_not_editable`, and `null` 400 `validation_failed`.
         distance_factors:
@@ -2112,8 +2146,8 @@ components:
             The distance brought to the cumulative distance category: the
             distance times the factor of the sport in this challenge, rounded
             to the meter (half up) as the ranking rounds a total. Null when
-            the sport has no factor in this challenge or the activity no
-            distance. The ranking rounds the total once, so it may differ by
+            the challenge has no cumulative distance category, the sport no
+            factor in this challenge, or the activity no distance. The ranking rounds the total once, so it may differ by
             a meter or so from the sum of these values.
         duration_seconds:
           type: integer
