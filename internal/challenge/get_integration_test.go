@@ -1042,23 +1042,37 @@ func TestParticipantsListing(t *testing.T) {
 			break
 		}
 	}
-	if len(got) != 4 {
-		t.Fatalf("%d participants, want 4", len(got))
+	// The deleted account is not listed at all.
+	if len(got) != 3 {
+		t.Fatalf("%d participants, want 3", len(got))
 	}
-	wantStatus := []ParticipantStatus{ParticipantActive, ParticipantAbandoned, ParticipantAbandoned, ParticipantActive}
+	wantIDs := []string{ids[0], ids[1], ids[3]}
+	wantStatus := []ParticipantStatus{ParticipantActive, ParticipantAbandoned, ParticipantActive}
 	for i, p := range got {
-		if p.UserID != ids[i] || p.Status != wantStatus[i] {
-			t.Fatalf("participant %d: %s %s, want %s %s in order of registration", i, p.UserID, p.Status, ids[i], wantStatus[i])
+		if p.UserID != wantIDs[i] || p.Status != wantStatus[i] {
+			t.Fatalf("participant %d: %s %s, want %s %s in order of registration", i, p.UserID, p.Status, wantIDs[i], wantStatus[i])
 		}
 	}
 	if p := got[1].Name.Pseudo; p == nil || *p != "list_a" {
 		t.Fatalf("abandoned participant pseudo %v, want list_a kept", p)
 	}
-	if got[2].Name.Pseudo != nil {
-		t.Fatalf("anonymized participant pseudo %q, want none", *got[2].Name.Pseudo)
+	if !got[2].JoinedAt.Equal(now.Add(3 * time.Minute)) {
+		t.Fatalf("joined at %s, want the instant of the join", got[2].JoinedAt)
 	}
-	if !got[3].JoinedAt.Equal(now.Add(3 * time.Minute)) {
-		t.Fatalf("joined at %s, want the instant of the join", got[3].JoinedAt)
+	// Nor are its activities, even asked by its id.
+	if _, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[2]); !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) {
+		t.Fatalf("activities of the deleted account: %v, want not_found", err)
+	}
+	if _, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[1]); err != nil {
+		t.Fatalf("activities of the abandoned participant: %v, want them", err)
+	}
+	// Excluding it or making it a creator answers as for someone who never
+	// joined.
+	if err := svc.Exclude(t.Context(), creatorID, id, ids[2]); !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) {
+		t.Fatalf("exclude the deleted account: %v, want not_found", err)
+	}
+	if _, err := svc.AddCreator(t.Context(), creatorID, id, ids[2]); !errors.Is(err, apperr.New(apperr.CodeNotActiveParticipant, nil)) {
+		t.Fatalf("add the deleted account as creator: %v, want not_active_participant", err)
 	}
 
 	// Private: the abandoned participant still sees the list, an outsider gets 404.

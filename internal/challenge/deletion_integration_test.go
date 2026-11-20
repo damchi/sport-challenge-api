@@ -217,9 +217,6 @@ func TestAccountDeletionRaces(t *testing.T) {
 	if deleteErr != nil && !lastCreator {
 		t.Fatalf("delete: %v, want done or last_creator", deleteErr)
 	}
-	if excludeErr != nil {
-		t.Fatalf("exclude: %v, want done or nothing to do", excludeErr)
-	}
 	refusedOrDone := func(err error, codes ...apperr.Code) bool {
 		if err == nil {
 			return true
@@ -230,6 +227,11 @@ func TestAccountDeletionRaces(t *testing.T) {
 			}
 		}
 		return false
+	}
+	// Excluded before the deletion, or not found once the account is deleted
+	// (as for someone who never joined, SC-API-113).
+	if !refusedOrDone(excludeErr, apperr.CodeNotFound) {
+		t.Fatalf("exclude: %v, want done or not_found", excludeErr)
 	}
 	for i, err := range joinErrs {
 		if !refusedOrDone(err, apperr.CodeAccountDeleted, apperr.CodeNotFound) {

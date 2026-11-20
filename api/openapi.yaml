@@ -575,7 +575,7 @@ paths:
         for a private one. Anyone else, like a missing or deleted challenge,
         gets the same 404 `challenge_not_found`. Every participant is listed,
         abandoned or excluded ones included (shown as abandoned), in order
-        of registration.
+        of registration; a deleted account is not listed at all.
       tags: [challenges]
       parameters:
         - name: challengeId
@@ -674,7 +674,8 @@ paths:
         the exclusion. A creator cannot be excluded, even one who abandoned
         (422 `cannot_exclude_creator`); a finished challenge answers 422
         `challenge_ended`; excluding a participant already out answers 204
-        and changes nothing; a user who never joined answers 404 `not_found`.
+        and changes nothing; a user who never joined, or a deleted account,
+        answers 404 `not_found`.
       tags: [challenges]
       parameters:
         - name: challengeId
@@ -727,7 +728,8 @@ paths:
         or excluded ones included) and its creators. A challenge the user
         may not see answers 404 `challenge_not_found`; a visible one the
         user never joined (a public challenge shows them its leaderboard
-        only), or a `userId` who never joined it, answers 404 `not_found`.
+        only), or a `userId` who never joined it or whose account was
+        deleted, answers 404 `not_found`.
         `contributions` and `locked` are read from this challenge only, never
         from the other challenges of the participant: `contributions` holds
         it when the activity counts in it (never for a participant who
@@ -776,7 +778,8 @@ paths:
         "404":
           description: |
             A missing, deleted or hidden challenge (`challenge_not_found`), or
-            an actor or a `userId` who never joined it (`not_found`).
+            an actor or a `userId` who never joined it, or a deleted account
+            (`not_found`).
           content:
             application/json:
               schema:
@@ -792,7 +795,8 @@ paths:
       description: |
         Creators only (403 `forbidden`). The target must be an active
         participant (422 `not_active_participant`): every creator is a
-        participant. Adding an existing creator answers 200 and changes
+        participant, and a deleted account is none, even one that was a
+        creator. Adding an existing creator answers 200 and changes
         nothing. A finished challenge answers 422 `challenge_ended`.
       tags: [challenges]
       parameters:
@@ -1560,19 +1564,19 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/Pseudo"
-          description: Null for a deleted (anonymized) account; the apps show a neutral name.
+          description: Null until the user chooses one (a deleted account is never listed).
         first_name:
           type: string
           nullable: true
           allOf:
             - $ref: "#/components/schemas/PersonName"
-          description: Null for a deleted (anonymized) account, or one that has not set it.
+          description: Null for an account that has not set it (a deleted account is never listed).
         last_name:
           type: string
           nullable: true
           allOf:
             - $ref: "#/components/schemas/PersonName"
-          description: Null for a deleted (anonymized) account, or one that has not set it.
+          description: Null for an account that has not set it (a deleted account is never listed).
         avatar:
           type: string
           nullable: true
@@ -1580,7 +1584,7 @@ components:
         status:
           type: string
           enum: [active, abandoned]
-          description: "`abandoned` also covers an excluded participant, and a deleted account in a challenge not finished when it was deleted (in a finished one, the participation stays `active`)."
+          description: "`abandoned` also covers an excluded participant. A deleted account is never listed."
         joined_at:
           type: string
           format: date-time
@@ -1721,7 +1725,7 @@ components:
           format: date-time
         participant_count:
           type: integer
-          description: Everyone who joined, abandoned included.
+          description: Everyone who joined, abandoned included, deleted accounts left out.
         my_role:
           type: string
           enum: [creator, participant, abandoned, invited, outsider]

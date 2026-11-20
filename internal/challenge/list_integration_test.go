@@ -144,6 +144,14 @@ func TestListScopesAndStatuses(t *testing.T) {
 
 func TestListCountsAndMyStatus(t *testing.T) {
 	f := newListFixture(t)
+	// A deleted account in B is not counted.
+	gone := insertTestUser(t, f.pool, "email|gone")
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ('00000000-0000-0000-0000-0000000000b0', $1, $2)`, gone, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", gone); err != nil {
+		t.Fatal(err)
+	}
 	page, err := f.svc.List(t.Context(), f.me, ScopeMine, "", 20, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +160,8 @@ func TestListCountsAndMyStatus(t *testing.T) {
 	for _, s := range page.Items {
 		got[s.Title] = s
 	}
-	// B: me active and the creator abandoned, both counted.
+	// B: me active and the creator abandoned, both counted; the deleted
+	// account is not.
 	if b := got["B ongoing, mine"]; b.ParticipantCount != 2 || b.MyStatus == nil || *b.MyStatus != "active" {
 		t.Errorf("B = %d participants, my status %v, want 2 and active", b.ParticipantCount, b.MyStatus)
 	}
