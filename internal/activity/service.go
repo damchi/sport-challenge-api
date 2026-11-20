@@ -63,7 +63,7 @@ func NewService(repo repository, profiles Profiles, catalogue Catalogue, partici
 // point of activity creation (manual entry now, imports later). The actor
 // needs a complete profile (422 profile_incomplete); the draft is validated
 // (Validate), an unknown sport giving 400 validation_failed on sport_code.
-// The activity is refused with 422 week_locked when its week has ended in a
+// The activity is refused with 422 week_locked when its week is locked in a
 // challenge where it counts, checked in the transaction of the write; it is
 // recorded even if it counts nowhere (ADR 0001). With idempotencyKey, an
 // activity of the actor recorded before with the same key is returned
@@ -126,7 +126,7 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 // creation (Record): the body replaces every field entered. The activity of
 // someone else, a deleted or a missing one gives 404 activity_not_found. It
 // is refused with 422 week_locked when the week of its current start, or of
-// the new one, has ended in a challenge where it counts, checked in the
+// the new one, is locked in a challenge where it counts, checked in the
 // transaction of the write. The profile is not checked again: the activity
 // was recorded with a complete one. A badge won stays won (README §2.7,
 // V1.1).
@@ -180,7 +180,7 @@ func (s *Service) EraseUser(ctx context.Context, userID string) error {
 
 // Delete marks activity id of actorID deleted: it counts nowhere from then
 // on. As for Update, the activity of someone else gives 404
-// activity_not_found and a week ended where it counts 422 week_locked.
+// activity_not_found and a week locked where it counts 422 week_locked.
 func (s *Service) Delete(ctx context.Context, actorID, id string) error {
 	err := s.repo.Delete(ctx, actorID, id, s.clock.Now(), func(ctx context.Context, current Activity) error {
 		_, err := s.changeable(ctx, actorID, current)
@@ -287,7 +287,7 @@ func (s *Service) validate(ctx context.Context, draft Draft) (Draft, error) {
 }
 
 // changeable checks that actorID may change current (CanChange, else 404
-// activity_not_found) and that its week has not ended in a challenge where
+// activity_not_found) and that its week is not locked in a challenge where
 // it counts (422 week_locked). It returns the participations of the author,
 // read in the transaction of ctx.
 func (s *Service) changeable(ctx context.Context, actorID string, current Activity) ([]Participation, error) {

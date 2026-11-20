@@ -47,8 +47,9 @@ const (
 	CodeDistanceRequired Code = "distance_required"
 	// CodeDistanceNotAllowed refuses a distance for a sport without one.
 	CodeDistanceNotAllowed Code = "distance_not_allowed"
-	// CodeWeekLocked refuses writing an activity whose week has ended in a
-	// challenge where it counts (ADR 0001).
+	// CodeWeekLocked refuses writing an activity whose week is locked (7 am
+	// on the first day of the next week) in a challenge where it counts
+	// (ADR 0001).
 	CodeWeekLocked Code = "week_locked"
 	// CodeActivityOverlap refuses an activity that overlaps another of its
 	// author (README §2.5).

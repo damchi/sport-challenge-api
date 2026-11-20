@@ -67,11 +67,13 @@ func NewService(repo repository, data Activities, c clock.Clock, logger *slog.Lo
 	return &Service{repo: repo, data: data, clock: c, logger: logger}
 }
 
-// CloseWeeks closes every week that has ended, in every challenge, and
-// has no closure yet: the eliminations of the week are those of the scorer,
-// recorded with the closure in one transaction. It can be run again and
-// again: a week is judged by its activities, and a week that ended is locked,
-// so when it runs does not change them, even after the challenge is over.
+// CloseWeeks closes every week that is locked (7 am, local time, on the
+// first day of the next week: scoring.Window.WeekLocksAt), in every
+// challenge, and has no closure yet: the eliminations of the week are those
+// of the scorer, recorded with the closure in one transaction. A week that ended but is not
+// locked yet is left for a later run. It can be run again and again: a week
+// is judged by its activities, which no longer change once it is locked, so
+// when it runs does not change them, even after the challenge is over.
 // The last week of a challenge is left to its finalization. One thing is read
 // as of the run: who is abandoned (see closeChallenge). A challenge in error
 // does not stop the others; the errors are joined.
@@ -98,7 +100,7 @@ func (s *Service) CloseWeeks(ctx context.Context) (Result, error) {
 	return result, errors.Join(errs...)
 }
 
-// closeChallenge closes the weeks of one challenge that ended at now and are
+// closeChallenge closes the weeks of one challenge that are locked at now and
 // not closed, oldest first, and counts the weeks and eliminations recorded.
 func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time) (weeks, eliminations int, err error) {
 	loc, err := time.LoadLocation(c.Timezone)
@@ -106,13 +108,13 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 		return 0, 0, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
 	}
 	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
-	// The last week ends with the challenge: its finalization judges it.
-	ended := min(w.EndedWeeks(), w.Weeks()-1)
+	// The last week locks after the challenge: its finalization judges it.
+	locked := min(w.LockedWeeks(), w.Weeks()-1)
 	closed, err := s.repo.ClosedWeeks(ctx, c.ID)
 	if err != nil {
 		return 0, 0, err
 	}
-	todo := openWeeks(ended, closed)
+	todo := openWeeks(locked, closed)
 	if len(todo) == 0 {
 		return 0, 0, nil
 	}
@@ -149,14 +151,14 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 	return weeks, eliminations, nil
 }
 
-// openWeeks lists, in order, the weeks 1 to ended that are not in closed.
-func openWeeks(ended int, closed []int) []int {
+// openWeeks lists, in order, the weeks 1 to locked that are not in closed.
+func openWeeks(locked int, closed []int) []int {
 	isClosed := make(map[int]bool, len(closed))
 	for _, n := range closed {
 		isClosed[n] = true
 	}
 	var todo []int
-	for n := 1; n <= ended; n++ {
+	for n := 1; n <= locked; n++ {
 		if !isClosed[n] {
 			todo = append(todo, n)
 		}
@@ -164,16 +166,17 @@ func openWeeks(ended int, closed []int) []int {
 	return todo
 }
 
-// FinalizeChallenges freezes the results of every challenge that is over and
-// has none: the final ranking of each category, computed from the raw
-// activities by the scorer of the category, is recorded in one transaction
-// per challenge, with the closure of its last week and the eliminations
-// judged in it (as close-weeks records the other weeks). It can be run again
-// and again: a challenge with its snapshots is not listed, and a run at the
-// same time records nothing. Who
+// FinalizeChallenges freezes the results of every challenge whose last week
+// is locked (7 am, local time, on the first day after the challenge) and has
+// none: until then, an activity of the last week can still be entered. The final ranking
+// of each category, computed from the raw activities by the scorer of the
+// category, is recorded in one transaction per challenge, with the closure
+// of its last week and the eliminations judged in it (as close-weeks records
+// the other weeks). It can be run again and again: a challenge with its
+// snapshots is not listed, and a run at the same time records nothing. Who
 // is abandoned is read as of the run, which changes nothing after the end:
 // nobody can abandon or be excluded from a challenge that is over, and the
-// activities of a week that ended are locked. Challenges deleted get no
+// activities of a locked week no longer change. Challenges deleted get no
 // snapshot. A challenge in error does not stop the others; the errors are
 // joined.
 func (s *Service) FinalizeChallenges(ctx context.Context) (FinalizeResult, error) {
@@ -197,23 +200,26 @@ func (s *Service) FinalizeChallenges(ctx context.Context) (FinalizeResult, error
 	return result, errors.Join(errs...)
 }
 
-// finalizeChallenge records the snapshots of one challenge, and reports
-// whether this run did.
+// finalizeChallenge records the snapshots of one challenge once its last
+// week is locked, and reports whether this run did.
 func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now time.Time) (bool, error) {
 	loc, err := time.LoadLocation(c.Timezone)
 	if err != nil {
 		return false, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
 	}
+	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
+	last := LastWeek{Number: w.Weeks()}
+	if now.Before(w.WeekLocksAt(last.Number)) {
+		return false, nil
+	}
 	participants, err := s.data.Participants(ctx, c.ID)
 	if err != nil {
 		return false, err
 	}
-	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
 	activities, err := s.data.Activities(ctx, c.ID, w, eliminationSport(c.Categories))
 	if err != nil {
 		return false, err
 	}
-	last := LastWeek{Number: w.Weeks()}
 	snapshots := make([]Snapshot, len(c.Categories))
 	for i, cat := range c.Categories {
 		scorer, err := scorerOf(cat)

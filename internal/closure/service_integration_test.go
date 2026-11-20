@@ -125,6 +125,8 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 	// The time change of March 8 falls in week 2.
 	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
 	weekEnd := func(n int) time.Time { return start.AddDate(0, 0, 7*n).UTC() }
+	// A week locks at 7 am on the day after it ends.
+	locked := func(n int) time.Time { return time.Date(2026, 3, 2+7*n, 7, 0, 0, 0, loc).UTC() }
 	inWeek := func(n int) time.Time { return start.AddDate(0, 0, 7*(n-1)).Add(time.Hour) }
 
 	a, b, quitter, stranger := s.user("a"), s.user("b"), s.user("quitter"), s.user("stranger")
@@ -148,19 +150,34 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 	}
 	want := []recordedElimination{{User: a, Week: 2, Run: 6999, Min: 7000}}
 
-	t.Run("nothing happens the nanosecond before the end of week 1", func(t *testing.T) {
-		got, err := service(weekEnd(1).Add(-time.Nanosecond)).CloseWeeks(t.Context())
-		if err != nil || got != (Result{}) {
-			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
+	t.Run("nothing happens at the end of week 1, before it locks", func(t *testing.T) {
+		for _, now := range []time.Time{weekEnd(1), locked(1).Add(-time.Nanosecond)} {
+			got, err := service(now).CloseWeeks(t.Context())
+			if err != nil || got != (Result{}) {
+				t.Fatalf("at %s: result = %+v, err = %v, want nothing", now, got, err)
+			}
+		}
+	})
+
+	t.Run("no elimination recorded for week 2 before 7 am", func(t *testing.T) {
+		got, err := service(locked(2).Add(-time.Nanosecond)).CloseWeeks(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (Result{Challenges: 1, Weeks: 1}); got != want {
+			t.Fatalf("result = %+v, want %+v: week 1 only", got, want)
+		}
+		if weeks, elims := s.closedWeeks(challengeID), s.eliminations(challengeID); !reflect.DeepEqual(weeks, []int{1}) || len(elims) != 0 {
+			t.Fatalf("closed weeks %v, eliminations %+v, want [1] and none", weeks, elims)
 		}
 	})
 
 	t.Run("week 2 is judged an hour late", func(t *testing.T) {
-		got, err := service(weekEnd(2).Add(time.Hour)).CloseWeeks(t.Context())
+		got, err := service(locked(2).Add(time.Hour)).CloseWeeks(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := (Result{Challenges: 1, Weeks: 2, Eliminations: 1}); got != want {
+		if want := (Result{Challenges: 1, Weeks: 1, Eliminations: 1}); got != want {
 			t.Fatalf("result = %+v, want %+v", got, want)
 		}
 		if weeks := s.closedWeeks(challengeID); !reflect.DeepEqual(weeks, []int{1, 2}) {
@@ -175,7 +192,7 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 	})
 
 	t.Run("running again, even later, changes nothing", func(t *testing.T) {
-		got, err := service(weekEnd(2).Add(2 * time.Hour)).CloseWeeks(t.Context())
+		got, err := service(locked(2).Add(2 * time.Hour)).CloseWeeks(t.Context())
 		if err != nil || got != (Result{}) {
 			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
 		}
@@ -186,7 +203,7 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 
 	t.Run("the next week is judged on its own", func(t *testing.T) {
 		s.run(b, inWeek(3), 8999) // under 7000 + 2000
-		got, err := service(weekEnd(3)).CloseWeeks(t.Context())
+		got, err := service(locked(3)).CloseWeeks(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,7 +217,7 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 	})
 
 	t.Run("the last week is left to the finalization", func(t *testing.T) {
-		got, err := service(start.AddDate(0, 0, 28)).CloseWeeks(t.Context())
+		got, err := service(locked(4)).CloseWeeks(t.Context())
 		if err != nil || got != (Result{}) {
 			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
 		}
@@ -265,7 +282,8 @@ func TestCloseWeeksOfAParticipantWhoAbandonedSinceTheWeekEnded(t *testing.T) {
 	// Under the minimum of week 2, but abandoned after the week ended.
 	s.run(runner, start.Add(time.Hour), 5000)
 
-	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(week2End.Add(time.Hour)), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	// An hour after week 2 locks, at 7 am on the day after its end.
+	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(week2End.Add(8*time.Hour)), slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	got, err := service.CloseWeeks(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -337,6 +355,8 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 	}
 	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
 	end := start.AddDate(0, 0, 28).UTC()
+	// The last week locks at 7 am on the day after the end.
+	lock := time.Date(2026, 3, 30, 7, 0, 0, 0, loc).UTC()
 	inWeek := func(n int) time.Time { return start.AddDate(0, 0, 7*(n-1)).Add(time.Hour) }
 
 	a, b, quitter := s.user("a"), s.user("b"), s.user("quitter")
@@ -365,15 +385,20 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		return NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(now), slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	}
 
-	t.Run("nothing is frozen the nanosecond before the end", func(t *testing.T) {
-		got, err := service(end.Add(-time.Nanosecond)).FinalizeChallenges(t.Context())
-		if err != nil || got != (FinalizeResult{}) {
-			t.Fatalf("result = %+v, err = %v, want nothing", got, err)
+	t.Run("nothing is frozen before the last week locks", func(t *testing.T) {
+		for _, now := range []time.Time{end.Add(-time.Nanosecond), end, lock.Add(-time.Nanosecond)} {
+			got, err := service(now).FinalizeChallenges(t.Context())
+			if err != nil || got != (FinalizeResult{}) {
+				t.Fatalf("at %s: result = %+v, err = %v, want nothing", now, got, err)
+			}
+		}
+		if weeks, elims := s.closedWeeks(challengeID), s.eliminations(challengeID); len(weeks) != 0 || len(elims) != 0 {
+			t.Fatalf("closed weeks %v, eliminations %+v, want none before 7 am", weeks, elims)
 		}
 	})
 
-	t.Run("the end freezes the three categories, not the deleted challenge", func(t *testing.T) {
-		got, err := service(end.Add(time.Hour)).FinalizeChallenges(t.Context())
+	t.Run("the lock of the last week freezes the three categories, not the deleted challenge", func(t *testing.T) {
+		got, err := service(lock.Add(time.Hour)).FinalizeChallenges(t.Context())
 		if err != nil || got != (FinalizeResult{Challenges: 1}) {
 			t.Fatalf("result = %+v, err = %v, want 1 challenge", got, err)
 		}
@@ -383,7 +408,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		}
 		wantTypes := []string{"cumulative_time", "cumulative_distance", "run_elimination"}
 		for i, snap := range snaps {
-			if snap.Type != wantTypes[i] || !snap.CreatedAt.Equal(end.Add(time.Hour)) {
+			if snap.Type != wantTypes[i] || !snap.CreatedAt.Equal(lock.Add(time.Hour)) {
 				t.Fatalf("snapshot %d = %s at %v, want %s at the instant of the clock", i, snap.Type, snap.CreatedAt, wantTypes[i])
 			}
 		}
@@ -549,7 +574,8 @@ func TestCloseWeeksAfterTheFinalization(t *testing.T) {
 	challengeID, _ := s.challenge(a, start, false)
 	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, challengeID, a, start)
 	s.exec(`INSERT INTO week_closure (challenge_id, week_number, closed_at) VALUES ($1, 1, $2), ($1, 2, $2)`, challengeID, end)
-	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(end.Add(time.Hour)), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	// An hour after the last week locks, at 7 am on the day after the end.
+	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(end.Add(8*time.Hour)), slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	if _, err := service.FinalizeChallenges(t.Context()); err != nil {
 		t.Fatal(err)
 	}

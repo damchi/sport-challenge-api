@@ -64,10 +64,11 @@ func NewService(challenges Challenges, profiles Profiles, repo repository, c clo
 // order, as actorID may read it (the rule is the challenge module's, and
 // nothing is loaded before it passes). Abandoned participants are listed in
 // each category, unranked; deleted accounts are not listed at all. The weeks
-// are judged at the instant of the clock. Once the challenge is over, the
-// frozen results are served; until
-// the worker has frozen them, the ranking is computed, which gives the same
-// result: the weeks that ended are locked by the clock, not by the worker.
+// locked at the instant of the clock are judged (7 am, local time, on the first
+// day of the next week). Once the challenge is over, the frozen results are
+// served; until the worker has frozen them, at the earliest when the last
+// week locks, the ranking is computed, which gives the same result once it
+// is locked: the weeks are locked by the clock, not by the worker.
 func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, error) {
 	c, err := s.challenges.Challenge(ctx, actorID, id)
 	if err != nil {

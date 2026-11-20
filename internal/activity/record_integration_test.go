@@ -150,15 +150,30 @@ func TestRecordWeekLocked(t *testing.T) {
 }
 
 // TestRecordIntoEndedChallengeWithoutTheWorker: the clock locks the last week
-// of a challenge that is over; no worker has run (nothing is frozen), and
-// nothing is written.
+// of a challenge that is over at 7 am on the day after its end (2026-06-22);
+// no worker has run (nothing is frozen). Before, a run across the end is
+// recorded and counts; from then on, nothing is written.
 func TestRecordIntoEndedChallengeWithoutTheWorker(t *testing.T) {
 	f := setupRecord(t)
-	ended := NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations{challengeOf(t, "c1")}, nil, clock.NewFake(toronto(t, 2026, 6, 22, 0)))
-	_, err := ended.Record(t.Context(), f.user, nil, run(toronto(t, 2026, 6, 21, 23)))
+	at := func(now time.Time) *Service {
+		return NewService(NewRepository(f.gdb), fakeProfiles{complete: true}, catalogue, staticParticipations{challengeOf(t, "c1")}, nil, clock.NewFake(now))
+	}
+	lock := toronto(t, 2026, 6, 22, 7)
+
+	_, err := at(lock).Record(t.Context(), f.user, nil, run(toronto(t, 2026, 6, 21, 23)))
 	wantCode(t, err, apperr.CodeWeekLocked)
 	if f.count() != 0 {
 		t.Fatalf("%d rows, want nothing written", f.count())
+	}
+
+	// Started 15 minutes before the end, done 10 minutes after it.
+	across := toronto(t, 2026, 6, 22, 0).Add(-15 * time.Minute)
+	got, err := at(lock.Add(-time.Second)).Record(t.Context(), f.user, nil, run(across))
+	if err != nil {
+		t.Fatalf("record before 7 am: %v", err)
+	}
+	if len(got.Contributions) != 1 || got.Contributions[0].ChallengeID != "c1" || got.Locked {
+		t.Fatalf("contributions %+v, locked %v, want it to count in c1, not locked", got.Contributions, got.Locked)
 	}
 }
 

@@ -50,7 +50,7 @@ Utilise le skill `scoring-rules`. Écris les tests d'abord. Packages `scoring` (
 
 ## Phase 7 — Clôtures et worker
 
-Migrations `week_closure`, `elimination`, `result_snapshot`. Tâches `close-weeks` et `finalize-challenges`, idempotentes, testées avec une horloge décalée (changement d'heure, instant exact de fin de semaine).
+Migrations `week_closure`, `elimination`, `result_snapshot`. Tâches `close-weeks` et `finalize-challenges`, idempotentes, testées avec une horloge décalée (changement d'heure, instant exact de fin de semaine et du verrouillage à 7 h).
 
 ## Phase 8 — Invitations (badges reportés en V1.1)
 

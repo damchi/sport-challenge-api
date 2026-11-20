@@ -57,16 +57,19 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 **Catégorie 3 : course avec élimination** (la distance doit augmenter chaque semaine) :
 - ✅ **X** est un **incrément en km**, choisi par le créateur à la création du challenge (ex. X = 2 km).
 - ✅ Règle : la distance courue en semaine s+1 doit être **au minimum** égale à la distance de la semaine s plus X. Exemple avec X = 2 : semaine 1 = 5 km, donc semaine 2 au moins 7 km, puis semaine 3 au moins (semaine 2) + 2 km, et ainsi de suite jusqu'à la fin du challenge.
-- ✅ À la fin d'une semaine, si cette condition n'est pas remplie, la personne est éliminée **de cette catégorie seulement** et reste en lice dans les deux autres.
+- ✅ Au verrouillage d'une semaine (voir plus bas), si cette condition n'est pas remplie, la personne est éliminée **de cette catégorie seulement** et reste en lice dans les deux autres.
 - ✅ Le gagnant est celui qui a le plus de km cumulés.
 - ✅ La « distance de la semaine s » est la distance **réellement courue** par la personne en semaine s. **Si elle court plus que le minimum requis, cette distance devient sa nouvelle base de calcul** : avec X = 2, minimum de 7 km en semaine 2 ; si elle court 10 km, le minimum de la semaine 3 est 12 km. Il n'y a donc pas de distance de départ à régler, et personne n'est éliminé en semaine 1 (pas de référence).
-- ✅ Il n'y a **pas de délai de grâce** : le minimum de la semaine s+1 est définitif dès la fin de la semaine s.
+- ✅ Le minimum de la semaine s+1 est **définitif au verrouillage de la semaine s** (à 7 h le premier jour de la semaine suivante) ; avant, il est provisoire, puisqu'une course de la semaine s peut encore être saisie.
 - ✅ La distance d'une semaine est le cumul de toutes les courses de la semaine (pas une seule sortie).
 - ✅ Les personnes qui terminent le challenge sans être éliminées sont classées par km cumulés, **quelle que soit leur base de départ** : celle qui a couru le plus de km gagne.
 - ✅ Viennent ensuite les éliminés : le dernier éliminé est classé devant, et en cas d'égalité sur la semaine d'élimination, la distance cumulée départage.
 - ✅ La distance cumulée d'un éliminé s'arrête à la **fin de sa semaine d'élimination** (cette semaine comprise) : ses courses suivantes ne comptent plus, son rang ne bouge plus.
-- ✅ L'élimination est jugée à l'instant exact de la fin de la semaine (fuseau du challenge), sans délai de grâce.
-- ✅ Une semaine terminée est **verrouillée** : aucune activité datée de cette semaine ne peut plus être ajoutée, modifiée ni supprimée (saisie manuelle comprise), puisque l'élimination est immédiate et définitive. C'est l'horloge qui fait foi, pas le passage du worker.
+- ✅ **Verrouillage d'une semaine** (décision du 2026-11-20, SC-API-121) : une semaine se verrouille à **7 h, heure locale du challenge, le premier jour de la semaine suivante** (le jour de la fin de la semaine, `week_ends_at` étant le minuit qui l'ouvre), et non à l'instant de sa fin : environ 7 heures plus tard, 6 ou 8 si l'heure change cette nuit-là. La dernière semaine a la même fenêtre : jusqu'à 7 h le premier jour après le challenge (le jour de `ends_at`). Là où un changement d'heure saute ou répète 7 h, c'est le **premier instant qui existe** (comme pour le début d'un jour, §2.1).
+  - Jusqu'au verrouillage, une activité datée de la semaine (toutes, pas seulement celles à cheval sur sa fin) peut être **ajoutée, modifiée et supprimée** ; ensuite plus rien ne change (`week_locked`), saisie manuelle comprise. C'est l'horloge qui fait foi, pas le passage du worker.
+  - Les bornes des semaines ne bougent pas : une activité compte **entièrement pour la semaine de son début**. Une course du dimanche 23:30 au lundi 00:30 compte pour la semaine qui finit ce dimanche, et se saisit jusqu'au lundi 7 h ; une activité commencée après la fin de la semaine compte pour la suivante.
+- ✅ L'élimination d'une semaine est jugée **à son verrouillage** (fuseau du challenge), jamais avant : le délai de grâce va jusqu'à 7 h, heure locale, le premier jour de la semaine suivante. Jugée ensuite, elle ne change plus.
+- ✅ Entre la fin de la semaine s et son verrouillage, le classement et « Mes défis » montrent la **semaine s+1** (celle de l'horloge) : personne n'est encore éliminé pour la semaine s, et le minimum de la semaine s+1 est **provisoire** (distance actuelle de la semaine s + X) ; il peut encore monter jusqu'à 7 h. Le statut live de la semaine s+1 se calcule avec ce minimum provisoire.
 - ✅ Le statut live affiche « objectif atteint » dès que la distance de la semaine atteint le minimum ; sinon « à risque » quand il reste **24 h ou moins** avant la fin de la semaine, et « en cours » avant. Aucun statut en semaine 1 (pas de minimum). Le seuil de 24 h est un paramètre de configuration.
 - ✅ La liste « Mes défis » montre, pour chaque challenge en cours où la personne participe encore, sa semaine (numéro, fin, et en catégorie 3 la distance, le minimum et le statut live ci-dessus) et son **rang dans chacune des 3 catégories**, sous la forme « rang sur nombre de classés » (ex aequo compris : 1, 1, 3 ; les abandons et les comptes supprimés ne sont pas comptés). Les valeurs sont celles du classement au même instant. Rien pour un challenge à venir ou terminé, ni pour qui a abandonné.
 
@@ -94,8 +97,8 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 
 - ✅ **V1 : saisie manuelle uniquement.** Les synchronisations Strava, Garmin, Polar et Coros arrivent après.
 - ✅ **Impossible d'importer une activité après la fin** du challenge.
-- ✅ Une activité compte selon sa date de début, dans la fenêtre du challenge ; il n'y a pas de délai de grâce.
-- ✅ Pendant la semaine en cours, un participant peut modifier ou supprimer ses propres activités ; une fois la semaine terminée, plus rien ne change (voir §2.3).
+- ✅ Une activité compte selon sa date de début, dans la fenêtre du challenge, entièrement pour la semaine de son début (même si elle finit dans la suivante).
+- ✅ Un participant peut ajouter, modifier ou supprimer ses propres activités d'une semaine jusqu'à son **verrouillage, à 7 h le premier jour de la semaine suivante** (heure locale du challenge) ; ensuite plus rien ne change (voir §2.3). Une activité à cheval sur la fin d'une semaine se saisit donc une fois finie, dans cette fenêtre.
 - ✅ Toutes les activités ont une **durée** ; la distance n'est demandée que pour les sports qui en produisent (pas le yoga, par exemple).
 - ✅ La **vitesse (ou l'allure) n'est jamais saisie** : elle est calculée automatiquement à partir de la durée et de la distance.
 - ✅ **Activités cohérentes** (SC-API-084) :
@@ -106,14 +109,14 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ❓ Aucun plafond de vitesse en V1 par défaut (seulement des bornes techniques : durée et distance positives, valeurs maximales raisonnables). À revoir si des abus apparaissent.
 - ✅ Un **catalogue de sports** définit, pour chaque sport : si la distance est obligatoire, interdite ou facultative (« autre »), et son coefficient suggéré (§2.4).
 - ✅ Un utilisateur peut **saisir un sport à la main** s'il n'est pas proposé : il choisit « autre » et écrit un libellé libre (2 à 40 caractères). ✅ Un sport saisi à la main compte toujours pour le **temps** (catégorie 1) ; la distance est **facultative** : s'il y en a une, il compte aussi pour la catégorie 2 (✅ coefficient suggéré ×1, modifiable par le créateur comme les autres), sinon non.
-- ✅ **Une activité est saisie une seule fois** et compte dans **tous** les challenges où l'utilisateur est participant actif et dont la fenêtre la contient ; ✅ une activité hors de toute fenêtre est acceptée et comptera si l'utilisateur rejoint un challenge dont la fenêtre la contient (voir `docs/adr/0001-activity-scope.md`). Conséquence : une activité est non modifiable dès que sa semaine est terminée dans **l'un** de ces challenges.
+- ✅ **Une activité est saisie une seule fois** et compte dans **tous** les challenges où l'utilisateur est participant actif et dont la fenêtre la contient ; ✅ une activité hors de toute fenêtre est acceptée et comptera si l'utilisateur rejoint un challenge dont la fenêtre la contient (voir `docs/adr/0001-activity-scope.md`). Conséquence : une activité est non modifiable dès que sa semaine est verrouillée dans **l'un** de ces challenges, chacun avec son fuseau.
 
 ### 2.6 Classement et équité
 
 - ✅ Aucun handicap ni catégorie de niveau : tout le monde est traité à la même enseigne.
 - ✅ **V1 : mise à jour du classement au rafraîchissement** de l'écran (pas de temps réel instantané).
 - ✅ Égalités : classement **ex aequo** (1, 1, 3), sans départage arbitraire.
-- ✅ Résultats **figés** à la fin du challenge, sans délai de grâce. Seule exception : un compte supprimé en est retiré et les autres remontent (§2.2).
+- ✅ Résultats **figés** au verrouillage de la dernière semaine (7 h le premier jour après le challenge (le jour de `ends_at`)). Le challenge est « terminé » dès sa date de fin ; entre la fin et 7 h, le classement servi est calculé depuis les activités (la dernière semaine n'est pas encore jugée), puis les résultats figés le remplacent. Seule exception : un compte supprimé en est retiré et les autres remontent (§2.2).
 - ✅ Le classement est toujours recalculé à partir des activités brutes.
 
 ### 2.7 Badges
@@ -320,7 +323,7 @@ sport-challenge-api/
 │   │   ├── model.go                 Activity (source, identifiant externe, sport, durée, distance)
 │   │   ├── rules.go                 validation pure : bornes techniques (durée et distance positives, valeurs
 │   │   │                            maximales raisonnables), distance selon le sport ; vitesse calculée
-│   │   ├── policy.go                qui peut saisir, modifier, supprimer (auteur, semaine terminée verrouillée)
+│   │   ├── policy.go                qui peut saisir, modifier, supprimer (auteur, semaine verrouillée)
 │   │   ├── service.go               point d'entrée unique : validation, fenêtre du challenge, idempotence
 │   │   ├── repository.go
 │   │   └── handler.go
@@ -403,7 +406,7 @@ flowchart TD
 | `challenge` | `POST /challenges`, `GET /challenges` (publics et les miens), `GET /challenges/{id}`, `PATCH /challenges/{id}` (titre, description), `POST /challenges/{id}/join`, `POST /challenges/{id}/abandon`, `GET /challenges/{id}/participants`, `DELETE /challenges/{id}/participants/{userId}` (exclure), `POST /challenges/{id}/creators`, `DELETE /challenges/{id}` (créateurs : supprimer le challenge) |
 | `invitation` | `POST /challenges/{id}/invitations`, `POST /invitations/open`, `POST /invitations/accept` (le jeton dans le corps, jamais dans l'URL) |
 | `leaderboard` | `GET /challenges/{id}/leaderboard` (les 3 catégories ensemble, sans filtre ni pagination) |
-| `activity` | `POST /activities`, `GET /me/activities`, `GET /challenges/{id}/participants/{userId}/activities` (participants du challenge), `PATCH` et `DELETE /activities/{id}` (auteur, tant que la semaine n'est pas terminée dans aucun challenge où l'activité compte) |
+| `activity` | `POST /activities`, `GET /me/activities`, `GET /challenges/{id}/participants/{userId}/activities` (participants du challenge), `PATCH` et `DELETE /activities/{id}` (auteur, tant que la semaine n'est verrouillée dans aucun challenge où l'activité compte) |
 | `sport` | `GET /sports` |
 | `badge` (V1.1) | `GET /me/badges`, `GET /challenges/{id}/badges`, `POST /challenges/{id}/badges` (créateur), `PATCH` et `DELETE /challenges/{id}/badges/{badgeId}` (créateur, tant que personne ne l'a gagné) |
 | uploads (V1.1) | `POST /uploads/avatar` (URL signée) |
@@ -412,9 +415,9 @@ flowchart TD
 
 **Tâches du worker**
 
-- `close-weeks` : clôt les semaines terminées (fin de semaine atteinte), enregistre les éliminations, évalue les badges de type « plusieurs semaines de suite ».
+- `close-weeks` : clôt les semaines verrouillées (à 7 h le premier jour de la semaine suivante), enregistre les éliminations, évalue les badges de type « plusieurs semaines de suite ».
 - `retry-auth0-deletions` : rejoue la suppression chez Auth0 des comptes supprimés dont l'appel a échoué ou n'a pas eu lieu (instance arrêtée juste après la suppression).
-- `finalize-challenges` : fige les résultats des challenges terminés (statut « terminé », classements enregistrés) et clôt leur **dernière semaine**, laissée par `close-weeks` : sa clôture et ses éliminations sont enregistrées dans la même transaction que les classements figés.
+- `finalize-challenges` : fige les résultats des challenges terminés dont la dernière semaine est verrouillée (7 h le premier jour après le challenge (le jour de `ends_at`) ; classements enregistrés) et clôt leur **dernière semaine**, laissée par `close-weeks` : sa clôture et ses éliminations sont enregistrées dans la même transaction que les classements figés.
 - 🟡 Cloud Scheduler les lance **toutes les heures**, car les semaines se terminent à des heures différentes selon le fuseau de chaque challenge. Chaque tâche est **idempotente** : la relancer ne change rien si le travail est déjà fait.
 
 ### 5.3 Responsabilités des modules
@@ -428,7 +431,7 @@ flowchart TD
 | `activity` | Saisie manuelle, validation (durée obligatoire, distance selon le sport, vitesse calculée et jamais saisie), marquage « manuelle » ; une activité hors de toute fenêtre est enregistrée et ne compte nulle part (ADR 0001) |
 | `scoring` | Calcule un classement à partir d'activités et de règles, sans dépendance à la base ni à Gin |
 | `leaderboard` | Charge participants et activités, appelle les scorers, renvoie un classement par catégorie |
-| `closure` | À chaque fin de semaine : éliminations, badges « semaines de suite » ; à la fin du challenge : gel des résultats |
+| `closure` | Au verrouillage de chaque semaine : éliminations, badges « semaines de suite » ; au verrouillage de la dernière : gel des résultats |
 | `badge` | Badges créés par les créateurs d'un challenge (nom, description, condition structurée) ; évaluation à chaque nouvelle activité, attribution idempotente |
 | `integration` | (V2+) Connexion OAuth au fournisseur, réception des webhooks, import, dédoublonnage |
 
@@ -448,19 +451,19 @@ flowchart TD
 | `elimination` | participant, catégorie, semaine d'élimination, distance courue et minimum exigé cette semaine-là (trace du jugement, jamais lue pour classer) |
 | `badge_definition` | challenge, nom, description, règle (JSON structuré), créateur, date de création |
 | `badge_award` | badge, utilisateur, date d'obtention, activité déclencheuse (si applicable) ; unique (badge, utilisateur) |
-| `result_snapshot` | challenge, catégorie, classement figé en fin de challenge |
+| `result_snapshot` | challenge, catégorie, classement figé au verrouillage de la dernière semaine |
 
 Index à prévoir : `activity (utilisateur, date de début)`, `participant (challenge)`, `category (challenge)`.
 
 ### 5.5 Flux principaux
 
 1. **Création d'un challenge** : validation (fuseau, dates, catégories) → challenge, catégories et premier créateur enregistrés → le créateur devient participant.
-2. **Saisie d'une activité** (point d'entrée unique) : validation (aucune semaine terminée dans les challenges où l'activité compte : une semaine terminée est verrouillée, ADR 0001) → stockage avec source « manuelle » → aucun recalcul stocké.
+2. **Saisie d'une activité** (point d'entrée unique) : validation (aucune semaine verrouillée dans les challenges où l'activité compte : une semaine se verrouille à 7 h le premier jour de la semaine suivante, ADR 0001) → stockage avec source « manuelle » → aucun recalcul stocké.
 3. **Lecture du classement** (au rafraîchissement) : chargement des participants et, en une requête, des **totaux** des activités de la fenêtre (par participant et par semaine pour le sport de la catégorie à élimination, par participant et par sport pour les autres) → un scorer par catégorie → classement ex aequo renvoyé au client. Le calcul se fait toujours depuis les activités brutes, sommées par la base, jamais depuis des totaux stockés : les scorers ne faisant que des sommes, le résultat est identique (un test d'intégration le vérifie). ✅ Ni plafond de participants ni pagination du classement pour l'instant (SC-API-082). Mesure (benchmark `BenchmarkActivities5000`, PostgreSQL local) pour 5 000 participants, 12 semaines, 5 activités par semaine (300 000 activités) : 70 000 lignes lues au lieu de 300 000, ~125 ms au lieu de ~945 ms et 45 Mo alloués au lieu de 219 Mo par lecture.
-4. **Clôture hebdomadaire** : Cloud Scheduler lance le worker → pour chaque challenge actif dont une semaine est terminée → éliminations (catégorie à élimination) enregistrées → badges « semaines de suite » évalués.
-5. **Fin de challenge** : à l'instant de fin → statut « terminé », `result_snapshot` enregistré, avec la clôture (`week_closure`) et les éliminations (`elimination`) de la dernière semaine, comme pour les autres semaines. Plus aucune activité datée de sa fenêtre ne peut être ajoutée (sa dernière semaine est terminée, donc verrouillée).
+4. **Clôture hebdomadaire** : Cloud Scheduler lance le worker → pour chaque challenge actif dont une semaine est verrouillée (7 h le premier jour de la semaine suivante) → éliminations (catégorie à élimination) enregistrées → badges « semaines de suite » évalués.
+5. **Fin de challenge** : à l'instant de fin → statut « terminé » ; au verrouillage de la dernière semaine (7 h le premier jour après le challenge (le jour de `ends_at`)) → `result_snapshot` enregistré, avec la clôture (`week_closure`) et les éliminations (`elimination`) de la dernière semaine, comme pour les autres semaines. Ensuite plus aucune activité datée de sa fenêtre ne peut être ajoutée (sa dernière semaine est verrouillée).
 6. **Abandon d'un participant** : statut « abandonné » (volontairement, ou après l'exclusion par un créateur), éliminé de toutes les catégories, apparaît comme « a abandonné ».
-7. **Badges** : après l'enregistrement d'une activité, évaluation des badges du challenge pour son auteur ; attribution immédiate et idempotente (unique par badge et utilisateur). Les conditions « plusieurs semaines de suite » sont évaluées à la fin de chaque semaine par le worker.
+7. **Badges** : après l'enregistrement d'une activité, évaluation des badges du challenge pour son auteur ; attribution immédiate et idempotente (unique par badge et utilisateur). Les conditions « plusieurs semaines de suite » sont évaluées au verrouillage de chaque semaine par le worker.
 
 ### 5.6 API
 
@@ -519,8 +522,8 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Exclure un participant | créateurs (✅) |
 | Créer un badge | créateurs (✅) |
 | Modifier ou supprimer un badge | créateurs, tant que personne ne l'a gagné (🟡) |
-| Saisir une activité | l'utilisateur, pour lui-même, hors des semaines terminées des challenges où elle compte (✅, ADR 0001) |
-| Modifier ou supprimer une activité | son auteur, tant que sa semaine n'est terminée dans aucun challenge où elle compte (✅, ADR 0001) |
+| Saisir une activité | l'utilisateur, pour lui-même, hors des semaines verrouillées des challenges où elle compte (7 h le premier jour de la semaine suivante) (✅, ADR 0001) |
+| Modifier ou supprimer une activité | son auteur, tant que sa semaine n'est verrouillée dans aucun challenge où elle compte (✅, ADR 0001) |
 | Abandonner (« quitter ») un challenge | le participant, pour lui-même ; équivaut à un abandon définitif (✅) |
 | Supprimer le challenge | créateurs, à tout moment (✅) |
 | Voir le détail des activités (date, sport, durée, distance) d'un participant | les participants du même challenge (y compris ceux qui ont abandonné) et les créateurs (✅) ; un non-participant d'un challenge public ne voit que le classement (✅). Le participant visé peut avoir abandonné ou été exclu : ses activités de la fenêtre du challenge restent visibles jusqu'à la fin, **y compris celles saisies après son départ**, qui n'y comptent plus (✅). Jamais pour un compte supprimé : ses activités sont effacées de la base (404 `not_found`, ✅ SC-API-113, SC-API-117) |
@@ -593,8 +596,8 @@ Le détail ticket par ticket (69 tickets, critères d'acceptation, commits propo
 | 2 | Utilisateur et **Auth0** | Middlewares `Authenticate`, `CORS`, `CurrentUser` (la limitation de débit par IP et par utilisateur vient en phase 9, avant l'exposition publique) ; interface `TokenVerifier` ; **access token** de l'API (pas l'ID token) ; tenant Auth0 unique pour le local et la production (région Canada, code à usage unique par e-mail) ; création de l'utilisateur au premier login, idempotente ; connexion **obligatoire** partout sauf `/health` et `/ready` |
 | 3 | Catalogue de sports | Données de référence idempotentes ; coefficients copiés dans le challenge à sa création |
 | 4 | Challenges et catégories | **`policy.go`** (matrice des droits §5.7) ; **aucune autorisation dans un middleware** ; 3 catégories figées ; inscription jusqu'à la fin de la semaine 1 ; plusieurs créateurs ; titre et description seuls modifiables ; test « interdit » pour chaque règle |
-| 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine terminée verrouillée** ; modification et suppression tant que sa semaine n'est terminée dans aucun challenge où elle compte ; route de détail des activités des participants (visible des seuls participants du challenge) |
-| 6 | Scoring et classement | Tests d'abord ; catégorie 3 : minimum = distance réelle de la semaine précédente + X, aucune élimination en semaine 1, sans délai de grâce ; classement des éliminés (dernier éliminé devant, puis km) ; ex aequo |
+| 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine verrouillée à 7 h le premier jour de la suivante** ; modification et suppression tant que sa semaine n'est verrouillée dans aucun challenge où elle compte ; route de détail des activités des participants (visible des seuls participants du challenge) |
+| 6 | Scoring et classement | Tests d'abord ; catégorie 3 : minimum = distance réelle de la semaine précédente + X, aucune élimination en semaine 1, jugée au verrouillage de la semaine (7 h le premier jour de la semaine suivante) ; classement des éliminés (dernier éliminé devant, puis km) ; ex aequo |
 | 7 | Clôtures et worker | `close-weeks` et `finalize-challenges` toutes les heures, **idempotents** ; résultat indépendant du moment où le worker passe ; horloge réglable hors production |
 | 8 | Invitations (badges reportés en V1.1) | Invitations avec la règle « les participants peuvent inviter » ; les badges (conditions structurées, évaluation après chaque activité) viennent en V1.1 |
 | 9 | Limitation de débit et déploiement | `RateLimitIP` et `RateLimitUser`, Docker, compléments de CI/CD, infrastructure de production (configurée à la main), alerte de budget ; jamais de modification de l'infrastructure sans demande |
@@ -617,7 +620,7 @@ Garmin et Coros (demandes de partenariat à lancer tôt, les délais sont longs)
 
 ## 8. Questions ouvertes
 
-- ❓ (V2) Synchronisations tardives (Garmin, Coros) : sans délai de grâce, une activité reçue après la fin de sa semaine ne compte pas. À revisiter à l'arrivée des synchronisations.
+- ❓ (V2) Synchronisations tardives (Garmin, Coros) : une activité reçue après le verrouillage de sa semaine (7 h le premier jour de la semaine suivante) ne compte pas. À revisiter à l'arrivée des synchronisations.
 - ❓ Agrégateur ou connexions directes pour les synchronisations (à trancher avant la V2).
 - ✅ Package d'erreurs maison (Faunadex) : examiné, non repris. `platform/apperr` suit le contrat du §5.8 ; ses messages FR/EN pourront alimenter les fichiers de traduction du frontend. Le `translator` (`go-i18n`, fichiers `.toml`) pourra servir plus tard aux textes émis par le serveur (courriels, notifications).
 - ❓ Pseudos qui se ressemblent (`marie.92`, `marie_92`, `marie-92`) et pseudos réservés (`admin`, `support`…) : faut-il les refuser ? Aujourd'hui seule la casse est ignorée pour l'unicité.
