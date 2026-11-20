@@ -22,7 +22,9 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Le créateur choisit la durée en **nombre entier de semaines, de 2 à 52** (ex. 6 semaines) : pas de dernière semaine partielle.
 - ✅ Le challenge commence à minuit (heure locale) d'un jour choisi entre **aujourd'hui et un an plus tard**, dans son fuseau.
 - ✅ Là où un changement d'heure saute minuit (Chili, Égypte, Liban…), le jour commence au **premier instant qui existe** ce jour-là (par exemple 01:00) : jamais la veille. La même règle vaut pour chaque début de semaine.
-- ✅ Un challenge a **toujours les 3 catégories** ; le créateur règle seulement l'incrément X de la catégorie 3.
+- ✅ **Catégories à la carte** (décision du 2026-11-20, SC-API-131) : un challenge a **toujours** la catégorie temps cumulé ; le créateur ajoute, s'il le veut, la distance cumulée, l'élimination et la catégorie Points, dans n'importe quelle combinaison (§2.3). Un challenge peut n'avoir que le temps cumulé.
+- ✅ **Sport de référence** (SC-API-131) : le créateur choisit, à la création, le sport de référence du challenge parmi les sports du catalogue dont la distance est obligatoire (course, vélo, natation, aviron…) ; **course par défaut**. Les distances de la distance cumulée et du critère de distance des Points y sont ramenées (§2.4), et l'élimination porte sur lui (§2.3).
+- ✅ Catégories, sport de référence et paramètres (coefficients, incrément X, réglages de la catégorie Points) sont **figés à la création**.
 - ✅ **Plusieurs créateurs** possibles pour un même challenge.
 - ✅ Visibilité :
   - **Public** : accès libre, listé sur la page d'accueil de l'app.
@@ -43,21 +45,24 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Un compte supprimé est traité comme un abandon dans les challenges à venir ou en cours, et il est **retiré partout** dans tous ses challenges, terminés compris : la personne ne veut plus que ses données soient vues, elle ne peut plus rien gagner et n'est plus comptée. Il n'apparaît plus dans les classements, ni dans la liste ni le nombre des participants, et ses activités ne sont plus visibles (404 `not_found`, comme pour quelqu'un qui n'a jamais rejoint, y compris pour l'exclure ; l'ajouter comme créateur répond `not_active_participant`). Dans un challenge terminé, les autres participants remontent dans les résultats figés (les ex aequo restent ex aequo : 1, 1, 3). ✅ Ses données sont **effacées** de la base, dans la transaction de la suppression : activités, participations, éliminations, rôles de créateur, liens d'invitation et ses entrées dans les résultats figés (les rangs, eux, restent recalculés à la lecture et ne sont jamais réécrits). Seuls les challenges qu'il a créés restent, rattachés au compte anonymisé (voir §6). Un compte déjà supprimé quand le worker fige les résultats n'y est pas inscrit.
 - ✅ **Dernier créateur** : la suppression d'un compte est **refusée** (`last_creator`, avec la liste des challenges) tant qu'il est le dernier créateur, ayant encore un compte, d'un challenge à venir ou en cours. La personne désigne d'abord un autre créateur (« ajouter un créateur »), ou, s'il n'y a personne à désigner, supprime le challenge elle-même. Un challenge terminé ne bloque rien. Un co-créateur qui a abandonné garde ses droits de créateur (§5.7) et compte donc comme autre créateur. Les liens d'invitation d'un compte supprimé sont **effacés** : une personne qui avait ouvert le lien sans rejoindre perd l'accès au challenge privé ; celles qui ont déjà rejoint restent participantes.
 - ✅ Les activités faites avant l'inscription, mais dans la fenêtre du challenge, comptent.
+- ✅ **Catégorie Points et suppression d'un compte** (SC-API-131) : les points n'étant jamais stockés (§2.3), un compte supprimé avant le gel des résultats (7 h le premier jour après le challenge, §2.6) est retiré de **tous** les mini-classements hebdomadaires, semaines verrouillées comprises : les suivants remontent et reçoivent les points de la place gagnée (personne ne perd de points). Après le gel, comme dans les autres catégories, seuls les rangs se recalculent : les points figés ne bougent plus.
 
 ### 2.3 Catégories et podiums
 
-Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, donc plusieurs gagnants par challenge. Les catégories sont figées à la création.
+Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles que le créateur a choisies (§2.1). **Chaque catégorie a son propre podium**, donc plusieurs gagnants par challenge. Les catégories sont figées à la création et affichées dans l'ordre du tableau.
 
-| # | Catégorie | Activités acceptées | Classement |
-|---|---|---|---|
-| 1 | **Temps cumulé** | Toutes les activités, tous sports confondus (course, yoga, escalade, aviron…) | Plus de temps cumulé |
-| 2 | **Distance cumulée** | Toutes les activités qui produisent des km, ramenées à une distance de course si le sport est plus rapide | Plus de distance équivalente cumulée |
-| 3 | **Course avec élimination** | Course uniquement, en distance | Voir ci-dessous |
+| # | Catégorie | Présence | Activités acceptées | Classement |
+|---|---|---|---|---|
+| 1 | **Temps cumulé** | toujours | Toutes les activités, tous sports confondus (course, yoga, escalade, aviron…) | Plus de temps cumulé |
+| 2 | **Distance cumulée** | au choix | Toutes les activités qui produisent des km, ramenées à une distance du sport de référence si le sport est plus rapide (§2.4) | Plus de distance équivalente cumulée |
+| 3 | **Élimination** | au choix | Sport de référence uniquement, en distance réelle | Voir ci-dessous |
+| 4 | **Points** | au choix | Selon les critères choisis | Plus de points (voir plus bas) |
 
-**Catégorie 3 : course avec élimination** (la distance doit augmenter chaque semaine) :
+**Élimination** (la distance du sport de référence doit augmenter chaque semaine ; avec la course pour référence, c'est l'ancienne « course avec élimination ») :
+- ✅ Les règles ci-dessous parlent de course et de distance courue : elles valent pour le **sport de référence** du challenge, quel qu'il soit (§2.1), en distance réelle, sans coefficient.
 - ✅ **X** est un **incrément en km**, choisi par le créateur à la création du challenge (ex. X = 2 km).
 - ✅ Règle : la distance courue en semaine s+1 doit être **au minimum** égale à la distance de la semaine s plus X. Exemple avec X = 2 : semaine 1 = 5 km, donc semaine 2 au moins 7 km, puis semaine 3 au moins (semaine 2) + 2 km, et ainsi de suite jusqu'à la fin du challenge.
-- ✅ Au verrouillage d'une semaine (voir plus bas), si cette condition n'est pas remplie, la personne est éliminée **de cette catégorie seulement** et reste en lice dans les deux autres.
+- ✅ Au verrouillage d'une semaine (voir plus bas), si cette condition n'est pas remplie, la personne est éliminée **de cette catégorie seulement** et reste en lice dans les autres catégories du challenge.
 - ✅ Le gagnant est celui qui a le plus de km cumulés.
 - ✅ La « distance de la semaine s » est la distance **réellement courue** par la personne en semaine s. **Si elle court plus que le minimum requis, cette distance devient sa nouvelle base de calcul** : avec X = 2, minimum de 7 km en semaine 2 ; si elle court 10 km, le minimum de la semaine 3 est 12 km. Il n'y a donc pas de distance de départ à régler, et personne n'est éliminé en semaine 1 (pas de référence).
 - ✅ Le minimum de la semaine s+1 est **définitif au verrouillage de la semaine s** (à 7 h le premier jour de la semaine suivante) ; avant, il est provisoire, puisqu'une course de la semaine s peut encore être saisie.
@@ -71,14 +76,25 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ L'élimination d'une semaine est jugée **à son verrouillage** (fuseau du challenge), jamais avant : le délai de grâce va jusqu'à 7 h, heure locale, le premier jour de la semaine suivante. Jugée ensuite, elle ne change plus.
 - ✅ Entre la fin de la semaine s et son verrouillage, le classement et « Mes défis » montrent la **semaine s+1** (celle de l'horloge) : personne n'est encore éliminé pour la semaine s, et le minimum de la semaine s+1 est **provisoire** (distance actuelle de la semaine s + X) ; il peut encore monter jusqu'à 7 h. Le statut live de la semaine s+1 se calcule avec ce minimum provisoire.
 - ✅ Le statut live affiche « objectif atteint » dès que la distance de la semaine atteint le minimum ; sinon « à risque » quand il reste **24 h ou moins** avant la fin de la semaine, et « en cours » avant. Aucun statut en semaine 1 (pas de minimum). Le seuil de 24 h est un paramètre de configuration.
-- ✅ La liste « Mes défis » montre, pour chaque challenge en cours où la personne participe encore, sa semaine (numéro, fin, et en catégorie 3 la distance, le minimum et le statut live ci-dessus) et son **rang dans chacune des 3 catégories**, sous la forme « rang sur nombre de classés » (ex aequo compris : 1, 1, 3 ; les abandons et les comptes supprimés ne sont pas comptés). Les valeurs sont celles du classement au même instant. Rien pour un challenge à venir ou terminé, ni pour qui a abandonné.
+- ✅ La liste « Mes défis » montre, pour chaque challenge en cours où la personne participe encore, sa semaine (numéro, fin, et dans l'élimination la distance, le minimum et le statut live ci-dessus ; dans la catégorie Points, ses points provisoires) et son **rang dans chacune des catégories du challenge**, sous la forme « rang sur nombre de classés » (ex aequo compris : 1, 1, 3 ; les abandons et les comptes supprimés ne sont pas comptés). Les valeurs sont celles du classement au même instant. Rien pour un challenge à venir ou terminé, ni pour qui a abandonné.
 
-### 2.4 Équivalences de distance (catégorie 2, distance cumulée)
+**Catégorie Points** (décision du 2026-11-20, SC-API-131) :
+- ✅ Le créateur coche, à la création, les **critères** de la catégorie (au moins un) :
+  1. **séance la plus longue en temps** (tous les sports) ;
+  2. **séance la plus longue en distance équivalente** (distance ramenée au sport de référence avec les coefficients du challenge, comme la distance cumulée, §2.4 ; une activité sans distance ou d'un sport sans coefficient n'y compte pas) ;
+  3. **nombre de séances** de la semaine ; une séance ne compte que si sa durée atteint un **minimum fixé par le créateur** (pré-rempli à 20 min, de 1 à 180 min).
+- ✅ Chaque semaine, chaque critère donne un **mini-classement**, et les points vont au **top 5** (10, 8, 6, 4, 2) ou au **top 10** (25, 18, 15, 12, 10, 8, 6, 4, 2, 1), au choix du créateur.
+- ✅ Ex aequo dans un mini-classement : même rang et mêmes points (1, 1, 3), y compris à la limite du top (trois ex aequo au 5ᵉ rang reçoivent chacun les points du 5ᵉ). Une valeur nulle (aucune séance qui compte) ne marque pas.
+- ✅ Les points d'une semaine sont **acquis à son verrouillage** (7 h, heure locale, le premier jour de la semaine suivante), semaine 1 comprise. Avant, ils sont **provisoires** : le classement les montre à part (« 43 pts + 12 provisoires »), et le rang se calcule sur les points acquis seuls. Entre la fin d'une semaine et son verrouillage, ses points restent provisoires.
+- ✅ Le gagnant a le plus de points acquis à la fin ; égalité : ex aequo (1, 1, 3). Un participant qui abandonne (ou qui est exclu) **reste** dans les mini-classements des semaines verrouillées avant son départ : les points de ces semaines ne bougent pas, ni les siens ni ceux des autres. Il sort des mini-classements des semaines verrouillées ensuite, et apparaît « a abandonné », sans rang ni total, comme dans les autres catégories (décision du 2026-11-20). Seule la suppression d'un compte, qui efface ses activités, redistribue les points (§2.2).
+- ✅ Les points ne sont **jamais stockés** : ils se recalculent à la lecture depuis les activités, puis se figent avec les autres catégories au verrouillage de la dernière semaine (§2.6). Les points acquis ne baissent jamais ; ils ne montent après coup que si un compte est supprimé avant le gel (§2.2).
 
-- ✅ Les activités **plus lentes que la course** (marche, randonnée, natation) comptent **sans coefficient** (1 pour 1).
-- ✅ Les activités **plus rapides** sont ramenées à une distance de course :
+### 2.4 Équivalences de distance (distance cumulée et critère de distance des Points)
 
-| Activité | Coefficient |
+- ✅ Les distances sont ramenées à une distance du **sport de référence** du challenge (§2.1 ; course par défaut).
+- ✅ Les coefficients du catalogue sont exprimés **par rapport à la course** :
+
+| Activité | Coefficient (référence course) |
 |---|---|
 | Course | ×1 |
 | Marche, randonnée, natation et autres sports à km plus lents | ×1 |
@@ -87,11 +103,13 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 | Roller | ×0,5 |
 | Ski de fond | ×0,5 |
 
-- ✅ Ce sont des **suggestions** : le catalogue propose un coefficient pour chaque sport à distance, et le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**. La course reste la référence : son coefficient est toujours ×1 et ne s'envoie pas à la création (refusé même à 1).
+- ✅ **Autre référence** (décision du 2026-11-20, SC-API-131) : le coefficient suggéré d'un sport est `min(1, coefficient du sport / coefficient de la référence)`, arrondi à deux décimales (la moitié vers le haut) et jamais sous 0,1. Les activités **plus lentes que la référence** comptent donc **sans coefficient** (1 pour 1), comme la marche par rapport à la course ; aucune suggestion n'est majorée. Exemples : référence vélo → vélo ×1, course ×1, aviron ×1 ; référence aviron → vélo ×0,6, course ×1.
+- ✅ Ce sont des **suggestions** : le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**. Le sport de référence vaut toujours ×1 et son coefficient ne s'envoie pas à la création (refusé même à 1).
+- ✅ Les coefficients existent dès que la distance cumulée **ou** le critère de distance de la catégorie Points est choisi ; sinon il n'y en a pas, et la création les refuse.
 - ✅ Les coefficients sont **figés à la création du challenge** : ni une modification ultérieure du catalogue ni les créateurs ne les changent pour un challenge en cours.
 - ✅ La distance équivalente est **sommée exactement**, puis **arrondie au mètre** (demi-mètre vers le haut) une seule fois, sur le total de chaque participant : deux totaux à moins d'un mètre l'un de l'autre peuvent être ex aequo.
-- ✅ Un sport à distance **ajouté au catalogue après la création** d'un challenge n'a pas de coefficient figé dans ce challenge : ses activités comptent pour le temps cumulé, mais pas pour la distance cumulée.
-- Conséquence assumée : la marche compte pleinement, donc un marcheur peut battre un coureur en distance pure.
+- ✅ Un sport à distance **ajouté au catalogue après la création** d'un challenge n'a pas de coefficient figé dans ce challenge : ses activités comptent pour le temps cumulé, mais ni pour la distance cumulée ni pour le critère de distance des Points.
+- Conséquence assumée : la marche compte pleinement, donc un marcheur peut battre un coureur en distance pure ; de même, dans un challenge vélo, 10 km courus valent 10 km de vélo.
 
 ### 2.5 Activités
 
@@ -108,7 +126,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - 🟡 Les activités saisies à la main sont marquées « manuelle » (surtout utile à partir de la V2, quand des activités synchronisées s'ajoutent).
 - ❓ Aucun plafond de vitesse en V1 par défaut (seulement des bornes techniques : durée et distance positives, valeurs maximales raisonnables). À revoir si des abus apparaissent.
 - ✅ Un **catalogue de sports** définit, pour chaque sport : si la distance est obligatoire, interdite ou facultative (« autre »), et son coefficient suggéré (§2.4).
-- ✅ Un utilisateur peut **saisir un sport à la main** s'il n'est pas proposé : il choisit « autre » et écrit un libellé libre (2 à 40 caractères). ✅ Un sport saisi à la main compte toujours pour le **temps** (catégorie 1) ; la distance est **facultative** : s'il y en a une, il compte aussi pour la catégorie 2 (✅ coefficient suggéré ×1, modifiable par le créateur comme les autres), sinon non.
+- ✅ Un utilisateur peut **saisir un sport à la main** s'il n'est pas proposé : il choisit « autre » et écrit un libellé libre (2 à 40 caractères). ✅ Un sport saisi à la main compte toujours pour le **temps cumulé** ; la distance est **facultative** : s'il y en a une, il compte aussi pour la distance cumulée (✅ coefficient de catalogue ×1, ramené au sport de référence comme les autres, §2.4, et modifiable par le créateur), sinon non.
 - ✅ **Une activité est saisie une seule fois** et compte dans **tous** les challenges où l'utilisateur est participant actif et dont la fenêtre la contient ; ✅ une activité hors de toute fenêtre est acceptée et comptera si l'utilisateur rejoint un challenge dont la fenêtre la contient (voir `docs/adr/0001-activity-scope.md`). Conséquence : une activité est non modifiable dès que sa semaine est verrouillée dans **l'un** de ces challenges, chacun avec son fuseau.
 
 ### 2.6 Classement et équité
@@ -331,9 +349,10 @@ sport-challenge-api/
 │   ├── scoring/                     Go pur, sans dépendance : testé sans base de données
 │   │   ├── types.go                 Activity, Window, Entry, interface Scorer
 │   │   ├── window.go                semaines découpées dans le fuseau du challenge
-│   │   ├── distance.go              catégorie 2 : distance cumulée (coefficients)
+│   │   ├── distance.go              distance cumulée (coefficients)
 │   │   ├── duration.go              catégorie durée
 │   │   ├── elimination.go           catégorie à élimination
+│   │   ├── points.go                (cible, SC-API-135) catégorie Points (mini-classements hebdomadaires, barème)
 │   │   └── ranks.go                 classement ex aequo (1, 1, 3)
 │   │
 │   ├── leaderboard/
@@ -405,7 +424,7 @@ flowchart TD
 | `user` | `GET /me`, `PATCH /me`, `DELETE /me` |
 | `challenge` | `POST /challenges`, `GET /challenges` (publics et les miens), `GET /challenges/{id}`, `PATCH /challenges/{id}` (titre, description), `POST /challenges/{id}/join`, `POST /challenges/{id}/abandon`, `GET /challenges/{id}/participants`, `DELETE /challenges/{id}/participants/{userId}` (exclure), `POST /challenges/{id}/creators`, `DELETE /challenges/{id}` (créateurs : supprimer le challenge) |
 | `invitation` | `POST /challenges/{id}/invitations`, `POST /invitations/open`, `POST /invitations/accept` (le jeton dans le corps, jamais dans l'URL) |
-| `leaderboard` | `GET /challenges/{id}/leaderboard` (les 3 catégories ensemble, sans filtre ni pagination) |
+| `leaderboard` | `GET /challenges/{id}/leaderboard` (toutes les catégories du challenge ensemble, sans filtre ni pagination) |
 | `activity` | `POST /activities`, `GET /me/activities`, `GET /challenges/{id}/participants/{userId}/activities` (participants du challenge), `PATCH` et `DELETE /activities/{id}` (auteur, tant que la semaine n'est verrouillée dans aucun challenge où l'activité compte) |
 | `sport` | `GET /sports` |
 | `badge` (V1.1) | `GET /me/badges`, `GET /challenges/{id}/badges`, `POST /challenges/{id}/badges` (créateur), `PATCH` et `DELETE /challenges/{id}/badges/{badgeId}` (créateur, tant que personne ne l'a gagné) |
@@ -440,9 +459,9 @@ flowchart TD
 | Entité | Champs clés |
 |---|---|
 | `users` | id, identifiant du fournisseur d'auth, pseudo, prénom, nom, e-mail, avatar, langue |
-| `challenges` | id, titre, description, visibilité, participants peuvent inviter (`members_can_invite`), fuseau, début et fin (UTC), créé par, suppression logique (`deleted_at`) ; le statut (à venir, en cours, terminé) se déduit des dates |
+| `challenges` | id, titre, description, visibilité, participants peuvent inviter (`members_can_invite`), fuseau, sport de référence (`reference_sport`, course par défaut), début et fin (UTC), créé par, suppression logique (`deleted_at`) ; le statut (à venir, en cours, terminé) se déduit des dates |
 | `challenge_creators` | challenge, utilisateur |
-| `categories` | challenge, type (temps cumulé, distance cumulée, course avec élimination), position, paramètres figés (`params`) ; le nom est traduit par le frontend |
+| `categories` | challenge, type (temps cumulé, distance cumulée, élimination, points), position (fixe par type, de 1 à 4), paramètres figés (`params` : coefficients, sport et incrément X de l'élimination, critères, barème et durée minimale des Points) ; le nom est traduit par le frontend |
 | `participants` | challenge, utilisateur, statut (actif ou abandonné), date d'inscription, date d'abandon |
 | `invitation` | challenge, invité par, empreinte du jeton (jamais le jeton), expiration (fin de la semaine 1), date de révocation (`revoked_at`, prévue par le schéma : aucune route ne révoque une invitation pour l'instant) ; les personnes qui ont ouvert le lien (`invitation_recipients`) |
 | `sports` | code, mode de distance (obligatoire, interdite, facultative), coefficient suggéré (libellés traduits par le frontend) |
@@ -459,7 +478,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 
 1. **Création d'un challenge** : validation (fuseau, dates, catégories) → challenge, catégories et premier créateur enregistrés → le créateur devient participant.
 2. **Saisie d'une activité** (point d'entrée unique) : validation (aucune semaine verrouillée dans les challenges où l'activité compte : une semaine se verrouille à 7 h le premier jour de la semaine suivante, ADR 0001) → stockage avec source « manuelle » → aucun recalcul stocké.
-3. **Lecture du classement** (au rafraîchissement) : chargement des participants et, en une requête, des **totaux** des activités de la fenêtre (par participant et par semaine pour le sport de la catégorie à élimination, par participant et par sport pour les autres) → un scorer par catégorie → classement ex aequo renvoyé au client. Le calcul se fait toujours depuis les activités brutes, sommées par la base, jamais depuis des totaux stockés : les scorers ne faisant que des sommes, le résultat est identique (un test d'intégration le vérifie). ✅ Ni plafond de participants ni pagination du classement pour l'instant (SC-API-082). Mesure (benchmark `BenchmarkActivities5000`, PostgreSQL local) pour 5 000 participants, 12 semaines, 5 activités par semaine (300 000 activités) : 70 000 lignes lues au lieu de 300 000, ~125 ms au lieu de ~945 ms et 45 Mo alloués au lieu de 219 Mo par lecture.
+3. **Lecture du classement** (au rafraîchissement) : chargement des participants et, en une requête, des **totaux** des activités de la fenêtre (par participant et par semaine pour le sport de la catégorie à élimination, par participant et par sport pour les autres) → un scorer par catégorie → classement ex aequo renvoyé au client. Le calcul se fait toujours depuis les activités brutes, sommées par la base, jamais depuis des totaux stockés : les scorers ne faisant que des sommes, le résultat est identique (un test d'intégration le vérifie). Seule exception (à partir de SC-API-136) : un challenge qui a une catégorie Points lit chaque activité (séance la plus longue, nombre de séances), sans regroupement ; les autres challenges gardent les totaux. ✅ Ni plafond de participants ni pagination du classement pour l'instant (SC-API-082). Mesure (benchmark `BenchmarkActivities5000`, PostgreSQL local) pour 5 000 participants, 12 semaines, 5 activités par semaine (300 000 activités) : 70 000 lignes lues au lieu de 300 000, ~125 ms au lieu de ~945 ms et 45 Mo alloués au lieu de 219 Mo par lecture.
 4. **Clôture hebdomadaire** : Cloud Scheduler lance le worker → pour chaque challenge actif dont une semaine est verrouillée (7 h le premier jour de la semaine suivante) → éliminations (catégorie à élimination) enregistrées → badges « semaines de suite » évalués.
 5. **Fin de challenge** : à l'instant de fin → statut « terminé » ; au verrouillage de la dernière semaine (7 h le premier jour après le challenge (le jour de `ends_at`)) → `result_snapshot` enregistré, avec la clôture (`week_closure`) et les éliminations (`elimination`) de la dernière semaine, comme pour les autres semaines. Ensuite plus aucune activité datée de sa fenêtre ne peut être ajoutée (sa dernière semaine est verrouillée).
 6. **Abandon d'un participant** : statut « abandonné » (volontairement, ou après l'exclusion par un créateur), éliminé de toutes les catégories, apparaît comme « a abandonné ».
@@ -595,9 +614,9 @@ Le détail ticket par ticket (critères d'acceptation, commits proposés) est da
 | 1 | Serveur minimal | `config` réduite aux variables utilisées, `slog`, middlewares `Recovery`, `RequestID`, `Logger`, `GET /health` et `/ready`. Le reste du socle (**`apperr`**, §5.8, `clock` injectable, transactions, pagination, `CORS`) arrive avec la première fonctionnalité qui l'utilise |
 | 2 | Utilisateur et **Auth0** | Middlewares `Authenticate`, `CORS`, `CurrentUser` (la limitation de débit par IP et par utilisateur vient en phase 9, avant l'exposition publique) ; interface `TokenVerifier` ; **access token** de l'API (pas l'ID token) ; tenant Auth0 unique pour le local et la production (région Canada, code à usage unique par e-mail) ; création de l'utilisateur au premier login, idempotente ; connexion **obligatoire** partout sauf `/health` et `/ready` |
 | 3 | Catalogue de sports | Données de référence idempotentes ; coefficients copiés dans le challenge à sa création |
-| 4 | Challenges et catégories | **`policy.go`** (matrice des droits §5.7) ; **aucune autorisation dans un middleware** ; 3 catégories figées ; inscription jusqu'à la fin de la semaine 1 ; plusieurs créateurs ; titre et description seuls modifiables ; test « interdit » pour chaque règle |
+| 4 | Challenges et catégories | **`policy.go`** (matrice des droits §5.7) ; **aucune autorisation dans un middleware** ; catégories figées (3 en V1, à la carte depuis SC-API-131) ; inscription jusqu'à la fin de la semaine 1 ; plusieurs créateurs ; titre et description seuls modifiables ; test « interdit » pour chaque règle |
 | 5 | Activités | **Point d'entrée unique** ; `source` et `external_id` ; **semaine verrouillée à 7 h le premier jour de la suivante** ; modification et suppression tant que sa semaine n'est verrouillée dans aucun challenge où elle compte ; route de détail des activités des participants (visible des seuls participants du challenge) |
-| 6 | Scoring et classement | Tests d'abord ; catégorie 3 : minimum = distance réelle de la semaine précédente + X, aucune élimination en semaine 1, jugée au verrouillage de la semaine (7 h le premier jour de la semaine suivante) ; classement des éliminés (dernier éliminé devant, puis km) ; ex aequo |
+| 6 | Scoring et classement | Tests d'abord ; élimination : minimum = distance réelle de la semaine précédente + X, aucune élimination en semaine 1, jugée au verrouillage de la semaine (7 h le premier jour de la semaine suivante) ; classement des éliminés (dernier éliminé devant, puis km) ; ex aequo |
 | 7 | Clôtures et worker | `close-weeks` et `finalize-challenges` toutes les heures, **idempotents** ; résultat indépendant du moment où le worker passe ; horloge réglable hors production |
 | 8 | Invitations (badges reportés en V1.1) | Invitations avec la règle « les participants peuvent inviter » ; les badges (conditions structurées, évaluation après chaque activité) viennent en V1.1 |
 | 9 | Limitation de débit et déploiement | `RateLimitIP` et `RateLimitUser`, Docker, compléments de CI/CD, infrastructure de production (configurée à la main), alerte de budget ; jamais de modification de l'infrastructure sans demande |
