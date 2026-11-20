@@ -313,8 +313,11 @@ func TestListParticipants(t *testing.T) {
 	first, _ := items[0].(map[string]any)
 	second, _ := items[1].(map[string]any)
 	if len(items) != 2 || first["pseudo"] != "marie_92" || first["first_name"] != "Marie-Ève" || first["last_name"] != "Tremblay" ||
-		first["status"] != "active" || first["avatar"] != nil {
-		t.Fatalf("items %v, want 2 items, the first with its pseudo and names", out["items"])
+		first["status"] != "active" || first["avatar"] != nil || first["is_creator"] != true {
+		t.Fatalf("items %v, want 2 items, the first a creator with its pseudo and names", out["items"])
+	}
+	if second["is_creator"] != false {
+		t.Fatalf("second item %v, want is_creator false", second)
 	}
 	// Never the e-mail of another user.
 	if _, ok := first["email"]; ok {

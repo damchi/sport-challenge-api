@@ -282,11 +282,13 @@ func (r *Repository) Memberships(ctx context.Context, userID string) ([]UserChal
 
 // Participants returns up to limit participations of challenge id, abandoned
 // ones included and those of deleted accounts left out, in order of
-// registration (joined_at, user_id), after the position after when set.
-// Pseudos are not read: they belong to module user.
+// registration (joined_at, user_id), after the position after when set,
+// each telling whether it is a creator. Pseudos are not read: they belong to
+// module user.
 func (r *Repository) Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error) {
 	q := r.db.WithContext(ctx).Table("participants p").
-		Select("p.user_id, p.status, p.joined_at").
+		Select("p.user_id, p.status, p.joined_at, "+
+			"EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = p.challenge_id AND user_id = p.user_id) AS creator").
 		Joins("JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL").
 		Where("p.challenge_id = ?", id)
 	if after != nil {
@@ -296,13 +298,14 @@ func (r *Repository) Participants(ctx context.Context, id string, limit int, aft
 		UserID   string
 		Status   string
 		JoinedAt time.Time
+		Creator  bool
 	}
 	if err := q.Order("p.joined_at, p.user_id").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list participants: %w", err)
 	}
 	items := make([]Participant, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, Participant{UserID: row.UserID, Status: ParticipantStatus(row.Status), JoinedAt: row.JoinedAt})
+		items = append(items, Participant{UserID: row.UserID, Status: ParticipantStatus(row.Status), IsCreator: row.Creator, JoinedAt: row.JoinedAt})
 	}
 	return items, nil
 }
