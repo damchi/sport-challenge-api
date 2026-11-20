@@ -522,6 +522,23 @@ func abandonParticipation(tx *gorm.DB, id, userID string, at time.Time) error {
 	return nil
 }
 
+// CategoriesOf returns the categories of each of ids, in position order, in
+// one query.
+func (r *Repository) CategoriesOf(ctx context.Context, ids []string) (map[string][]Category, error) {
+	out := make(map[string][]Category, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var cats []Category
+	if err := r.db.WithContext(ctx).Where("challenge_id IN ?", ids).Order("challenge_id, position").Find(&cats).Error; err != nil {
+		return nil, fmt.Errorf("read categories: %w", err)
+	}
+	for _, c := range cats {
+		out[c.ChallengeID] = append(out[c.ChallengeID], c)
+	}
+	return out, nil
+}
+
 // Categories returns the categories of challenge id, in position order.
 func (r *Repository) Categories(ctx context.Context, id string) ([]Category, error) {
 	var cats []Category

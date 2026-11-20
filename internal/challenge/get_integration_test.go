@@ -108,7 +108,7 @@ func TestGetRegistrationDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	clk := clock.NewFake(deadline.Add(-time.Second))
-	reader := NewService(NewRepository(gdb), nil, nil, clk)
+	reader := NewService(NewRepository(gdb), nil, nil, fakeStandings{}, clk)
 
 	d, err := reader.Get(t.Context(), outsider, c.ID)
 	if err != nil {
@@ -138,7 +138,7 @@ func TestGetInvited(t *testing.T) {
 		t.Fatal(err)
 	}
 	clk := clock.NewFake(now)
-	svc := NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, clk)
+	svc := NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, fakeStandings{}, clk)
 	c, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Visibility = VisibilityPrivate }))
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestGetInvitedByADeletedAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, clock.NewFake(now))
+	svc := NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, fakeStandings{}, clock.NewFake(now))
 	c, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Visibility = VisibilityPrivate }))
 	if err != nil {
 		t.Fatal(err)
@@ -384,7 +384,7 @@ func joinFixture(t *testing.T) (svc *Service, clk *clock.FakeClock, pool *pgxpoo
 		t.Fatal(err)
 	}
 	clk = clock.NewFake(now)
-	return NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, clk), clk, pool, c.ID
+	return NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, fakeStandings{}, clk), clk, pool, c.ID
 }
 
 func insertProfile(t *testing.T, pool *pgxpool.Pool, subject string) string {

@@ -68,6 +68,7 @@ Un challenge a **3 catégories**. **Chaque catégorie a son propre podium**, don
 - ✅ L'élimination est jugée à l'instant exact de la fin de la semaine (fuseau du challenge), sans délai de grâce.
 - ✅ Une semaine terminée est **verrouillée** : aucune activité datée de cette semaine ne peut plus être ajoutée, modifiée ni supprimée (saisie manuelle comprise), puisque l'élimination est immédiate et définitive. C'est l'horloge qui fait foi, pas le passage du worker.
 - ✅ Le statut live affiche « objectif atteint » dès que la distance de la semaine atteint le minimum ; sinon « à risque » quand il reste **24 h ou moins** avant la fin de la semaine, et « en cours » avant. Aucun statut en semaine 1 (pas de minimum). Le seuil de 24 h est un paramètre de configuration.
+- ✅ La liste « Mes défis » montre, pour chaque challenge en cours où la personne participe encore, sa semaine (numéro, fin, et en catégorie 3 la distance, le minimum et le statut live ci-dessus) et son **rang dans chacune des 3 catégories**, sous la forme « rang sur nombre de classés » (ex aequo compris : 1, 1, 3 ; les abandons et les comptes supprimés ne sont pas comptés). Les valeurs sont celles du classement au même instant. Rien pour un challenge à venir ou terminé, ni pour qui a abandonné.
 
 ### 2.4 Équivalences de distance (catégorie 2, distance cumulée)
 

@@ -88,13 +88,18 @@ func run() error {
 		return err
 	}
 	// Each needs the other: deleting an account abandons its challenges and
-	// erases its rows in the other modules, which read the profiles. The
-	// closures resolve the services once set.
+	// erases its rows in the other modules, which read the profiles; the
+	// challenge list reads the standings from the leaderboard, which reads
+	// the challenges. The closures resolve the services once set.
 	var (
-		challenges  *challenge.Service
-		activities  *activity.Service
-		invitations *invitation.Service
+		challenges   *challenge.Service
+		activities   *activity.Service
+		invitations  *invitation.Service
+		leaderboards *leaderboard.Service
 	)
+	standings := standingsFunc(func(ctx context.Context, actorID string, cs []leaderboard.Challenge) (map[string]leaderboard.Standing, error) {
+		return leaderboards.Standings(ctx, actorID, cs)
+	})
 	abandonAll := abandonAllFunc(func(ctx context.Context, userID string) error {
 		return challenges.AbandonAll(ctx, userID)
 	})
@@ -108,9 +113,9 @@ func run() error {
 
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
-	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, clk)
+	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, standings, clk)
 	activities = activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
-	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, cfg.AtRiskThreshold)
+	leaderboards = leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, cfg.AtRiskThreshold)
 	invitations = invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 	challengeHandler := challenge.NewHandler(challenges)
 	handlers := server{
@@ -305,13 +310,43 @@ func (l leaderboardChallenges) Challenge(ctx context.Context, actorID, id string
 	if err != nil {
 		return leaderboard.Challenge{}, err
 	}
-	categories := make([]leaderboard.Category, len(d.Categories))
-	for i, c := range d.Categories {
+	return toLeaderboardChallenge(d.Challenge), nil
+}
+
+// toLeaderboardChallenge gives a challenge, with its categories, the shape
+// of module leaderboard.
+func toLeaderboardChallenge(c challenge.Challenge) leaderboard.Challenge {
+	categories := make([]leaderboard.Category, len(c.Categories))
+	for i, cat := range c.Categories {
 		categories[i] = leaderboard.Category{
-			Type: c.Type, Factors: c.Params.Factors, Sport: c.Params.Sport, StepMeters: c.Params.StepMeters,
+			Type: cat.Type, Factors: cat.Params.Factors, Sport: cat.Params.Sport, StepMeters: cat.Params.StepMeters,
 		}
 	}
-	return leaderboard.Challenge{ID: d.ID, Timezone: d.Timezone, StartsAt: d.StartsAt, EndsAt: d.EndsAt, Categories: categories}, nil
+	return leaderboard.Challenge{ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Categories: categories}
+}
+
+// standingsFunc gives module challenge the standings of module leaderboard,
+// as challenge.Standings.
+type standingsFunc func(ctx context.Context, actorID string, challenges []leaderboard.Challenge) (map[string]leaderboard.Standing, error)
+
+func (f standingsFunc) Standings(ctx context.Context, actorID string, challenges []challenge.Challenge) (map[string]challenge.Standing, error) {
+	in := make([]leaderboard.Challenge, len(challenges))
+	for i, c := range challenges {
+		in[i] = toLeaderboardChallenge(c)
+	}
+	standings, err := f(ctx, actorID, in)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]challenge.Standing, len(standings))
+	for id, st := range standings {
+		rankings := make([]challenge.Ranking, len(st.Categories))
+		for i, p := range st.Categories {
+			rankings[i] = challenge.Ranking{Type: p.Type, Rank: p.Entry.Rank, RankedCount: p.RankedCount, Progress: p.Entry.Progress}
+		}
+		out[id] = challenge.Standing{Week: st.Week, WeekEndsAt: st.WeekEndsAt, Rankings: rankings}
+	}
+	return out, nil
 }
 
 // invited is what invitationChallenges reads from module challenge.

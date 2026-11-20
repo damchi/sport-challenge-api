@@ -19,6 +19,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 type acceptingVerifier struct{}
@@ -91,7 +92,7 @@ func serve(t *testing.T, svc *Service, method, target, body string) (*httptest.R
 
 func newTestService(profileComplete bool) (*Service, *fakeRepository) {
 	repo := &fakeRepository{}
-	return NewService(repo, fakeProfiles{complete: profileComplete}, fakeCatalogue{factors: suggested()}, clock.NewFake(now)), repo
+	return NewService(repo, fakeProfiles{complete: profileComplete}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now)), repo
 }
 
 const validBody = `{"title":"Spring run","visibility":"public","timezone":"America/Toronto","start_date":"2026-03-04","weeks":6,"elimination_step_meters":2000,"distance_factors":{"ride":0.25}}`
@@ -166,7 +167,7 @@ func TestListChallenges(t *testing.T) {
 		{ID: "11111111-1111-1111-1111-111111111111", Title: "A", Visibility: "public", Timezone: "UTC", StartsAt: now, EndsAt: now.AddDate(0, 0, 14), ParticipantCount: 3, MyStatus: &desc, Creator: true},
 		{ID: "22222222-2222-2222-2222-222222222222", Title: "B", Visibility: "public", Timezone: "UTC", StartsAt: now.AddDate(0, 0, 1), EndsAt: now.AddDate(0, 0, 15), ParticipantCount: 1},
 	}}
-	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now))
+	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
 
 	rec, out := serve(t, svc, http.MethodGet, "/api/v1/challenges?scope=mine&status=ongoing&limit=1", "")
 	if rec.Code != http.StatusOK {
@@ -197,9 +198,49 @@ func TestListChallenges(t *testing.T) {
 	}
 }
 
+func TestListChallengesMyWeek(t *testing.T) {
+	active := string(ParticipantActive)
+	weekEnd := now.Add(48 * time.Hour)
+	minimum := 7000
+	running := Summary{
+		ID: "11111111-1111-1111-1111-111111111111", Title: "A", Visibility: "public", Timezone: "UTC",
+		StartsAt: now.AddDate(0, 0, -8), EndsAt: now.AddDate(0, 0, 13), ParticipantCount: 8, MyStatus: &active,
+	}
+	upcoming := Summary{ID: "22222222-2222-2222-2222-222222222222", Title: "B", Visibility: "public", Timezone: "UTC", StartsAt: now.AddDate(0, 0, 1), EndsAt: now.AddDate(0, 0, 15), MyStatus: &active}
+	repo := &fakeRepository{summaries: []Summary{running, upcoming}, categoriesOf: map[string][]Category{running.ID: nil}}
+	standings := fakeStandings{standings: map[string]Standing{running.ID: {Week: 2, WeekEndsAt: weekEnd, Rankings: []Ranking{
+		{Type: CategoryCumulativeTime, Rank: 1, RankedCount: 7},
+		{Type: CategoryCumulativeDistance, Rank: 5, RankedCount: 7},
+		{Type: CategoryRunElimination, Rank: 3, RankedCount: 7, Progress: &scoring.Progress{
+			Status: scoring.StatusAtRisk, MinimumMeters: &minimum, RunMeters: 6000, WeekEndsAt: weekEnd,
+		}},
+	}}}}
+	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, standings, clock.NewFake(now))
+
+	rec, out := serve(t, svc, http.MethodGet, "/api/v1/challenges?scope=mine", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	items, _ := out["items"].([]any)
+	first, _ := items[0].(map[string]any)
+	second, _ := items[1].(map[string]any)
+	if v, ok := second["my_week"]; !ok || v != nil {
+		t.Fatalf("upcoming my_week %v, want null", v)
+	}
+	got, _ := json.Marshal(first["my_week"])
+	want := `{"rankings":[` +
+		`{"elimination":null,"rank":1,"ranked_count":7,"type":"cumulative_time"},` +
+		`{"elimination":null,"rank":5,"ranked_count":7,"type":"cumulative_distance"},` +
+		`{"elimination":{"eliminated_week":null,"minimum_meters":7000,"run_meters":6000,"status":"at_risk","week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"},"rank":3,"ranked_count":7,"type":"run_elimination"}` +
+		`],"week":2,"week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"}`
+	if string(got) != want {
+		t.Fatalf("my_week\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestListChallengesDefaults(t *testing.T) {
 	repo := &fakeRepository{}
-	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges", "")
+	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges", "")
 	if rec.Code != http.StatusOK || out["next_cursor"] != nil {
 		t.Fatalf("got %d %v, want 200 with no next page", rec.Code, out)
 	}
@@ -230,7 +271,7 @@ func TestListChallengesRefusals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{}
-			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges?"+tt.query, "")
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges?"+tt.query, "")
 			e, _ := out["error"].(map[string]any)
 			params, _ := e["params"].(map[string]any)
 			if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || params["fields"] != tt.wantFields {
@@ -251,7 +292,7 @@ func TestListChallengesNormalizesTheCursorID(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := &fakeRepository{}
-	rec, _ := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges?cursor="+cursor, "")
+	rec, _ := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges?cursor="+cursor, "")
 	if rec.Code != http.StatusOK || repo.listed.After == nil || repo.listed.After.ID != "11111111-1111-1111-1111-111111111111" {
 		t.Fatalf("got %d, after %+v, want the canonical id", rec.Code, repo.listed.After)
 	}
@@ -262,7 +303,7 @@ const participantsPath = "/api/v1/challenges/11111111-1111-1111-1111-11111111111
 func TestListParticipants(t *testing.T) {
 	repo := &fakeRepository{challenge: stored(VisibilityPublic), participants: participants(3)}
 	profiles := fakeProfiles{names: map[string]Name{"00000000-0000-0000-0000-000000000001": marie}}
-	svc := NewService(repo, profiles, fakeCatalogue{}, clock.NewFake(now))
+	svc := NewService(repo, profiles, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
 
 	rec, out := serve(t, svc, http.MethodGet, participantsPath+"?limit=2", "")
 	if rec.Code != http.StatusOK {
@@ -310,7 +351,7 @@ func TestListParticipantsHidden(t *testing.T) {
 		"missing": {},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, participantsPath, "")
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, participantsPath, "")
 			e, _ := out["error"].(map[string]any)
 			if rec.Code != http.StatusNotFound || e["code"] != "challenge_not_found" {
 				t.Fatalf("got %d %v, want 404 challenge_not_found", rec.Code, out)
@@ -347,7 +388,7 @@ func TestListParticipantsRefusals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic)}
-			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, tt.target, "")
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, tt.target, "")
 			e, _ := out["error"].(map[string]any)
 			params, _ := e["params"].(map[string]any)
 			if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || (tt.wantFields != "" && params["fields"] != tt.wantFields) {
@@ -366,7 +407,7 @@ func TestListParticipantsNormalizesTheCursorID(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := &fakeRepository{challenge: stored(VisibilityPublic)}
-	rec, _ := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, participantsPath+"?cursor="+cursor, "")
+	rec, _ := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, participantsPath+"?cursor="+cursor, "")
 	if rec.Code != http.StatusOK || repo.participantsAsked == nil || repo.participantsAsked.after.UserID != "11111111-1111-1111-1111-111111111111" {
 		t.Fatalf("got %d, query %+v, want the canonical id", rec.Code, repo.participantsAsked)
 	}
@@ -376,7 +417,7 @@ func TestGetChallenge(t *testing.T) {
 	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Participant: ParticipantAbandoned}}
 	repo.challenge.Categories = []Category{{Type: CategoryCumulativeTime, Position: 1}}
 	clk := clock.NewFake(time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC))
-	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clk), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
+	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clk), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
@@ -405,7 +446,7 @@ func TestGetChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 		"missing or deleted": {},
 		"private, not mine":  {challenge: stored(VisibilityPrivate)},
 	} {
-		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
 		headers := rec.Header().Clone()
 		headers.Del("X-Request-ID") // differs for every request
 		e, _ := out["error"].(map[string]any)
@@ -427,7 +468,7 @@ func TestGetChallengeOutsideTheWindowHasNoWeek(t *testing.T) {
 		"before the start": time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 		"after the end":    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 	} {
-		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(at)), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(at)), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: status %d", name, rec.Code)
 		}
@@ -441,7 +482,7 @@ func TestGetChallengeOutsideTheWindowHasNoWeek(t *testing.T) {
 }
 
 func TestGetChallengeBadID(t *testing.T) {
-	rec, out := serve(t, NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges/not-a-uuid", "")
+	rec, out := serve(t, NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges/not-a-uuid", "")
 	e, _ := out["error"].(map[string]any)
 	if rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" {
 		t.Fatalf("got %d %v, want 400 validation_failed", rec.Code, out)
@@ -472,7 +513,7 @@ func TestUpdateChallenge(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: tt.membership}
-			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPatch, target, tt.body)
+			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodPatch, target, tt.body)
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
 			}
@@ -506,7 +547,7 @@ func TestUpdateChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 		`{"title":"New title"}`:           {},
 		`{"title":"New title","weeks":8}`: {challenge: stored(VisibilityPrivate)},
 	} {
-		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPatch, target, body)
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodPatch, target, body)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status %d, want 404", rec.Code)
 		}
@@ -540,7 +581,7 @@ func TestJoinChallenge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec, out := serve(t, NewService(tt.repo, fakeProfiles{complete: tt.profile}, fakeCatalogue{}, before), http.MethodPost, target, "")
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{complete: tt.profile}, fakeCatalogue{}, fakeStandings{}, before), http.MethodPost, target, "")
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
 			}
@@ -558,7 +599,7 @@ func TestJoinChallenge(t *testing.T) {
 
 	// Registration closed: the clock at the exact end of week 1.
 	closed := clock.NewFake(time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC))
-	rec, out := serve(t, NewService(&fakeRepository{challenge: stored(VisibilityPublic)}, fakeProfiles{complete: true}, fakeCatalogue{}, closed), http.MethodPost, target, "")
+	rec, out := serve(t, NewService(&fakeRepository{challenge: stored(VisibilityPublic)}, fakeProfiles{complete: true}, fakeCatalogue{}, fakeStandings{}, closed), http.MethodPost, target, "")
 	if e, _ := out["error"].(map[string]any); rec.Code != 422 || e["code"] != "registration_closed" {
 		t.Fatalf("got %d %v, want 422 registration_closed", rec.Code, out)
 	}
@@ -570,7 +611,7 @@ func TestJoinChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/join"
 	var bodies []map[string]any
 	for _, repo := range []*fakeRepository{{}, {challenge: stored(VisibilityPrivate)}} {
-		rec, out := serve(t, NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPost, target, "")
+		rec, out := serve(t, NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodPost, target, "")
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status %d, want 404", rec.Code)
 		}
@@ -601,7 +642,7 @@ func TestAbandonChallenge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, tt.clk), http.MethodPost, target, "")
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, tt.clk), http.MethodPost, target, "")
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
 			}
@@ -620,7 +661,7 @@ func TestAbandonChallenge(t *testing.T) {
 
 func TestAbandonChallengeByTheCreator(t *testing.T) {
 	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: Membership{Creator: true, Participant: ParticipantActive}}
-	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC))), http.MethodPost, "/api/v1/challenges/11111111-1111-1111-1111-111111111111/abandon", "")
+	rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC))), http.MethodPost, "/api/v1/challenges/11111111-1111-1111-1111-111111111111/abandon", "")
 	if rec.Code != http.StatusOK || out["my_role"] != "creator" || out["my_status"] != "abandoned" {
 		t.Fatalf("got %d %v, want 200, still creator, abandoned", rec.Code, out)
 	}
@@ -630,7 +671,7 @@ func TestAbandonChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 	const target = "/api/v1/challenges/11111111-1111-1111-1111-111111111111/abandon"
 	var bodies []map[string]any
 	for _, repo := range []*fakeRepository{{}, {challenge: stored(VisibilityPrivate)}} {
-		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodPost, target, "")
+		rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodPost, target, "")
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status %d, want 404", rec.Code)
 		}
@@ -661,17 +702,17 @@ func TestExcludeParticipant(t *testing.T) {
 		{name: "hidden", repo: &fakeRepository{challenge: stored(VisibilityPrivate)}, wantStatus: 404, wantCode: "challenge_not_found"},
 	}
 	ended := &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: Membership{Participant: ParticipantActive}}
-	rec, out := serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC))), http.MethodDelete, target, "")
+	rec, out := serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC))), http.MethodDelete, target, "")
 	if e, _ := out["error"].(map[string]any); rec.Code != 422 || e["code"] != "challenge_ended" {
 		t.Fatalf("at the exact end: %d %v, want 422 challenge_ended", rec.Code, out)
 	}
-	rec, out = serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, during), http.MethodDelete, "/api/v1/challenges/11111111-1111-1111-1111-111111111111/participants/not-a-uuid", "")
+	rec, out = serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, during), http.MethodDelete, "/api/v1/challenges/11111111-1111-1111-1111-111111111111/participants/not-a-uuid", "")
 	if e, _ := out["error"].(map[string]any); rec.Code != 400 || e["code"] != "validation_failed" {
 		t.Fatalf("bad user id: %d %v, want 400 validation_failed", rec.Code, out)
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, during), http.MethodDelete, target, "")
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, during), http.MethodDelete, target, "")
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
 			}
@@ -710,7 +751,7 @@ func TestAddCreator(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, during), http.MethodPost, target, tt.body)
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, during), http.MethodPost, target, tt.body)
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
 			}
@@ -727,7 +768,7 @@ func TestAddCreator(t *testing.T) {
 	}
 
 	ended := &fakeRepository{challenge: stored(VisibilityPublic), membership: creator, target: Membership{Participant: ParticipantActive}}
-	rec, out := serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC))), http.MethodPost, target, body)
+	rec, out := serve(t, NewService(ended, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(time.Date(2026, 3, 23, 4, 0, 0, 0, time.UTC))), http.MethodPost, target, body)
 	if e, _ := out["error"].(map[string]any); rec.Code != 422 || e["code"] != "challenge_ended" {
 		t.Fatalf("at the exact end: %d %v, want 422 challenge_ended", rec.Code, out)
 	}
@@ -749,7 +790,7 @@ func TestDeleteChallenge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, clock.NewFake(now)), http.MethodDelete, target, "")
+			rec, out := serve(t, NewService(tt.repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodDelete, target, "")
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body)
 			}

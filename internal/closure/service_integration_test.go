@@ -433,8 +433,8 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 			},
 		}
 		board := func(repo interface {
-			Participants(context.Context, string) ([]scoring.Participant, error)
-			Activities(context.Context, string, scoring.Window, string) ([]scoring.Activity, error)
+			ParticipantsOf(context.Context, []string) (map[string][]scoring.Participant, error)
+			ActivitiesOf(context.Context, []leaderboard.Scope) (map[string][]scoring.Activity, error)
 			Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
 			DeletedAccounts(context.Context, []string) (map[string]bool, error)
 		},

@@ -47,7 +47,7 @@ func newRecording(t *testing.T) recording {
 	clk := clock.NewFake(recordNow)
 	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
-	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, clk)
+	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, standingsFunc(nil), clk)
 	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
 
 	var id string

@@ -274,6 +274,12 @@ paths:
         and field alike, is computed from the current instant. Upcoming and
         ongoing challenges come soonest first, finished ones most recent
         first; without a status filter, by start date.
+
+        In `mine`, `my_week` gives where the user stands in each ongoing
+        challenge they take part in: their lines of the leaderboard
+        (`GET /challenges/{challengeId}/leaderboard`), computed at the
+        instant of the request. A challenge that ends in the meantime has
+        none.
       tags: [challenges]
       parameters:
         - name: scope
@@ -1722,7 +1728,7 @@ components:
           description: The end of the current week; null when eliminated or outside the weeks.
     ChallengeSummary:
       type: object
-      required: [id, title, visibility, timezone, starts_at, ends_at, participant_count, my_role, my_status, status]
+      required: [id, title, visibility, timezone, starts_at, ends_at, participant_count, my_role, my_status, status, my_week]
       additionalProperties: false
       properties:
         id:
@@ -1756,6 +1762,55 @@ components:
         status:
           type: string
           enum: [upcoming, ongoing, finished]
+        my_week:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/MyWeek"
+          description: |
+            Only in `mine`, for an ongoing challenge where the user is an
+            active participant; null otherwise (`public`, upcoming or
+            finished, abandoned).
+    MyWeek:
+      type: object
+      required: [week, week_ends_at, rankings]
+      additionalProperties: false
+      properties:
+        week:
+          type: integer
+          minimum: 1
+          description: Number of the current week.
+        week_ends_at:
+          type: string
+          format: date-time
+          description: End of the current week.
+        rankings:
+          type: array
+          description: The user's line in each of the 3 categories, in the order of the challenge.
+          items:
+            $ref: "#/components/schemas/MyRanking"
+    MyRanking:
+      type: object
+      required: [type, rank, ranked_count, elimination]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [cumulative_time, cumulative_distance, run_elimination]
+        rank:
+          type: integer
+          minimum: 1
+          description: The user's rank, as in the leaderboard; equal values share it (1, 1, 3).
+        ranked_count:
+          type: integer
+          minimum: 1
+          description: How many participants are ranked in the category, abandoned ones and deleted accounts left out.
+        elimination:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/EliminationProgress"
+          description: Only in `run_elimination`, as in the leaderboard; null in the other categories.
     ChallengeDetail:
       type: object
       required: [id, title, description, visibility, members_can_invite, timezone, starts_at, ends_at, categories, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at]

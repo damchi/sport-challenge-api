@@ -81,7 +81,7 @@ func newErasureFixture(t *testing.T) erasureFixture {
 	}
 	f.users = user.NewService(user.NewRepository(gdb), f.participations, f.erasers, deletedAtAuth0{}, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
-	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{f.users}, sports, clk)
+	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{f.users}, sports, standingsFunc(nil), clk)
 	activities = activity.NewService(activity.NewRepository(gdb), f.users, sports, participations{challenges}, activityScopes{challenges}, clk)
 	invitations = invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 	f.leaderboards = leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{f.users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)

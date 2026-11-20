@@ -88,7 +88,7 @@ func setup(t *testing.T, pseudo *string) (*Service, *pgxpool.Pool, string) {
 	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ('email|creator', $1) RETURNING id", pseudo).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, clock.NewFake(now))
+	svc := NewService(NewRepository(gdb), sqlProfiles{pool}, sqlCatalogue{pool}, fakeStandings{}, clock.NewFake(now))
 	return svc, pool, userID
 }
 
