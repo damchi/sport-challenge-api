@@ -20,6 +20,9 @@ import (
 
 // repository is what the service needs from the storage.
 type repository interface {
+	// AwaitActivityWrites waits for the end of every activity write that
+	// checked the lock of its weeks before it was called (db.AwaitWeekWrites).
+	AwaitActivityWrites(ctx context.Context) error
 	// ClosableChallenges lists the challenges not deleted and started at now
 	// that still have a week to close before the last one.
 	ClosableChallenges(ctx context.Context, now time.Time) ([]Challenge, error)
@@ -78,7 +81,10 @@ func NewService(repo repository, data Activities, c clock.Clock, logger *slog.Lo
 // as of the run: who is abandoned (see closeChallenge). A challenge in error
 // does not stop the others; the errors are joined.
 func (s *Service) CloseWeeks(ctx context.Context) (Result, error) {
-	now := s.clock.Now()
+	now, err := s.now(ctx)
+	if err != nil {
+		return Result{}, err
+	}
 	challenges, err := s.repo.ClosableChallenges(ctx, now)
 	if err != nil {
 		return Result{}, err
@@ -98,6 +104,26 @@ func (s *Service) CloseWeeks(ctx context.Context) (Result, error) {
 		}
 	}
 	return result, errors.Join(errs...)
+}
+
+// awaitWritesTimeout bounds the wait for the activity writes: meanwhile, new
+// writes wait behind the run. A run that gives up judges nothing and is run
+// again later, with the same result.
+const awaitWritesTimeout = 30 * time.Second
+
+// now reads the instant of a run, then waits for the activity writes that
+// checked the lock of their weeks before it: an activity accepted just before
+// a week locks may commit after that instant, and the week judged without it
+// would stay so. Once they end, a week locked at now has all its activities,
+// and no other write can change them (it reads a later clock, and is refused).
+func (s *Service) now(ctx context.Context) (time.Time, error) {
+	now := s.clock.Now()
+	ctx, cancel := context.WithTimeout(ctx, awaitWritesTimeout)
+	defer cancel()
+	if err := s.repo.AwaitActivityWrites(ctx); err != nil {
+		return time.Time{}, fmt.Errorf("await activity writes: %w", err)
+	}
+	return now, nil
 }
 
 // closeChallenge closes the weeks of one challenge that are locked at now and
@@ -180,7 +206,10 @@ func openWeeks(locked int, closed []int) []int {
 // snapshot. A challenge in error does not stop the others; the errors are
 // joined.
 func (s *Service) FinalizeChallenges(ctx context.Context) (FinalizeResult, error) {
-	now := s.clock.Now()
+	now, err := s.now(ctx)
+	if err != nil {
+		return FinalizeResult{}, err
+	}
 	challenges, err := s.repo.EndedChallenges(ctx, now)
 	if err != nil {
 		return FinalizeResult{}, err

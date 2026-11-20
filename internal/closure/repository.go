@@ -23,6 +23,12 @@ func NewRepository(gdb *gorm.DB) *Repository {
 	return &Repository{db: gdb}
 }
 
+// AwaitActivityWrites waits for the end of the activity writes that checked
+// the lock of their weeks before it was called (db.AwaitWeekWrites).
+func (r *Repository) AwaitActivityWrites(ctx context.Context) error {
+	return db.AwaitWeekWrites(ctx, r.db)
+}
+
 // ClosableChallenges lists the challenges not deleted and started at now,
 // over or not, that still have a week to close before the last one (which is
 // left to the finalization of the challenge), each with its run elimination

@@ -182,6 +182,9 @@ func (s *Service) EraseUser(ctx context.Context, userID string) error {
 // on. As for Update, the activity of someone else gives 404
 // activity_not_found and a week locked where it counts 422 week_locked.
 func (s *Service) Delete(ctx context.Context, actorID, id string) error {
+	// This instant is only the deleted_at stored: the lock is checked against
+	// the clock read in the transaction, once the week lock is held
+	// (changeable).
 	err := s.repo.Delete(ctx, actorID, id, s.clock.Now(), func(ctx context.Context, current Activity) error {
 		_, err := s.changeable(ctx, actorID, current)
 		return err

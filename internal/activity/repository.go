@@ -32,10 +32,12 @@ func NewRepository(gdb *gorm.DB) *Repository {
 }
 
 // Record stores a in one transaction, carried by the ctx that decide gets so
-// that it reads in it. The author's row is locked first (lockUser). An
-// activity of the same author with the same idempotency key is returned as
-// is, with false, decide not being called; errActivityNotFound once it is
-// deleted. Otherwise decide refuses with an
+// that it reads in it. The week lock is taken shared first, before decide
+// reads the clock (db.ShareWeekLock: the worker judges a week only once the
+// writes checked against its lock are committed), then the author's row
+// (lockUser). An activity of the same author with the same idempotency key
+// is returned as is, with false, decide not being called;
+// errActivityNotFound once it is deleted. Otherwise decide refuses with an
 // error, nothing being written then, or a is inserted and returned with its
 // id and true. An anonymized account gives errAccountDeleted. The
 // participations decide reads are not locked: an abandon committed meanwhile
@@ -46,6 +48,9 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 	var created bool
 	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
 		tx := db.Conn(ctx, r.db)
+		if err := db.ShareWeekLock(tx); err != nil {
+			return err
+		}
 		if err := lockUser(tx, a.UserID); err != nil {
 			return err
 		}
@@ -164,12 +169,15 @@ func (r *Repository) EraseUser(ctx context.Context, userID string) error {
 }
 
 // change runs decide then write on activity id, locked, in one transaction
-// (Update, Delete). Only an activity of actorID is read, so that the row of
-// someone else is never locked: theirs gives errActivityNotFound, as a
-// missing one does.
+// (Update, Delete), the week lock taken shared first as in Record. Only an
+// activity of actorID is read, so that the row of someone else is never
+// locked: theirs gives errActivityNotFound, as a missing one does.
 func (r *Repository) change(ctx context.Context, actorID, id string, decide func(ctx context.Context, current Activity) error, write func(tx *gorm.DB, current Activity) error) error {
 	return db.InTx(ctx, r.db, func(ctx context.Context) error {
 		tx := db.Conn(ctx, r.db)
+		if err := db.ShareWeekLock(tx); err != nil {
+			return err
+		}
 		if err := lockUser(tx, actorID); err != nil {
 			return err
 		}
