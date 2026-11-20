@@ -1482,12 +1482,12 @@ components:
           description: Increment X of the elimination category, in meters.
         reference_sport:
           type: string
-          default: run
           description: |
             Code of the sport the distances are brought back to and the
             elimination is run in: a sport of the catalogue whose distance is
             required (`distance_mode` `required`), otherwise 400
-            `validation_failed` on `reference_sport`.
+            `validation_failed` on `reference_sport`. `run` when absent; `null`
+            is refused (no default in the schema, which would replace it).
           pattern: "^[a-z][a-z0-9_]{0,31}$"
           example: run
         distance_factors:
