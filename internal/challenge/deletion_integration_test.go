@@ -36,7 +36,7 @@ func accounts(t *testing.T, pool *pgxpool.Pool, svc *Service) *user.Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return user.NewService(user.NewRepository(gdb), svc, nil, deletedAtAuth0{}, logger)
+	return user.NewService(user.NewRepository(gdb), svc, nil, deletedAtAuth0{}, svc.clock, logger)
 }
 
 func statusOf(t *testing.T, pool *pgxpool.Pool, challengeID, userID string) (string, *time.Time) {

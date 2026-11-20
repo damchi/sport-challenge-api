@@ -47,7 +47,7 @@ func newLeaderboardFixture(t *testing.T) leaderboardFixture {
 		t.Fatal(err)
 	}
 	clk := clock.NewFake(recordNow)
-	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, logger)
+	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, nil, logger)
 	var svc *leaderboard.Service
 	standings := standingsFunc(func(ctx context.Context, actorID string, cs []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error) {
 		return svc.Standings(ctx, actorID, cs, now)

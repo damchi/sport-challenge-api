@@ -120,7 +120,7 @@ func run() error {
 		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
 	}
 	management := auth.NewAuth0Management(cfg.Auth0MgmtDomain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
-	users := user.NewService(user.NewRepository(gdb), abandonAll, erasers, management, logger)
+	users := user.NewService(user.NewRepository(gdb), abandonAll, erasers, management, clk, logger)
 
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))

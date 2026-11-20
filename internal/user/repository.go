@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -121,11 +122,12 @@ func (r *Repository) UpdateEmail(ctx context.Context, id, email string) error {
 // one transaction that abandon joins (ctx carries it): the row is locked,
 // the fingerprint of its subject is stored, the subject is replaced by a
 // placeholder and the pseudo, names, e-mail, avatar and language are erased,
-// the deletion at Auth0 is recorded as pending; then abandon runs. It returns
-// the former subject, for the deletion at Auth0. An unknown or already
-// anonymized user gives errUserNotFound; an error of abandon rolls everything
-// back, the pending deletion included.
-func (r *Repository) Delete(ctx context.Context, id string, abandon func(ctx context.Context) error) (string, error) {
+// the deletion at Auth0 is recorded as pending; then abandon runs. Both the
+// anonymization and the fingerprint are dated at (the service's clock). It
+// returns the former subject, for the deletion at Auth0. An unknown or
+// already anonymized user gives errUserNotFound; an error of abandon rolls
+// everything back, the pending deletion included.
+func (r *Repository) Delete(ctx context.Context, id string, at time.Time, abandon func(ctx context.Context) error) (string, error) {
 	var subject string
 	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
 		tx := db.Conn(ctx, r.db)
@@ -139,7 +141,7 @@ func (r *Repository) Delete(ctx context.Context, id string, abandon func(ctx con
 		if err != nil {
 			return fmt.Errorf("lock user: %w", err)
 		}
-		if err := tx.Exec("INSERT INTO deleted_subjects (fingerprint) VALUES (decode(?, 'hex'))", subjectFingerprint(u.AuthSubject)).Error; err != nil {
+		if err := tx.Exec("INSERT INTO deleted_subjects (fingerprint, deleted_at) VALUES (decode(?, 'hex'), ?)", subjectFingerprint(u.AuthSubject), at).Error; err != nil {
 			return fmt.Errorf("insert deleted subject: %w", err)
 		}
 		// The placeholder keeps auth_subject unique and tells nothing of the subject.
@@ -151,7 +153,7 @@ func (r *Repository) Delete(ctx context.Context, id string, abandon func(ctx con
 			"email":         nil,
 			"avatar_key":    nil,
 			"language":      nil,
-			"anonymized_at": gorm.Expr("now()"),
+			"anonymized_at": at,
 		})
 		if res.Error != nil {
 			return fmt.Errorf("anonymize user: %w", res.Error)
