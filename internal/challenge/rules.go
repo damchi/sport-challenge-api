@@ -93,8 +93,16 @@ type PointsDraft struct {
 	// Podium is the size of the top that scores: 5 or 10.
 	Podium int
 	// MinSessionMinutes is the minimum duration of a session counted by
-	// the session count, 1 to 180 minutes.
-	MinSessionMinutes int
+	// the session count, 1 to 180 minutes; nil for the default, 20.
+	MinSessionMinutes *int
+}
+
+// minSessionMinutes is the minimum session chosen, or the default.
+func (p PointsDraft) minSessionMinutes() int {
+	if p.MinSessionMinutes == nil {
+		return defaultMinSessionMinutes
+	}
+	return *p.MinSessionMinutes
 }
 
 // longestDistance reports whether the points category ranks the longest
@@ -272,7 +280,7 @@ func invalidPoints(p PointsDraft) []string {
 	if !slices.Contains(pointsPodiums, p.Podium) {
 		fields = append(fields, "categories.points.podium")
 	}
-	if p.MinSessionMinutes < minSessionMinutes || p.MinSessionMinutes > maxSessionMinutes {
+	if m := p.minSessionMinutes(); m < minSessionMinutes || m > maxSessionMinutes {
 		fields = append(fields, "categories.points.min_session_minutes")
 	}
 	return fields

@@ -48,12 +48,9 @@ func (h *Handler) CreateChallenge(ctx context.Context, req api.CreateChallengeRe
 			draft.Elimination = &EliminationDraft{StepMeters: e.StepMeters}
 		}
 		if p := cats.Points; p != nil {
-			draft.Points = &PointsDraft{Podium: int(p.Podium), MinSessionMinutes: defaultMinSessionMinutes}
+			draft.Points = &PointsDraft{Podium: int(p.Podium), MinSessionMinutes: p.MinSessionMinutes}
 			for _, c := range p.Criteria {
 				draft.Points.Criteria = append(draft.Points.Criteria, string(c))
-			}
-			if p.MinSessionMinutes != nil {
-				draft.Points.MinSessionMinutes = *p.MinSessionMinutes
 			}
 		}
 	}

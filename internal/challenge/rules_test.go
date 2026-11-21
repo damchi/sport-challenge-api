@@ -42,9 +42,12 @@ func valid() Draft {
 	}
 }
 
-// points is a points category with criteria, a top 5 and sessions of 20 min.
+func minutes(n int) *int { return &n }
+
+// points is a points category with criteria, a top 5 and the default
+// minimum session.
 func points(criteria ...string) *PointsDraft {
-	return &PointsDraft{Criteria: criteria, Podium: 5, MinSessionMinutes: 20}
+	return &PointsDraft{Criteria: criteria, Podium: 5}
 }
 
 func with(change func(*Draft)) Draft {
@@ -161,17 +164,29 @@ func TestValidate(t *testing.T) {
 			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount)
 		})},
 		{name: "points in a top 10", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.Podium = 10 })},
-		{name: "points with a session of 1 min", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.MinSessionMinutes = 1 })},
-		{name: "points with a session of 180 min", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.MinSessionMinutes = 180 })},
+		{name: "points with a session of 1 min", draft: with(func(d *Draft) {
+			d.Points = points(scoring.CriterionSessionCount)
+			d.Points.MinSessionMinutes = minutes(1)
+		})},
+		{name: "points with a session of 180 min", draft: with(func(d *Draft) {
+			d.Points = points(scoring.CriterionSessionCount)
+			d.Points.MinSessionMinutes = minutes(180)
+		})},
 		{name: "points without criterion", draft: with(func(d *Draft) { d.Points = points() }), wantFields: "categories.points.criteria"},
 		{name: "points with an unknown criterion", draft: with(func(d *Draft) { d.Points = points("fastest") }), wantFields: "categories.points.criteria"},
 		{name: "points with a criterion twice", draft: with(func(d *Draft) {
 			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDuration)
 		}), wantFields: "categories.points.criteria"},
 		{name: "points in a top 3", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.Podium = 3 }), wantFields: "categories.points.podium"},
-		{name: "points with a session of 0 min", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.MinSessionMinutes = 0 }), wantFields: "categories.points.min_session_minutes"},
-		{name: "points with a session of 181 min", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.MinSessionMinutes = 181 }), wantFields: "categories.points.min_session_minutes"},
-		{name: "points with every setting invalid", draft: with(func(d *Draft) { d.Points = &PointsDraft{} }), wantFields: "categories.points.criteria,categories.points.min_session_minutes,categories.points.podium"},
+		{name: "points with a session of 0 min", draft: with(func(d *Draft) {
+			d.Points = points(scoring.CriterionSessionCount)
+			d.Points.MinSessionMinutes = minutes(0)
+		}), wantFields: "categories.points.min_session_minutes"},
+		{name: "points with a session of 181 min", draft: with(func(d *Draft) {
+			d.Points = points(scoring.CriterionSessionCount)
+			d.Points.MinSessionMinutes = minutes(181)
+		}), wantFields: "categories.points.min_session_minutes"},
+		{name: "points with every setting invalid", draft: with(func(d *Draft) { d.Points = &PointsDraft{MinSessionMinutes: minutes(0)} }), wantFields: "categories.points.criteria,categories.points.min_session_minutes,categories.points.podium"},
 
 		// The longest distance of the points uses the factors too.
 		{name: "factors for the longest distance alone", draft: with(func(d *Draft) {

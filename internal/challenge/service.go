@@ -125,7 +125,7 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		categories = append(categories, Category{Type: CategoryElimination, Position: positionElimination, Params: Params{Sport: reference, StepMeters: e.StepMeters}})
 	}
 	if p := draft.Points; p != nil {
-		params := Params{Criteria: p.Criteria, Podium: p.Podium, MinSessionSeconds: p.MinSessionMinutes * 60}
+		params := Params{Criteria: p.Criteria, Podium: p.Podium, MinSessionSeconds: p.minSessionMinutes() * 60}
 		if p.longestDistance() {
 			params.Factors = factors
 		}

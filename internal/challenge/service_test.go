@@ -411,7 +411,7 @@ func TestServiceCreatePoints(t *testing.T) {
 			name: "longest distance without the cumulative distance",
 			draft: with(func(d *Draft) {
 				d.Distance = false
-				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDistance, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: 30}
+				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDistance, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: minutes(30)}
 				d.DistanceFactors = map[string]float64{"ride": 0.25}
 			}),
 			wantFactors: ridden,
@@ -419,7 +419,7 @@ func TestServiceCreatePoints(t *testing.T) {
 		{
 			name: "longest distance with the cumulative distance",
 			draft: with(func(d *Draft) {
-				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDistance, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: 30}
+				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDistance, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: minutes(30)}
 				d.DistanceFactors = map[string]float64{"ride": 0.25}
 			}),
 			wantFactors: ridden,
@@ -427,7 +427,7 @@ func TestServiceCreatePoints(t *testing.T) {
 		{
 			name: "no factors without the longest distance",
 			draft: with(func(d *Draft) {
-				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDuration, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: 30}
+				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDuration, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: minutes(30)}
 			}),
 		},
 	}
@@ -450,6 +450,20 @@ func TestServiceCreatePoints(t *testing.T) {
 				t.Fatalf("distance factors %v and points factors %v, want the same", cats[1].Params.Factors, p.Factors)
 			}
 		})
+	}
+}
+
+// TestServiceCreatePointsDefaultSession: without a minimum session, the
+// points category counts the sessions of 20 min.
+func TestServiceCreatePointsDefaultSession(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now))
+	if _, err := svc.Create(t.Context(), actor, with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount) })); err != nil {
+		t.Fatal(err)
+	}
+	cats := repo.created.Categories
+	if p := cats[len(cats)-1].Params; p.MinSessionSeconds != 1200 {
+		t.Fatalf("minimum session %d s, want 1200 by default", p.MinSessionSeconds)
 	}
 }
 
