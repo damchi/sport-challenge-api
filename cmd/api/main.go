@@ -331,6 +331,7 @@ func toLeaderboardChallenge(c challenge.Challenge) leaderboard.Challenge {
 	for i, cat := range c.Categories {
 		categories[i] = leaderboard.Category{
 			Type: cat.Type, Factors: cat.Params.Factors, Sport: cat.Params.Sport, StepMeters: cat.Params.StepMeters,
+			Criteria: cat.Params.Criteria, Podium: cat.Params.Podium, MinSessionSeconds: cat.Params.MinSessionSeconds,
 		}
 	}
 	return leaderboard.Challenge{ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Categories: categories}
@@ -353,7 +354,9 @@ func (f standingsFunc) Standings(ctx context.Context, actorID string, challenges
 	for id, st := range standings {
 		rankings := make([]challenge.Ranking, len(st.Categories))
 		for i, p := range st.Categories {
-			rankings[i] = challenge.Ranking{Type: p.Type, Rank: p.Entry.Rank, RankedCount: p.RankedCount, Progress: p.Entry.Progress}
+			rankings[i] = challenge.Ranking{
+				Type: p.Type, Rank: p.Entry.Rank, RankedCount: p.RankedCount, Progress: p.Entry.Progress, Provisional: p.Entry.Provisional,
+			}
 		}
 		out[id] = challenge.Standing{Week: st.Week, WeekEndsAt: st.WeekEndsAt, Rankings: rankings}
 	}

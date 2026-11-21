@@ -327,8 +327,8 @@ paths:
       summary: Create a challenge
       description: |
         Creates a challenge with its categories: the cumulative time always,
-        the cumulative distance and the elimination when chosen in
-        `categories`; the creator becomes its first participant. Requires a
+        the cumulative distance, the elimination and the points when chosen
+        in `categories`; the creator becomes its first participant. Requires a
         complete profile (`profile_incomplete`).
         The window starts at local midnight of `start_date` in `timezone` and
         lasts `weeks` local weeks. Distance factors not given keep the
@@ -656,6 +656,13 @@ paths:
         (the day of `week_ends_at`): until
         then nobody is eliminated for it, and the minimum of the current
         week may still rise.
+
+        In the `points` category, `value` is the points acquired: those of
+        the weeks locked (7 am on the first day of the next week), the rank
+        being on them alone. `provisional_points` gives apart the points of
+        the weeks started but not locked yet, computed the same way from the
+        activities of the moment; null once every started week is locked,
+        and in the frozen results.
       tags: [challenges]
       parameters:
         - name: challengeId
@@ -1493,9 +1500,10 @@ components:
           type: object
           description: |
             Factors chosen by the creator, by sport code (distance sports only,
-            0.1 to 2, two decimals at most), for the cumulative distance:
-            without that category, sending them answers 400
-            `validation_failed` on `distance_factors`. Send only the factors the creator
+            0.1 to 2, two decimals at most), for the cumulative distance and
+            the `longest_distance` criterion of the points category: without
+            either, sending them answers 400 `validation_failed` on
+            `distance_factors`. Send only the factors the creator
             changed: sports not given keep their suggested factor brought back
             to the reference sport, min(1, factor / factor of the reference),
             rounded to two decimals and never under 0.1. The reference sport is
@@ -1519,6 +1527,8 @@ components:
           $ref: "#/components/schemas/CumulativeDistanceCreate"
         elimination:
           $ref: "#/components/schemas/EliminationCreate"
+        points:
+          $ref: "#/components/schemas/PointsCreate"
     CumulativeDistanceCreate:
       type: object
       additionalProperties: false
@@ -1534,6 +1544,37 @@ components:
           minimum: 1
           maximum: 100000
           description: Increment X, in meters.
+    PointsCreate:
+      type: object
+      required: [criteria, podium]
+      additionalProperties: false
+      description: |
+        Points: each week, each criterion ranks the participants, and the top
+        of each of these weekly rankings scores the points of the scale.
+      properties:
+        criteria:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          description: |
+            The longest session by duration (every sport), the longest
+            session by equivalent distance (with the factors of
+            `distance_factors`), the number of sessions of at least
+            `min_session_minutes`. At least one, each once.
+          items:
+            type: string
+            enum: [longest_duration, longest_distance, session_count]
+        podium:
+          type: integer
+          enum: [5, 10]
+          description: Top 5 (10, 8, 6, 4, 2) or top 10 (25, 18, 15, 12, 10, 8, 6, 4, 2, 1).
+        min_session_minutes:
+          type: integer
+          minimum: 1
+          maximum: 180
+          default: 20
+          description: Minimum duration of a session counted by `session_count`, in minutes.
     Challenge:
       type: object
       required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories]
@@ -1577,12 +1618,12 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, elimination]
+          enum: [cumulative_time, cumulative_distance, elimination, points]
         position:
           type: integer
           minimum: 1
-          maximum: 3
-          description: Fixed by type, gaps left by the missing categories (cumulative_time 1, cumulative_distance 2, elimination 3).
+          maximum: 4
+          description: Fixed by type, gaps left by the missing categories (cumulative_time 1, cumulative_distance 2, elimination 3, points 4).
         params:
           $ref: "#/components/schemas/CategoryParams"
     CategoryParams:
@@ -1592,7 +1633,9 @@ components:
       properties:
         factors:
           type: object
-          description: cumulative_distance only, distance factor by sport code.
+          description: |
+            cumulative_distance, and points with the `longest_distance`
+            criterion: distance factor by sport code.
           additionalProperties:
             type: number
             format: double
@@ -1602,6 +1645,21 @@ components:
         step_meters:
           type: integer
           description: Elimination category only, increment X in meters.
+        criteria:
+          type: array
+          description: Points category only, its criteria in the order chosen.
+          items:
+            type: string
+            enum: [longest_duration, longest_distance, session_count]
+        podium:
+          type: integer
+          enum: [5, 10]
+          description: Points category only, the size of the top that scores.
+        min_session_seconds:
+          type: integer
+          minimum: 60
+          maximum: 10800
+          description: Points category only, minimum duration of a session counted by `session_count`, in seconds.
     ChallengePage:
       type: object
       required: [items, next_cursor]
@@ -1695,18 +1753,19 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, elimination]
+          enum: [cumulative_time, cumulative_distance, elimination, points]
         entries:
           type: array
           description: |
             Every participant but the deleted accounts. Ranked ones first,
-            best first; abandoned ones last. `value` is in seconds for `cumulative_time` and in meters
-            for the other two.
+            best first; abandoned ones last. `value` is in seconds for
+            `cumulative_time`, in meters for `cumulative_distance` and
+            `elimination`, in points acquired for `points`.
           items:
             $ref: "#/components/schemas/LeaderboardEntry"
     LeaderboardEntry:
       type: object
-      required: [rank, user, value, abandoned, elimination]
+      required: [rank, user, value, abandoned, elimination, provisional_points]
       additionalProperties: false
       properties:
         rank:
@@ -1729,6 +1788,15 @@ components:
           allOf:
             - $ref: "#/components/schemas/EliminationProgress"
           description: Only in the `elimination` category, and null for a participant who abandoned.
+        provisional_points:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: |
+            Only in the `points` category: the points of the weeks started but
+            not locked yet, not counted in `value` nor in the rank. Null in the
+            other categories, for a participant who abandoned, once every
+            started week is locked, and in the frozen results.
     LeaderboardUser:
       type: object
       required: [id, pseudo, first_name, last_name, avatar]
@@ -1855,12 +1923,12 @@ components:
             $ref: "#/components/schemas/MyRanking"
     MyRanking:
       type: object
-      required: [type, rank, ranked_count, elimination]
+      required: [type, rank, ranked_count, elimination, provisional_points]
       additionalProperties: false
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, elimination]
+          enum: [cumulative_time, cumulative_distance, elimination, points]
         rank:
           type: integer
           minimum: 1
@@ -1875,6 +1943,14 @@ components:
           allOf:
             - $ref: "#/components/schemas/EliminationProgress"
           description: Only in the `elimination` category, as in the leaderboard; null in the other categories.
+        provisional_points:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: |
+            Only in the `points` category, as in the leaderboard: the points of
+            the weeks started but not locked yet; null in the other categories
+            and once every started week is locked.
     ChallengeDetail:
       type: object
       required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, participant_count, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at]

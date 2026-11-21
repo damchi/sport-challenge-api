@@ -46,15 +46,19 @@ const (
 	categoryCumulativeTime     = "cumulative_time"
 	categoryCumulativeDistance = "cumulative_distance"
 	categoryElimination        = "elimination"
+	categoryPoints             = "points"
 )
 
 // Activities gives the participants of a challenge and, in one query, the
 // totals of the activities of its active participants started in the window,
 // per participant and week for weeklySport, per participant and sport for the
-// others (module leaderboard, which ranks from the same data).
+// others; with minSessionSeconds > 0, the groups of a points category whose
+// minimum session it is: every sport per participant, week and sport,
+// abandoned participants included (module leaderboard, which ranks from the
+// same data).
 type Activities interface {
 	Participants(ctx context.Context, challengeID string) ([]scoring.Participant, error)
-	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string) ([]scoring.Activity, error)
+	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int) ([]scoring.Activity, error)
 }
 
 // Service holds the use cases of the closure.
@@ -151,7 +155,7 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 	if err != nil {
 		return 0, 0, err
 	}
-	activities, err := s.data.Activities(ctx, c.ID, w, c.Sport)
+	activities, err := s.data.Activities(ctx, c.ID, w, c.Sport, 0)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -245,7 +249,7 @@ func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now t
 	if err != nil {
 		return false, err
 	}
-	activities, err := s.data.Activities(ctx, c.ID, w, eliminationSport(c.Categories))
+	activities, err := s.data.Activities(ctx, c.ID, w, eliminationSport(c.Categories), minSessionSeconds(c.Categories))
 	if err != nil {
 		return false, err
 	}
@@ -288,6 +292,17 @@ func eliminationSport(categories []Category) string {
 	return ""
 }
 
+// minSessionSeconds is the minimum session of the points category, whose
+// groups are then read; 0 without such a category.
+func minSessionSeconds(categories []Category) int {
+	for _, cat := range categories {
+		if cat.Type == categoryPoints {
+			return cat.MinSessionSeconds
+		}
+	}
+	return 0
+}
+
 // scorerOf returns the scorer of a category, from the type and the settings
 // frozen at the creation of the challenge (as the leaderboard does).
 func scorerOf(cat Category) (scoring.Scorer, error) {
@@ -298,6 +313,8 @@ func scorerOf(cat Category) (scoring.Scorer, error) {
 		return scoring.Distance{Factors: cat.Factors}, nil
 	case categoryElimination:
 		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters}, nil
+	case categoryPoints:
+		return scoring.Points{Criteria: cat.Criteria, Podium: cat.Podium, Factors: cat.Factors}, nil
 	default:
 		return nil, fmt.Errorf("unknown category type %q", cat.Type)
 	}

@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,8 +99,10 @@ type fakeData struct {
 	participants []scoring.Participant
 	activities   []scoring.Activity
 	loads        int
-	// weekly is the sport the activities were asked to sum per week.
-	weekly string
+	// weekly is the sport the activities were asked to sum per week, and
+	// minSession the minimum session of the points groups asked for.
+	weekly     string
+	minSession int
 }
 
 func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant, error) {
@@ -106,9 +110,9 @@ func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant,
 	return f.participants, nil
 }
 
-func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport string) ([]scoring.Activity, error) {
+func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport string, minSessionSeconds int) ([]scoring.Activity, error) {
 	f.loads++
-	f.weekly = weeklySport
+	f.weekly, f.minSession = weeklySport, minSessionSeconds
 	return f.activities, nil
 }
 
@@ -443,6 +447,42 @@ func TestFinalizeChallenges(t *testing.T) {
 		}
 		if want := (LastWeek{Number: 4, CategoryID: "cat3"}); !reflect.DeepEqual(repo.last, want) {
 			t.Fatalf("last week = %+v, want %+v", repo.last, want)
+		}
+	})
+
+	t.Run("the points category is frozen from its groups, without provisional points", func(t *testing.T) {
+		repo := newFakeRepo()
+		withPoints := c
+		withPoints.Categories = append(slices.Clone(c.Categories), Category{
+			ID: "cat4", Type: categoryPoints, Criteria: []string{scoring.CriterionLongestDistance}, Podium: 5,
+			Factors: map[string]float64{"run": 1}, MinSessionSeconds: 1200,
+		})
+		repo.ended = []EndedChallenge{withPoints}
+		groups := make([]scoring.Activity, len(activities))
+		for i, a := range activities {
+			a.LongestSeconds, a.LongestMeters, a.Sessions = a.DurationSeconds, a.DistanceMeters, 1
+			groups[i] = a
+		}
+		data := &fakeData{participants: participants, activities: groups}
+		if _, err := NewService(repo, data, clock.NewFake(lock), discard()).FinalizeChallenges(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if data.weekly != "run" || data.minSession != 1200 {
+			t.Fatalf("activities asked with %q per week and a %d s minimum, want run and 1200", data.weekly, data.minSession)
+		}
+		// Equal in weeks 1 to 3 (10 each), b ahead in week 4 (10 against 8).
+		want := payload{Entries: []payloadEntry{
+			{UserID: "b", Rank: 1, Value: 40},
+			{UserID: "a", Rank: 2, Value: 38},
+			{UserID: "quitter", Abandoned: true},
+		}}
+		if got := payloadOf(t, repo, "cat4"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("points ranking = %+v, want %+v", got, want)
+		}
+		for _, snap := range repo.snapshots["c1"] {
+			if strings.Contains(string(snap.Payload), "provisional") {
+				t.Fatalf("snapshot %s carries provisional points: %s", snap.CategoryID, snap.Payload)
+			}
 		}
 	})
 

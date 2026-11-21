@@ -139,21 +139,27 @@ func insertEliminations(tx *gorm.DB, challengeID, categoryID string, eliminated 
 // snapshots of a challenge are written together, so none means none.
 func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]EndedChallenge, error) {
 	var rows []struct {
-		ID         string
-		Timezone   string
-		StartsAt   time.Time
-		EndsAt     time.Time
-		CategoryID string
-		Type       string
-		Factors    string
-		Sport      string
-		StepMeters int
+		ID                string
+		Timezone          string
+		StartsAt          time.Time
+		EndsAt            time.Time
+		CategoryID        string
+		Type              string
+		Factors           string
+		Sport             string
+		StepMeters        int
+		Criteria          string
+		Podium            int
+		MinSessionSeconds int
 	}
 	err := db.Conn(ctx, r.db).Raw(
 		`SELECT c.id, c.timezone, c.starts_at, c.ends_at, cat.id AS category_id, cat.type,
 			COALESCE(cat.params->>'factors', '{}') AS factors,
 			COALESCE(cat.params->>'sport', '') AS sport,
-			COALESCE((cat.params->>'step_meters')::int, 0) AS step_meters
+			COALESCE((cat.params->>'step_meters')::int, 0) AS step_meters,
+			COALESCE(cat.params->>'criteria', '[]') AS criteria,
+			COALESCE((cat.params->>'podium')::int, 0) AS podium,
+			COALESCE((cat.params->>'min_session_seconds')::int, 0) AS min_session_seconds
 		FROM challenges c
 		JOIN categories cat ON cat.challenge_id = c.id
 		WHERE c.deleted_at IS NULL AND c.ends_at <= @now
@@ -169,9 +175,15 @@ func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]Ende
 		if len(out) == 0 || out[len(out)-1].ID != row.ID {
 			out = append(out, EndedChallenge{ID: row.ID, Timezone: row.Timezone, StartsAt: row.StartsAt.UTC(), EndsAt: row.EndsAt.UTC()})
 		}
-		cat := Category{ID: row.CategoryID, Type: row.Type, Sport: row.Sport, StepMeters: row.StepMeters}
+		cat := Category{
+			ID: row.CategoryID, Type: row.Type, Sport: row.Sport, StepMeters: row.StepMeters,
+			Podium: row.Podium, MinSessionSeconds: row.MinSessionSeconds,
+		}
 		if err := json.Unmarshal([]byte(row.Factors), &cat.Factors); err != nil {
 			return nil, fmt.Errorf("read factors of category %s: %w", row.CategoryID, err)
+		}
+		if err := json.Unmarshal([]byte(row.Criteria), &cat.Criteria); err != nil {
+			return nil, fmt.Errorf("read criteria of category %s: %w", row.CategoryID, err)
 		}
 		last := &out[len(out)-1]
 		last.Categories = append(last.Categories, cat)

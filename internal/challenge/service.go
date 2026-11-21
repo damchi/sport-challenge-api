@@ -77,8 +77,10 @@ func NewService(repo repository, profiles Profiles, catalogue Catalogue, standin
 // creator and first participant. The actor needs a complete profile (422
 // profile_incomplete). The distance factors are the catalogue's suggestions
 // brought back to the reference sport (referenceFactors), replaced by those
-// of the draft, then frozen in the category; the elimination is run in the
-// reference sport.
+// of the draft, then frozen in the categories that use them (the cumulative
+// distance, the points with the longest distance); the elimination is run in
+// the reference sport. The minimum session of the points is stored in
+// seconds.
 func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Challenge, error) {
 	complete, err := s.profiles.ProfileComplete(ctx, actorID)
 	if err != nil {
@@ -110,14 +112,24 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		return Challenge{}, err
 	}
 
+	var factors map[string]float64
+	if draft.usesFactors() {
+		factors = referenceFactors(suggested, reference)
+		maps.Copy(factors, draft.DistanceFactors)
+	}
 	categories := []Category{{Type: CategoryCumulativeTime, Position: positionTime, Params: Params{}}}
 	if draft.Distance {
-		factors := referenceFactors(suggested, reference)
-		maps.Copy(factors, draft.DistanceFactors)
 		categories = append(categories, Category{Type: CategoryCumulativeDistance, Position: positionDistance, Params: Params{Factors: factors}})
 	}
 	if e := draft.Elimination; e != nil {
 		categories = append(categories, Category{Type: CategoryElimination, Position: positionElimination, Params: Params{Sport: reference, StepMeters: e.StepMeters}})
+	}
+	if p := draft.Points; p != nil {
+		params := Params{Criteria: p.Criteria, Podium: p.Podium, MinSessionSeconds: p.MinSessionMinutes * 60}
+		if p.longestDistance() {
+			params.Factors = factors
+		}
+		categories = append(categories, Category{Type: CategoryPoints, Position: positionPoints, Params: params})
 	}
 
 	// An empty description is no description, as on edit.

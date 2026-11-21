@@ -14,6 +14,7 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 const actor = "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f"
@@ -368,6 +369,14 @@ func TestServiceCreateOptionalCategories(t *testing.T) {
 		{"cumulative time only", with(func(d *Draft) { d.Distance = false; d.Elimination = nil }), []placed{{CategoryCumulativeTime, 1}}},
 		{"elimination only", with(func(d *Draft) { d.Distance = false }), []placed{{CategoryCumulativeTime, 1}, {CategoryElimination, 3}}},
 		{"distance only", with(func(d *Draft) { d.Elimination = nil }), []placed{{CategoryCumulativeTime, 1}, {CategoryCumulativeDistance, 2}}},
+		{"points only", with(func(d *Draft) {
+			d.Distance = false
+			d.Elimination = nil
+			d.Points = points(scoring.CriterionSessionCount)
+		}), []placed{{CategoryCumulativeTime, 1}, {CategoryPoints, 4}}},
+		{"every category", with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount) }), []placed{
+			{CategoryCumulativeTime, 1}, {CategoryCumulativeDistance, 2}, {CategoryElimination, 3}, {CategoryPoints, 4},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -383,6 +392,62 @@ func TestServiceCreateOptionalCategories(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.want) || len(c.Categories) != len(tt.want) {
 				t.Fatalf("stored categories %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestServiceCreatePoints: the settings of the points category are frozen,
+// the minimum session in seconds, and the factors only with the longest
+// distance, the same as those of the cumulative distance.
+func TestServiceCreatePoints(t *testing.T) {
+	ridden := map[string]float64{"run": 1, "walk": 1, "ride": 0.25, "other": 1}
+	tests := []struct {
+		name        string
+		draft       Draft
+		wantFactors map[string]float64
+	}{
+		{
+			name: "longest distance without the cumulative distance",
+			draft: with(func(d *Draft) {
+				d.Distance = false
+				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDistance, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: 30}
+				d.DistanceFactors = map[string]float64{"ride": 0.25}
+			}),
+			wantFactors: ridden,
+		},
+		{
+			name: "longest distance with the cumulative distance",
+			draft: with(func(d *Draft) {
+				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDistance, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: 30}
+				d.DistanceFactors = map[string]float64{"ride": 0.25}
+			}),
+			wantFactors: ridden,
+		},
+		{
+			name: "no factors without the longest distance",
+			draft: with(func(d *Draft) {
+				d.Points = &PointsDraft{Criteria: []string{scoring.CriterionLongestDuration, scoring.CriterionSessionCount}, Podium: 10, MinSessionMinutes: 30}
+			}),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{}
+			svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now))
+			if _, err := svc.Create(t.Context(), actor, tt.draft); err != nil {
+				t.Fatal(err)
+			}
+			cats := repo.created.Categories
+			p := cats[len(cats)-1].Params
+			if cats[len(cats)-1].Type != CategoryPoints || !slices.Equal(p.Criteria, tt.draft.Points.Criteria) || p.Podium != 10 || p.MinSessionSeconds != 1800 {
+				t.Fatalf("points category %+v, want the criteria, a top 10 and 1800 s", cats[len(cats)-1])
+			}
+			if !maps.Equal(p.Factors, tt.wantFactors) {
+				t.Fatalf("points factors %v, want %v", p.Factors, tt.wantFactors)
+			}
+			if tt.wantFactors != nil && tt.draft.Distance && !maps.Equal(cats[1].Params.Factors, p.Factors) {
+				t.Fatalf("distance factors %v and points factors %v, want the same", cats[1].Params.Factors, p.Factors)
 			}
 		})
 	}

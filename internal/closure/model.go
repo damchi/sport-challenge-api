@@ -45,11 +45,16 @@ type EndedChallenge struct {
 type Category struct {
 	ID   string
 	Type string
-	// Factors is the distance factor by sport code (cumulative_distance).
+	// Factors is the distance factor by sport code (cumulative_distance,
+	// and points with the longest distance criterion).
 	Factors map[string]float64
 	// Sport and StepMeters are the elimination settings.
 	Sport      string
 	StepMeters int
+	// Criteria, Podium and MinSessionSeconds are the points settings.
+	Criteria          []string
+	Podium            int
+	MinSessionSeconds int
 }
 
 // Snapshot is the final ranking of a category, as JSON.

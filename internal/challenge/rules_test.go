@@ -13,6 +13,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 // distanceSports is the catalogue part the rules need: the sports that have
@@ -39,6 +40,11 @@ func valid() Draft {
 		Distance:    true,
 		Elimination: &EliminationDraft{StepMeters: 2000},
 	}
+}
+
+// points is a points category with criteria, a top 5 and sessions of 20 min.
+func points(criteria ...string) *PointsDraft {
+	return &PointsDraft{Criteria: criteria, Podium: 5, MinSessionMinutes: 20}
 }
 
 func with(change func(*Draft)) Draft {
@@ -147,6 +153,41 @@ func TestValidate(t *testing.T) {
 		{name: "invalid factors without distance: the field only", draft: with(func(d *Draft) {
 			d.Distance = false
 			d.DistanceFactors = map[string]float64{"ride": 3, "quidditch": 1}
+		}), wantFields: "distance_factors"},
+
+		// Points: at least one known criterion, each once; a podium of 5 or
+		// 10; a minimum session of 1 to 180 minutes.
+		{name: "points with every criterion", draft: with(func(d *Draft) {
+			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount)
+		})},
+		{name: "points in a top 10", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.Podium = 10 })},
+		{name: "points with a session of 1 min", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.MinSessionMinutes = 1 })},
+		{name: "points with a session of 180 min", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.MinSessionMinutes = 180 })},
+		{name: "points without criterion", draft: with(func(d *Draft) { d.Points = points() }), wantFields: "categories.points.criteria"},
+		{name: "points with an unknown criterion", draft: with(func(d *Draft) { d.Points = points("fastest") }), wantFields: "categories.points.criteria"},
+		{name: "points with a criterion twice", draft: with(func(d *Draft) {
+			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDuration)
+		}), wantFields: "categories.points.criteria"},
+		{name: "points in a top 3", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.Podium = 3 }), wantFields: "categories.points.podium"},
+		{name: "points with a session of 0 min", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.MinSessionMinutes = 0 }), wantFields: "categories.points.min_session_minutes"},
+		{name: "points with a session of 181 min", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.MinSessionMinutes = 181 }), wantFields: "categories.points.min_session_minutes"},
+		{name: "points with every setting invalid", draft: with(func(d *Draft) { d.Points = &PointsDraft{} }), wantFields: "categories.points.criteria,categories.points.min_session_minutes,categories.points.podium"},
+
+		// The longest distance of the points uses the factors too.
+		{name: "factors for the longest distance alone", draft: with(func(d *Draft) {
+			d.Distance = false
+			d.Points = points(scoring.CriterionLongestDistance)
+			d.DistanceFactors = map[string]float64{"ride": 0.25}
+		})},
+		{name: "invalid factor for the longest distance", draft: with(func(d *Draft) {
+			d.Distance = false
+			d.Points = points(scoring.CriterionLongestDistance)
+			d.DistanceFactors = map[string]float64{"ride": 3}
+		}), wantFields: "distance_factors.ride"},
+		{name: "factors for points without the longest distance", draft: with(func(d *Draft) {
+			d.Distance = false
+			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionSessionCount)
+			d.DistanceFactors = map[string]float64{"ride": 0.25}
 		}), wantFields: "distance_factors"},
 
 		// Distance factors chosen by the creator: distance sports, 0.1 to 2,

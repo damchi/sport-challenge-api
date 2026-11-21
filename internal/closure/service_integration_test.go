@@ -689,3 +689,102 @@ func TestChallengeWithoutElimination(t *testing.T) {
 		}
 	})
 }
+
+// TestChallengeWithPoints: finalize-challenges freezes the points category
+// as computed once the last week is locked, which the leaderboard then
+// serves as is, without provisional points. An account deleted after the
+// freeze leaves it: the others move up, their points do not change.
+func TestChallengeWithPoints(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, 28)
+	// The last week (4) locks at 7 am on the day after the end.
+	lock := time.Date(2026, 3, 30, 7, 0, 0, 0, loc).UTC()
+	a, b, c, quitter := s.user("a"), s.user("b"), s.user("c"), s.user("quitter")
+	var id string
+	s.scan(&id, `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Spring', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, end, a)
+	s.exec(`INSERT INTO categories (challenge_id, type, position, params) VALUES ($1, 'cumulative_time', 1, '{}'),
+		($1, 'points', 4, '{"criteria": ["longest_duration", "session_count"], "podium": 5, "min_session_seconds": 1200}')`, id)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $5), ($1, $3, $5), ($1, $4, $5)`, id, a, b, c, start)
+	// The quitter leaves once week 2 is locked: it keeps its place in weeks 1 and 2.
+	s.exec(`INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $4)`,
+		id, quitter, start, time.Date(2026, 3, 16, 8, 0, 0, 0, loc))
+	session := func(user string, week, seconds int) {
+		s.exec(`INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ($1, 'yoga', $2, $3)`,
+			user, start.AddDate(0, 0, 7*(week-1)).Add(10*time.Hour), seconds)
+	}
+	// Week 1: the longest session ranks the quitter, a, b, c; each has a
+	// session of the minimum (all first). Week 4: b then c, whose session is
+	// under the minimum.
+	session(quitter, 1, 4000)
+	session(a, 1, 3600)
+	session(b, 1, 2400)
+	session(c, 1, 1800)
+	session(b, 4, 3000)
+	session(c, 4, 1000)
+
+	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(lock), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if got, err := service.FinalizeChallenges(t.Context()); err != nil || got != (FinalizeResult{Challenges: 1}) {
+		t.Fatalf("result = %+v, err = %v, want 1 challenge", got, err)
+	}
+	snaps := s.snapshots(id)
+	// a 8 + 10, b 6 + 10 + 10 + 10, c 4 + 10 + 8.
+	want := payload{Entries: []payloadEntry{
+		{UserID: b, Rank: 1, Value: 36}, {UserID: c, Rank: 2, Value: 22}, {UserID: a, Rank: 3, Value: 18}, {UserID: quitter, Abandoned: true},
+	}}
+	if len(snaps) != 2 || snaps[1].Type != "points" || !reflect.DeepEqual(snaps[1].Payload, want) {
+		t.Fatalf("snapshots %+v, want the points %+v", snaps, want)
+	}
+
+	ch := leaderboard.Challenge{
+		ID: id, Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end.UTC(),
+		Categories: []leaderboard.Category{
+			{Type: leaderboard.CategoryCumulativeTime},
+			{Type: leaderboard.CategoryPoints, Criteria: []string{scoring.CriterionLongestDuration, scoring.CriterionSessionCount}, Podium: 5, MinSessionSeconds: 1200},
+		},
+	}
+	points := func(repo interface {
+		ParticipantsOf(context.Context, []string) (map[string][]scoring.Participant, error)
+		ActivitiesOf(context.Context, []leaderboard.Scope) (map[string][]scoring.Activity, error)
+		Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
+		DeletedAccounts(context.Context, []string) (map[string]bool, error)
+	},
+	) []scoring.Entry {
+		t.Helper()
+		svc := leaderboard.NewService(staticChallenge{ch}, noProfiles{}, repo, clock.NewFake(lock.Add(time.Hour)), time.Hour)
+		board, err := svc.Get(t.Context(), a, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []scoring.Entry
+		for _, r := range board.Categories[1].Entries {
+			out = append(out, r.Entry)
+		}
+		return out
+	}
+	frozen, computed := points(leaderboard.NewRepository(gdb)), points(withoutSnapshots{leaderboard.NewRepository(gdb)})
+	if !reflect.DeepEqual(frozen, computed) {
+		t.Fatalf("served from the snapshot = %+v, want what is computed %+v", frozen, computed)
+	}
+	for _, e := range frozen {
+		if e.Provisional != nil {
+			t.Fatalf("frozen entry %+v has provisional points", e)
+		}
+	}
+
+	s.exec("UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1", b)
+	wantAfter := []scoring.Entry{{UserID: c, Rank: 1, Value: 22}, {UserID: a, Rank: 2, Value: 18}, {UserID: quitter, Abandoned: true}}
+	if got := points(leaderboard.NewRepository(gdb)); !reflect.DeepEqual(got, wantAfter) {
+		t.Fatalf("after the deletion of b: %+v, want %+v, the frozen points unchanged", got, wantAfter)
+	}
+}
