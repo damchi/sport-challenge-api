@@ -164,8 +164,8 @@ func TestCloseWeeks(t *testing.T) {
 		t.Helper()
 		return NewService(repo, data, clock.NewFake(at), discard()).CloseWeeks(t.Context())
 	}
-	wantWeek2 := scoring.Eliminated{UserID: "a", Week: 2, RunMeters: 6999, MinimumMeters: 7000}
-	wantWeek3 := scoring.Eliminated{UserID: "c", Week: 3, RunMeters: 8999, MinimumMeters: 9000}
+	wantWeek2 := scoring.Eliminated{UserID: "a", Week: 2, DistanceMeters: 6999, MinimumMeters: 7000}
+	wantWeek3 := scoring.Eliminated{UserID: "c", Week: 3, DistanceMeters: 8999, MinimumMeters: 9000}
 
 	t.Run("the lock of a week closes it", func(t *testing.T) {
 		repo, data := newFakeRepo(c), &fakeData{participants: participants, activities: activities}
@@ -418,7 +418,7 @@ func TestFinalizeChallenges(t *testing.T) {
 		}
 		// The last week is closed with the results (SC-API-089): only its
 		// eliminations, in the elimination category.
-		wantLast := LastWeek{Number: 4, CategoryID: "cat3", Eliminated: []scoring.Eliminated{{UserID: "a", Week: 4, RunMeters: 10000, MinimumMeters: 11000}}}
+		wantLast := LastWeek{Number: 4, CategoryID: "cat3", Eliminated: []scoring.Eliminated{{UserID: "a", Week: 4, DistanceMeters: 10000, MinimumMeters: 11000}}}
 		if !reflect.DeepEqual(repo.last, wantLast) {
 			t.Fatalf("last week = %+v, want %+v", repo.last, wantLast)
 		}

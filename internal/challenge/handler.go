@@ -224,7 +224,7 @@ func toMyWeek(st Standing) *api.MyWeek {
 // toProgress turns the live situation into its contract form, zero values
 // being null, as the leaderboard does (leaderboard.toProgress).
 func toProgress(p scoring.Progress) *api.EliminationProgress {
-	out := &api.EliminationProgress{MinimumMeters: p.MinimumMeters, RunMeters: p.RunMeters}
+	out := &api.EliminationProgress{MinimumMeters: p.MinimumMeters, DistanceMeters: p.DistanceMeters}
 	if p.Status != "" {
 		status := api.EliminationProgressStatus(p.Status)
 		out.Status = &status

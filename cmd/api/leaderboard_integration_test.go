@@ -143,7 +143,7 @@ func TestLeaderboardOfAPublicChallengeIsOpenToAStranger(t *testing.T) {
 	}
 	// 6 km so far in week 2, 1 km short of the 7 km the week asks for.
 	p := got.Categories[2].Entries[0].Progress
-	if p == nil || p.Status != scoring.StatusInProgress || p.MinimumMeters == nil || *p.MinimumMeters != 7000 || p.RunMeters != 6000 {
+	if p == nil || p.Status != scoring.StatusInProgress || p.MinimumMeters == nil || *p.MinimumMeters != 7000 || p.DistanceMeters != 6000 {
 		t.Fatalf("progress = %+v, want in progress, 6000 of 7000 m", p)
 	}
 }

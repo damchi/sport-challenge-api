@@ -68,13 +68,13 @@ const (
 // Progress is where a participant stands in the elimination category at the
 // instant of the window. An eliminated participant has the status
 // eliminated and the week of the elimination, nothing else. The others have
-// the numbers of the current week: the distance already run and the instant
-// it ends; the minimum and a status only from week 2, which has a reference.
-// Outside the weeks of the challenge there is nothing but the elimination.
+// the numbers of the current week: the distance already covered and the
+// instant it ends; the minimum and a status only from week 2, which has a
+// reference. Outside the weeks of the challenge there is nothing but the elimination.
 type Progress struct {
 	Status         string
 	EliminatedWeek int
 	MinimumMeters  *int
-	RunMeters      int
+	DistanceMeters int
 	WeekEndsAt     time.Time
 }

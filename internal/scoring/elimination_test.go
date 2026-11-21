@@ -39,7 +39,9 @@ func TestEliminationScore(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
+		name string
+		// sport is the reference sport, run when empty.
+		sport        string
 		now          time.Time
 		participants []Participant
 		activities   []Activity
@@ -60,7 +62,7 @@ func TestEliminationScore(t *testing.T) {
 			want:         []Entry{{UserID: "b", Rank: 1, Value: 4000}, {UserID: "a", Rank: 2, Value: 11999}},
 		},
 		{
-			name:         "running more than the minimum raises the base",
+			name:         "covering more than the minimum raises the base",
 			now:          locked(3),
 			participants: users("a", "c"),
 			// Week 3 needs 10000 + 2000, not 5000 + 4000.
@@ -91,11 +93,22 @@ func TestEliminationScore(t *testing.T) {
 			want: []Entry{{UserID: "a", Rank: 1, Value: 12000}},
 		},
 		{
-			name:         "only running counts",
+			name:         "only the reference sport counts",
 			now:          locked(2),
 			participants: users("a"),
 			activities:   []Activity{act("a", "run", 1, 5000), act("a", "ride", 2, 9000)},
 			want:         []Entry{{UserID: "a", Rank: 1, Value: 5000}},
+		},
+		{
+			name:         "another reference sport: its distance counts, not the runs",
+			sport:        "ride",
+			now:          locked(2),
+			participants: users("a", "b"),
+			activities: []Activity{
+				act("a", "ride", 1, 5000), act("a", "ride", 2, 7000), act("a", "run", 2, 9000),
+				act("b", "run", 1, 5000), act("b", "run", 2, 9000),
+			},
+			want: []Entry{{UserID: "a", Rank: 1, Value: 12000}, {UserID: "b", Rank: 2}},
 		},
 		{
 			name:         "survivors with different bases: the most km win",
@@ -233,7 +246,11 @@ func TestEliminationScore(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := w
 			w.Now = tt.now
-			got := Elimination{Sport: "run", StepMeters: step}.Score(w, tt.participants, tt.activities)
+			sport := tt.sport
+			if sport == "" {
+				sport = "run"
+			}
+			got := Elimination{Sport: sport, StepMeters: step}.Score(w, tt.participants, tt.activities)
 			// The live progress has its own test.
 			for i := range got {
 				got[i].Progress = nil
@@ -298,37 +315,37 @@ func TestEliminationProgress(t *testing.T) {
 		{
 			name: "week 1: no minimum, no status",
 			got:  progress(weekEnd(1).Add(-time.Hour), a, run("a", 1, 3000))["a"],
-			want: &Progress{RunMeters: 3000, WeekEndsAt: weekEnd(1)},
+			want: &Progress{DistanceMeters: 3000, WeekEndsAt: weekEnd(1)},
 		},
 		{
 			name: "goal reached once the week reaches the minimum",
 			got:  progress(weekEnd(2).Add(-48*time.Hour), a, run("a", 1, 5000), run("a", 2, 7000))["a"],
-			want: &Progress{Status: StatusReached, MinimumMeters: meters(7000), RunMeters: 7000, WeekEndsAt: weekEnd(2)},
+			want: &Progress{Status: StatusReached, MinimumMeters: meters(7000), DistanceMeters: 7000, WeekEndsAt: weekEnd(2)},
 		},
 		{
 			name: "goal reached even in the last hours",
 			got:  progress(weekEnd(2).Add(-time.Hour), a, run("a", 1, 5000), run("a", 2, 9000))["a"],
-			want: &Progress{Status: StatusReached, MinimumMeters: meters(7000), RunMeters: 9000, WeekEndsAt: weekEnd(2)},
+			want: &Progress{Status: StatusReached, MinimumMeters: meters(7000), DistanceMeters: 9000, WeekEndsAt: weekEnd(2)},
 		},
 		{
 			name: "25 hours left: in progress",
 			got:  progress(weekEnd(2).Add(-25*time.Hour), a, run("a", 1, 5000), run("a", 2, 6000))["a"],
-			want: &Progress{Status: StatusInProgress, MinimumMeters: meters(7000), RunMeters: 6000, WeekEndsAt: weekEnd(2)},
+			want: &Progress{Status: StatusInProgress, MinimumMeters: meters(7000), DistanceMeters: 6000, WeekEndsAt: weekEnd(2)},
 		},
 		{
 			name: "24 hours left: at risk",
 			got:  progress(weekEnd(2).Add(-24*time.Hour), a, run("a", 1, 5000), run("a", 2, 6000))["a"],
-			want: &Progress{Status: StatusAtRisk, MinimumMeters: meters(7000), RunMeters: 6000, WeekEndsAt: weekEnd(2)},
+			want: &Progress{Status: StatusAtRisk, MinimumMeters: meters(7000), DistanceMeters: 6000, WeekEndsAt: weekEnd(2)},
 		},
 		{
 			name: "23 hours left: at risk",
 			got:  progress(weekEnd(2).Add(-23*time.Hour), a, run("a", 1, 5000), run("a", 2, 6000))["a"],
-			want: &Progress{Status: StatusAtRisk, MinimumMeters: meters(7000), RunMeters: 6000, WeekEndsAt: weekEnd(2)},
+			want: &Progress{Status: StatusAtRisk, MinimumMeters: meters(7000), DistanceMeters: 6000, WeekEndsAt: weekEnd(2)},
 		},
 		{
-			name: "the minimum follows the distance really run the week before",
+			name: "the minimum follows the distance really covered the week before",
 			got:  progress(weekEnd(3).Add(-48*time.Hour), a, run("a", 1, 5000), run("a", 2, 10000), run("a", 3, 11000))["a"],
-			want: &Progress{Status: StatusInProgress, MinimumMeters: meters(12000), RunMeters: 11000, WeekEndsAt: weekEnd(3)},
+			want: &Progress{Status: StatusInProgress, MinimumMeters: meters(12000), DistanceMeters: 11000, WeekEndsAt: weekEnd(3)},
 		},
 		{
 			name: "the exact end of a week is already the next week",
@@ -412,11 +429,11 @@ func TestEliminations(t *testing.T) {
 		want         []Eliminated
 	}{
 		{
-			name:         "the distance run and the minimum it missed",
+			name:         "the distance covered and the minimum it missed",
 			now:          locked(2),
 			participants: users("a", "b"),
 			activities:   slices.Concat(runs("a", 5000, 6999), runs("b", 1000, 3000)),
-			want:         []Eliminated{{UserID: "a", Week: 2, RunMeters: 6999, MinimumMeters: 7000}},
+			want:         []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 6999, MinimumMeters: 7000}},
 		},
 		{
 			name:         "exactly the minimum is not eliminated",
@@ -429,7 +446,7 @@ func TestEliminations(t *testing.T) {
 			now:          locked(2),
 			participants: users("a"),
 			activities:   runs("a", 5000),
-			want:         []Eliminated{{UserID: "a", Week: 2, RunMeters: 0, MinimumMeters: 7000}},
+			want:         []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 0, MinimumMeters: 7000}},
 		},
 		{
 			name:         "week 2 is judged when it locks, not before",
@@ -443,19 +460,19 @@ func TestEliminations(t *testing.T) {
 			participants: users("a"),
 		},
 		{
-			name:         "the minimum follows the distance really run",
+			name:         "the minimum follows the distance really covered",
 			now:          locked(3),
 			participants: users("a", "c"),
 			// Week 3 needs 10000 + 2000, not 5000 + 4000.
 			activities: slices.Concat(runs("a", 5000, 10000, 12000), runs("c", 5000, 10000, 11999)),
-			want:       []Eliminated{{UserID: "c", Week: 3, RunMeters: 11999, MinimumMeters: 12000}},
+			want:       []Eliminated{{UserID: "c", Week: 3, DistanceMeters: 11999, MinimumMeters: 12000}},
 		},
 		{
 			name:         "only the first elimination of a participant",
 			now:          locked(4),
 			participants: users("a"),
 			activities:   runs("a", 5000, 1000, 9000, 20000),
-			want:         []Eliminated{{UserID: "a", Week: 2, RunMeters: 1000, MinimumMeters: 7000}},
+			want:         []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 1000, MinimumMeters: 7000}},
 		},
 		{
 			name:         "ordered by week then participant",
@@ -463,9 +480,9 @@ func TestEliminations(t *testing.T) {
 			participants: users("d", "c", "b", "a"),
 			activities:   slices.Concat(runs("a", 5000, 7000, 1), runs("b", 5000, 100, 100), runs("c", 5000, 7000, 1), runs("d", 5000, 7000, 9000)),
 			want: []Eliminated{
-				{UserID: "b", Week: 2, RunMeters: 100, MinimumMeters: 7000},
-				{UserID: "a", Week: 3, RunMeters: 1, MinimumMeters: 9000},
-				{UserID: "c", Week: 3, RunMeters: 1, MinimumMeters: 9000},
+				{UserID: "b", Week: 2, DistanceMeters: 100, MinimumMeters: 7000},
+				{UserID: "a", Week: 3, DistanceMeters: 1, MinimumMeters: 9000},
+				{UserID: "c", Week: 3, DistanceMeters: 1, MinimumMeters: 9000},
 			},
 		},
 		{
@@ -482,7 +499,7 @@ func TestEliminations(t *testing.T) {
 				UserID: "a", SportCode: "ride", StartedAt: weekStart(2).Add(time.Hour),
 				DurationSeconds: 1800, DistanceMeters: meters(20000),
 			}}),
-			want: []Eliminated{{UserID: "a", Week: 2, RunMeters: 0, MinimumMeters: 7000}},
+			want: []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 0, MinimumMeters: 7000}},
 		},
 	}
 	for _, tt := range tests {

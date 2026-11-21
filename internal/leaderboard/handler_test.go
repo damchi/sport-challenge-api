@@ -152,7 +152,7 @@ func TestGetLeaderboardAnswersEveryCategory(t *testing.T) {
 
 	elimination := categories[2].(map[string]any)["entries"].([]any)
 	annLine := elimination[0].(map[string]any)["elimination"].(map[string]any)
-	if annLine["status"] != "in_progress" || annLine["minimum_meters"] != 7000.0 || annLine["run_meters"] != 4000.0 || annLine["eliminated_week"] != nil || annLine["week_ends_at"] == nil {
+	if annLine["status"] != "in_progress" || annLine["minimum_meters"] != 7000.0 || annLine["distance_meters"] != 4000.0 || annLine["eliminated_week"] != nil || annLine["week_ends_at"] == nil {
 		t.Fatalf("ann's progress %v, want in progress, 4000 of 7000 m, no elimination", annLine)
 	}
 }
