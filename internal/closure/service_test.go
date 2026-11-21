@@ -34,6 +34,9 @@ type fakeRepo struct {
 	// awaitErr is the error of AwaitActivityWrites; awaits counts its calls.
 	awaitErr error
 	awaits   int
+	// deletedSince is how many SaveSnapshots fail as if an account ranked
+	// had been deleted since the ranking.
+	deletedSince int
 }
 
 func (f *fakeRepo) AwaitActivityWrites(context.Context) error {
@@ -85,6 +88,10 @@ func (f *fakeRepo) EndedChallenges(_ context.Context, now time.Time) ([]EndedCha
 func (f *fakeRepo) SaveSnapshots(_ context.Context, id string, at time.Time, snapshots []Snapshot, last LastWeek) (bool, error) {
 	if id == f.failOn {
 		return false, errors.New("database down")
+	}
+	if f.deletedSince > 0 {
+		f.deletedSince--
+		return false, errRankedAccountDeleted
 	}
 	if _, done := f.snapshots[id]; done {
 		return false, nil
@@ -483,6 +490,31 @@ func TestFinalizeChallenges(t *testing.T) {
 			if strings.Contains(string(snap.Payload), "provisional") {
 				t.Fatalf("snapshot %s carries provisional points: %s", snap.CategoryID, snap.Payload)
 			}
+		}
+	})
+
+	t.Run("an account deleted since the ranking has the challenge ranked again", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		repo.deletedSince = 1
+		data := &fakeData{participants: participants, activities: activities}
+		got, err := NewService(repo, data, clock.NewFake(lock), discard()).FinalizeChallenges(t.Context())
+		if err != nil || got != (FinalizeResult{Challenges: 1}) || len(repo.snapshots["c1"]) != len(c.Categories) {
+			t.Fatalf("result = %+v, err = %v, want 1 challenge frozen", got, err)
+		}
+		// Participants and activities read twice: ranked again.
+		if data.loads != 4 {
+			t.Fatalf("%d reads, want 4: the challenge ranked twice", data.loads)
+		}
+	})
+
+	t.Run("an account deleted at each attempt is left to the next run", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		repo.deletedSince = freezeAttempts
+		got, err := finalize(t, repo, lock)
+		if !errors.Is(err, errRankedAccountDeleted) || got != (FinalizeResult{}) || len(repo.snapshots) != 0 {
+			t.Fatalf("result = %+v, err = %v, want nothing frozen and the error", got, err)
 		}
 	})
 

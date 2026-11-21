@@ -37,9 +37,20 @@ type repository interface {
 	EndedChallenges(ctx context.Context, now time.Time) ([]EndedChallenge, error)
 	// SaveSnapshots records the snapshots of a challenge and the closure of
 	// its last week in one transaction. It reports false, and records
-	// nothing, when they were already taken (by a run at the same time).
+	// nothing, when they were already taken (by a run at the same time). It
+	// fails with errRankedAccountDeleted, and records nothing, when an
+	// account ranked in them was deleted since.
 	SaveSnapshots(ctx context.Context, challengeID string, createdAt time.Time, snapshots []Snapshot, last LastWeek) (bool, error)
 }
+
+// errRankedAccountDeleted is an account deleted between the ranking of a
+// challenge and the writing of its snapshots: the results are not frozen
+// yet, so the deletion counts, and the challenge is ranked again without it.
+var errRankedAccountDeleted = errors.New("an account ranked was deleted since the ranking")
+
+// freezeAttempts is how many times a challenge is ranked in one run when an
+// account ranked is deleted meanwhile; the next run tries again.
+const freezeAttempts = 2
 
 // Category types, as the challenge module stores them (categories.type).
 const (
@@ -234,17 +245,33 @@ func (s *Service) FinalizeChallenges(ctx context.Context) (FinalizeResult, error
 }
 
 // finalizeChallenge records the snapshots of one challenge once its last
-// week is locked, and reports whether this run did.
+// week is locked, and reports whether this run did. The results are frozen
+// when they are written, not when the last week locks: an account deleted
+// until then leaves them, and in the points category the next ones take its
+// places and its points (README §2.2). So a deletion between the ranking and
+// the writing has the challenge ranked again.
 func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now time.Time) (bool, error) {
 	loc, err := time.LoadLocation(c.Timezone)
 	if err != nil {
 		return false, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
 	}
 	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
-	last := LastWeek{Number: w.Weeks()}
-	if now.Before(w.WeekLocksAt(last.Number)) {
+	if now.Before(w.WeekLocksAt(w.Weeks())) {
 		return false, nil
 	}
+	for attempt := 1; ; attempt++ {
+		done, err := s.freeze(ctx, c, w)
+		if errors.Is(err, errRankedAccountDeleted) && attempt < freezeAttempts {
+			continue
+		}
+		return done, err
+	}
+}
+
+// freeze ranks every category of challenge c in window w and records the
+// snapshots, with the closure of its last week.
+func (s *Service) freeze(ctx context.Context, c EndedChallenge, w scoring.Window) (bool, error) {
+	last := LastWeek{Number: w.Weeks()}
 	participants, err := s.data.Participants(ctx, c.ID)
 	if err != nil {
 		return false, err
@@ -274,7 +301,7 @@ func (s *Service) finalizeChallenge(ctx context.Context, c EndedChallenge, now t
 		}
 		snapshots[i] = Snapshot{CategoryID: cat.ID, Type: cat.Type, Payload: payload}
 	}
-	done, err := s.repo.SaveSnapshots(ctx, c.ID, now, snapshots, last)
+	done, err := s.repo.SaveSnapshots(ctx, c.ID, w.Now, snapshots, last)
 	if err != nil {
 		return false, fmt.Errorf("save snapshots: %w", err)
 	}
