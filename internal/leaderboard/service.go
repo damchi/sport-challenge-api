@@ -21,7 +21,8 @@ type repository interface {
 	// ActivitiesOf gives, in one query, the totals of the activities of the
 	// active participants of each challenge started in its window: per
 	// participant and week for its weekly sport, per participant and sport
-	// for the others.
+	// for the others; with a points category, per participant, week and
+	// sport for every sport, abandoned participants included.
 	ActivitiesOf(ctx context.Context, scopes []Scope) (map[string][]scoring.Activity, error)
 	// Snapshots gives the frozen results of the challenge by category type,
 	// and when they were frozen; none until the worker has finalized it.
@@ -95,7 +96,7 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 		return Leaderboard{}, err
 	}
 	participants := byChallenge[id]
-	activitiesOf, err := s.repo.ActivitiesOf(ctx, []Scope{{ChallengeID: id, Window: w, WeeklySport: weeklySport(c.Categories)}})
+	activitiesOf, err := s.repo.ActivitiesOf(ctx, []Scope{scopeOf(id, c.Categories, w)})
 	if err != nil {
 		return Leaderboard{}, err
 	}
@@ -162,7 +163,7 @@ func (s *Service) Standings(ctx context.Context, actorID string, challenges []Ch
 	for _, r := range runs {
 		if isActive(participants[r.c.ID], actorID) {
 			kept = append(kept, r)
-			scopes = append(scopes, Scope{ChallengeID: r.c.ID, Window: r.w, WeeklySport: weeklySport(r.c.Categories)})
+			scopes = append(scopes, scopeOf(r.c.ID, r.c.Categories, r.w))
 		}
 	}
 	if len(kept) == 0 {
@@ -235,6 +236,8 @@ func (s *Service) scorerOf(cat Category) (scoring.Scorer, error) {
 		return scoring.Distance{Factors: cat.Factors}, nil
 	case CategoryElimination:
 		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters, AtRisk: s.atRisk}, nil
+	case CategoryPoints:
+		return scoring.Points{Criteria: cat.Criteria, Podium: cat.Podium, Factors: cat.Factors}, nil
 	default:
 		return nil, fmt.Errorf("unknown category type %q", cat.Type)
 	}
@@ -331,13 +334,18 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 	return board, true, nil
 }
 
-// weeklySport is the sport of the elimination category, the only one the
-// scorers count week by week; empty without such a category.
-func weeklySport(categories []Category) string {
+// scopeOf is what the activities of challenge id, with categories, are read
+// for in window w: the sport of its elimination category summed per week, and
+// the groups of its points category; neither without such a category.
+func scopeOf(id string, categories []Category, w scoring.Window) Scope {
+	sc := Scope{ChallengeID: id, Window: w}
 	for _, cat := range categories {
-		if cat.Type == CategoryElimination {
-			return cat.Sport
+		switch cat.Type {
+		case CategoryElimination:
+			sc.WeeklySport = cat.Sport
+		case CategoryPoints:
+			sc.Points = &PointsRead{MinSessionSeconds: cat.MinSessionSeconds}
 		}
 	}
-	return ""
+	return sc
 }

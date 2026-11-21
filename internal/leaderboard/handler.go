@@ -51,7 +51,8 @@ func (h *Handler) GetLeaderboard(ctx context.Context, req api.GetLeaderboardRequ
 }
 
 // toEntry turns a line of a ranking into its contract form: an abandoned
-// participant has no rank, no value and no elimination progress.
+// participant has no rank, no value, no elimination progress and no
+// provisional points.
 func toEntry(r Ranked) (api.LeaderboardEntry, error) {
 	id, err := uuid.Parse(r.UserID)
 	if err != nil {
@@ -65,7 +66,7 @@ func toEntry(r Ranked) (api.LeaderboardEntry, error) {
 	if r.Abandoned {
 		return entry, nil
 	}
-	entry.Rank, entry.Value = &r.Rank, &r.Value
+	entry.Rank, entry.Value, entry.ProvisionalPoints = &r.Rank, &r.Value, r.Provisional
 	if r.Progress != nil {
 		entry.Elimination = toProgress(*r.Progress)
 	}

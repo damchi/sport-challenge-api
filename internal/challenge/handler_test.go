@@ -137,7 +137,10 @@ func TestCreateChallengeOptionalCategories(t *testing.T) {
 		{"no optional category chosen", `"categories":{},`, []string{"cumulative_time@1"}},
 		{"elimination", `"categories":{"elimination":{"step_meters":1500}},`, []string{"cumulative_time@1", "elimination@3"}},
 		{"distance", `"categories":{"cumulative_distance":{}},`, []string{"cumulative_time@1", "cumulative_distance@2"}},
-		{"every category", `"categories":{"cumulative_distance":{},"elimination":{"step_meters":1500}},`, []string{"cumulative_time@1", "cumulative_distance@2", "elimination@3"}},
+		{"points", `"categories":{"points":{"criteria":["session_count"],"podium":5}},`, []string{"cumulative_time@1", "points@4"}},
+		{"every category", `"categories":{"cumulative_distance":{},"elimination":{"step_meters":1500},"points":{"criteria":["session_count"],"podium":5}},`, []string{
+			"cumulative_time@1", "cumulative_distance@2", "elimination@3", "points@4",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -155,6 +158,41 @@ func TestCreateChallengeOptionalCategories(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("categories %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCreateChallengePoints: the settings of the points category are passed
+// on, the minimum session of 20 min by default, and the answer carries them,
+// the minimum in seconds and the factors of the longest distance.
+func TestCreateChallengePoints(t *testing.T) {
+	tests := []struct {
+		name       string
+		points     string
+		wantSecond float64
+	}{
+		{"default minimum session", `{"criteria":["longest_distance","session_count"],"podium":10}`, 1200},
+		{"chosen minimum session", `{"criteria":["longest_distance","session_count"],"podium":10,"min_session_minutes":45}`, 2700},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo := newTestService(true)
+			body := `{"title":"Spring run","visibility":"public","timezone":"America/Toronto","start_date":"2026-03-04","weeks":6,` +
+				`"categories":{"points":` + tt.points + `},"distance_factors":{"ride":0.25}}`
+			rec, out := post(t, svc, body)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status %d, want 201: %s", rec.Code, rec.Body)
+			}
+			cats, _ := out["categories"].([]any)
+			params, _ := cats[len(cats)-1].(map[string]any)["params"].(map[string]any)
+			factors, _ := params["factors"].(map[string]any)
+			criteria, _ := params["criteria"].([]any)
+			if len(criteria) != 2 || criteria[0] != "longest_distance" || params["podium"] != 10.0 || params["min_session_seconds"] != tt.wantSecond || factors["ride"] != 0.25 {
+				t.Fatalf("points params %v, want the criteria, a top 10, %v s and ride at 0.25", params, tt.wantSecond)
+			}
+			if p := repo.created.Categories[len(repo.created.Categories)-1].Params; p.MinSessionSeconds != int(tt.wantSecond) {
+				t.Fatalf("stored %d s, want %v", p.MinSessionSeconds, tt.wantSecond)
 			}
 		})
 	}
@@ -220,6 +258,15 @@ func TestCreateChallengeRefusals(t *testing.T) {
 		{name: "null categories", complete: true, body: strings.Replace(validBody, `"categories":{"cumulative_distance":{},"elimination":{"step_meters":2000}}`, `"categories":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories"},
 		{name: "null cumulative distance", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{}`, `"cumulative_distance":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.cumulative_distance"},
 		{name: "null elimination", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"elimination":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination"},
+		{name: "points without criterion", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":{"criteria":[],"podium":5}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points.criteria"},
+		{name: "points criterion twice", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":{"criteria":["session_count","session_count"],"podium":5}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points.criteria"},
+		{name: "unknown points criterion", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":{"criteria":["fastest"],"podium":5}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points.criteria.0"},
+		{name: "points in a top 3", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":{"criteria":["session_count"],"podium":3}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points.podium"},
+		{name: "points without podium", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":{"criteria":["session_count"]}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points.podium"},
+		{name: "points session of 0 min", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":{"criteria":["session_count"],"podium":5,"min_session_minutes":0}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points.min_session_minutes"},
+		{name: "points session over 180 min", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":{"criteria":["session_count"],"podium":5,"min_session_minutes":181}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points.min_session_minutes"},
+		{name: "null points", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points"},
+		{name: "factors for points without the longest distance", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{},"elimination":{"step_meters":2000}`, `"points":{"criteria":["session_count"],"podium":5}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors"},
 		{name: "factors without the cumulative distance", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{},`, "", 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors"},
 		{name: "former elimination_step_meters", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"elimination_step_meters":2000`, 1), wantStatus: 400, wantCode: "validation_failed"},
 		{name: "factor over 2: refused by the contract, key not echoed", complete: true, body: strings.Replace(validBody, `"ride":0.25`, `"ride":3`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors"},
@@ -286,7 +333,7 @@ func TestListChallenges(t *testing.T) {
 func TestListChallengesMyWeek(t *testing.T) {
 	active := string(ParticipantActive)
 	weekEnd := now.Add(48 * time.Hour)
-	minimum := 7000
+	minimum, provisional := 7000, 12
 	running := Summary{
 		ID: "11111111-1111-1111-1111-111111111111", Title: "A", Visibility: "public", Timezone: "UTC",
 		StartsAt: now.AddDate(0, 0, -8), EndsAt: now.AddDate(0, 0, 13), ParticipantCount: 8, MyStatus: &active,
@@ -299,6 +346,7 @@ func TestListChallengesMyWeek(t *testing.T) {
 		{Type: CategoryElimination, Rank: 3, RankedCount: 7, Progress: &scoring.Progress{
 			Status: scoring.StatusAtRisk, MinimumMeters: &minimum, RunMeters: 6000, WeekEndsAt: weekEnd,
 		}},
+		{Type: CategoryPoints, Rank: 2, RankedCount: 7, Provisional: &provisional},
 	}}}}
 	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, standings, clock.NewFake(now))
 
@@ -314,9 +362,10 @@ func TestListChallengesMyWeek(t *testing.T) {
 	}
 	got, _ := json.Marshal(first["my_week"])
 	want := `{"rankings":[` +
-		`{"elimination":null,"rank":1,"ranked_count":7,"type":"cumulative_time"},` +
-		`{"elimination":null,"rank":5,"ranked_count":7,"type":"cumulative_distance"},` +
-		`{"elimination":{"eliminated_week":null,"minimum_meters":7000,"run_meters":6000,"status":"at_risk","week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"},"rank":3,"ranked_count":7,"type":"elimination"}` +
+		`{"elimination":null,"provisional_points":null,"rank":1,"ranked_count":7,"type":"cumulative_time"},` +
+		`{"elimination":null,"provisional_points":null,"rank":5,"ranked_count":7,"type":"cumulative_distance"},` +
+		`{"elimination":{"eliminated_week":null,"minimum_meters":7000,"run_meters":6000,"status":"at_risk","week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"},"provisional_points":null,"rank":3,"ranked_count":7,"type":"elimination"},` +
+		`{"elimination":null,"provisional_points":12,"rank":2,"ranked_count":7,"type":"points"}` +
 		`],"week":2,"week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"}`
 	if string(got) != want {
 		t.Fatalf("my_week\n%s\nwant\n%s", got, want)

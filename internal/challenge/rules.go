@@ -35,7 +35,19 @@ const (
 	distanceRequired     = "required"
 	factorFieldPrefix    = "distance_factors."
 	distanceFactorsField = "distance_factors"
+	// defaultMinSessionMinutes is the minimum session of the points
+	// category when the creator gives none.
+	defaultMinSessionMinutes = 20
+	minSessionMinutes        = 1
+	maxSessionMinutes        = 180
 )
+
+// pointsPodiums are the sizes of the top that scores in the points
+// category, those scoring.Points has a scale for.
+var pointsPodiums = []int{5, 10}
+
+// pointsCriteria are the criteria of the points category.
+var pointsCriteria = []string{scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount}
 
 // Draft is a challenge as its creator describes it.
 type Draft struct {
@@ -56,6 +68,8 @@ type Draft struct {
 	Distance bool
 	// Elimination is the elimination category, nil when not chosen.
 	Elimination *EliminationDraft
+	// Points is the points category, nil when not chosen.
+	Points *PointsDraft
 	// ReferenceSport is the sport the distances are brought back to and the
 	// elimination is run in; nil for run (an empty code is refused).
 	ReferenceSport *string
@@ -70,6 +84,37 @@ type Draft struct {
 type EliminationDraft struct {
 	// StepMeters is the increment X, in meters.
 	StepMeters int
+}
+
+// PointsDraft is the setting of the points category.
+type PointsDraft struct {
+	// Criteria are those chosen, at least one, each once.
+	Criteria []string
+	// Podium is the size of the top that scores: 5 or 10.
+	Podium int
+	// MinSessionMinutes is the minimum duration of a session counted by
+	// the session count, 1 to 180 minutes; nil for the default, 20.
+	MinSessionMinutes *int
+}
+
+// minSessionMinutes is the minimum session chosen, or the default.
+func (p PointsDraft) minSessionMinutes() int {
+	if p.MinSessionMinutes == nil {
+		return defaultMinSessionMinutes
+	}
+	return *p.MinSessionMinutes
+}
+
+// longestDistance reports whether the points category ranks the longest
+// session by equivalent distance, which needs the distance factors.
+func (p *PointsDraft) longestDistance() bool {
+	return p != nil && slices.Contains(p.Criteria, scoring.CriterionLongestDistance)
+}
+
+// usesFactors reports whether a category of the draft uses the distance
+// factors: the cumulative distance, or the longest distance of the points.
+func (d Draft) usesFactors() bool {
+	return d.Distance || d.Points.longestDistance()
 }
 
 // reference is the reference sport of the draft, run when none is given.
@@ -90,7 +135,7 @@ type Window struct {
 // (from platform/clock), with distanceSports the sports of the catalogue that
 // have a distance and referenceMode the distance mode of the reference sport
 // (empty when the catalogue has no such sport). The distance factors are
-// refused without the cumulative distance, the only category to use them.
+// refused without a category that uses them (usesFactors).
 // It returns the window of the challenge: from the first instant of the
 // first local day (midnight, or the end of the skipped hour where a time
 // change skips midnight: scoring.StartOfDay), for a whole number of weeks
@@ -115,10 +160,13 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool, refere
 	if e := draft.Elimination; e != nil && (e.StepMeters <= 0 || e.StepMeters > maxEliminationStep) {
 		fields = append(fields, "categories.elimination.step_meters")
 	}
+	if p := draft.Points; p != nil {
+		fields = append(fields, invalidPoints(*p)...)
+	}
 	if referenceMode != distanceRequired {
 		fields = append(fields, "reference_sport")
 	}
-	if !draft.Distance && draft.DistanceFactors != nil {
+	if !draft.usesFactors() && draft.DistanceFactors != nil {
 		// No category uses them: the field alone, its keys never echoed.
 		fields = append(fields, distanceFactorsField)
 	} else {
@@ -212,6 +260,30 @@ func location(name string) (*time.Location, error) {
 		return nil, errInvalidTimezone
 	}
 	return loc, nil
+}
+
+// invalidPoints returns the fields of the points settings that break the
+// rules.
+func invalidPoints(p PointsDraft) []string {
+	var fields []string
+	seen := make(map[string]bool, len(p.Criteria))
+	ok := len(p.Criteria) > 0
+	for _, c := range p.Criteria {
+		if seen[c] || !slices.Contains(pointsCriteria, c) {
+			ok = false
+		}
+		seen[c] = true
+	}
+	if !ok {
+		fields = append(fields, "categories.points.criteria")
+	}
+	if !slices.Contains(pointsPodiums, p.Podium) {
+		fields = append(fields, "categories.points.podium")
+	}
+	if m := p.minSessionMinutes(); m < minSessionMinutes || m > maxSessionMinutes {
+		fields = append(fields, "categories.points.min_session_minutes")
+	}
+	return fields
 }
 
 // invalidFactors returns the fields of factors that break the rules: a known

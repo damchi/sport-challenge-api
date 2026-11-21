@@ -11,6 +11,7 @@ const (
 	CategoryCumulativeTime     = "cumulative_time"
 	CategoryCumulativeDistance = "cumulative_distance"
 	CategoryElimination        = "elimination"
+	CategoryPoints             = "points"
 )
 
 // Challenge is a challenge as the leaderboard needs it: its window and its
@@ -26,11 +27,16 @@ type Challenge struct {
 // Category is a category of a challenge, in position order.
 type Category struct {
 	Type string
-	// Factors is the distance factor by sport code (cumulative_distance).
+	// Factors is the distance factor by sport code (cumulative_distance,
+	// and points with the longest distance criterion).
 	Factors map[string]float64
 	// Sport and StepMeters are the elimination settings.
 	Sport      string
 	StepMeters int
+	// Criteria, Podium and MinSessionSeconds are the points settings.
+	Criteria          []string
+	Podium            int
+	MinSessionSeconds int
 }
 
 // Ranked is a line of a ranking with the public name of the participant

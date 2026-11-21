@@ -139,21 +139,27 @@ func insertEliminations(tx *gorm.DB, challengeID, categoryID string, eliminated 
 // snapshots of a challenge are written together, so none means none.
 func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]EndedChallenge, error) {
 	var rows []struct {
-		ID         string
-		Timezone   string
-		StartsAt   time.Time
-		EndsAt     time.Time
-		CategoryID string
-		Type       string
-		Factors    string
-		Sport      string
-		StepMeters int
+		ID                string
+		Timezone          string
+		StartsAt          time.Time
+		EndsAt            time.Time
+		CategoryID        string
+		Type              string
+		Factors           string
+		Sport             string
+		StepMeters        int
+		Criteria          string
+		Podium            int
+		MinSessionSeconds int
 	}
 	err := db.Conn(ctx, r.db).Raw(
 		`SELECT c.id, c.timezone, c.starts_at, c.ends_at, cat.id AS category_id, cat.type,
 			COALESCE(cat.params->>'factors', '{}') AS factors,
 			COALESCE(cat.params->>'sport', '') AS sport,
-			COALESCE((cat.params->>'step_meters')::int, 0) AS step_meters
+			COALESCE((cat.params->>'step_meters')::int, 0) AS step_meters,
+			COALESCE(cat.params->>'criteria', '[]') AS criteria,
+			COALESCE((cat.params->>'podium')::int, 0) AS podium,
+			COALESCE((cat.params->>'min_session_seconds')::int, 0) AS min_session_seconds
 		FROM challenges c
 		JOIN categories cat ON cat.challenge_id = c.id
 		WHERE c.deleted_at IS NULL AND c.ends_at <= @now
@@ -169,9 +175,15 @@ func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]Ende
 		if len(out) == 0 || out[len(out)-1].ID != row.ID {
 			out = append(out, EndedChallenge{ID: row.ID, Timezone: row.Timezone, StartsAt: row.StartsAt.UTC(), EndsAt: row.EndsAt.UTC()})
 		}
-		cat := Category{ID: row.CategoryID, Type: row.Type, Sport: row.Sport, StepMeters: row.StepMeters}
+		cat := Category{
+			ID: row.CategoryID, Type: row.Type, Sport: row.Sport, StepMeters: row.StepMeters,
+			Podium: row.Podium, MinSessionSeconds: row.MinSessionSeconds,
+		}
 		if err := json.Unmarshal([]byte(row.Factors), &cat.Factors); err != nil {
 			return nil, fmt.Errorf("read factors of category %s: %w", row.CategoryID, err)
+		}
+		if err := json.Unmarshal([]byte(row.Criteria), &cat.Criteria); err != nil {
+			return nil, fmt.Errorf("read criteria of category %s: %w", row.CategoryID, err)
 		}
 		last := &out[len(out)-1]
 		last.Categories = append(last.Categories, cat)
@@ -180,20 +192,12 @@ func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]Ende
 }
 
 // lockParticipantsQuery takes FOR SHARE the users of the participants of
-// @id, in one global order: an account deletion, which locks its user row
-// first, then waits for the snapshots to be written, or they wait for it.
+// @id whose account is not deleted, in one global order: an account
+// deletion, which locks its user row first, then waits for the snapshots to
+// be written, or they wait for it. A deletion erases the participations, so
+// an account deleted before is not among them.
 const lockParticipantsQuery = `SELECT u.id FROM participants p JOIN users u ON u.id = p.user_id
-WHERE p.challenge_id = @id ORDER BY u.id FOR SHARE OF u`
-
-// dropDeletedEntriesQuery removes from the snapshots of @id the entries of
-// the accounts deleted (anonymized) since they were ranked, keeping the
-// order of the others; the ranks are computed again when served.
-const dropDeletedEntriesQuery = `UPDATE result_snapshot rs
-SET payload = jsonb_set(rs.payload, '{entries}', COALESCE(
-	(SELECT jsonb_agg(e ORDER BY n) FROM jsonb_array_elements(rs.payload->'entries') WITH ORDINALITY AS t(e, n)
-		WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id::text = e->>'user_id' AND u.anonymized_at IS NOT NULL)),
-	'[]'::jsonb))
-WHERE rs.challenge_id = @id`
+WHERE p.challenge_id = @id AND u.anonymized_at IS NULL ORDER BY u.id FOR SHARE OF u`
 
 // SaveSnapshots records the snapshots of a challenge, then the closure of its
 // last week and the eliminations judged in it, in one transaction. A run that
@@ -202,15 +206,20 @@ WHERE rs.challenge_id = @id`
 //
 // The rankings were computed before the transaction: an account deleted
 // since would stay in them, its erasure having found nothing to erase. So
-// the users of the participants are locked first (lockParticipantsQuery) and
-// the entries of deleted accounts dropped once written: a deletion either
-// commits before, and is dropped here, or waits and erases them itself.
+// the users of the participants are locked first (lockParticipantsQuery): a
+// deletion either commits before, and an account ranked is missing from
+// them (errRankedAccountDeleted, nothing written: the results are not frozen
+// yet, so the challenge is ranked again without it), or waits and erases its
+// entries itself.
 func (r *Repository) SaveSnapshots(ctx context.Context, challengeID string, createdAt time.Time, snapshots []Snapshot, last LastWeek) (bool, error) {
 	var recorded bool
 	err := db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
 		var locked []string
 		if err := tx.Raw(lockParticipantsQuery, map[string]any{"id": challengeID}).Scan(&locked).Error; err != nil {
 			return fmt.Errorf("lock participants: %w", err)
+		}
+		if err := checkRanked(snapshots, locked); err != nil {
+			return err
 		}
 		for i, s := range snapshots {
 			res := tx.Exec(
@@ -233,9 +242,6 @@ func (r *Repository) SaveSnapshots(ctx context.Context, challengeID string, crea
 		if len(snapshots) == 0 {
 			return nil
 		}
-		if err := tx.Exec(dropDeletedEntriesQuery, map[string]any{"id": challengeID}).Error; err != nil {
-			return fmt.Errorf("drop entries of deleted accounts: %w", err)
-		}
 		if err := tx.Exec(
 			`INSERT INTO week_closure (challenge_id, week_number, closed_at) VALUES (@id, @week, @closed_at)
 			ON CONFLICT (challenge_id, week_number) DO NOTHING`,
@@ -250,4 +256,26 @@ func (r *Repository) SaveSnapshots(ctx context.Context, challengeID string, crea
 		return nil
 	})
 	return recorded, err
+}
+
+// checkRanked fails with errRankedAccountDeleted when a participant ranked
+// in snapshots is not among the participants locked, whose account is not
+// deleted.
+func checkRanked(snapshots []Snapshot, locked []string) error {
+	active := make(map[string]bool, len(locked))
+	for _, id := range locked {
+		active[id] = true
+	}
+	for _, s := range snapshots {
+		var p payload
+		if err := json.Unmarshal(s.Payload, &p); err != nil {
+			return fmt.Errorf("decode snapshot of category %s: %w", s.CategoryID, err)
+		}
+		for _, e := range p.Entries {
+			if !active[e.UserID] {
+				return errRankedAccountDeleted
+			}
+		}
+	}
+	return nil
 }

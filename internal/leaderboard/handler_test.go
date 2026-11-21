@@ -97,7 +97,7 @@ func handlerService(t *testing.T, challenges *fakeChallenges) *Service {
 	run := func(user string, day, distance int) scoring.Activity {
 		return scoring.Activity{
 			UserID: user, SportCode: "run", StartedAt: time.Date(2026, 6, day, 7, 0, 0, 0, loc).UTC(),
-			DurationSeconds: 1800, DistanceMeters: meters(distance),
+			DurationSeconds: 1800, DistanceMeters: meters(distance), LongestSeconds: 1800, Sessions: 1,
 		}
 	}
 	repo := &fakeRepo{
@@ -171,6 +171,9 @@ func TestGetLeaderboardAnswersTheCategoriesOfTheChallenge(t *testing.T) {
 		{"with the distance", all[:2], []string{"cumulative_time", "cumulative_distance"}},
 		{"with the elimination", []Category{all[0], all[2]}, []string{"cumulative_time", "elimination"}},
 		{"every category", all, []string{"cumulative_time", "cumulative_distance", "elimination"}},
+		{"with the points", append(all, Category{Type: CategoryPoints, Criteria: []string{scoring.CriterionLongestDuration}, Podium: 5, MinSessionSeconds: 1200}), []string{
+			"cumulative_time", "cumulative_distance", "elimination", "points",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,6 +193,34 @@ func TestGetLeaderboardAnswersTheCategoriesOfTheChallenge(t *testing.T) {
 				t.Fatalf("categories %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestGetLeaderboardAnswersProvisionalPoints: in the points category, the
+// points of the running week are apart, null for an abandoned participant;
+// the other categories have none.
+func TestGetLeaderboardAnswersProvisionalPoints(t *testing.T) {
+	c := twoWeeks(t)
+	c.Categories = []Category{{Type: CategoryCumulativeTime}, {Type: CategoryPoints, Criteria: []string{scoring.CriterionLongestDuration}, Podium: 5, MinSessionSeconds: 1200}}
+	svc := handlerService(t, &fakeChallenges{c: c})
+	rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/leaderboard", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d (%s), want 200", rec.Code, rec.Body)
+	}
+	categories := body["categories"].([]any)
+	for _, e := range categories[0].(map[string]any)["entries"].([]any) {
+		if v, ok := e.(map[string]any)["provisional_points"]; !ok || v != nil {
+			t.Fatalf("time entry %v, want null provisional points", e)
+		}
+	}
+	// Week 1 is locked, ann and bob equal in it; week 2 runs, ann alone in it.
+	want := map[string][3]any{ann: {1.0, 10.0, 10.0}, bob: {1.0, 10.0, 0.0}, gone: {nil, nil, nil}}
+	for _, e := range categories[1].(map[string]any)["entries"].([]any) {
+		entry := e.(map[string]any)
+		id := entry["user"].(map[string]any)["id"].(string)
+		if got := [3]any{entry["rank"], entry["value"], entry["provisional_points"]}; got != want[id] {
+			t.Fatalf("points of %s: rank, value, provisional %v, want %v", id, got, want[id])
+		}
 	}
 }
 

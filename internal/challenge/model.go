@@ -16,6 +16,7 @@ const (
 	CategoryCumulativeTime     = "cumulative_time"
 	CategoryCumulativeDistance = "cumulative_distance"
 	CategoryElimination        = "elimination"
+	CategoryPoints             = "points"
 )
 
 // Positions of the categories, fixed by type: a missing category leaves a
@@ -24,6 +25,7 @@ const (
 	positionTime        = 1
 	positionDistance    = 2
 	positionElimination = 3
+	positionPoints      = 4
 )
 
 // Challenge is a row of the challenges table with its categories.
@@ -63,11 +65,16 @@ type Category struct {
 
 // Params are the frozen settings of a category (column categories.params).
 type Params struct {
-	// Factors is the distance factor by sport code (cumulative_distance).
+	// Factors is the distance factor by sport code (cumulative_distance,
+	// and points with the longest distance criterion).
 	Factors map[string]float64 `json:"factors,omitempty"`
 	// Sport and StepMeters are the elimination settings.
 	Sport      string `json:"sport,omitempty"`
 	StepMeters int    `json:"step_meters,omitempty"`
+	// Criteria, Podium and MinSessionSeconds are the points settings.
+	Criteria          []string `json:"criteria,omitempty"`
+	Podium            int      `json:"podium,omitempty"`
+	MinSessionSeconds int      `json:"min_session_seconds,omitempty"`
 }
 
 // Value implements driver.Valuer: params are stored as a JSON object.
@@ -181,13 +188,14 @@ type Standing struct {
 }
 
 // Ranking is the line of a participant in a category: their rank, how many
-// are ranked, and the live situation in the elimination category (nil in
-// the others).
+// are ranked, the live situation in the elimination category and the
+// provisional points in the points category (nil in the others).
 type Ranking struct {
 	Type        string
 	Rank        int
 	RankedCount int
 	Progress    *scoring.Progress
+	Provisional *int
 }
 
 // Page is a page of a listing; Next is nil on the last page.

@@ -97,7 +97,6 @@ func TestConstraints(t *testing.T) {
 		// categories (000004)
 		{name: "the 3 categories", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_distance', 2), ('` + challengeID + `', 'elimination', 3)`},
 		{name: "unknown category type", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'fastest', 1)`, constraint: "categories_type_check"},
-		{name: "position 4", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 4)`, constraint: "categories_position_check"},
 		{name: "position 0", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 0)`, constraint: "categories_position_check"},
 		{name: "params not an object", sql: `INSERT INTO categories (challenge_id, type, position, params) VALUES ('` + challengeID + `', 'cumulative_time', 1, '[]')`, constraint: "categories_params_check"},
 		{name: "same type twice", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_time', 2)`, constraint: "categories_challenge_type_key"},
@@ -106,6 +105,10 @@ func TestConstraints(t *testing.T) {
 		// categories and elimination renamed (000012)
 		{name: "former run elimination type", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'run_elimination', 3)`, constraint: "categories_type_check"},
 		{name: "former run elimination type recorded", sql: eliminationFixture + `INSERT INTO elimination (challenge_id, category_id, user_id, category_type, week_number, distance_meters, required_meters) VALUES ('` + challengeID + `', '` + categoryID + `', '` + userID + `', 'run_elimination', 2, 4000, 6000)`, constraint: "elimination_category_type_check"},
+
+		// points category (000014)
+		{name: "the 4 categories", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_distance', 2), ('` + challengeID + `', 'elimination', 3), ('` + challengeID + `', 'points', 4)`},
+		{name: "position 5", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'points', 5)`, constraint: "categories_position_check"},
 
 		// participants (000004)
 		{name: "active participant", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL)`},

@@ -246,6 +246,9 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", challengeID, u, start)
 	}
 	w := scoring.Window{Start: start, End: end, Location: loc}
+	// u4 abandons once week 2 is locked: the points category keeps it in
+	// weeks 1 and 2, the others no longer count it.
+	s.exec("UPDATE participants SET status = 'abandoned', abandoned_at = $1 WHERE user_id = $2", w.WeekLocksAt(2).Add(time.Hour), users[3])
 	km := func(m int) *int { return &m }
 	for i, u := range users {
 		for n := 1; n <= 4; n++ {
@@ -271,10 +274,14 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		t.Fatal(err)
 	}
 	participants := participantsOf[challengeID]
-	// The raw activities, as Activities read them before SC-API-082.
+	// The raw activities, as Activities read them before SC-API-082, those of
+	// the abandoned participant included (the scorers do not count them but
+	// in the weeks the points category keeps); each is its own group of
+	// sessions.
+	const minSession = 1200
 	rows, err := pool.Query(t.Context(), `SELECT a.user_id, a.sport_code, a.started_at, a.duration_seconds, a.distance_meters
 		FROM participants p JOIN activities a ON a.user_id = p.user_id
-		WHERE p.challenge_id = $1 AND p.status = 'active' AND a.deleted_at IS NULL AND a.started_at >= $2 AND a.started_at < $3`,
+		WHERE p.challenge_id = $1 AND a.deleted_at IS NULL AND a.started_at >= $2 AND a.started_at < $3`,
 		challengeID, start, end)
 	if err != nil {
 		t.Fatal(err)
@@ -286,6 +293,10 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 			t.Fatal(err)
 		}
 		a.StartedAt = a.StartedAt.UTC()
+		a.LongestSeconds, a.LongestMeters = a.DurationSeconds, a.DistanceMeters
+		if a.DurationSeconds >= minSession {
+			a.Sessions = 1
+		}
 		raw = append(raw, a)
 	}
 	if rows.Err() != nil {
@@ -305,7 +316,21 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		t.Fatal(err)
 	}
 	noWeekly := noWeeklyOf[challengeID]
+	// With a points category, every sport is grouped per week.
+	groupsOf, err := repo.ActivitiesOf(t.Context(), []Scope{{ChallengeID: challengeID, Window: w, WeeklySport: "run", Points: &PointsRead{MinSessionSeconds: minSession}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := groupsOf[challengeID]
+	if len(groups) >= len(raw) || len(groups) <= len(totals) {
+		t.Fatalf("%d groups for %d raw activities and %d totals, want between", len(groups), len(raw), len(totals))
+	}
 	elimination := scoring.Elimination{Sport: "run", StepMeters: 1500}
+	factors := map[string]float64{"run": 1, "ride": 0.3, "other": 1}
+	points := scoring.Points{
+		Criteria: []string{scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount},
+		Podium:   5, Factors: factors,
+	}
 	scorers := []struct {
 		name   string
 		scorer scoring.Scorer
@@ -316,11 +341,17 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		{"elimination", elimination, totals},
 		{"time, no elimination category", scoring.Duration{}, noWeekly},
 		{"distance, no elimination category", scoring.Distance{Factors: map[string]float64{"run": 1, "ride": 0.3, "other": 1}}, noWeekly},
+		{"time, points category", scoring.Duration{}, groups},
+		{"distance, points category", scoring.Distance{Factors: factors}, groups},
+		{"elimination, points category", elimination, groups},
+		{"points", points, groups},
 	}
 	instants := []time.Time{start.Add(-time.Hour), end, end.Add(24 * time.Hour)}
 	for n := 1; n <= 4; n++ {
 		from, weekEnd := w.WeekBounds(n)
 		instants = append(instants, from.Add(3*24*time.Hour), weekEnd.Add(-time.Second), weekEnd)
+		// Around the lock, when the points of the week are acquired.
+		instants = append(instants, w.WeekLocksAt(n).Add(-time.Second), w.WeekLocksAt(n))
 	}
 	for _, sc := range scorers {
 		for _, now := range instants {
@@ -345,12 +376,21 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	if eliminated == 0 || survivors == 0 {
 		t.Fatalf("%d eliminated, %d survivors: want both, or the comparison proves little", eliminated, survivors)
 	}
+	// And the points must differ, the abandoned participant's included.
+	w.Now = w.WeekLocksAt(3)
+	for _, e := range points.Score(w, participants, raw) {
+		if !e.Abandoned && (e.Value == 0 || e.Provisional == nil) {
+			t.Fatalf("points %+v: want each active participant to score, with provisional points", e)
+		}
+	}
 }
 
 // BenchmarkActivities5000 measures what one leaderboard read loads for a
 // challenge of 5 000 participants over 12 weeks, 5 activities a week each
 // (300 000 activities), as SC-API-082 asks: the raw activities, as before,
-// and the totals (per week for the runs, per sport for the rest). Run on demand:
+// the totals (per week for the runs, per sport for the rest), and the groups
+// of a challenge with a points category (per week and sport, SC-API-136).
+// Run on demand:
 //
 //	go test -tags integration -run '^$' -bench Activities5000 -benchtime 10x ./internal/leaderboard/
 func BenchmarkActivities5000(b *testing.B) {
@@ -416,6 +456,16 @@ func BenchmarkActivities5000(b *testing.B) {
 			}
 			totals := totalsOf[challengeID]
 			b.ReportMetric(float64(len(totals)), "rows")
+		}
+	})
+	b.Run("points groups per week and sport", func(b *testing.B) {
+		for b.Loop() {
+			groupsOf, err := repo.ActivitiesOf(b.Context(), []Scope{{ChallengeID: challengeID, Window: w, WeeklySport: "run", Points: &PointsRead{MinSessionSeconds: 1200}}})
+			if err != nil {
+				b.Fatal(err)
+			}
+			groups := groupsOf[challengeID]
+			b.ReportMetric(float64(len(groups)), "rows")
 		}
 	})
 }
@@ -493,5 +543,186 @@ func TestActivitiesOfKeepsEachChallengeInItsWindow(t *testing.T) {
 	}
 	if len(participants[spring]) != 3 || len(participants[summer]) != 1 {
 		t.Fatalf("participants = %+v, want 3 in spring (one abandoned, the deleted account left out), 1 in summer", participants)
+	}
+}
+
+// TestActivitiesOfGroupsThePointsCategoryPerWeek: in one query, a challenge
+// with a points category gets every sport per participant, week and sport,
+// with its longest sessions and the count of those of the minimum, its
+// abandoned participants included; one without gets a total per sport, as
+// before. A deleted account is in neither.
+func TestActivitiesOfGroupsThePointsCategoryPerWeek(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	runner, quitter, gone := s.user("runner"), s.user("quitter"), s.user("gone")
+	loc := toronto(t)
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, 14)
+	at := func(day, hour int) time.Time { return time.Date(2026, 6, day, hour, 0, 0, 0, loc) }
+	var withPoints, without string
+	for _, id := range []*string{&withPoints, &without} {
+		if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+			VALUES ('C', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, end, runner).Scan(id); err != nil {
+			t.Fatal(err)
+		}
+		s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3), ($1, $4, $3)", *id, runner, start, gone)
+		s.exec("INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $4)", *id, quitter, start, at(9, 0))
+	}
+	s.exec("UPDATE users SET anonymized_at = now() WHERE id = $1", gone)
+	km := func(m int) *int { return &m }
+	s.activity(runner, "run", at(2, 7), 1800, km(5000), false)
+	s.activity(runner, "run", at(3, 7), 1199, km(6000), false) // under the minimum, the longest distance
+	s.activity(runner, "run", at(4, 7), 1200, km(2000), false) // the minimum exactly
+	s.activity(runner, "run", at(5, 7), 3600, km(9000), true)  // deleted
+	s.activity(runner, "ride", at(3, 8), 3600, km(20000), false)
+	s.activity(runner, "yoga", at(6, 8), 2700, nil, false)
+	s.activity(runner, "run", at(9, 7), 1300, km(8000), false)
+	s.activity(quitter, "run", at(2, 9), 2000, km(4000), false)
+	s.activity(gone, "run", at(2, 9), 9000, km(40000), false)
+
+	w := scoring.Window{Start: start.UTC(), End: end.UTC(), Location: loc}
+	week1, week2 := start.UTC(), start.AddDate(0, 0, 7).UTC()
+	got, err := NewRepository(gdb).ActivitiesOf(t.Context(), []Scope{
+		{ChallengeID: withPoints, Window: w, Points: &PointsRead{MinSessionSeconds: 1200}},
+		{ChallengeID: without, Window: w},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := func(user, sport string, started time.Time, seconds int, meters *int, longest int, longestMeters *int, sessions int) scoring.Activity {
+		return scoring.Activity{
+			UserID: user, SportCode: sport, StartedAt: started, DurationSeconds: seconds, DistanceMeters: meters,
+			LongestSeconds: longest, LongestMeters: longestMeters, Sessions: sessions,
+		}
+	}
+	want := map[string][]scoring.Activity{
+		withPoints: {
+			group(runner, "run", week1, 4199, km(13000), 1800, km(6000), 2),
+			group(runner, "ride", week1, 3600, km(20000), 3600, km(20000), 1),
+			group(runner, "yoga", week1, 2700, nil, 2700, nil, 1),
+			group(runner, "run", week2, 1300, km(8000), 1300, km(8000), 1),
+			group(quitter, "run", week1, 2000, km(4000), 2000, km(4000), 1),
+		},
+		without: {
+			group(runner, "run", week1, 5499, km(21000), 0, nil, 0),
+			group(runner, "ride", week1, 3600, km(20000), 0, nil, 0),
+			group(runner, "yoga", week1, 2700, nil, 0, nil, 0),
+		},
+	}
+	for id, groups := range want {
+		if !sameActivities(got[id], groups) {
+			t.Fatalf("challenge %s: %+v, want %+v", id, got[id], groups)
+		}
+	}
+}
+
+// sameActivities reports whether a and b hold the same activities, in any
+// order.
+func sameActivities(a, b []scoring.Activity) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	used := make([]bool, len(b))
+	for _, x := range a {
+		found := false
+		for j, y := range b {
+			if !used[j] && reflect.DeepEqual(x, y) {
+				used[j], found = true, true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// readActivities is the repository, keeping what ActivitiesOf gives.
+type readActivities struct {
+	*Repository
+	read map[string][]scoring.Activity
+}
+
+func (r *readActivities) ActivitiesOf(ctx context.Context, scopes []Scope) (map[string][]scoring.Activity, error) {
+	out, err := r.Repository.ActivitiesOf(ctx, scopes)
+	r.read = out
+	return out, err
+}
+
+// TestGetPointsOfAnAccountDeletedBeforeTheFreeze: the points are never
+// stored, so an account deleted before the results are frozen leaves every
+// weekly ranking, locked weeks included: the next one takes its place and
+// its points, and none of its activities is read.
+func TestGetPointsOfAnAccountDeletedBeforeTheFreeze(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	a, b, c := s.user("a"), s.user("b"), s.user("c")
+	loc := toronto(t)
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, 14)
+	at := func(day, hour int) time.Time { return time.Date(2026, 6, day, hour, 0, 0, 0, loc) }
+	var challengeID string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Points', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, end, a).Scan(&challengeID); err != nil {
+		t.Fatal(err)
+	}
+	s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $5), ($1, $3, $5), ($1, $4, $5)", challengeID, a, b, c, start)
+	// Week 1, locked at 7 am on June 8: a 1st, b 2nd, c 3rd.
+	s.activity(a, "run", at(2, 7), 3600, nil, false)
+	s.activity(b, "run", at(2, 8), 2400, nil, false)
+	s.activity(c, "run", at(2, 9), 1800, nil, false)
+
+	ch := Challenge{
+		ID: challengeID, Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end.UTC(),
+		Categories: []Category{
+			{Type: CategoryCumulativeTime},
+			{Type: CategoryPoints, Criteria: []string{scoring.CriterionLongestDuration}, Podium: 5, MinSessionSeconds: 1200},
+		},
+	}
+	repo := &readActivities{Repository: NewRepository(gdb)}
+	svc := NewService(staticChallenge(ch), fakeProfiles{}, repo, clock.NewFake(at(10, 12)), 24*time.Hour)
+	points := func() []scoring.Entry {
+		t.Helper()
+		board, err := svc.Get(t.Context(), b, challengeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []scoring.Entry
+		for _, r := range board.Categories[1].Entries {
+			out = append(out, r.Entry)
+		}
+		return out
+	}
+	zero := 0
+	before := []scoring.Entry{
+		{UserID: a, Rank: 1, Value: 10, Provisional: &zero},
+		{UserID: b, Rank: 2, Value: 8, Provisional: &zero},
+		{UserID: c, Rank: 3, Value: 6, Provisional: &zero},
+	}
+	if got := points(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("points before the deletion %+v, want %+v", got, before)
+	}
+
+	s.exec("UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1", a)
+	after := []scoring.Entry{
+		{UserID: b, Rank: 1, Value: 10, Provisional: &zero},
+		{UserID: c, Rank: 2, Value: 8, Provisional: &zero},
+	}
+	if got := points(); !reflect.DeepEqual(got, after) {
+		t.Fatalf("points after the deletion %+v, want %+v", got, after)
+	}
+	for _, act := range repo.read[challengeID] {
+		if act.UserID == a {
+			t.Fatalf("activity %+v of the deleted account read", act)
+		}
 	}
 }

@@ -47,6 +47,12 @@ func (h *Handler) CreateChallenge(ctx context.Context, req api.CreateChallengeRe
 		if e := cats.Elimination; e != nil {
 			draft.Elimination = &EliminationDraft{StepMeters: e.StepMeters}
 		}
+		if p := cats.Points; p != nil {
+			draft.Points = &PointsDraft{Podium: int(p.Podium), MinSessionMinutes: p.MinSessionMinutes}
+			for _, c := range p.Criteria {
+				draft.Points.Criteria = append(draft.Points.Criteria, string(c))
+			}
+		}
 	}
 	if b.MembersCanInvite != nil {
 		draft.MembersCanInvite = *b.MembersCanInvite
@@ -96,6 +102,21 @@ func toAPI(c Challenge) (api.Challenge, error) {
 		if cat.Params.StepMeters != 0 {
 			step := cat.Params.StepMeters
 			params.StepMeters = &step
+		}
+		if cat.Params.Criteria != nil {
+			criteria := make([]api.CategoryParamsCriteria, len(cat.Params.Criteria))
+			for i, c := range cat.Params.Criteria {
+				criteria[i] = api.CategoryParamsCriteria(c)
+			}
+			params.Criteria = &criteria
+		}
+		if cat.Params.Podium != 0 {
+			podium := api.CategoryParamsPodium(cat.Params.Podium)
+			params.Podium = &podium
+		}
+		if cat.Params.MinSessionSeconds != 0 {
+			seconds := cat.Params.MinSessionSeconds
+			params.MinSessionSeconds = &seconds
 		}
 		out.Categories = append(out.Categories, api.Category{
 			Type:     api.CategoryType(cat.Type),
@@ -192,7 +213,7 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 func toMyWeek(st Standing) *api.MyWeek {
 	out := &api.MyWeek{Week: st.Week, WeekEndsAt: st.WeekEndsAt.UTC(), Rankings: make([]api.MyRanking, len(st.Rankings))}
 	for i, r := range st.Rankings {
-		out.Rankings[i] = api.MyRanking{Type: api.MyRankingType(r.Type), Rank: r.Rank, RankedCount: r.RankedCount}
+		out.Rankings[i] = api.MyRanking{Type: api.MyRankingType(r.Type), Rank: r.Rank, RankedCount: r.RankedCount, ProvisionalPoints: r.Provisional}
 		if r.Progress != nil {
 			out.Rankings[i].Elimination = toProgress(*r.Progress)
 		}

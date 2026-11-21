@@ -254,12 +254,97 @@ func TestTimeOnlyChallenge(t *testing.T) {
 	})
 }
 
-func TestWeeklySport(t *testing.T) {
-	if got := weeklySport(twoWeeks(t).Categories); got != "run" {
-		t.Fatalf("with an elimination category: %q, want run", got)
+// TestPointsChallenge: the points category is ranked on the points of the
+// locked weeks, those of the running week apart; its groups are asked for
+// with its minimum session; frozen, it has no provisional points; and the
+// actor's place carries them.
+func TestPointsChallenge(t *testing.T) {
+	c := twoWeeks(t)
+	c.Categories = []Category{
+		{Type: CategoryCumulativeTime},
+		{Type: CategoryPoints, Criteria: []string{scoring.CriterionLongestDuration}, Podium: 5, MinSessionSeconds: 1200},
 	}
-	if got := weeklySport([]Category{{Type: CategoryCumulativeTime}, {Type: CategoryCumulativeDistance}}); got != "" {
-		t.Fatalf("without an elimination category: %q, want empty", got)
+	loc := toronto(t)
+	at := func(day, hour int) time.Time { return time.Date(2026, 6, day, hour, 0, 0, 0, loc).UTC() }
+	group := func(user string, week time.Time, seconds, longest int) scoring.Activity {
+		return scoring.Activity{UserID: user, SportCode: "run", StartedAt: week, DurationSeconds: seconds, LongestSeconds: longest, Sessions: 1}
+	}
+	// a has the longest session of week 1, b that of week 2 (running).
+	activities := []scoring.Activity{
+		group("a", at(1, 0), 3600, 3600), group("b", at(1, 0), 1800, 1800),
+		group("a", at(8, 0), 1000, 1000), group("b", at(8, 0), 3000, 3000),
+	}
+	participants := []scoring.Participant{{UserID: "a"}, {UserID: "b"}}
+	now := at(10, 12)
+	ten, eight := 10, 8
+
+	t.Run("live", func(t *testing.T) {
+		repo := &fakeRepo{participants: participants, activities: activities}
+		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), 24*time.Hour)
+		got, err := svc.Get(t.Context(), "actor", "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := CategoryRanking{Type: CategoryPoints, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 10, Provisional: &eight}, Name: annName},
+			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 8, Provisional: &ten}, Name: bobName},
+		}}
+		if len(got.Categories) != 2 || !reflect.DeepEqual(got.Categories[1], want) {
+			t.Fatalf("Get() = %+v, want the points %+v", got.Categories, want)
+		}
+		if len(repo.scopes) != 1 || repo.scopes[0].Points == nil || repo.scopes[0].Points.MinSessionSeconds != 1200 || repo.scopes[0].WeeklySport != "" {
+			t.Fatalf("scopes %+v, want the points groups at 1200 s and no weekly sport", repo.scopes)
+		}
+	})
+
+	t.Run("frozen", func(t *testing.T) {
+		repo := &fakeRepo{snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":4600,"abandoned":false}]}`),
+			CategoryPoints:         json.RawMessage(`{"entries":[{"user_id":"b","rank":1,"value":18,"abandoned":false},{"user_id":"a","rank":2,"value":10,"abandoned":false}]}`),
+		}}
+		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
+		got, err := svc.Get(t.Context(), "actor", "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := CategoryRanking{Type: CategoryPoints, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 18}, Name: bobName},
+			{Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 10}, Name: annName},
+		}}
+		if !reflect.DeepEqual(got.Categories[1], want) || repo.calls != 0 {
+			t.Fatalf("Get() = %+v after %d reads, want %+v from the snapshot alone", got.Categories, repo.calls, want)
+		}
+	})
+
+	t.Run("standings", func(t *testing.T) {
+		repo := &fakeRepo{participants: participants, activities: activities}
+		svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), 24*time.Hour)
+		got, err := svc.Standings(t.Context(), "b", []Challenge{c}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		place := got["c1"].Categories[1]
+		if want := (Place{Type: CategoryPoints, Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 8, Provisional: &ten}, RankedCount: 2}); !reflect.DeepEqual(place, want) {
+			t.Fatalf("points place %+v, want %+v", place, want)
+		}
+		if len(repo.scopes) != 1 || repo.scopes[0].Points == nil {
+			t.Fatalf("scopes %+v, want the points groups", repo.scopes)
+		}
+	})
+}
+
+func TestScopeOf(t *testing.T) {
+	c := twoWeeks(t)
+	if got := scopeOf("c1", c.Categories, scoring.Window{}); got.ChallengeID != "c1" || got.WeeklySport != "run" || got.Points != nil {
+		t.Fatalf("with an elimination category: %+v, want run per week and no points", got)
+	}
+	c.Categories = []Category{{Type: CategoryCumulativeTime}, {Type: CategoryCumulativeDistance}}
+	if got := scopeOf("c1", c.Categories, scoring.Window{}); got.WeeklySport != "" || got.Points != nil {
+		t.Fatalf("without an elimination nor a points category: %+v, want neither", got)
+	}
+	c.Categories = append(c.Categories, Category{Type: CategoryPoints, Criteria: []string{scoring.CriterionSessionCount}, Podium: 5, MinSessionSeconds: 1200})
+	if got := scopeOf("c1", c.Categories, scoring.Window{}); got.WeeklySport != "" || got.Points == nil || got.Points.MinSessionSeconds != 1200 {
+		t.Fatalf("with a points category: %+v, want its groups at 1200 s", got)
 	}
 }
 

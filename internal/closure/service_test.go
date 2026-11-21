@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +34,9 @@ type fakeRepo struct {
 	// awaitErr is the error of AwaitActivityWrites; awaits counts its calls.
 	awaitErr error
 	awaits   int
+	// deletedSince is how many SaveSnapshots fail as if an account ranked
+	// had been deleted since the ranking.
+	deletedSince int
 }
 
 func (f *fakeRepo) AwaitActivityWrites(context.Context) error {
@@ -84,6 +89,10 @@ func (f *fakeRepo) SaveSnapshots(_ context.Context, id string, at time.Time, sna
 	if id == f.failOn {
 		return false, errors.New("database down")
 	}
+	if f.deletedSince > 0 {
+		f.deletedSince--
+		return false, errRankedAccountDeleted
+	}
 	if _, done := f.snapshots[id]; done {
 		return false, nil
 	}
@@ -97,8 +106,10 @@ type fakeData struct {
 	participants []scoring.Participant
 	activities   []scoring.Activity
 	loads        int
-	// weekly is the sport the activities were asked to sum per week.
-	weekly string
+	// weekly is the sport the activities were asked to sum per week, and
+	// minSession the minimum session of the points groups asked for.
+	weekly     string
+	minSession int
 }
 
 func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant, error) {
@@ -106,9 +117,9 @@ func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant,
 	return f.participants, nil
 }
 
-func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport string) ([]scoring.Activity, error) {
+func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport string, minSessionSeconds int) ([]scoring.Activity, error) {
 	f.loads++
-	f.weekly = weeklySport
+	f.weekly, f.minSession = weeklySport, minSessionSeconds
 	return f.activities, nil
 }
 
@@ -443,6 +454,67 @@ func TestFinalizeChallenges(t *testing.T) {
 		}
 		if want := (LastWeek{Number: 4, CategoryID: "cat3"}); !reflect.DeepEqual(repo.last, want) {
 			t.Fatalf("last week = %+v, want %+v", repo.last, want)
+		}
+	})
+
+	t.Run("the points category is frozen from its groups, without provisional points", func(t *testing.T) {
+		repo := newFakeRepo()
+		withPoints := c
+		withPoints.Categories = append(slices.Clone(c.Categories), Category{
+			ID: "cat4", Type: categoryPoints, Criteria: []string{scoring.CriterionLongestDistance}, Podium: 5,
+			Factors: map[string]float64{"run": 1}, MinSessionSeconds: 1200,
+		})
+		repo.ended = []EndedChallenge{withPoints}
+		groups := make([]scoring.Activity, len(activities))
+		for i, a := range activities {
+			a.LongestSeconds, a.LongestMeters, a.Sessions = a.DurationSeconds, a.DistanceMeters, 1
+			groups[i] = a
+		}
+		data := &fakeData{participants: participants, activities: groups}
+		if _, err := NewService(repo, data, clock.NewFake(lock), discard()).FinalizeChallenges(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if data.weekly != "run" || data.minSession != 1200 {
+			t.Fatalf("activities asked with %q per week and a %d s minimum, want run and 1200", data.weekly, data.minSession)
+		}
+		// Equal in weeks 1 to 3 (10 each), b ahead in week 4 (10 against 8).
+		want := payload{Entries: []payloadEntry{
+			{UserID: "b", Rank: 1, Value: 40},
+			{UserID: "a", Rank: 2, Value: 38},
+			{UserID: "quitter", Abandoned: true},
+		}}
+		if got := payloadOf(t, repo, "cat4"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("points ranking = %+v, want %+v", got, want)
+		}
+		for _, snap := range repo.snapshots["c1"] {
+			if strings.Contains(string(snap.Payload), "provisional") {
+				t.Fatalf("snapshot %s carries provisional points: %s", snap.CategoryID, snap.Payload)
+			}
+		}
+	})
+
+	t.Run("an account deleted since the ranking has the challenge ranked again", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		repo.deletedSince = 1
+		data := &fakeData{participants: participants, activities: activities}
+		got, err := NewService(repo, data, clock.NewFake(lock), discard()).FinalizeChallenges(t.Context())
+		if err != nil || got != (FinalizeResult{Challenges: 1}) || len(repo.snapshots["c1"]) != len(c.Categories) {
+			t.Fatalf("result = %+v, err = %v, want 1 challenge frozen", got, err)
+		}
+		// Participants and activities read twice: ranked again.
+		if data.loads != 4 {
+			t.Fatalf("%d reads, want 4: the challenge ranked twice", data.loads)
+		}
+	})
+
+	t.Run("an account deleted at each attempt is left to the next run", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{c}
+		repo.deletedSince = freezeAttempts
+		got, err := finalize(t, repo, lock)
+		if !errors.Is(err, errRankedAccountDeleted) || got != (FinalizeResult{}) || len(repo.snapshots) != 0 {
+			t.Fatalf("result = %+v, err = %v, want nothing frozen and the error", got, err)
 		}
 	})
 
