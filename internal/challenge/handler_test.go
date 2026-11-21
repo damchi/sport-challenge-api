@@ -120,6 +120,9 @@ func TestCreateChallenge(t *testing.T) {
 	if repo.created == nil || repo.created.CreatedBy != actor {
 		t.Fatalf("stored %+v, want a challenge created by the actor from the token", repo.created)
 	}
+	if repo.created.MembersCanInvite {
+		t.Fatal("members_can_invite stored as true, want false when absent")
+	}
 	if out["reference_sport"] != "run" {
 		t.Fatalf("reference_sport %v, want run by default", out["reference_sport"])
 	}
@@ -243,6 +246,7 @@ func TestCreateChallengeRefusals(t *testing.T) {
 		{name: "incomplete profile", body: validBody, wantStatus: 422, wantCode: "profile_incomplete"},
 		{name: "rule broken (start in the past)", complete: true, body: strings.Replace(validBody, "2026-03-04", "2026-03-01", 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "start_date"},
 		{name: "contract broken (53 weeks, other visibility)", complete: true, body: strings.Replace(strings.Replace(validBody, `"weeks":6`, `"weeks":53`, 1), `"public"`, `"friends"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "visibility,weeks"},
+		{name: "null members_can_invite", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"members_can_invite":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "members_can_invite"},
 		{name: "null reference sport", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"reference_sport":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "reference_sport"},
 		{name: "reference sport over 32 characters", complete: true, body: strings.Replace(validBody, `"weeks":6`, `"weeks":6,"reference_sport":"`+strings.Repeat("a", 33)+`"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "reference_sport"},
 		{name: "factor of an unknown sport: the key is not echoed", complete: true, body: strings.Replace(validBody, `"ride":0.25`, `"<script>":"x"`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "distance_factors"},

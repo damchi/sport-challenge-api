@@ -1468,8 +1468,10 @@ components:
           enum: [public, private]
         members_can_invite:
           type: boolean
-          default: false
-          description: Whether participants may invite people, not only creators.
+          description: |
+            Whether participants may invite people, not only creators. `false`
+            when absent; `null` is refused (no default in the schema, which
+            would replace it).
         timezone:
           type: string
           description: IANA time zone of the place the challenge is run from; the weeks are cut in it.
