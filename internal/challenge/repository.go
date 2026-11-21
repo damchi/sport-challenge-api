@@ -144,6 +144,7 @@ var errChallengeNotFound = errors.New("challenge not found")
 const membershipQuery = `SELECT c.*,
 	EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
 	(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant,
+	(SELECT abandoned_at FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS abandoned_at,
 	` + invitedColumn + ` AS invited,
 	EXISTS (SELECT 1 FROM users WHERE id = @actor AND anonymized_at IS NOT NULL) AS account_deleted,
 	` + participantCountColumn + ` AS participant_count
@@ -165,6 +166,7 @@ func readWithMembership(gdb *gorm.DB, id, actorID string, now time.Time) (Challe
 		Challenge
 		Creator          bool
 		Participant      *string
+		AbandonedAt      *time.Time
 		Invited          bool
 		AccountDeleted   bool
 		ParticipantCount int
@@ -176,7 +178,7 @@ func readWithMembership(gdb *gorm.DB, id, actorID string, now time.Time) (Challe
 	if row.ID == "" {
 		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", errChallengeNotFound)
 	}
-	m := Membership{Creator: row.Creator, Invited: row.Invited, AccountDeleted: row.AccountDeleted}
+	m := Membership{Creator: row.Creator, Invited: row.Invited, AccountDeleted: row.AccountDeleted, AbandonedAt: row.AbandonedAt}
 	if row.Participant != nil {
 		m.Participant = ParticipantStatus(*row.Participant)
 	}
@@ -261,9 +263,10 @@ func (r *Repository) Memberships(ctx context.Context, userID string) ([]UserChal
 		EndsAt         time.Time
 		Creator        bool
 		Participant    string
+		AbandonedAt    *time.Time
 		DistanceParams Params
 	}
-	err := db.Conn(ctx, r.db).Raw(`SELECT c.id, c.title, c.timezone, c.starts_at, c.ends_at, p.status AS participant,
+	err := db.Conn(ctx, r.db).Raw(`SELECT c.id, c.title, c.timezone, c.starts_at, c.ends_at, p.status AS participant, p.abandoned_at,
 		EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = p.user_id) AS creator,
 		COALESCE(cat.params, '{}') AS distance_params
 		FROM participants p JOIN challenges c ON c.id = p.challenge_id
@@ -282,7 +285,7 @@ func (r *Repository) Memberships(ctx context.Context, userID string) ([]UserChal
 			StartsAt:   row.StartsAt,
 			EndsAt:     row.EndsAt,
 			Factors:    row.DistanceParams.Factors,
-			Membership: Membership{Creator: row.Creator, Participant: ParticipantStatus(row.Participant)},
+			Membership: Membership{Creator: row.Creator, Participant: ParticipantStatus(row.Participant), AbandonedAt: row.AbandonedAt},
 		})
 	}
 	return out, nil

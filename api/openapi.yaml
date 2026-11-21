@@ -759,8 +759,8 @@ paths:
         it when the activity counts in it (never for a participant who
         abandoned: empty), and `locked` is true once its week is locked in
         it (7 am, local time of the challenge, on the first day of the next
-        week),
-        where it counts (never for a participant who abandoned). The
+        week), where it counts; for a participant who abandoned, only when
+        the week was already locked when they left. The
         author's own listing (`/me/activities`) may still show an activity
         locked by another challenge.
       tags: [activities]
@@ -1010,7 +1010,9 @@ paths:
         its week is locked in one of those challenges, finished ones
         included: a week locks at 7 am, local time of the challenge, on the
         first day of the next week (the day of `week_ends_at`; the last one
-        on the day of the challenge's `ends_at`). Its end
+        on the day of the challenge's `ends_at`). A challenge the user left
+        (abandoned or excluded) still locks the weeks already locked when
+        they left: their points there no longer move. Its end
         (`started_at` plus `duration_seconds`) is never in the future (5
         minutes of tolerance) and `started_at` never before 2000-01-01
         (`validation_failed`). It never overlaps another activity of the user
@@ -1061,7 +1063,8 @@ paths:
             a distance (`distance_required`) or takes none
             (`distance_not_allowed`), the activity overlaps another of the
             user (`activity_overlap`), or the week of `started_at` is locked
-            in a challenge where the activity counts (`week_locked`).
+            in a challenge where the activity counts, or was already locked
+            when the user left a challenge (`week_locked`).
           content:
             application/json:
               schema:
@@ -1089,7 +1092,9 @@ paths:
         (`sport_label`, `distance_meters`). The source and the
         `Idempotency-Key` of the creation stay. It is refused
         (`week_locked`) when the week of the current `started_at`, or of the
-        new one, is locked in a challenge where the activity counts, and
+        new one, is locked in a challenge where the activity counts, or was
+        already locked when the user left a challenge (as at the creation),
+        and
         (`activity_overlap`) when it would overlap another activity of the
         user.
       tags: [activities]
@@ -1118,7 +1123,8 @@ paths:
             (`distance_not_allowed`), it would overlap another activity of
             the user (`activity_overlap`), or the week of the current or the
             new `started_at` is locked in a challenge where the activity
-            counts (`week_locked`).
+            counts, or was already locked when the user left a challenge
+            (`week_locked`).
           content:
             application/json:
               schema:
@@ -1133,7 +1139,9 @@ paths:
       description: |
         Author only, as for the update (404 `activity_not_found`). The
         activity stops counting at once; it is refused (`week_locked`) when
-        its week is locked in a challenge where it counts. Deleting it again
+        its week is locked in a challenge where it counts, or was already
+        locked when the user left a challenge (as at the creation). Deleting
+        it again
         answers 404.
       tags: [activities]
       responses:
@@ -1146,7 +1154,7 @@ paths:
         "404":
           $ref: "#/components/responses/ActivityNotFound"
         "422":
-          description: The week of the activity is locked in a challenge where it counts (`week_locked`).
+          description: The week of the activity is locked in a challenge where it counts, or was already locked when the user left a challenge (`week_locked`).
           content:
             application/json:
               schema:
@@ -2209,7 +2217,9 @@ components:
           description: |
             True once the week of the activity is locked in a challenge where
             it counts, at 7 am, local time of the challenge, on the first day
-            of the next week: it can no longer be changed nor deleted.
+            of the next week, or was already locked when the user left a
+            challenge (abandoned or excluded): it can no longer be changed nor
+            deleted.
     ActivityContribution:
       type: object
       required: [challenge_id, challenge_title, distance_meters, duration_seconds]

@@ -501,14 +501,21 @@ func TestListActivitiesOfAnAbandonedParticipant(t *testing.T) {
 	}
 	runner := r.newUser("runner3")
 	r.join(c, runner, "active")
-	var want []string
-	for _, at := range []time.Time{toronto(t, 2026, 6, 10, 7), toronto(t, 2026, 6, 3, 7)} { // after, then before the abandonment
-		recorded, err := r.record(at)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want = append(want, recorded.ID)
+	after, err := r.record(toronto(t, 2026, 6, 10, 7))
+	if err != nil {
+		t.Fatal(err)
 	}
+	// Week 1 locked before the abandonment, so it stays locked: entered
+	// before, never through the service now.
+	var before string
+	if err := r.pool.QueryRow(t.Context(), `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters)
+		VALUES ($1, 'run', $2, 1500, 5000) RETURNING id`, r.user, toronto(t, 2026, 6, 3, 7)).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.record(toronto(t, 2026, 6, 3, 9)); !errors.Is(err, apperr.New(apperr.CodeWeekLocked, nil)) {
+		t.Fatalf("record in week 1 after the abandonment: %v, want week_locked", err)
+	}
+	want := []string{after.ID, before}
 	if _, err := r.record(toronto(t, 2026, 5, 20, 7)); err != nil { // before the window
 		t.Fatal(err)
 	}
@@ -520,6 +527,9 @@ func TestListActivitiesOfAnAbandonedParticipant(t *testing.T) {
 	for _, item := range page.Items {
 		if len(item.Contributions) != 0 {
 			t.Fatalf("activity %s counts in %v, want nowhere: its author abandoned", item.ID, challengeIDs(item.Contributions))
+		}
+		if item.ID == before && !item.Locked {
+			t.Fatalf("activity %s of week 1 unlocked, want it locked: the week locked before the abandonment", item.ID)
 		}
 		got = append(got, item.ID)
 	}

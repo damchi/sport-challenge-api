@@ -181,6 +181,7 @@ func TestServiceRecord(t *testing.T) {
 		{name: "no challenge at all", draft: run(inWeek2)},
 		{name: "two challenges", draft: run(inWeek2), challenges: []Participation{c1, c2}, want: []string{"c1", "c2"}},
 		{name: "not active: counts nowhere, never refused", draft: run(inWeek2), challenges: []Participation{notActive, c1}, want: []string{"c1"}},
+		{name: "left before week 1 locked: open, counts nowhere", draft: run(toronto(t, 2026, 6, 3, 7)), challenges: []Participation{leftAt(challengeOf(t, "c3"), toronto(t, 2026, 6, 5, 10))}},
 		{name: "sport without distance", draft: Draft{SportCode: "yoga", StartedAt: inWeek2, DurationSeconds: 3600}, challenges: []Participation{c1}, want: []string{"c1"}},
 	}
 	for _, tt := range tests {
@@ -229,6 +230,7 @@ func TestServiceRecordWeekLocked(t *testing.T) {
 	}{
 		{name: "week 1 ended", startedAt: toronto(t, 2026, 6, 3, 7), challenges: []Participation{c1}},
 		{name: "in the window of a finished challenge", startedAt: toronto(t, 2026, 5, 2, 7), challenges: []Participation{finished}},
+		{name: "week 1 locked before leaving", startedAt: toronto(t, 2026, 6, 3, 7), challenges: []Participation{leftAt(c1, toronto(t, 2026, 6, 9, 10))}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -416,6 +418,8 @@ func TestServiceUpdateRefusals(t *testing.T) {
 		{name: "missing or deleted activity", draft: run(inWeek2), code: apperr.CodeActivityNotFound, noDecision: true},
 		{name: "original week locked", stored: &lockedRun, draft: run(inWeek2), code: apperr.CodeWeekLocked},
 		{name: "moved into a locked week", draft: run(inWeek1), code: apperr.CodeWeekLocked},
+		{name: "original week locked before leaving", stored: &lockedRun, ps: fakeParticipations{challenges: []Participation{leftAt(c1, toronto(t, 2026, 6, 9, 10))}}, draft: run(inWeek2), code: apperr.CodeWeekLocked},
+		{name: "moved into a week locked before leaving", ps: fakeParticipations{challenges: []Participation{leftAt(c1, toronto(t, 2026, 6, 9, 10))}}, draft: run(inWeek1), code: apperr.CodeWeekLocked},
 		{name: "unknown sport", draft: Draft{SportCode: "chess", StartedAt: inWeek2, DurationSeconds: 60}, code: apperr.CodeValidationFailed, noDecision: true},
 		{name: "in the future", draft: run(recordNow.Add(time.Hour)), code: apperr.CodeValidationFailed, noDecision: true},
 		{name: "distance not allowed", draft: yogaWithDistance, code: apperr.CodeDistanceNotAllowed, noDecision: true},
@@ -477,6 +481,7 @@ func TestServiceDeleteRefusals(t *testing.T) {
 		{name: "activity of someone else in a locked week", stored: map[string]Activity{activityID: someoneElseLocked}, code: apperr.CodeActivityNotFound},
 		{name: "missing or deleted activity", code: apperr.CodeActivityNotFound},
 		{name: "week locked", stored: map[string]Activity{activityID: locked}, code: apperr.CodeWeekLocked},
+		{name: "week locked before leaving", stored: map[string]Activity{activityID: locked}, ps: fakeParticipations{challenges: []Participation{leftAt(challengeOf(t, "c1"), toronto(t, 2026, 6, 9, 10))}}, code: apperr.CodeWeekLocked},
 		{name: "account deleted meanwhile", repoErr: errAccountDeleted, code: apperr.CodeAccountDeleted},
 		{name: "participations read fails", stored: map[string]Activity{activityID: storedRun(t)}, ps: fakeParticipations{err: storage}, wantErr: storage},
 	}
