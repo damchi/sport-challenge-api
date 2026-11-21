@@ -144,6 +144,14 @@ func TestIsLocked(t *testing.T) {
 		// Ignored: where the activity does not count.
 		{name: "not an active participant: ignored", now: lockMonday1, startedAt: tuesday, challenges: []Participation{notActive}},
 		{name: "ignored challenge does not hide an active one", now: lockMonday1, startedAt: tuesday, challenges: []Participation{notActive, monday}, want: true},
+
+		// Left the challenge: the weeks locked by then stay locked (README §2.3).
+		{name: "left before the week locked: open", now: lockMonday1.Add(24 * time.Hour), startedAt: tuesday, challenges: []Participation{leftAt(monday, lockMonday1.Add(-sec))}},
+		{name: "left as the week locked: locked", now: lockMonday1.Add(24 * time.Hour), startedAt: tuesday, challenges: []Participation{leftAt(monday, lockMonday1)}, want: true},
+		{name: "left after the week locked: locked", now: lockMonday1.Add(24 * time.Hour), startedAt: tuesday, challenges: []Participation{leftAt(monday, lockMonday1.Add(time.Hour))}, want: true},
+		{name: "left after the week locked: a later week stays open", now: toronto(t, 2026, 6, 15, 7), startedAt: endMonday1.Add(time.Minute), challenges: []Participation{leftAt(monday, lockMonday1.Add(time.Hour))}},
+		{name: "left after the week locked: outside the window, counts nowhere", now: lockMonday1.Add(time.Hour), startedAt: monday.StartsAt.Add(-sec), challenges: []Participation{leftAt(monday, lockMonday1)}},
+		{name: "left, no time zone: locked", now: lockMonday1, startedAt: tuesday, challenges: []Participation{leftAt(noZone, lockMonday1)}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -252,4 +260,10 @@ func challengeIDs(contributions []Contribution) []string {
 		ids = append(ids, c.ChallengeID)
 	}
 	return ids
+}
+
+// leftAt is c once its author left it (abandoned or excluded) at at.
+func leftAt(c Participation, at time.Time) Participation {
+	c.Active, c.AbandonedAt = false, &at
+	return c
 }

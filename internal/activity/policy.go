@@ -30,6 +30,11 @@ type Participation struct {
 	// participation status, never the role (a creator who abandoned no
 	// longer competes).
 	Active bool
+	// AbandonedAt is when the author left the challenge (abandoned or
+	// excluded), nil while active. The weeks locked by then stay locked: the
+	// points category keeps the author in them, and their points no longer
+	// move (README §2.3).
+	AbandonedAt *time.Time
 }
 
 // Contribution is what an activity brings to a challenge where it counts:
@@ -66,11 +71,15 @@ func Contributions(a Activity, challenges []Participation) []Contribution {
 // IsLocked reports whether an activity started at startedAt is locked at now
 // (from platform/clock, never the worker): its week is locked in at least
 // one challenge where it counts (Contributions), from 7 am, local time of
-// that challenge, on the first day of the next week (scoring.Window.WeekLocksAt).
-// An activity across the end of a week belongs to the week it starts in.
+// that challenge, on the first day of the next week (scoring.Window.WeekLocksAt),
+// or in a challenge the author left once that week was locked (AbandonedAt,
+// the bound scoring.Points keeps them in a week by). An activity across the
+// end of a week belongs to the week it starts in.
 func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 	for _, c := range challenges {
-		if !counts(c, startedAt) {
+		// A participation abandoned always has its instant (schema check).
+		w := window(c)
+		if (!c.Active && c.AbandonedAt == nil) || !w.Contains(startedAt) {
 			continue
 		}
 		// A challenge whose weeks cannot be cut locks rather than lets an
@@ -78,8 +87,12 @@ func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 		if c.Location == nil {
 			return true
 		}
-		w := window(c)
-		if !now.Before(w.WeekLocksAt(w.WeekOf(startedAt))) {
+		locksAt := w.WeekLocksAt(w.WeekOf(startedAt))
+		switch {
+		case c.Active && !now.Before(locksAt):
+			return true
+		case !c.Active && !c.AbandonedAt.Before(locksAt):
+			// Locked by the time they left (never after now).
 			return true
 		}
 	}

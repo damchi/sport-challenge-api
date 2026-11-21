@@ -1135,6 +1135,7 @@ func TestParticipantsListing(t *testing.T) {
 		}
 		ids = append(ids, u)
 	}
+	abandonedAt := clk.Now()
 	if _, err := svc.Abandon(t.Context(), ids[1], id); err != nil {
 		t.Fatal(err)
 	}
@@ -1182,8 +1183,12 @@ func TestParticipantsListing(t *testing.T) {
 	if _, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[2]); !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) {
 		t.Fatalf("activities of the deleted account: %v, want not_found", err)
 	}
-	if _, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[1]); err != nil {
-		t.Fatalf("activities of the abandoned participant: %v, want them", err)
+	// With the instant of the abandon: the weeks locked by then stay locked.
+	if scope, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[1]); err != nil || scope.AbandonedAt == nil || !scope.AbandonedAt.Equal(abandonedAt) {
+		t.Fatalf("activities of the abandoned participant: %+v, %v, want them, abandoned at %s", scope, err, abandonedAt)
+	}
+	if scope, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[3]); err != nil || scope.AbandonedAt != nil {
+		t.Fatalf("activities of the active participant: %+v, %v, want them, not abandoned", scope, err)
 	}
 	// Excluding it or making it a creator answers as for someone who never
 	// joined.

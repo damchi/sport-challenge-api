@@ -394,16 +394,18 @@ func TestMembershipsListsTheChallengesJoined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	abandonedAt := now
 	want := map[string]Membership{
 		created.ID: {Creator: true, Participant: ParticipantActive},
-		joined.ID:  {Participant: ParticipantAbandoned},
+		joined.ID:  {Participant: ParticipantAbandoned, AbandonedAt: &abandonedAt},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("Memberships() = %+v, want %d challenges", got, len(want))
 	}
 	factors := created.Categories[1].Params.Factors
 	for _, m := range got {
-		if w, ok := want[m.ID]; !ok || m.Membership != w || m.Timezone != created.Timezone || !m.StartsAt.Equal(created.StartsAt) || !m.EndsAt.Equal(created.EndsAt) {
+		if w, ok := want[m.ID]; !ok || withoutAbandonedAt(m.Membership) != withoutAbandonedAt(w) || !sameInstant(m.AbandonedAt, w.AbandonedAt) ||
+			m.Timezone != created.Timezone || !m.StartsAt.Equal(created.StartsAt) || !m.EndsAt.Equal(created.EndsAt) {
 			t.Fatalf("membership %+v, want %+v with the window of the challenge", m, w)
 		}
 		// The title and the factors of the distance category, frozen.
@@ -432,4 +434,19 @@ func TestMembershipsListsTheChallengesJoined(t *testing.T) {
 	if !slices.Contains(ids, joined.ID) || len(got) != len(want) {
 		t.Fatalf("Memberships() = %v, want every challenge joined, %s included", ids, joined.ID)
 	}
+}
+
+// withoutAbandonedAt is m without its instant of abandon, compared apart
+// (sameInstant): a pointer to a time read back has another location.
+func withoutAbandonedAt(m Membership) Membership {
+	m.AbandonedAt = nil
+	return m
+}
+
+// sameInstant reports whether a and b are both nil or the same instant.
+func sameInstant(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }

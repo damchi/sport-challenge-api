@@ -244,7 +244,8 @@ func (a activityScopes) ActivitiesScope(ctx context.Context, actorID, challengeI
 
 // toParticipation turns a challenge of a user into an activity.Participation:
 // Active comes from the status of the participation, never the role (a
-// creator who abandoned no longer competes, ADR 0001).
+// creator who abandoned no longer competes, ADR 0001); AbandonedAt keeps the
+// weeks locked before the abandon locked.
 func toParticipation(m challenge.UserChallenge) (activity.Participation, error) {
 	// Validated at creation: an unknown time zone is broken data.
 	loc, err := time.LoadLocation(m.Timezone)
@@ -259,6 +260,7 @@ func toParticipation(m challenge.UserChallenge) (activity.Participation, error) 
 		Location:    loc,
 		Factors:     m.Factors,
 		Active:      m.Participant == challenge.ParticipantActive,
+		AbandonedAt: m.AbandonedAt,
 	}, nil
 }
 

@@ -38,6 +38,10 @@ type Membership struct {
 	// this is (the target, when read for one) was deleted (anonymized): it is
 	// then shown nowhere, its participation included.
 	AccountDeleted bool
+	// AbandonedAt is when the participation was abandoned (left or
+	// excluded), nil otherwise. No rule here reads it: module activity keeps
+	// locked the weeks locked by then.
+	AbandonedAt *time.Time
 }
 
 // Role is the role of a user in a challenge, from none to the strongest.
