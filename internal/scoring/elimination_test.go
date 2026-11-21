@@ -400,19 +400,21 @@ func TestEliminations(t *testing.T) {
 	const step = 2000
 	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
 	locked := w.WeekLocksAt
-	// runs is one run per week, none for 0.
-	runs := func(user string, distances ...int) []Activity {
+	// sessions is one activity of sport per week, none for 0.
+	sessions := func(sport, user string, distances ...int) []Activity {
 		var as []Activity
 		for i, d := range distances {
 			if d > 0 {
 				as = append(as, Activity{
-					UserID: user, SportCode: "run", StartedAt: weekStart(i + 1).Add(time.Hour),
+					UserID: user, SportCode: sport, StartedAt: weekStart(i + 1).Add(time.Hour),
 					DurationSeconds: 1800, DistanceMeters: meters(d),
 				})
 			}
 		}
 		return as
 	}
+	runs := func(user string, distances ...int) []Activity { return sessions("run", user, distances...) }
+	rides := func(user string, distances ...int) []Activity { return sessions("ride", user, distances...) }
 	users := func(ids ...string) []Participant {
 		ps := make([]Participant, len(ids))
 		for i, id := range ids {
@@ -422,7 +424,9 @@ func TestEliminations(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
+		name string
+		// sport is the reference sport, run when empty.
+		sport        string
 		now          time.Time
 		participants []Participant
 		activities   []Activity
@@ -492,7 +496,7 @@ func TestEliminations(t *testing.T) {
 			activities:   runs("b", 5000, 7000),
 		},
 		{
-			name:         "a run of another sport does not count",
+			name:         "an activity of another sport does not count",
 			now:          locked(2),
 			participants: users("a"),
 			activities: slices.Concat(runs("a", 5000), []Activity{{
@@ -501,12 +505,24 @@ func TestEliminations(t *testing.T) {
 			}}),
 			want: []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 0, MinimumMeters: 7000}},
 		},
+		{
+			name:         "another reference sport: a longer run neither saves nor eliminates",
+			sport:        "ride",
+			now:          locked(2),
+			participants: users("a", "b"),
+			activities:   slices.Concat(rides("a", 5000, 6999), runs("a", 0, 20000), rides("b", 5000, 7000), runs("b", 9000)),
+			want:         []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 6999, MinimumMeters: 7000}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := w
 			w.Now = tt.now
-			got := Elimination{Sport: "run", StepMeters: step}.Eliminations(w, tt.participants, tt.activities)
+			sport := tt.sport
+			if sport == "" {
+				sport = "run"
+			}
+			got := Elimination{Sport: sport, StepMeters: step}.Eliminations(w, tt.participants, tt.activities)
 			if !reflect.DeepEqual(got, tt.want) && (len(got) != 0 || len(tt.want) != 0) {
 				t.Fatalf("Eliminations() = %+v, want %+v", got, tt.want)
 			}
