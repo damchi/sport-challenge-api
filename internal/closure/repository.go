@@ -119,12 +119,12 @@ func insertEliminations(tx *gorm.DB, challengeID, categoryID string, eliminated 
 	for _, e := range eliminated {
 		if err := tx.Exec(
 			`INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters)
-			SELECT @challenge, @category, @user, @week, @run, @minimum
+			SELECT @challenge, @category, @user, @week, @distance, @minimum
 			WHERE EXISTS (SELECT 1 FROM participants WHERE challenge_id = @challenge AND user_id = @user)
 			ON CONFLICT (category_id, user_id) DO NOTHING`,
 			map[string]any{
 				"challenge": challengeID, "category": categoryID, "user": e.UserID,
-				"week": e.Week, "run": e.RunMeters, "minimum": e.MinimumMeters,
+				"week": e.Week, "distance": e.DistanceMeters, "minimum": e.MinimumMeters,
 			},
 		).Error; err != nil {
 			return fmt.Errorf("insert elimination: %w", err)

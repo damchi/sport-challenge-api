@@ -1831,7 +1831,7 @@ components:
             of the pseudo, or of the first and last names without one.
     EliminationProgress:
       type: object
-      required: [status, eliminated_week, minimum_meters, run_meters, week_ends_at]
+      required: [status, eliminated_week, minimum_meters, distance_meters, week_ends_at]
       additionalProperties: false
       properties:
         status:
@@ -1849,10 +1849,10 @@ components:
           minimum: 0
           nullable: true
           description: The distance the current week needs; null in week 1, when eliminated, or outside the weeks. Until the week before locks, it may still rise.
-        run_meters:
+        distance_meters:
           type: integer
           minimum: 0
-          description: The distance already run in the current week; 0 when eliminated or outside the weeks.
+          description: The distance already covered in the reference sport in the current week; 0 when eliminated or outside the weeks.
         week_ends_at:
           type: string
           format: date-time

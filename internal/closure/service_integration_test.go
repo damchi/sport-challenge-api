@@ -47,7 +47,7 @@ func (s seed) user(subject string) string {
 	return id
 }
 
-// challenge creates a 4-week challenge with its 3 categories (the run
+// challenge creates a 4-week challenge with its 3 categories (the
 // elimination one with a step of 2000 m); it returns its id and that category's.
 func (s seed) challenge(creator string, start time.Time, deleted bool) (id, category string) {
 	s.t.Helper()
@@ -250,7 +250,7 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 		repo := NewRepository(gdb)
 		c := Challenge{ID: challengeID, CategoryID: categoryID}
 		// A negative distance breaks a check of the elimination.
-		_, err := repo.CloseWeek(t.Context(), c, 4, weekEnd(3), []scoring.Eliminated{{UserID: b, Week: 4, RunMeters: -1, MinimumMeters: 2}})
+		_, err := repo.CloseWeek(t.Context(), c, 4, weekEnd(3), []scoring.Eliminated{{UserID: b, Week: 4, DistanceMeters: -1, MinimumMeters: 2}})
 		if err == nil {
 			t.Fatal("error = nil, want the check of the distance")
 		}
@@ -498,7 +498,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 	t.Run("a run that lost the race records nothing", func(t *testing.T) {
 		repo := NewRepository(gdb)
 		taken := s.snapshots(challengeID)[0]
-		last := LastWeek{Number: 4, CategoryID: categoryID, Eliminated: []scoring.Eliminated{{UserID: b, Week: 4, RunMeters: 1, MinimumMeters: 2}}}
+		last := LastWeek{Number: 4, CategoryID: categoryID, Eliminated: []scoring.Eliminated{{UserID: b, Week: 4, DistanceMeters: 1, MinimumMeters: 2}}}
 		done, err := repo.SaveSnapshots(t.Context(), challengeID, end, []Snapshot{{CategoryID: taken.Category, Type: taken.Type, Payload: []byte(`{"entries": []}`)}}, last)
 		if err != nil || done {
 			t.Fatalf("done = %v, err = %v, want false: the category already has its snapshot", done, err)
@@ -608,7 +608,7 @@ func TestSaveSnapshotsOfAnAccountDeletedSinceTheRanking(t *testing.T) {
 
 	payload := []byte(`{"entries": [{"user_id": "` + gone + `", "rank": 1, "value": 9000, "abandoned": false},
 		{"user_id": "` + kept + `", "rank": 2, "value": 5000, "abandoned": false}]}`)
-	last := LastWeek{Number: 4, CategoryID: categoryID, Eliminated: []scoring.Eliminated{{UserID: gone, Week: 4, RunMeters: 1, MinimumMeters: 2}}}
+	last := LastWeek{Number: 4, CategoryID: categoryID, Eliminated: []scoring.Eliminated{{UserID: gone, Week: 4, DistanceMeters: 1, MinimumMeters: 2}}}
 	done, err := NewRepository(gdb).SaveSnapshots(t.Context(), challengeID, start.AddDate(0, 0, 28),
 		[]Snapshot{{CategoryID: categoryID, Type: "elimination", Payload: payload}}, last)
 	// Not frozen yet: the challenge is to be ranked again without it.

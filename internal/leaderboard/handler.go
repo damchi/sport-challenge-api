@@ -76,7 +76,7 @@ func toEntry(r Ranked) (api.LeaderboardEntry, error) {
 // toProgress turns the live situation into its contract form, zero values
 // being null: no status, no eliminated week, no minimum, no week end.
 func toProgress(p scoring.Progress) *api.EliminationProgress {
-	out := &api.EliminationProgress{MinimumMeters: p.MinimumMeters, RunMeters: p.RunMeters}
+	out := &api.EliminationProgress{MinimumMeters: p.MinimumMeters, DistanceMeters: p.DistanceMeters}
 	if p.Status != "" {
 		status := api.EliminationProgressStatus(p.Status)
 		out.Status = &status

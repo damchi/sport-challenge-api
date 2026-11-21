@@ -734,7 +734,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 1, WeekEndsAt: endOf(1), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000}, RankedCount: 2},
-				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{RunMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 2},
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{DistanceMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 2},
 			}},
 		},
 		{
@@ -744,7 +744,7 @@ func TestStandings(t *testing.T) {
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000}, RankedCount: 2},
 				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000, Progress: &scoring.Progress{
-					Status: scoring.StatusInProgress, MinimumMeters: minimum(7000), RunMeters: 6000, WeekEndsAt: endOf(2),
+					Status: scoring.StatusInProgress, MinimumMeters: minimum(7000), DistanceMeters: 6000, WeekEndsAt: endOf(2),
 				}}, RankedCount: 2},
 			}},
 		},
@@ -755,7 +755,7 @@ func TestStandings(t *testing.T) {
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000}, RankedCount: 2},
 				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 11000, Progress: &scoring.Progress{
-					Status: scoring.StatusAtRisk, MinimumMeters: minimum(7000), RunMeters: 6000, WeekEndsAt: endOf(2),
+					Status: scoring.StatusAtRisk, MinimumMeters: minimum(7000), DistanceMeters: 6000, WeekEndsAt: endOf(2),
 				}}, RankedCount: 2},
 			}},
 		},
@@ -766,7 +766,7 @@ func TestStandings(t *testing.T) {
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 12000}, RankedCount: 2},
 				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 12000, Progress: &scoring.Progress{
-					Status: scoring.StatusReached, MinimumMeters: minimum(7000), RunMeters: 7000, WeekEndsAt: endOf(2),
+					Status: scoring.StatusReached, MinimumMeters: minimum(7000), DistanceMeters: 7000, WeekEndsAt: endOf(2),
 				}}, RankedCount: 2},
 			}},
 		},
@@ -788,7 +788,7 @@ func TestStandings(t *testing.T) {
 			want: &Standing{Week: 1, WeekEndsAt: endOf(1), Categories: []Place{
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 3},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 3, Value: 5000}, RankedCount: 3},
-				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 3, Value: 5000, Progress: &scoring.Progress{RunMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 3},
+				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 3, Value: 5000, Progress: &scoring.Progress{DistanceMeters: 5000, WeekEndsAt: endOf(1)}}, RankedCount: 3},
 			}},
 		},
 		{
@@ -798,7 +798,7 @@ func TestStandings(t *testing.T) {
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000}, RankedCount: 2},
 				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 5000, Progress: &scoring.Progress{
-					Status: scoring.StatusInProgress, MinimumMeters: minimum(7000), RunMeters: 0, WeekEndsAt: endOf(2),
+					Status: scoring.StatusInProgress, MinimumMeters: minimum(7000), DistanceMeters: 0, WeekEndsAt: endOf(2),
 				}}, RankedCount: 2},
 			}},
 		},
@@ -809,7 +809,7 @@ func TestStandings(t *testing.T) {
 				{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 7200}, RankedCount: 2},
 				{Type: CategoryCumulativeDistance, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000}, RankedCount: 2},
 				{Type: CategoryElimination, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 11000, Progress: &scoring.Progress{
-					Status: scoring.StatusInProgress, MinimumMeters: minimum(8000), RunMeters: 0, WeekEndsAt: endOf(3),
+					Status: scoring.StatusInProgress, MinimumMeters: minimum(8000), DistanceMeters: 0, WeekEndsAt: endOf(3),
 				}}, RankedCount: 2},
 			}},
 		},

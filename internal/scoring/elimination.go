@@ -6,17 +6,20 @@ import (
 	"time"
 )
 
-// Elimination is category 3, run with elimination: the distance run in a
-// week must be at least the distance of the week before plus the step, or
-// the participant is eliminated from this category, for good.
+// Elimination is category 3, elimination in the reference sport: the
+// distance covered in a week must be at least the distance of the week
+// before plus the step, or the participant is eliminated from this
+// category, for good.
 //
 // Sport and StepMeters are the frozen settings of the category. Only the
-// runs count. A week is judged when it locks (Window.WeekLocksAt), 7 am on
-// the first day of the next week, never before: until then the minimum of the next week
-// may still rise. There is no elimination in week 1, which has no reference.
+// activities of that sport count. A week is judged when it locks
+// (Window.WeekLocksAt), 7 am on the first day of the next week, never
+// before: until then the minimum of the next week may still rise. There is
+// no elimination in week 1, which has no reference.
 //
 // Value is the cumulative distance of a survivor, and of an eliminated
-// participant up to the week of the elimination: later runs change nothing.
+// participant up to the week of the elimination: later activities change
+// nothing.
 type Elimination struct {
 	Sport      string
 	StepMeters int
@@ -61,12 +64,12 @@ func (e Elimination) Score(w Window, participants []Participant, activities []Ac
 }
 
 // Eliminated is a participant eliminated from the category: the first week
-// judged under the minimum, the distance run that week and the minimum.
+// judged under the minimum, the distance covered that week and the minimum.
 type Eliminated struct {
-	UserID        string
-	Week          int
-	RunMeters     int
-	MinimumMeters int
+	UserID         string
+	Week           int
+	DistanceMeters int
+	MinimumMeters  int
 }
 
 // Eliminations lists the participants eliminated in the weeks locked at the
@@ -85,7 +88,7 @@ func (e Elimination) Eliminations(w Window, participants []Participant, activiti
 		distances := weekly[p.UserID]
 		if n := firstEliminatedWeek(distances, judged, e.StepMeters); n > 0 {
 			out = append(out, Eliminated{
-				UserID: p.UserID, Week: n, RunMeters: distances[n], MinimumMeters: minimumMeters(distances[n-1], e.StepMeters),
+				UserID: p.UserID, Week: n, DistanceMeters: distances[n], MinimumMeters: minimumMeters(distances[n-1], e.StepMeters),
 			})
 		}
 	}
@@ -95,8 +98,8 @@ func (e Elimination) Eliminations(w Window, participants []Participant, activiti
 	return out
 }
 
-// weeklyDistances is the distance run by each participant in each week:
-// weekly[user][n] for week n, index 0 unused.
+// weeklyDistances is the distance covered in the sport by each participant
+// in each week: weekly[user][n] for week n, index 0 unused.
 func (e Elimination) weeklyDistances(w Window, participants []Participant, activities []Activity) map[string][]int {
 	weeks := w.Weeks()
 	weekly := make(map[string][]int, len(participants))
@@ -136,12 +139,12 @@ func (e Elimination) progress(distances []int, eliminatedWeek, week int, weekEnd
 	case week == 0:
 		return &Progress{}
 	case week == 1:
-		return &Progress{RunMeters: distances[1], WeekEndsAt: weekEnd}
+		return &Progress{DistanceMeters: distances[1], WeekEndsAt: weekEnd}
 	}
 	minimum := minimumMeters(distances[week-1], e.StepMeters)
-	p := &Progress{MinimumMeters: &minimum, RunMeters: distances[week], WeekEndsAt: weekEnd}
+	p := &Progress{MinimumMeters: &minimum, DistanceMeters: distances[week], WeekEndsAt: weekEnd}
 	switch {
-	case p.RunMeters >= minimum:
+	case p.DistanceMeters >= minimum:
 		p.Status = StatusReached
 	case weekEnd.Sub(now) <= e.AtRisk:
 		p.Status = StatusAtRisk
@@ -152,8 +155,8 @@ func (e Elimination) progress(distances []int, eliminatedWeek, week int, weekEnd
 }
 
 // minimumMeters is the rule of the minimum, the only place it lives: the
-// minimum of a week is the distance really run the week before plus the
-// step, so running more than the minimum raises the next one.
+// minimum of a week is the distance really covered the week before plus
+// the step, so covering more than the minimum raises the next one.
 func minimumMeters(previous, step int) int {
 	return previous + step
 }
