@@ -175,6 +175,48 @@ func TestListWeekCountIsTheDetails(t *testing.T) {
 	}
 }
 
+// TestListCurrentWeekIsTheDetails: in both scopes, every item has the
+// current week of its detail, whoever reads it: null (0) for the upcoming
+// and the finished ones, present for the ongoing one, to the active
+// participant, to the one who abandoned and to a stranger alike.
+func TestListCurrentWeekIsTheDetails(t *testing.T) {
+	f := newListFixture(t)
+	stranger := insertTestUser(t, f.pool, "email|stranger")
+	readers := map[string]string{"active": f.me, "abandoned": f.other, "stranger": stranger}
+	for name, actor := range readers {
+		for _, scope := range []string{ScopePublic, ScopeMine} {
+			t.Run(name+" "+scope, func(t *testing.T) {
+				page, err := f.svc.List(t.Context(), actor, scope, "", 20, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, it := range page.Items {
+					d, err := f.svc.Get(t.Context(), actor, it.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if it.CurrentWeek != d.CurrentWeek || !it.WeekEndsAt.Equal(d.WeekEndsAt) {
+						t.Fatalf("%s: week %d ending %s, want that of the detail, %d ending %s", it.Title, it.CurrentWeek, it.WeekEndsAt, d.CurrentWeek, d.WeekEndsAt)
+					}
+					ongoing := it.Status == StatusOngoing
+					if (it.CurrentWeek > 0) != ongoing || it.WeekEndsAt.IsZero() == ongoing {
+						t.Fatalf("%s (%s): week %d ending %s, want one only while it runs", it.Title, it.Status, it.CurrentWeek, it.WeekEndsAt)
+					}
+				}
+			})
+		}
+	}
+	// The ongoing challenge, started yesterday at 15:00 UTC: week 1, ending
+	// at midnight seven days after its first day.
+	page, err := f.svc.List(t.Context(), stranger, ScopePublic, StatusOngoing, 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].CurrentWeek != 1 || !page.Items[0].WeekEndsAt.Equal(time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("ongoing %+v, want week 1 ending 2026-03-10", page.Items)
+	}
+}
+
 // TestListGivesTheReferenceSport: both lists read the reference sport of
 // each challenge, a run and a ride one, the same as the detail.
 func TestListGivesTheReferenceSport(t *testing.T) {

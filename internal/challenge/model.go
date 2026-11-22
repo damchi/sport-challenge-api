@@ -180,6 +180,11 @@ type Summary struct {
 	MyWeek *Standing `gorm:"-"`
 	// WeekCount is the number of weeks of the window, as in the detail.
 	WeekCount int `gorm:"-"`
+	// CurrentWeek and WeekEndsAt are the current week and its end at the
+	// instant of the request, as in the detail, whatever the actor's role:
+	// CurrentWeek is 0, and WeekEndsAt zero, outside the window.
+	CurrentWeek int       `gorm:"-"`
+	WeekEndsAt  time.Time `gorm:"-"`
 	// BestResult is the actor's best frozen rank, from the leaderboard: only
 	// in their own list, once the results of a finished challenge are frozen,
 	// when they are an active participant ranked somewhere; nil otherwise.
