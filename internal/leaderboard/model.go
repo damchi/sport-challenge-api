@@ -55,10 +55,13 @@ type Name struct {
 	LastName  *string
 }
 
-// CategoryRanking is the ranking of one category.
+// CategoryRanking is the ranking of one category, with how many
+// participants are ranked in it (abandoned ones are not, deleted accounts
+// are not listed).
 type CategoryRanking struct {
-	Type    string
-	Entries []Ranked
+	Type        string
+	RankedCount int
+	Entries     []Ranked
 }
 
 // Leaderboard is the rankings of a challenge, in category order, computed

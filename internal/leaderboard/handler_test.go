@@ -131,6 +131,10 @@ func TestGetLeaderboardAnswersEveryCategory(t *testing.T) {
 	if timeCategory["type"] != "cumulative_time" {
 		t.Fatalf("first category %v, want cumulative_time", timeCategory["type"])
 	}
+	// Ann and Bob; the one who abandoned is listed, not counted.
+	if timeCategory["ranked_count"] != 2.0 {
+		t.Fatalf("ranked_count = %v, want 2", timeCategory["ranked_count"])
+	}
 	entries := timeCategory["entries"].([]any)
 	first := entries[0].(map[string]any)
 	if first["rank"] != 1.0 || first["value"] != 3600.0 || first["abandoned"] != false || first["elimination"] != nil {

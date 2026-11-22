@@ -567,7 +567,7 @@ func TestGetChallenge(t *testing.T) {
 	want := map[string]any{
 		"my_role": "abandoned", "my_status": "abandoned", "status": "ongoing", "can_join": false,
 		"current_week": 1.0, "week_ends_at": "2026-03-09T04:00:00Z", "registration_deadline": "2026-03-09T04:00:00Z",
-		"participant_count": 4.0,
+		"participant_count": 4.0, "week_count": 3.0,
 	}
 	for k, v := range want {
 		if out[k] != v {
@@ -620,6 +620,9 @@ func TestGetChallengeOutsideTheWindowHasNoWeek(t *testing.T) {
 		}
 		if v, ok := out["week_ends_at"]; !ok || v != nil {
 			t.Errorf("%s: week_ends_at = %v, want null", name, v)
+		}
+		if v := out["week_count"]; v != 3.0 {
+			t.Errorf("%s: week_count = %v, want 3", name, v)
 		}
 	}
 }

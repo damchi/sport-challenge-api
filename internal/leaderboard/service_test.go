@@ -153,17 +153,17 @@ func TestGetRanksEveryCategory(t *testing.T) {
 	}
 	// c abandoned, and the fake gives it no name: the live path lists it.
 	want := Leaderboard{ComputedAt: now, Categories: []CategoryRanking{
-		{Type: CategoryCumulativeTime, Entries: []Ranked{
+		{Type: CategoryCumulativeTime, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 3600}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+		{Type: CategoryCumulativeDistance, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-		{Type: CategoryElimination, Entries: []Ranked{
+		{Type: CategoryElimination, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
@@ -202,7 +202,7 @@ func TestTimeOnlyChallenge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := Leaderboard{ComputedAt: now, Categories: []CategoryRanking{{Type: CategoryCumulativeTime, Entries: []Ranked{
+		want := Leaderboard{ComputedAt: now, Categories: []CategoryRanking{{Type: CategoryCumulativeTime, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 1800}, Name: bobName},
 		}}}}
@@ -227,7 +227,7 @@ func TestTimeOnlyChallenge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{{Type: CategoryCumulativeTime, Entries: []Ranked{
+		want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{{Type: CategoryCumulativeTime, RankedCount: 1, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 3600}, Name: annName},
 		}}}}
 		if !reflect.DeepEqual(got, want) || repo.calls != 0 {
@@ -285,7 +285,7 @@ func TestPointsChallenge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := CategoryRanking{Type: CategoryPoints, Entries: []Ranked{
+		want := CategoryRanking{Type: CategoryPoints, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 10, Provisional: &eight}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 8, Provisional: &ten}, Name: bobName},
 		}}
@@ -307,7 +307,7 @@ func TestPointsChallenge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := CategoryRanking{Type: CategoryPoints, Entries: []Ranked{
+		want := CategoryRanking{Type: CategoryPoints, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 18}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 10}, Name: annName},
 		}}
@@ -506,15 +506,15 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Leaderboard{ComputedAt: frozenAt, Categories: []CategoryRanking{
-		{Type: CategoryCumulativeTime, Entries: []Ranked{
+		{Type: CategoryCumulativeTime, RankedCount: 1, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+		{Type: CategoryCumulativeDistance, RankedCount: 1, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
 		}},
-		{Type: CategoryElimination, Entries: []Ranked{
+		{Type: CategoryElimination, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2}}, Name: bobName},
 			{Entry: scoring.Entry{UserID: "c", Abandoned: true}},
@@ -549,15 +549,15 @@ func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []CategoryRanking{
-		{Type: CategoryCumulativeTime, Entries: []Ranked{
+		{Type: CategoryCumulativeTime, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 9000}, Name: bobName},
 		}},
-		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+		{Type: CategoryCumulativeDistance, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
 		}},
-		{Type: CategoryElimination, Entries: []Ranked{
+		{Type: CategoryElimination, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 1}}, Name: bobName},
 		}},
@@ -588,15 +588,15 @@ func TestGetFrozenAfterTheErasure(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []CategoryRanking{
-		{Type: CategoryCumulativeTime, Entries: []Ranked{
+		{Type: CategoryCumulativeTime, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 9000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 9000}, Name: bobName},
 		}},
-		{Type: CategoryCumulativeDistance, Entries: []Ranked{
+		{Type: CategoryCumulativeDistance, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 28000}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000}, Name: bobName},
 		}},
-		{Type: CategoryElimination, Entries: []Ranked{
+		{Type: CategoryElimination, RankedCount: 2, Entries: []Ranked{
 			{Entry: scoring.Entry{UserID: "a", Rank: 1, Value: 22000, Progress: &scoring.Progress{}}, Name: annName},
 			{Entry: scoring.Entry{UserID: "b", Rank: 2, Value: 5000, Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 1}}, Name: bobName},
 		}},

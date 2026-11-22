@@ -319,6 +319,7 @@ func toDetail(d Detail) (api.ChallengeDetail, error) {
 		Status:               api.ChallengeDetailStatus(d.Status),
 		CanJoin:              d.CanJoin,
 		RegistrationDeadline: d.RegistrationDeadline.UTC(),
+		WeekCount:            d.WeekCount,
 	}
 	if d.Participant != "" {
 		status := api.ChallengeDetailMyStatus(d.Participant)

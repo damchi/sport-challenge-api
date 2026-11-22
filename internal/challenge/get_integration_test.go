@@ -1218,3 +1218,55 @@ func TestParticipantsListing(t *testing.T) {
 		t.Fatalf("deleted challenge: %v, want challenge_not_found", err)
 	}
 }
+
+// TestGetWeekCount: the number of weeks is the same before, during and after
+// the challenge, the last value current_week takes, a last week shorter than
+// 7 days included.
+func TestGetWeekCount(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, creatorID := setup(t, &pseudo)
+	c, err := svc.Create(t.Context(), creatorID, valid()) // 6 weeks from 2026-03-04, Toronto
+	if err != nil {
+		t.Fatal(err)
+	}
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clk := clock.NewFake(now)
+	reader := NewService(NewRepository(gdb), nil, nil, fakeStandings{}, clk)
+	read := func(at time.Time) Detail {
+		t.Helper()
+		clk.Set(at)
+		d, err := reader.Get(t.Context(), creatorID, c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+
+	for _, tt := range []struct {
+		at     time.Time
+		status string
+	}{
+		{c.StartsAt.Add(-time.Hour), StatusUpcoming},
+		{c.StartsAt, StatusOngoing},
+		{c.EndsAt, StatusFinished},
+	} {
+		if d := read(tt.at); d.Status != tt.status || d.WeekCount != 6 {
+			t.Fatalf("at %s: %s, %d weeks, want %s, 6 weeks", tt.at, d.Status, d.WeekCount, tt.status)
+		}
+	}
+	if d := read(c.EndsAt.Add(-time.Second)); d.CurrentWeek != 6 {
+		t.Fatalf("last second: week %d, want the week count", d.CurrentWeek)
+	}
+
+	// 17 days, to local midnight on 2026-03-21: 2 weeks and 3 days.
+	end := time.Date(2026, 3, 21, 4, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET ends_at = $1 WHERE id = $2", end, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if d := read(end.Add(-time.Second)); d.WeekCount != 3 || d.CurrentWeek != 3 {
+		t.Fatalf("17 days: week %d of %d, want week 3 of 3", d.CurrentWeek, d.WeekCount)
+	}
+}
