@@ -5,9 +5,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,9 +54,14 @@ func newLeaderboardFixture(t *testing.T) leaderboardFixture {
 	clk := clock.NewFake(recordNow)
 	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, nil, logger)
 	var svc *leaderboard.Service
-	standings := standingsFunc(func(ctx context.Context, actorID string, cs []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error) {
-		return svc.Standings(ctx, actorID, cs, now)
-	})
+	standings := challengeStandings{
+		standings: func(ctx context.Context, actorID string, cs []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error) {
+			return svc.Standings(ctx, actorID, cs, now)
+		},
+		results: func(ctx context.Context, actorID string, cs []leaderboard.Challenge) (map[string][]leaderboard.Place, error) {
+			return svc.Results(ctx, actorID, cs)
+		},
+	}
 	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), standings, clk)
 	svc = leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
 
@@ -313,5 +320,92 @@ func TestRankedCountIsMyRankingCount(t *testing.T) {
 	}
 	if p := board.Categories[2].Entries[1].Progress; board.Categories[2].Entries[1].UserID != dropped || p == nil || p.Status != scoring.StatusEliminated {
 		t.Fatalf("second in the elimination: %+v, want dropped, eliminated", board.Categories[2].Entries[1])
+	}
+}
+
+// TestBestResultIsTheFrozenLeaderboard: in the list, the best result of a
+// finished challenge is the runner's best line of its frozen leaderboard: the
+// deleted account ahead left out, the runner moves up to share the first
+// rank in two categories, and the first of them is kept. The participant who
+// abandoned gets none.
+func TestBestResultIsTheFrozenLeaderboard(t *testing.T) {
+	f := newLeaderboardFixture(t)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.pool.Exec(t.Context(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertUser := func(subject string) string {
+		t.Helper()
+		var id string
+		if err := f.pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ($1, $1, 'Test', 'User') RETURNING id", subject).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	other, gone := insertUser("other"), insertUser("gone")
+
+	// Three weeks from 2026-04-06, locked long before recordNow.
+	start := toronto(t, 2026, 4, 6, 0)
+	end := start.AddDate(0, 0, 21)
+	var id string
+	if err := f.pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('April', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, end, f.runner).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	exec("INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", id, f.runner)
+	for _, u := range []string{f.runner, other, gone} {
+		exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", id, u, start)
+	}
+	exec(`INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at)
+		VALUES ($1, $2, 'abandoned', $3, $4)`, id, f.quitter, start, start.Add(time.Hour))
+	entry := func(user string, rank, value int) string {
+		return fmt.Sprintf(`{"user_id":%q,"rank":%d,"value":%d,"abandoned":false}`, user, rank, value)
+	}
+	quit := fmt.Sprintf(`{"user_id":%q,"rank":0,"value":0,"abandoned":true}`, f.quitter)
+	for _, c := range []struct {
+		typ, params string
+		entries     []string
+	}{
+		{challenge.CategoryCumulativeTime, `{}`, []string{entry(gone, 1, 9000), entry(f.runner, 2, 5000), entry(other, 3, 4000), quit}},
+		{challenge.CategoryCumulativeDistance, `{"factors": {"run": 1}}`, []string{entry(f.runner, 1, 20000), entry(other, 1, 20000), entry(gone, 3, 1000), quit}},
+		{challenge.CategoryElimination, `{"sport": "run", "step_meters": 2000}`, []string{entry(other, 1, 20000), entry(f.runner, 2, 18000), entry(gone, 3, 1000), quit}},
+	} {
+		var category string
+		if err := f.pool.QueryRow(t.Context(), `INSERT INTO categories (challenge_id, type, position, params)
+			VALUES ($1, $2, (SELECT count(*) + 1 FROM categories WHERE challenge_id = $1), $3::jsonb) RETURNING id`, id, c.typ, c.params).Scan(&category); err != nil {
+			t.Fatal(err)
+		}
+		exec(`INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at) VALUES ($1, $2, $3, $4, $5)`,
+			category, id, c.typ, `{"entries":[`+strings.Join(c.entries, ",")+`]}`, end.Add(7*time.Hour))
+	}
+	exec("UPDATE users SET anonymized_at = $1, pseudo = NULL WHERE id = $2", recordNow, gone)
+
+	bestOf := func(userID string) *challenge.Ranking {
+		t.Helper()
+		page, err := f.challenges.List(t.Context(), userID, challenge.ScopeMine, challenge.StatusFinished, 20, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) != 1 || page.Items[0].ID != id {
+			t.Fatalf("finished challenges %+v, want April alone", page.Items)
+		}
+		return page.Items[0].BestResult
+	}
+	board, err := f.svc.Get(t.Context(), f.runner, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := board.Categories[0]
+	if first.RankedCount != 2 || first.Entries[0].UserID != f.runner || first.Entries[0].Rank != 1 {
+		t.Fatalf("frozen time ranking %+v, want the runner first of 2", first)
+	}
+	want := &challenge.Ranking{Type: challenge.CategoryCumulativeTime, Rank: 1, RankedCount: first.RankedCount}
+	if got := bestOf(f.runner); !reflect.DeepEqual(got, want) {
+		t.Fatalf("runner's best result %+v, want %+v", got, want)
+	}
+	if got := bestOf(f.quitter); got != nil {
+		t.Fatalf("quitter's best result %+v, want none", got)
 	}
 }

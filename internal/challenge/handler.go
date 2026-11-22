@@ -171,7 +171,10 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 	if err != nil {
 		return nil, err
 	}
-	out := api.ChallengePage{Items: make([]api.ChallengeSummary, 0, len(page.Items))}
+	out := api.ChallengePage{
+		Items:  make([]api.ChallengeSummary, 0, len(page.Items)),
+		Counts: api.ChallengeCounts{Upcoming: page.Counts.Upcoming, Ongoing: page.Counts.Ongoing, Finished: page.Counts.Finished},
+	}
 	for _, c := range page.Items {
 		id, err := uuid.Parse(c.ID)
 		if err != nil {
@@ -187,8 +190,9 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 			EndsAt:           c.EndsAt.UTC(),
 			ParticipantCount: c.ParticipantCount,
 			// Both schemas declare the same my_role enum (openapi.yaml).
-			MyRole: api.ChallengeSummaryMyRole(roleName(c.Role)),
-			Status: api.ChallengeSummaryStatus(c.Status),
+			MyRole:    api.ChallengeSummaryMyRole(roleName(c.Role)),
+			Status:    api.ChallengeSummaryStatus(c.Status),
+			WeekCount: c.WeekCount,
 		}
 		if c.MyStatus != nil {
 			status := api.ChallengeSummaryMyStatus(*c.MyStatus)
@@ -196,6 +200,10 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 		}
 		if c.MyWeek != nil {
 			item.MyWeek = toMyWeek(*c.MyWeek)
+		}
+		if r := c.BestResult; r != nil {
+			// Both schemas declare the same category type enum (openapi.yaml).
+			item.BestResult = &api.BestResult{Type: api.BestResultType(r.Type), Rank: r.Rank, RankedCount: r.RankedCount}
 		}
 		out.Items = append(out.Items, item)
 	}

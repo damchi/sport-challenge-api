@@ -726,3 +726,46 @@ func TestGetPointsOfAnAccountDeletedBeforeTheFreeze(t *testing.T) {
 		}
 	}
 }
+
+// TestResultsFromTheDatabase: the frozen results of several challenges are
+// read at once, by challenge; one not finalized yet gives nothing, and an
+// account deleted since moves the others up.
+func TestResultsFromTheDatabase(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, toronto(t))
+	end := start.AddDate(0, 0, 14)
+	runner, gone := s.user("runner"), s.user("gone")
+	newChallenge := func(title string) (string, string) {
+		t.Helper()
+		var id, category string
+		if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+			VALUES ($1, 'public', 'America/Toronto', $2, $3, $4) RETURNING id`, title, start, end, runner).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if err := pool.QueryRow(t.Context(), "INSERT INTO categories (challenge_id, type, position) VALUES ($1, 'cumulative_time', 1) RETURNING id", id).Scan(&category); err != nil {
+			t.Fatal(err)
+		}
+		return id, category
+	}
+	frozenID, frozenCategory := newChallenge("Frozen")
+	pendingID, _ := newChallenge("Pending")
+	s.exec(`INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at) VALUES ($1, $2, 'cumulative_time', $3, $4)`,
+		frozenCategory, frozenID, `{"entries":[{"user_id":"`+gone+`","rank":1,"value":9000},{"user_id":"`+runner+`","rank":2,"value":3600}]}`, end)
+	s.exec("UPDATE users SET anonymized_at = now() WHERE id = $1", gone)
+
+	svc := NewService(staticChallenge{}, fakeProfiles{}, NewRepository(gdb), clock.NewFake(end), 24*time.Hour)
+	categories := []Category{{Type: CategoryCumulativeTime}}
+	got, err := svc.Results(t.Context(), runner, []Challenge{{ID: frozenID, Categories: categories}, {ID: pendingID, Categories: categories}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]Place{frozenID: {{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: runner, Rank: 1, Value: 3600}, RankedCount: 1}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Results() = %+v, want %+v", got, want)
+	}
+}

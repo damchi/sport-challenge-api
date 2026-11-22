@@ -337,3 +337,21 @@ func referenceFactors(suggested map[string]float64, reference string) map[string
 	factors[reference] = 1
 	return factors
 }
+
+// BestResult is the best ranked line of rankings, in category order: the
+// lowest rank, the first category of the challenge between equal ranks; nil
+// when the participant is ranked in none.
+func BestResult(rankings []Ranking) *Ranking {
+	var best *Ranking
+	for i := range rankings {
+		r := &rankings[i]
+		if r.Rank > 0 && (best == nil || r.Rank < best.Rank) {
+			best = r
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	out := *best
+	return &out
+}

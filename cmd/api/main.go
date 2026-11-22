@@ -108,9 +108,14 @@ func run() error {
 		invitations  *invitation.Service
 		leaderboards *leaderboard.Service
 	)
-	standings := standingsFunc(func(ctx context.Context, actorID string, cs []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error) {
-		return leaderboards.Standings(ctx, actorID, cs, now)
-	})
+	standings := challengeStandings{
+		standings: func(ctx context.Context, actorID string, cs []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error) {
+			return leaderboards.Standings(ctx, actorID, cs, now)
+		},
+		results: func(ctx context.Context, actorID string, cs []leaderboard.Challenge) (map[string][]leaderboard.Place, error) {
+			return leaderboards.Results(ctx, actorID, cs)
+		},
+	}
 	abandonAll := abandonAllFunc(func(ctx context.Context, userID string) error {
 		return challenges.AbandonAll(ctx, userID)
 	})
@@ -381,30 +386,57 @@ func toLeaderboardChallenge(c challenge.Challenge) leaderboard.Challenge {
 	return leaderboard.Challenge{ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Categories: categories}
 }
 
-// standingsFunc gives module challenge the standings of module leaderboard,
-// as challenge.Standings.
-type standingsFunc func(ctx context.Context, actorID string, challenges []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error)
+// challengeStandings gives module challenge the standings and the frozen
+// results of module leaderboard, as challenge.Standings.
+type challengeStandings struct {
+	standings func(ctx context.Context, actorID string, challenges []leaderboard.Challenge, now time.Time) (map[string]leaderboard.Standing, error)
+	results   func(ctx context.Context, actorID string, challenges []leaderboard.Challenge) (map[string][]leaderboard.Place, error)
+}
 
-func (f standingsFunc) Standings(ctx context.Context, actorID string, challenges []challenge.Challenge, now time.Time) (map[string]challenge.Standing, error) {
-	in := make([]leaderboard.Challenge, len(challenges))
-	for i, c := range challenges {
-		in[i] = toLeaderboardChallenge(c)
-	}
-	standings, err := f(ctx, actorID, in, now)
+func (f challengeStandings) Standings(ctx context.Context, actorID string, challenges []challenge.Challenge, now time.Time) (map[string]challenge.Standing, error) {
+	standings, err := f.standings(ctx, actorID, toLeaderboardChallenges(challenges), now)
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[string]challenge.Standing, len(standings))
 	for id, st := range standings {
-		rankings := make([]challenge.Ranking, len(st.Categories))
-		for i, p := range st.Categories {
-			rankings[i] = challenge.Ranking{
-				Type: p.Type, Rank: p.Entry.Rank, RankedCount: p.RankedCount, Progress: p.Entry.Progress, Provisional: p.Entry.Provisional,
-			}
-		}
-		out[id] = challenge.Standing{Week: st.Week, WeekEndsAt: st.WeekEndsAt, Rankings: rankings}
+		out[id] = challenge.Standing{Week: st.Week, WeekEndsAt: st.WeekEndsAt, Rankings: toRankings(st.Categories)}
 	}
 	return out, nil
+}
+
+func (f challengeStandings) Results(ctx context.Context, actorID string, challenges []challenge.Challenge) (map[string][]challenge.Ranking, error) {
+	results, err := f.results(ctx, actorID, toLeaderboardChallenges(challenges))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]challenge.Ranking, len(results))
+	for id, places := range results {
+		out[id] = toRankings(places)
+	}
+	return out, nil
+}
+
+// toLeaderboardChallenges turns challenges into their form of module
+// leaderboard.
+func toLeaderboardChallenges(challenges []challenge.Challenge) []leaderboard.Challenge {
+	out := make([]leaderboard.Challenge, len(challenges))
+	for i, c := range challenges {
+		out[i] = toLeaderboardChallenge(c)
+	}
+	return out
+}
+
+// toRankings turns the places of module leaderboard into the rankings of
+// module challenge, in the same order.
+func toRankings(places []leaderboard.Place) []challenge.Ranking {
+	out := make([]challenge.Ranking, len(places))
+	for i, p := range places {
+		out[i] = challenge.Ranking{
+			Type: p.Type, Rank: p.Entry.Rank, RankedCount: p.RankedCount, Progress: p.Entry.Progress, Provisional: p.Entry.Provisional,
+		}
+	}
+	return out
 }
 
 // invited is what invitationChallenges reads from module challenge.

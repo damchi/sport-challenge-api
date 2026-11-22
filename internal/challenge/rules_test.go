@@ -5,6 +5,7 @@ import (
 	"maps"
 	"math"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -508,6 +509,28 @@ func TestReferenceFactors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := referenceFactors(tt.suggested, tt.reference); !maps.Equal(got, tt.want) {
 				t.Fatalf("referenceFactors() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBestResult(t *testing.T) {
+	line := func(ty string, rank int) Ranking { return Ranking{Type: ty, Rank: rank, RankedCount: 6} }
+	tests := []struct {
+		name     string
+		rankings []Ranking
+		want     *Ranking
+	}{
+		{"lowest rank", []Ranking{line(CategoryCumulativeTime, 3), line(CategoryCumulativeDistance, 1), line(CategoryPoints, 2)}, &Ranking{Type: CategoryCumulativeDistance, Rank: 1, RankedCount: 6}},
+		{"equal ranks: first category", []Ranking{line(CategoryCumulativeTime, 2), line(CategoryElimination, 2)}, &Ranking{Type: CategoryCumulativeTime, Rank: 2, RankedCount: 6}},
+		{"unranked lines skipped", []Ranking{line(CategoryCumulativeTime, 0), line(CategoryElimination, 4)}, &Ranking{Type: CategoryElimination, Rank: 4, RankedCount: 6}},
+		{"ranked nowhere", []Ranking{line(CategoryCumulativeTime, 0)}, nil},
+		{"no category", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := BestResult(tt.rankings); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("BestResult() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

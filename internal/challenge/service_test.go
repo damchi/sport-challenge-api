@@ -23,9 +23,14 @@ type fakeRepository struct {
 	created  *Challenge
 	joinedAt time.Time
 	err      error
-	// summaries and listed serve List.
+	// summaries and listed serve List; a summary without a time zone is in
+	// Toronto.
 	summaries []Summary
 	listed    ListQuery
+	// counts serve Counts, counted the query it was asked, countsErr fails it.
+	counts    Counts
+	counted   *ListQuery
+	countsErr error
 	// challenge and membership serve Get; a nil challenge is not found.
 	challenge      *Challenge
 	membership     Membership
@@ -63,6 +68,11 @@ type fakeRepository struct {
 	categoriesErr   error
 }
 
+func (f *fakeRepository) Counts(_ context.Context, q ListQuery) (Counts, error) {
+	f.counted = &q
+	return f.counts, f.countsErr
+}
+
 func (f *fakeRepository) CategoriesOf(_ context.Context, ids []string) (map[string][]Category, error) {
 	f.categoriesAsked = ids
 	out := make(map[string][]Category, len(ids))
@@ -82,6 +92,24 @@ type fakeStandings struct {
 	asked     *[]Challenge
 	askedAt   *time.Time
 	err       error
+	// results serve Results, resultsAsked records the challenges asked
+	// for, resultsErr fails it.
+	results      map[string][]Ranking
+	resultsAsked *[]Challenge
+	resultsErr   error
+}
+
+func (f fakeStandings) Results(_ context.Context, _ string, challenges []Challenge) (map[string][]Ranking, error) {
+	if f.resultsAsked != nil {
+		*f.resultsAsked = challenges
+	}
+	out := make(map[string][]Ranking)
+	for _, c := range challenges {
+		if r, ok := f.results[c.ID]; ok {
+			out[c.ID] = r
+		}
+	}
+	return out, f.resultsErr
 }
 
 func (f fakeStandings) Standings(_ context.Context, _ string, challenges []Challenge, now time.Time) (map[string]Standing, error) {
@@ -253,10 +281,16 @@ func (f *fakeRepository) List(_ context.Context, q ListQuery) ([]Summary, error)
 	if f.err != nil {
 		return nil, f.err
 	}
-	if len(f.summaries) > q.Limit {
-		return f.summaries[:q.Limit], nil
+	out := slices.Clone(f.summaries)
+	for i := range out {
+		if out[i].Timezone == "" {
+			out[i].Timezone = "America/Toronto"
+		}
 	}
-	return f.summaries, nil
+	if len(out) > q.Limit {
+		return out[:q.Limit], nil
+	}
+	return out, nil
 }
 
 func (f *fakeRepository) Create(_ context.Context, c Challenge, joinedAt time.Time) (Challenge, error) {
@@ -737,7 +771,8 @@ func TestServiceListStandings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"running", "also running"}; !reflect.DeepEqual(repo.categoriesAsked, want) {
+	// The finished one is read too, for its results, in the same query.
+	if want := []string{"running", "finished", "also running"}; !reflect.DeepEqual(repo.categoriesAsked, want) {
 		t.Fatalf("categories read for %v, want %v", repo.categoriesAsked, want)
 	}
 	want := []Challenge{
@@ -766,14 +801,18 @@ func TestServiceListStandings(t *testing.T) {
 
 func TestServiceListStandingsOnlyInMine(t *testing.T) {
 	active := string(ParticipantActive)
-	repo := &fakeRepository{summaries: []Summary{{ID: "running", MyStatus: &active, StartsAt: now.Add(-time.Hour), EndsAt: now.AddDate(0, 0, 14)}}}
-	var asked []Challenge
-	page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{asked: &asked}, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
+	repo := &fakeRepository{summaries: []Summary{
+		{ID: "running", MyStatus: &active, StartsAt: now.Add(-time.Hour), EndsAt: now.AddDate(0, 0, 14)},
+		{ID: "finished", MyStatus: &active, StartsAt: now.AddDate(0, 0, -14), EndsAt: now.Add(-time.Hour)},
+	}}
+	var asked, resultsAsked []Challenge
+	standings := fakeStandings{asked: &asked, resultsAsked: &resultsAsked}
+	page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, standings, clock.NewFake(now)).List(t.Context(), actor, ScopePublic, "", 20, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repo.categoriesAsked != nil || asked != nil || page.Items[0].MyWeek != nil {
-		t.Fatalf("public list read categories %v and standings %v, want nothing", repo.categoriesAsked, asked)
+	if repo.categoriesAsked != nil || asked != nil || resultsAsked != nil || page.Items[0].MyWeek != nil || page.Items[1].BestResult != nil {
+		t.Fatalf("public list read categories %v, standings %v and results %v, want nothing", repo.categoriesAsked, asked, resultsAsked)
 	}
 }
 
@@ -781,6 +820,7 @@ func TestServiceListStandingsFailures(t *testing.T) {
 	boom := errors.New("boom")
 	active := string(ParticipantActive)
 	running := []Summary{{ID: "running", MyStatus: &active, StartsAt: now.Add(-time.Hour), EndsAt: now.AddDate(0, 0, 14)}}
+	finished := []Summary{{ID: "finished", MyStatus: &active, StartsAt: now.AddDate(0, 0, -14), EndsAt: now.Add(-time.Hour)}}
 	tests := []struct {
 		name      string
 		repo      *fakeRepository
@@ -788,6 +828,8 @@ func TestServiceListStandingsFailures(t *testing.T) {
 	}{
 		{name: "categories", repo: &fakeRepository{summaries: running, categoriesErr: boom}},
 		{name: "standings", repo: &fakeRepository{summaries: running, categoriesOf: map[string][]Category{"running": nil}}, standings: fakeStandings{err: boom}},
+		{name: "results", repo: &fakeRepository{summaries: finished}, standings: fakeStandings{resultsErr: boom}},
+		{name: "counts", repo: &fakeRepository{summaries: running, countsErr: boom}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1722,5 +1764,111 @@ func TestServiceAllActivitiesScopeFailures(t *testing.T) {
 	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: active, membersErr: storageErr}
 	if _, _, err := svc(repo).AllActivitiesScope(t.Context(), actor, "c"); !errors.Is(err, storageErr) {
 		t.Fatalf("members failure: error = %v, want the cause kept", err)
+	}
+}
+
+// TestServiceListBestResult checks which challenges of the actor's own list
+// get a best result: finished ones they are an active participant of whose
+// results are frozen, read for the whole page at once with their categories;
+// the best is the lowest rank, the first category between equal ranks.
+func TestServiceListBestResult(t *testing.T) {
+	active, abandoned := string(ParticipantActive), string(ParticipantAbandoned)
+	day := 24 * time.Hour
+	finished := func(id string, status *string) Summary {
+		return Summary{ID: id, Timezone: "America/Toronto", MyStatus: status, StartsAt: now.Add(-28 * day), EndsAt: now.Add(-day)}
+	}
+	items := []Summary{
+		finished("best", &active),
+		finished("tie", &active),
+		finished("unranked", &active),
+		finished("not frozen", &active),
+		finished("abandoned", &abandoned),
+		finished("creator only", nil),
+		{ID: "ongoing", MyStatus: &active, StartsAt: now.Add(-day), EndsAt: now.Add(13 * day)},
+	}
+	cats := []Category{{Type: CategoryCumulativeTime, Position: 1}, {Type: CategoryCumulativeDistance, Position: 2}, {Type: CategoryPoints, Position: 4}}
+	repo := &fakeRepository{summaries: items, categoriesOf: map[string][]Category{"best": cats, "tie": cats, "unranked": cats, "not frozen": cats}}
+	var asked []Challenge
+	standings := fakeStandings{resultsAsked: &asked, results: map[string][]Ranking{
+		"best": {
+			{Type: CategoryCumulativeTime, Rank: 3, RankedCount: 8},
+			{Type: CategoryCumulativeDistance, Rank: 2, RankedCount: 8},
+			{Type: CategoryPoints, Rank: 4, RankedCount: 8},
+		},
+		"tie": {
+			{Type: CategoryCumulativeTime, Rank: 2, RankedCount: 8},
+			{Type: CategoryCumulativeDistance, Rank: 2, RankedCount: 8},
+			{Type: CategoryPoints, Rank: 5, RankedCount: 8},
+		},
+		"unranked": {{Type: CategoryCumulativeTime, RankedCount: 8}},
+		// Would be served if asked: an abandoned participant is not.
+		"abandoned": {{Type: CategoryCumulativeTime, Rank: 1, RankedCount: 8}},
+	}}
+
+	page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, standings, clock.NewFake(now)).List(t.Context(), actor, ScopeMine, "", 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var askedIDs []string
+	for _, c := range asked {
+		if !reflect.DeepEqual(c.Categories, cats) {
+			t.Fatalf("results asked for %s with categories %+v, want %+v", c.ID, c.Categories, cats)
+		}
+		askedIDs = append(askedIDs, c.ID)
+	}
+	if want := []string{"best", "tie", "unranked", "not frozen"}; !reflect.DeepEqual(askedIDs, want) {
+		t.Fatalf("results asked for %v, want %v", askedIDs, want)
+	}
+	want := map[string]*Ranking{
+		"best": {Type: CategoryCumulativeDistance, Rank: 2, RankedCount: 8},
+		"tie":  {Type: CategoryCumulativeTime, Rank: 2, RankedCount: 8},
+	}
+	for _, it := range page.Items {
+		if !reflect.DeepEqual(it.BestResult, want[it.ID]) {
+			t.Fatalf("%s: best result %+v, want %+v", it.ID, it.BestResult, want[it.ID])
+		}
+	}
+}
+
+// TestServiceListCountsAndWeekCount checks that the counts are those of the
+// scope at the clock's now, whatever the status filter and the cursor, and
+// that each item has its number of weeks, as the detail computes it.
+func TestServiceListCountsAndWeekCount(t *testing.T) {
+	toronto, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, toronto)
+	items := []Summary{
+		// 3 weeks and 2 days, across the spring time change: the last week
+		// is short.
+		{ID: "short", Timezone: "America/Toronto", StartsAt: start, EndsAt: start.AddDate(0, 0, 23)},
+		{ID: "one", Timezone: "America/Toronto", StartsAt: start, EndsAt: start.AddDate(0, 0, 7)},
+	}
+	counts := Counts{Upcoming: 1, Ongoing: 2, Finished: 3}
+	for _, tt := range []struct {
+		scope, status string
+		after         *Position
+	}{
+		{ScopeMine, "", nil},
+		{ScopeMine, StatusFinished, &Position{StartsAt: start, ID: "x"}},
+		{ScopePublic, StatusUpcoming, nil},
+	} {
+		t.Run(tt.scope+" "+tt.status, func(t *testing.T) {
+			repo := &fakeRepository{summaries: items, counts: counts}
+			page, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).List(t.Context(), actor, tt.scope, tt.status, 20, tt.after)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Counts != counts {
+				t.Fatalf("counts %+v, want %+v", page.Counts, counts)
+			}
+			if q := repo.counted; q == nil || *q != (ListQuery{ActorID: actor, Scope: tt.scope, Now: now}) {
+				t.Fatalf("counted %+v, want the scope of the actor at the clock's now, without status nor cursor", q)
+			}
+			if got := []int{page.Items[0].WeekCount, page.Items[1].WeekCount}; !slices.Equal(got, []int{4, 1}) {
+				t.Fatalf("week counts %v, want [4 1]", got)
+			}
+		})
 	}
 }

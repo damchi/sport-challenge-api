@@ -114,17 +114,19 @@ func TestListScopesAndStatuses(t *testing.T) {
 		scope  string
 		status string
 		want   []string
+		// counts are those of the scope, whatever the status filter.
+		counts Counts
 	}{
 		// Never a private or deleted challenge in public; soonest first.
-		{name: "public", scope: ScopePublic, want: []string{"G finished long ago", "E finished", "E2 finished, same start as E", "B ongoing, mine", "A upcoming", "H upcoming, same start as A"}},
-		{name: "public upcoming", scope: ScopePublic, status: StatusUpcoming, want: []string{"A upcoming", "H upcoming, same start as A"}},
-		{name: "public ongoing", scope: ScopePublic, status: StatusOngoing, want: []string{"B ongoing, mine"}},
+		{name: "public", scope: ScopePublic, want: []string{"G finished long ago", "E finished", "E2 finished, same start as E", "B ongoing, mine", "A upcoming", "H upcoming, same start as A"}, counts: Counts{Upcoming: 2, Ongoing: 1, Finished: 3}},
+		{name: "public upcoming", scope: ScopePublic, status: StatusUpcoming, want: []string{"A upcoming", "H upcoming, same start as A"}, counts: Counts{Upcoming: 2, Ongoing: 1, Finished: 3}},
+		{name: "public ongoing", scope: ScopePublic, status: StatusOngoing, want: []string{"B ongoing, mine"}, counts: Counts{Upcoming: 2, Ongoing: 1, Finished: 3}},
 		// Finished: most recent first.
-		{name: "public finished", scope: ScopePublic, status: StatusFinished, want: []string{"E2 finished, same start as E", "E finished", "G finished long ago"}},
+		{name: "public finished", scope: ScopePublic, status: StatusFinished, want: []string{"E2 finished, same start as E", "E finished", "G finished long ago"}, counts: Counts{Upcoming: 2, Ongoing: 1, Finished: 3}},
 		// Mine: joined, abandoned included, private included, deleted excluded;
 		// never another's private challenge.
-		{name: "mine", scope: ScopeMine, want: []string{"B ongoing, mine", "D private, I abandoned"}},
-		{name: "mine upcoming", scope: ScopeMine, status: StatusUpcoming, want: []string{"D private, I abandoned"}},
+		{name: "mine", scope: ScopeMine, want: []string{"B ongoing, mine", "D private, I abandoned"}, counts: Counts{Upcoming: 1, Ongoing: 1, Finished: 0}},
+		{name: "mine upcoming", scope: ScopeMine, status: StatusUpcoming, want: []string{"D private, I abandoned"}, counts: Counts{Upcoming: 1, Ongoing: 1, Finished: 0}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -138,7 +140,38 @@ func TestListScopesAndStatuses(t *testing.T) {
 			if page.Next != nil {
 				t.Fatalf("next %+v on a single page", page.Next)
 			}
+			if page.Counts != tt.counts {
+				t.Fatalf("counts %+v, want %+v", page.Counts, tt.counts)
+			}
 		})
+	}
+}
+
+// TestListWeekCountIsTheDetails: each item has the week count of its detail,
+// a challenge of 14 days and one of 7 days, both from 15:00: the weeks start
+// at midnight, the last one holds 15 hours.
+func TestListWeekCountIsTheDetails(t *testing.T) {
+	f := newListFixture(t)
+	if _, err := f.pool.Exec(t.Context(), "UPDATE challenges SET ends_at = starts_at + interval '7 days' WHERE id = '00000000-0000-0000-0000-0000000000a1'"); err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.svc.List(t.Context(), f.me, ScopePublic, StatusUpcoming, 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []int
+	for _, it := range page.Items {
+		d, err := f.svc.Get(t.Context(), f.me, it.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it.WeekCount != d.WeekCount {
+			t.Fatalf("%s: week count %d, want that of the detail, %d", it.Title, it.WeekCount, d.WeekCount)
+		}
+		got = append(got, it.WeekCount)
+	}
+	if !slices.Equal(got, []int{2, 3}) {
+		t.Fatalf("week counts %v, want [2 3]", got)
 	}
 }
 

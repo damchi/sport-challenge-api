@@ -275,3 +275,32 @@ func (r *Repository) Snapshots(ctx context.Context, challengeID string) (map[str
 	}
 	return out, createdAt, nil
 }
+
+// SnapshotsOf returns the frozen ranking of each category of challengeIDs,
+// by challenge ID then category type; nothing for a challenge the worker has
+// not finalized yet.
+func (r *Repository) SnapshotsOf(ctx context.Context, challengeIDs []string) (map[string]map[string]json.RawMessage, error) {
+	out := make(map[string]map[string]json.RawMessage)
+	if len(challengeIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ChallengeID  string
+		CategoryType string
+		Payload      []byte
+	}
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT challenge_id, category_type, payload FROM result_snapshot WHERE challenge_id IN @ids`,
+		map[string]any{"ids": challengeIDs},
+	).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("read result snapshots: %w", err)
+	}
+	for _, row := range rows {
+		if out[row.ChallengeID] == nil {
+			out[row.ChallengeID] = make(map[string]json.RawMessage)
+		}
+		out[row.ChallengeID][row.CategoryType] = row.Payload
+	}
+	return out, nil
+}
