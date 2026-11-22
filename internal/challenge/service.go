@@ -18,6 +18,7 @@ import (
 type repository interface {
 	Create(ctx context.Context, c Challenge, joinedAt time.Time) (Challenge, error)
 	List(ctx context.Context, q ListQuery) ([]Summary, error)
+	Counts(ctx context.Context, q ListQuery) (Counts, error)
 	// Get, Join, Abandon, Exclude, AddCreator and Delete judge the
 	// invitations at now (Membership.Invited).
 	Get(ctx context.Context, id, actorID string, now time.Time) (Challenge, Membership, error)
@@ -54,10 +55,13 @@ type Catalogue interface {
 
 // Standings gives where actorID stands in each of challenges that is in its
 // weeks at now and where they are an active participant, by challenge ID;
-// the others are left out (module leaderboard). challenges carry their
+// the others are left out. Results gives actorID's line in each category of
+// the frozen results of challenges, in category order, by challenge ID; those
+// not frozen yet are left out (module leaderboard). challenges carry their
 // categories.
 type Standings interface {
 	Standings(ctx context.Context, actorID string, challenges []Challenge, now time.Time) (map[string]Standing, error)
+	Results(ctx context.Context, actorID string, challenges []Challenge) (map[string][]Ranking, error)
 }
 
 // Service holds the use cases of the challenges.
@@ -160,11 +164,13 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 }
 
 // List returns a page of challenges for actorID: public ones, or those the
-// actor created or joined. The status filter and the status of each
-// challenge use the same instant of the clock. The visibility rules are
-// applied by the query itself, never by filtering a loaded list. In the
-// actor's own list, each ongoing challenge they are an active participant
-// of has their standing (MyWeek), read for the whole page at once.
+// actor created or joined. The status filter, the status of each challenge
+// and the counts by status use the same instant of the clock; the counts are
+// those of the whole scope, whatever the status filter and the page. The
+// visibility rules are applied by the queries themselves, never by filtering
+// a loaded list. In the actor's own list, each ongoing challenge they are an
+// active participant of has their standing (MyWeek), and each finished one
+// their best frozen result (BestResult), read for the whole page at once.
 func (s *Service) List(ctx context.Context, actorID, scope, status string, limit int, after *Position) (Page, error) {
 	if limit < 1 {
 		return Page{}, apperr.InvalidFields(nil, "limit")
@@ -178,6 +184,10 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 	if err != nil {
 		return Page{}, fmt.Errorf("list challenges: %w", err)
 	}
+	counts, err := s.repo.Counts(ctx, ListQuery{ActorID: actorID, Scope: scope, Now: now})
+	if err != nil {
+		return Page{}, fmt.Errorf("list challenges: %w", err)
+	}
 	for i := range items {
 		it := &items[i]
 		m := Membership{Creator: it.Creator, Invited: it.Invited}
@@ -186,50 +196,78 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 		}
 		it.Role = RoleOf(m)
 		it.Status = StatusAt(now, it.StartsAt, it.EndsAt)
+		loc, err := location(it.Timezone)
+		if err != nil {
+			return Page{}, fmt.Errorf("list challenges: challenge time zone %q: %w", it.Timezone, err)
+		}
+		it.WeekCount = scoring.Window{Start: it.StartsAt, End: it.EndsAt, Location: loc}.Weeks()
 	}
-	page := Page{Items: items}
+	page := Page{Items: items, Counts: counts}
 	if len(items) > limit {
 		page.Items = items[:limit]
 		last := page.Items[limit-1]
 		page.Next = &Position{StartsAt: last.StartsAt, ID: last.ID}
 	}
 	if scope == ScopeMine {
-		if err := s.addStandings(ctx, actorID, page.Items, now); err != nil {
-			return Page{}, err
+		if err := s.addRankings(ctx, actorID, page.Items, now); err != nil {
+			return Page{}, fmt.Errorf("list challenges: %w", err)
 		}
 	}
 	return page, nil
 }
 
-// addStandings sets MyWeek on the ongoing challenges of items where actorID
-// is an active participant, at now, the instant of their status: the
-// categories and the standings each read once for all of them.
-func (s *Service) addStandings(ctx context.Context, actorID string, items []Summary, now time.Time) error {
-	var running []Challenge
+// addRankings sets, on the challenges of items where actorID is an active
+// participant, MyWeek on the ongoing ones, at now, the instant of their
+// status, and BestResult on the finished ones: the categories, the standings
+// and the results each read once for all of them.
+func (s *Service) addRankings(ctx context.Context, actorID string, items []Summary, now time.Time) error {
+	var running, finished []Challenge
 	var ids []string
 	for _, it := range items {
-		if it.Status == StatusOngoing && it.MyStatus != nil && ParticipantStatus(*it.MyStatus) == ParticipantActive {
-			running = append(running, Challenge{ID: it.ID, Timezone: it.Timezone, StartsAt: it.StartsAt, EndsAt: it.EndsAt})
-			ids = append(ids, it.ID)
+		if it.MyStatus == nil || ParticipantStatus(*it.MyStatus) != ParticipantActive {
+			continue
 		}
+		c := Challenge{ID: it.ID, Timezone: it.Timezone, StartsAt: it.StartsAt, EndsAt: it.EndsAt}
+		switch it.Status {
+		case StatusOngoing:
+			running = append(running, c)
+		case StatusFinished:
+			finished = append(finished, c)
+		default:
+			continue
+		}
+		ids = append(ids, it.ID)
 	}
-	if len(running) == 0 {
+	if len(ids) == 0 {
 		return nil
 	}
 	categories, err := s.repo.CategoriesOf(ctx, ids)
 	if err != nil {
-		return fmt.Errorf("list challenges: %w", err)
+		return err
 	}
-	for i := range running {
-		running[i].Categories = categories[running[i].ID]
+	for _, cs := range [][]Challenge{running, finished} {
+		for i := range cs {
+			cs[i].Categories = categories[cs[i].ID]
+		}
 	}
-	standings, err := s.standings.Standings(ctx, actorID, running, now)
-	if err != nil {
-		return fmt.Errorf("list challenges: %w", err)
+	standings := map[string]Standing{}
+	if len(running) > 0 {
+		if standings, err = s.standings.Standings(ctx, actorID, running, now); err != nil {
+			return err
+		}
+	}
+	results := map[string][]Ranking{}
+	if len(finished) > 0 {
+		if results, err = s.standings.Results(ctx, actorID, finished); err != nil {
+			return err
+		}
 	}
 	for i := range items {
 		if st, ok := standings[items[i].ID]; ok {
 			items[i].MyWeek = &st
+		}
+		if r, ok := results[items[i].ID]; ok {
+			items[i].BestResult = BestResult(r)
 		}
 	}
 	return nil

@@ -462,6 +462,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 			ParticipantsOf(context.Context, []string) (map[string][]scoring.Participant, error)
 			ActivitiesOf(context.Context, []leaderboard.Scope) (map[string][]scoring.Activity, error)
 			Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
+			SnapshotsOf(context.Context, []string) (map[string]map[string]json.RawMessage, error)
 			DeletedAccounts(context.Context, []string) (map[string]bool, error)
 		},
 		) leaderboard.Leaderboard {
@@ -811,6 +812,7 @@ func TestChallengeWithPoints(t *testing.T) {
 		ParticipantsOf(context.Context, []string) (map[string][]scoring.Participant, error)
 		ActivitiesOf(context.Context, []leaderboard.Scope) (map[string][]scoring.Activity, error)
 		Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
+		SnapshotsOf(context.Context, []string) (map[string]map[string]json.RawMessage, error)
 		DeletedAccounts(context.Context, []string) (map[string]bool, error)
 	},
 	) []scoring.Entry {

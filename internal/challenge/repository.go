@@ -86,13 +86,7 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Summary, error) {
 	sql.WriteString(listColumns)
 	args := map[string]any{"actor": q.ActorID, "now": q.Now, "limit": q.Limit}
 
-	switch q.Scope {
-	case ScopeMine:
-		// The participants (user_id) index: every creator is a participant.
-		sql.WriteString(" AND me.user_id IS NOT NULL")
-	default:
-		sql.WriteString(" AND c.visibility = 'public'")
-	}
+	sql.WriteString(scopeFilter(q.Scope))
 	switch q.Status {
 	case StatusUpcoming:
 		sql.WriteString(" AND c.starts_at > @now")
@@ -123,6 +117,36 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Summary, error) {
 		return nil, fmt.Errorf("list challenges: %w", err)
 	}
 	return items, nil
+}
+
+// scopeFilter is the condition of a listing's scope on challenges c, with
+// me the participation of @actor: the visibility rules of the scope.
+func scopeFilter(scope string) string {
+	if scope == ScopeMine {
+		// The participants (user_id) index: every creator is a participant.
+		return " AND me.user_id IS NOT NULL"
+	}
+	return " AND c.visibility = 'public'"
+}
+
+// Counts returns how many challenges of q's scope have each status at q.Now,
+// with the conditions of List on the scope, whatever q.Status and q.After.
+// The statuses are those of StatusAt.
+func (r *Repository) Counts(ctx context.Context, q ListQuery) (Counts, error) {
+	var out Counts
+	err := r.db.WithContext(ctx).Raw(`SELECT
+		count(*) FILTER (WHERE c.starts_at > @now) AS upcoming,
+		count(*) FILTER (WHERE c.starts_at <= @now AND c.ends_at > @now) AS ongoing,
+		count(*) FILTER (WHERE c.ends_at <= @now) AS finished
+		FROM challenges c
+		LEFT JOIN participants me ON me.challenge_id = c.id AND me.user_id = @actor
+		WHERE c.deleted_at IS NULL`+scopeFilter(q.Scope),
+		map[string]any{"actor": q.ActorID, "now": q.Now},
+	).Scan(&out).Error
+	if err != nil {
+		return Counts{}, fmt.Errorf("count challenges: %w", err)
+	}
+	return out, nil
 }
 
 // errChallengeNotFound means no challenge, or a deleted one.

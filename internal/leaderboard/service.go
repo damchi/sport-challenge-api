@@ -27,6 +27,9 @@ type repository interface {
 	// Snapshots gives the frozen results of the challenge by category type,
 	// and when they were frozen; none until the worker has finalized it.
 	Snapshots(ctx context.Context, challengeID string) (map[string]json.RawMessage, time.Time, error)
+	// SnapshotsOf gives, in one query, the frozen results of each challenge
+	// by category type; none for a challenge not finalized yet.
+	SnapshotsOf(ctx context.Context, challengeIDs []string) (map[string]map[string]json.RawMessage, error)
 	// DeletedAccounts gives which of ids are deleted (anonymized) accounts,
 	// left out of the frozen results.
 	DeletedAccounts(ctx context.Context, ids []string) (map[string]bool, error)
@@ -269,33 +272,15 @@ type frozenRanking struct {
 // are read now, and an account deleted since is left out: the participants
 // after it move up.
 func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, error) {
-	if len(c.Categories) == 0 {
-		return Leaderboard{}, false, nil
-	}
 	payloads, createdAt, err := s.repo.Snapshots(ctx, c.ID)
 	if err != nil {
 		return Leaderboard{}, false, err
 	}
-	rankings := make([]frozenRanking, len(c.Categories))
-	var ids []string
-	for i, cat := range c.Categories {
-		payload, ok := payloads[cat.Type]
-		if !ok {
-			return Leaderboard{}, false, nil
-		}
-		if err := json.Unmarshal(payload, &rankings[i]); err != nil {
-			return Leaderboard{}, false, fmt.Errorf("decode snapshot of category %s: %w", cat.Type, err)
-		}
+	rankings, ok, err := decodeFrozen(c.Categories, payloads)
+	if err != nil || !ok {
+		return Leaderboard{}, false, err
 	}
-	seen := make(map[string]bool)
-	for _, r := range rankings {
-		for _, e := range r.Entries {
-			if !seen[e.UserID] {
-				seen[e.UserID] = true
-				ids = append(ids, e.UserID)
-			}
-		}
-	}
+	ids := frozenUsers(nil, rankings)
 	deleted, err := s.repo.DeletedAccounts(ctx, ids)
 	if err != nil {
 		return Leaderboard{}, false, err
@@ -314,36 +299,134 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 
 	board := Leaderboard{ComputedAt: createdAt, Categories: make([]CategoryRanking, len(c.Categories))}
 	for i, cat := range c.Categories {
-		ranked := make([]Ranked, 0, len(rankings[i].Entries))
-		entries := make([]scoring.Entry, 0, len(rankings[i].Entries))
-		// The ranks are given again without the deleted accounts, in the
-		// frozen order: equal ones still share a rank (1, 1, 3).
-		var frozenRank, rank int
-		for _, e := range rankings[i].Entries {
-			if deleted[e.UserID] {
-				continue
-			}
-			r := Ranked{Entry: scoring.Entry{UserID: e.UserID, Value: e.Value, Abandoned: e.Abandoned}, Name: names[e.UserID]}
-			if e.Rank > 0 {
-				if e.Rank != frozenRank {
-					frozenRank, rank = e.Rank, len(ranked)+1
-				}
-				r.Rank = rank
-			}
-			// As computed: a survivor of the elimination category has an empty
-			// progress once the challenge is over, an abandoned one has none.
-			if cat.Type == CategoryElimination && !e.Abandoned {
-				r.Progress = &scoring.Progress{}
-				if e.EliminatedWeek > 0 {
-					r.Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
-				}
-			}
-			ranked = append(ranked, r)
-			entries = append(entries, r.Entry)
+		entries := thaw(cat.Type, rankings[i], deleted)
+		ranked := make([]Ranked, len(entries))
+		for j, e := range entries {
+			ranked[j] = Ranked{Entry: e, Name: names[e.UserID]}
 		}
 		board.Categories[i] = CategoryRanking{Type: cat.Type, RankedCount: rankedCount(entries), Entries: ranked}
 	}
 	return board, true, nil
+}
+
+// Results returns actorID's line in each category of the frozen results of
+// challenges, in category order, by challenge ID: the lines of Get once the
+// challenge is over, deleted accounts left out and the participants after
+// them moving up. A line where actorID is not in the frozen ranking has a
+// zero entry (no rank). A challenge whose results are not all frozen yet is
+// left out. However many, the challenges are read in two queries.
+func (s *Service) Results(ctx context.Context, actorID string, challenges []Challenge) (map[string][]Place, error) {
+	out := make(map[string][]Place, len(challenges))
+	if len(challenges) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(challenges))
+	for i, c := range challenges {
+		ids[i] = c.ID
+	}
+	payloads, err := s.repo.SnapshotsOf(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	frozenOf := make(map[string][]frozenRanking, len(challenges))
+	var users []string
+	for _, c := range challenges {
+		rankings, ok, err := decodeFrozen(c.Categories, payloads[c.ID])
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			frozenOf[c.ID] = rankings
+			users = frozenUsers(users, rankings)
+		}
+	}
+	if len(frozenOf) == 0 {
+		return out, nil
+	}
+	deleted, err := s.repo.DeletedAccounts(ctx, users)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range challenges {
+		rankings, ok := frozenOf[c.ID]
+		if !ok {
+			continue
+		}
+		places := make([]Place, len(c.Categories))
+		for i, cat := range c.Categories {
+			places[i] = placeOf(cat.Type, thaw(cat.Type, rankings[i], deleted), actorID)
+		}
+		out[c.ID] = places
+	}
+	return out, nil
+}
+
+// decodeFrozen decodes the frozen ranking of each of categories, in their
+// order, from payloads by category type, and reports false when one is not
+// there yet, or when there is no category.
+func decodeFrozen(categories []Category, payloads map[string]json.RawMessage) ([]frozenRanking, bool, error) {
+	if len(categories) == 0 {
+		return nil, false, nil
+	}
+	rankings := make([]frozenRanking, len(categories))
+	for i, cat := range categories {
+		payload, ok := payloads[cat.Type]
+		if !ok {
+			return nil, false, nil
+		}
+		if err := json.Unmarshal(payload, &rankings[i]); err != nil {
+			return nil, false, fmt.Errorf("decode snapshot of category %s: %w", cat.Type, err)
+		}
+	}
+	return rankings, true, nil
+}
+
+// frozenUsers appends to ids the users of rankings not in it yet, in their
+// order.
+func frozenUsers(ids []string, rankings []frozenRanking) []string {
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		seen[id] = true
+	}
+	for _, r := range rankings {
+		for _, e := range r.Entries {
+			if !seen[e.UserID] {
+				seen[e.UserID] = true
+				ids = append(ids, e.UserID)
+			}
+		}
+	}
+	return ids
+}
+
+// thaw returns the entries of the frozen ranking r of a category of type
+// categoryType without the deleted accounts: the ranks are given again, in
+// the frozen order, and equal ones still share a rank (1, 1, 3).
+func thaw(categoryType string, r frozenRanking, deleted map[string]bool) []scoring.Entry {
+	entries := make([]scoring.Entry, 0, len(r.Entries))
+	var frozenRank, rank int
+	for _, e := range r.Entries {
+		if deleted[e.UserID] {
+			continue
+		}
+		entry := scoring.Entry{UserID: e.UserID, Value: e.Value, Abandoned: e.Abandoned}
+		if e.Rank > 0 {
+			if e.Rank != frozenRank {
+				frozenRank, rank = e.Rank, len(entries)+1
+			}
+			entry.Rank = rank
+		}
+		// As computed: a survivor of the elimination category has an empty
+		// progress once the challenge is over, an abandoned one has none.
+		if categoryType == CategoryElimination && !e.Abandoned {
+			entry.Progress = &scoring.Progress{}
+			if e.EliminatedWeek > 0 {
+				entry.Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
+			}
+		}
+		entries = append(entries, entry)
+	}
+	return entries
 }
 
 // scopeOf is what the activities of challenge id, with categories, are read

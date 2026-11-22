@@ -280,7 +280,11 @@ paths:
         In `mine`, `my_week` gives where the user stands in each ongoing
         challenge they take part in: their lines of the leaderboard
         (`GET /challenges/{challengeId}/leaderboard`), computed at the
-        instant the status is.
+        instant the status is; `best_result` gives their best frozen rank in
+        each finished one.
+
+        `counts` gives how many challenges of the scope have each status,
+        whatever the `status` filter: the same on every page.
       tags: [challenges]
       parameters:
         - name: scope
@@ -1738,7 +1742,7 @@ components:
           description: Points category only, minimum duration of a session counted by `session_count`, in seconds.
     ChallengePage:
       type: object
-      required: [items, next_cursor]
+      required: [items, next_cursor, counts]
       additionalProperties: false
       properties:
         items:
@@ -1749,6 +1753,28 @@ components:
           type: string
           nullable: true
           description: Pass it as `cursor` for the next page; null on the last page.
+        counts:
+          $ref: "#/components/schemas/ChallengeCounts"
+    ChallengeCounts:
+      type: object
+      required: [upcoming, ongoing, finished]
+      additionalProperties: false
+      description: |
+        How many challenges of the requested `scope` have each status, at the
+        instant the statuses of the page are: whatever the `status` filter and
+        the cursor, with the visibility rules of the scope (a private
+        challenge never counts in `public`). Their sum is every challenge of
+        the scope.
+      properties:
+        upcoming:
+          type: integer
+          minimum: 0
+        ongoing:
+          type: integer
+          minimum: 0
+        finished:
+          type: integer
+          minimum: 0
     ParticipantPage:
       type: object
       required: [items, next_cursor]
@@ -1943,7 +1969,7 @@ components:
           description: The end of the current week; null when eliminated or outside the weeks.
     ChallengeSummary:
       type: object
-      required: [id, title, visibility, timezone, reference_sport, starts_at, ends_at, participant_count, my_role, my_status, status, my_week]
+      required: [id, title, visibility, timezone, reference_sport, starts_at, ends_at, participant_count, my_role, my_status, status, week_count, my_week, best_result]
       additionalProperties: false
       properties:
         id:
@@ -1981,6 +2007,10 @@ components:
         status:
           type: string
           enum: [upcoming, ongoing, finished]
+        week_count:
+          type: integer
+          minimum: 1
+          description: Number of weeks of the challenge, whatever its status, as `week_count` of the detail.
         my_week:
           type: object
           nullable: true
@@ -1990,6 +2020,38 @@ components:
             Only in `mine`, for an ongoing challenge where the user is an
             active participant; null otherwise (`public`, upcoming or
             finished, abandoned).
+        best_result:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/BestResult"
+          description: |
+            Only in `mine`, for a finished challenge whose results are frozen
+            (at the lock of its last week) and where the user is an active
+            participant ranked in at least one category; null otherwise
+            (`public`, upcoming or ongoing, results not frozen yet, abandoned
+            or excluded).
+    BestResult:
+      type: object
+      required: [type, rank, ranked_count]
+      additionalProperties: false
+      description: |
+        The user's best frozen rank among the categories of the challenge, as
+        the leaderboard serves it once the challenge is over (deleted accounts
+        left out, the others moving up). Between categories of the same rank,
+        the first one in the order of the challenge's categories.
+      properties:
+        type:
+          type: string
+          enum: [cumulative_time, cumulative_distance, elimination, points]
+        rank:
+          type: integer
+          minimum: 1
+          description: The user's rank in the category; equal values share it (1, 1, 3).
+        ranked_count:
+          type: integer
+          minimum: 1
+          description: How many participants are ranked in the category, abandoned ones and deleted accounts left out.
     MyWeek:
       type: object
       required: [week, week_ends_at, rankings]

@@ -302,7 +302,7 @@ func TestListChallenges(t *testing.T) {
 	repo := &fakeRepository{summaries: []Summary{
 		{ID: "11111111-1111-1111-1111-111111111111", Title: "A", Visibility: "public", Timezone: "UTC", ReferenceSport: "ride", StartsAt: now, EndsAt: now.AddDate(0, 0, 14), ParticipantCount: 3, MyStatus: &desc, Creator: true},
 		{ID: "22222222-2222-2222-2222-222222222222", Title: "B", Visibility: "public", Timezone: "UTC", StartsAt: now.AddDate(0, 0, 1), EndsAt: now.AddDate(0, 0, 15), ParticipantCount: 1},
-	}}
+	}, counts: Counts{Upcoming: 1, Ongoing: 4, Finished: 2}}
 	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
 
 	rec, out := serve(t, svc, http.MethodGet, "/api/v1/challenges?scope=mine&status=ongoing&limit=1", "")
@@ -316,6 +316,14 @@ func TestListChallenges(t *testing.T) {
 	}
 	if first["my_role"] != "creator" || first["status"] != "ongoing" || first["reference_sport"] != "ride" {
 		t.Fatalf("item %v, want my role creator, the status ongoing and the reference sport", first)
+	}
+	// 14 days from 15:00: the weeks start at midnight, the third holds the
+	// last 15 hours.
+	if v, ok := first["best_result"]; first["week_count"] != 3.0 || !ok || v != nil {
+		t.Fatalf("item %v, want 3 weeks and a null best result", first)
+	}
+	if got, _ := json.Marshal(out["counts"]); string(got) != `{"finished":2,"ongoing":4,"upcoming":1}` {
+		t.Fatalf("counts %s, want those of the scope", got)
 	}
 	cursor, _ := out["next_cursor"].(string)
 	if cursor == "" {
@@ -373,6 +381,33 @@ func TestListChallengesMyWeek(t *testing.T) {
 		`],"week":2,"week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"}`
 	if string(got) != want {
 		t.Fatalf("my_week\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestListChallengesBestResult(t *testing.T) {
+	active := string(ParticipantActive)
+	done := Summary{
+		ID: "11111111-1111-1111-1111-111111111111", Title: "A", Visibility: "public", Timezone: "UTC",
+		StartsAt: now.AddDate(0, 0, -21), EndsAt: now.AddDate(0, 0, -1), ParticipantCount: 8, MyStatus: &active,
+	}
+	repo := &fakeRepository{summaries: []Summary{done}, categoriesOf: map[string][]Category{done.ID: nil}}
+	standings := fakeStandings{results: map[string][]Ranking{done.ID: {
+		{Type: CategoryCumulativeTime, Rank: 3, RankedCount: 7},
+		{Type: CategoryCumulativeDistance, Rank: 2, RankedCount: 7},
+	}}}
+	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, standings, clock.NewFake(now))
+
+	rec, out := serve(t, svc, http.MethodGet, "/api/v1/challenges?scope=mine", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	items, _ := out["items"].([]any)
+	first, _ := items[0].(map[string]any)
+	if got, _ := json.Marshal(first["best_result"]); string(got) != `{"rank":2,"ranked_count":7,"type":"cumulative_distance"}` {
+		t.Fatalf("best_result %s, want the distance line", got)
+	}
+	if v, ok := first["my_week"]; first["week_count"] != 3.0 || !ok || v != nil {
+		t.Fatalf("item %v, want 3 weeks and a null my week", first)
 	}
 }
 

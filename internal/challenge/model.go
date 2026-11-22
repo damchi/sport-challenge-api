@@ -178,6 +178,12 @@ type Summary struct {
 	// leaderboard: only in their own list, while the challenge runs and they
 	// are an active participant; nil otherwise.
 	MyWeek *Standing `gorm:"-"`
+	// WeekCount is the number of weeks of the window, as in the detail.
+	WeekCount int `gorm:"-"`
+	// BestResult is the actor's best frozen rank, from the leaderboard: only
+	// in their own list, once the results of a finished challenge are frozen,
+	// when they are an active participant ranked somewhere; nil otherwise.
+	BestResult *Ranking `gorm:"-"`
 }
 
 // Standing is where a participant stands in a challenge during its weeks:
@@ -199,10 +205,19 @@ type Ranking struct {
 	Provisional *int
 }
 
-// Page is a page of a listing; Next is nil on the last page.
+// Page is a page of a listing; Next is nil on the last page. Counts are
+// those of the whole scope, whatever the status filter and the page.
 type Page struct {
-	Items []Summary
-	Next  *Position
+	Items  []Summary
+	Next   *Position
+	Counts Counts
+}
+
+// Counts are how many challenges of a listing's scope have each status.
+type Counts struct {
+	Upcoming int
+	Ongoing  int
+	Finished int
 }
 
 // Participant is a participation in a listing, with the public name of the

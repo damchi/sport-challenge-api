@@ -31,8 +31,15 @@ type fakeRepo struct {
 	// calls, which count what a ranking is computed from.
 	snapshots map[string]json.RawMessage
 	frozenAt  time.Time
-	// snapshotsErr is what Snapshots fails with.
+	// snapshotsErr is what Snapshots and SnapshotsOf fail with.
 	snapshotsErr error
+	// snapshotsOf is what SnapshotsOf gives, by challenge ID; snapshotsOfAsked
+	// the IDs it was last asked for, snapshotsOfCalls how many times.
+	snapshotsOf      map[string]map[string]json.RawMessage
+	snapshotsOfAsked []string
+	snapshotsOfCalls int
+	// deletedCalls counts the calls of DeletedAccounts.
+	deletedCalls int
 	// deleted are the deleted accounts; deletedErr what DeletedAccounts
 	// fails with.
 	deleted    map[string]bool
@@ -80,7 +87,20 @@ func (f *fakeRepo) Snapshots(context.Context, string) (map[string]json.RawMessag
 	return f.snapshots, f.frozenAt, f.snapshotsErr
 }
 
+func (f *fakeRepo) SnapshotsOf(_ context.Context, ids []string) (map[string]map[string]json.RawMessage, error) {
+	f.snapshotsOfCalls++
+	f.snapshotsOfAsked = ids
+	out := make(map[string]map[string]json.RawMessage)
+	for _, id := range ids {
+		if p, ok := f.snapshotsOf[id]; ok {
+			out[id] = p
+		}
+	}
+	return out, f.snapshotsErr
+}
+
 func (f *fakeRepo) DeletedAccounts(context.Context, []string) (map[string]bool, error) {
+	f.deletedCalls++
 	return f.deleted, f.deletedErr
 }
 
@@ -938,5 +958,96 @@ func TestStandingsWithoutChallengeInItsWeeks(t *testing.T) {
 	}
 	if len(got) != 0 || repo.calls != 0 {
 		t.Fatalf("Standings() = %+v after %d reads, want nothing read", got, repo.calls)
+	}
+}
+
+// TestResults: the actor's lines of the frozen results of each challenge,
+// read for every challenge at once, as Get serves them: a deleted account is
+// left out and the participants after it move up, equal ones still sharing a
+// rank; a challenge not frozen, or frozen in part, is left out.
+func TestResults(t *testing.T) {
+	cat := func(types ...string) []Category {
+		out := make([]Category, len(types))
+		for i, ty := range types {
+			out[i] = Category{Type: ty}
+		}
+		return out
+	}
+	repo := &fakeRepo{
+		snapshotsOf: map[string]map[string]json.RawMessage{
+			"done": {
+				CategoryCumulativeTime: json.RawMessage(`{"entries":[{"user_id":"gone","rank":1,"value":9000},` +
+					`{"user_id":"b","rank":2,"value":5000},{"user_id":"actor","rank":2,"value":5000},{"user_id":"c","rank":0,"abandoned":true}]}`),
+				CategoryElimination: json.RawMessage(`{"entries":[{"user_id":"b","rank":1,"value":22000},` +
+					`{"user_id":"actor","rank":2,"value":5000,"eliminated_week":2},{"user_id":"c","rank":0,"abandoned":true}]}`),
+			},
+			// The elimination snapshot is missing: not all frozen.
+			"partial": {
+				CategoryCumulativeTime: json.RawMessage(`{"entries":[{"user_id":"actor","rank":1,"value":100}]}`),
+			},
+		},
+		deleted: map[string]bool{"gone": true},
+	}
+	svc := NewService(&fakeChallenges{}, fakeProfiles{}, repo, clock.NewFake(time.Time{}), 24*time.Hour)
+	got, err := svc.Results(t.Context(), "actor", []Challenge{
+		{ID: "done", Categories: cat(CategoryCumulativeTime, CategoryElimination)},
+		{ID: "partial", Categories: cat(CategoryCumulativeTime, CategoryElimination)},
+		{ID: "pending", Categories: cat(CategoryCumulativeTime)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]Place{"done": {
+		{Type: CategoryCumulativeTime, Entry: scoring.Entry{UserID: "actor", Rank: 1, Value: 5000}, RankedCount: 2},
+		{Type: CategoryElimination, Entry: scoring.Entry{
+			UserID: "actor", Rank: 2, Value: 5000,
+			Progress: &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: 2},
+		}, RankedCount: 2},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Results() = %+v, want %+v", got, want)
+	}
+	if repo.snapshotsOfCalls != 1 || repo.deletedCalls != 1 || !reflect.DeepEqual(repo.snapshotsOfAsked, []string{"done", "partial", "pending"}) {
+		t.Fatalf("%d snapshot reads of %v and %d account reads, want one of each for every challenge",
+			repo.snapshotsOfCalls, repo.snapshotsOfAsked, repo.deletedCalls)
+	}
+}
+
+// TestResultsReadsNothingItDoesNotNeed: no challenge, no read; nothing
+// frozen, no read of the accounts.
+func TestResultsReadsNothingItDoesNotNeed(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(&fakeChallenges{}, fakeProfiles{}, repo, clock.NewFake(time.Time{}), 24*time.Hour)
+	got, err := svc.Results(t.Context(), "actor", nil)
+	if err != nil || len(got) != 0 || repo.snapshotsOfCalls != 0 {
+		t.Fatalf("Results(none) = %v, %v after %d reads, want nothing read", got, err, repo.snapshotsOfCalls)
+	}
+	got, err = svc.Results(t.Context(), "actor", []Challenge{{ID: "pending", Categories: []Category{{Type: CategoryCumulativeTime}}}})
+	if err != nil || len(got) != 0 || repo.deletedCalls != 0 {
+		t.Fatalf("Results(not frozen) = %v, %v after %d account reads, want none", got, err, repo.deletedCalls)
+	}
+}
+
+// TestResultsFailures: a failed read, or a snapshot that cannot be decoded,
+// fails Results.
+func TestResultsFailures(t *testing.T) {
+	boom := errors.New("boom")
+	cats := []Category{{Type: CategoryCumulativeTime}}
+	frozen := map[string]map[string]json.RawMessage{"c1": {CategoryCumulativeTime: json.RawMessage(`{"entries":[]}`)}}
+	tests := []struct {
+		name string
+		repo *fakeRepo
+	}{
+		{"snapshots", &fakeRepo{snapshotsErr: boom}},
+		{"accounts", &fakeRepo{snapshotsOf: frozen, deletedErr: boom}},
+		{"payload", &fakeRepo{snapshotsOf: map[string]map[string]json.RawMessage{"c1": {CategoryCumulativeTime: json.RawMessage(`[`)}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(&fakeChallenges{}, fakeProfiles{}, tt.repo, clock.NewFake(time.Time{}), 24*time.Hour)
+			if _, err := svc.Results(t.Context(), "actor", []Challenge{{ID: "c1", Categories: cats}}); err == nil {
+				t.Fatal("Results() succeeded, want an error")
+			}
+		})
 	}
 }
