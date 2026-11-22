@@ -128,6 +128,40 @@ func (h *Handler) ListParticipantActivities(ctx context.Context, req api.ListPar
 	return api.ListParticipantActivities200JSONResponse(out), nil
 }
 
+// ListChallengeActivities answers a page of the activities of all the
+// participants of a challenge, each with its author.
+func (h *Handler) ListChallengeActivities(ctx context.Context, req api.ListChallengeActivitiesRequestObject) (api.ListChallengeActivitiesResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	p := req.Params
+	after, err := decodeAfter(p.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	page, err := h.service.OfChallenge(ctx, actorID, req.ChallengeId.String(), limitOf(p.Limit), after)
+	if err != nil {
+		return nil, err
+	}
+	out := api.ChallengeActivityPage{Items: make([]api.ChallengeActivity, 0, len(page.Items))}
+	for _, it := range page.Items {
+		a, err := toChallengeActivity(it)
+		if err != nil {
+			return nil, err
+		}
+		out.Items = append(out.Items, a)
+	}
+	if page.Next != nil {
+		cursor, err := httpx.EncodeCursor(page.Next)
+		if err != nil {
+			return nil, err
+		}
+		out.NextCursor = &cursor
+	}
+	return api.ListChallengeActivities200JSONResponse(out), nil
+}
+
 func limitOf(limit *int) int {
 	if limit == nil {
 		return defaultLimit
@@ -219,4 +253,31 @@ func toAPI(rec Recorded) (api.Activity, error) {
 		})
 	}
 	return out, nil
+}
+
+// toChallengeActivity is toAPI with the author of the activity. Avatar stays
+// null in V1: the avatar upload comes with SC-API-023.
+func toChallengeActivity(it Authored) (api.ChallengeActivity, error) {
+	a, err := toAPI(it.Recorded)
+	if err != nil {
+		return api.ChallengeActivity{}, err
+	}
+	userID, err := uuid.Parse(it.UserID)
+	if err != nil {
+		return api.ChallengeActivity{}, fmt.Errorf("author id: %w", err)
+	}
+	return api.ChallengeActivity{
+		Id:               a.Id,
+		SportCode:        a.SportCode,
+		SportLabel:       a.SportLabel,
+		StartedAt:        a.StartedAt,
+		DurationSeconds:  a.DurationSeconds,
+		DistanceMeters:   a.DistanceMeters,
+		Source:           api.ChallengeActivitySource(a.Source),
+		SpeedMps:         a.SpeedMps,
+		PaceSecondsPerKm: a.PaceSecondsPerKm,
+		Contributions:    a.Contributions,
+		Locked:           a.Locked,
+		User:             api.LeaderboardUser{Id: userID, Pseudo: it.Author.Pseudo, FirstName: it.Author.FirstName, LastName: it.Author.LastName},
+	}, nil
 }

@@ -353,7 +353,7 @@ func TestListMyActivities(t *testing.T) {
 	if first["id"] != activityID || first["locked"] != false || first["speed_mps"] == nil || first["source"] != "manual" {
 		t.Fatalf("item %v, want the run of week 2, unlocked, with its speed", first)
 	}
-	if q := repo.listed; q == nil || q.From == nil || q.To == nil || !q.From.Equal(toronto(t, 2026, 6, 1, 0)) || q.UserID != actor {
+	if q := repo.listed; q == nil || q.From == nil || q.To == nil || !q.From.Equal(toronto(t, 2026, 6, 1, 0)) || !reflect.DeepEqual(q.UserIDs, []string{actor}) {
 		t.Fatalf("query %+v, want the actor's activities in the period", q)
 	}
 
@@ -463,6 +463,72 @@ func TestListParticipantActivitiesRefusals(t *testing.T) {
 			}
 			repo := &fakeRepository{}
 			svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{t: t, user: participant}, fakeChallenges{err: tt.scopeErr}, clock.NewFake(recordNow))
+			rec, body := serve(t, svc, http.MethodGet, target, "", tt.headers)
+			if rec.Code != tt.status || errorCode(body) != tt.code {
+				t.Fatalf("got %d %v, want %d %s", rec.Code, body, tt.status, tt.code)
+			}
+			if repo.listed != nil {
+				t.Fatal("activities read despite the refusal")
+			}
+		})
+	}
+}
+
+const challengeActivities = "/api/v1/challenges/8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b/activities"
+
+func TestListChallengeActivities(t *testing.T) {
+	c1 := challengeOf(t, "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b")
+	run := storedRun(t)
+	run.UserID = participant
+	repo := &fakeRepository{listing: []Activity{run, run}}
+	pseudo := "lea"
+	profiles := fakeProfiles{names: map[string]Name{participant: {Pseudo: &pseudo}}}
+	var asked [3]string
+	scope := fakeChallenges{scope: c1, members: map[string]Participation{participant: c1}, asked: &asked}
+	svc := NewService(repo, profiles, catalogue, fakeParticipations{t: t, user: "nobody"}, scope, clock.NewFake(recordNow))
+	rec, body := serve(t, svc, http.MethodGet, challengeActivities+"?limit=1", "", nil)
+	if rec.Code != http.StatusOK || body["next_cursor"] == nil {
+		t.Fatalf("status %d (%s), want 200 and a next page", rec.Code, rec.Body)
+	}
+	if asked != [3]string{actor, c1.ChallengeID, ""} {
+		t.Fatalf("scope asked for %v", asked)
+	}
+	items, _ := body["items"].([]any)
+	first, _ := items[0].(map[string]any)
+	if ids := contributionIDs(first); len(ids) != 1 || ids[0] != c1.ChallengeID || first["locked"] != false || first["speed_mps"] == nil {
+		t.Fatalf("item %v, want the activity counting in %s, not locked, with its speed", first, c1.ChallengeID)
+	}
+	want := map[string]any{"id": participant, "pseudo": pseudo, "first_name": nil, "last_name": nil, "avatar": nil}
+	if !reflect.DeepEqual(first["user"], want) {
+		t.Fatalf("user %v, want %v", first["user"], want)
+	}
+}
+
+func TestListChallengeActivitiesRefusals(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string
+		headers  map[string]string
+		scopeErr error
+		status   int
+		code     string
+	}{
+		{name: "no token", headers: map[string]string{"Authorization": ""}, status: http.StatusUnauthorized, code: "unauthenticated"},
+		{name: "non-participant of a public challenge", scopeErr: apperr.New(apperr.CodeNotFound, nil), status: http.StatusNotFound, code: "not_found"},
+		{name: "private challenge hidden", scopeErr: apperr.New(apperr.CodeChallengeNotFound, nil), status: http.StatusNotFound, code: "challenge_not_found"},
+		{name: "malformed challenge id", target: "/api/v1/challenges/nope/activities", status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "limit zero", target: challengeActivities + "?limit=0", status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "forged cursor", target: challengeActivities + "?cursor=nope", status: http.StatusBadRequest, code: "validation_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := tt.target
+			if target == "" {
+				target = challengeActivities
+			}
+			repo := &fakeRepository{}
+			scope := fakeChallenges{members: map[string]Participation{participant: challengeOf(t, "c1")}, err: tt.scopeErr}
+			svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{}, scope, clock.NewFake(recordNow))
 			rec, body := serve(t, svc, http.MethodGet, target, "", tt.headers)
 			if rec.Code != tt.status || errorCode(body) != tt.code {
 				t.Fatalf("got %d %v, want %d %s", rec.Code, body, tt.status, tt.code)

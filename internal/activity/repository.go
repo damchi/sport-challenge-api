@@ -200,13 +200,16 @@ func (r *Repository) change(ctx context.Context, actorID, id string, decide func
 	})
 }
 
-// List returns up to q.Limit activities of q.UserID, deleted ones left out,
-// started in [q.From, q.To), most recent first (started_at, id), after the
-// position q.After when set.
+// List returns up to q.Limit activities of the users of q.UserIDs, deleted
+// ones left out, started in [q.From, q.To), most recent first (started_at,
+// id), after the position q.After when set.
 func (r *Repository) List(ctx context.Context, q ListQuery) ([]Activity, error) {
+	if len(q.UserIDs) == 0 {
+		return nil, errors.New("list activities: no user")
+	}
 	tx := r.db.WithContext(ctx).Table("activities").
 		Select("id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source").
-		Where("user_id = ? AND deleted_at IS NULL", q.UserID)
+		Where("user_id IN ? AND deleted_at IS NULL", q.UserIDs)
 	if q.From != nil {
 		tx = tx.Where("started_at >= ?", *q.From)
 	}

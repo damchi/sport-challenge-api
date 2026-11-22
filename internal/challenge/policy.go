@@ -133,14 +133,26 @@ func CanViewActivities(role Role) bool {
 // CanViewActivities lets out (404 not_found); a target who never joined, or
 // whose account was deleted, has no activities there (404 not_found).
 func ActivitiesRefusal(actor, target Membership, visibility string) error {
+	if err := AllActivitiesRefusal(actor, visibility); err != nil {
+		return err
+	}
+	if target.AccountDeleted || (target.Participant != ParticipantActive && target.Participant != ParticipantAbandoned) {
+		return apperr.New(apperr.CodeNotFound, nil)
+	}
+	return nil
+}
+
+// AllActivitiesRefusal tells why a user with membership actor may not see
+// the activities of the participants of a challenge of that visibility, or
+// nil if they may: a challenge the actor may not see is not found (404
+// challenge_not_found); anyone else CanViewActivities excludes sees its
+// leaderboard only (404 not_found).
+func AllActivitiesRefusal(actor Membership, visibility string) error {
 	role := RoleOf(actor)
 	if err := RequireView(role, visibility); err != nil {
 		return err
 	}
 	if !CanViewActivities(role) {
-		return apperr.New(apperr.CodeNotFound, nil)
-	}
-	if target.AccountDeleted || (target.Participant != ParticipantActive && target.Participant != ParticipantAbandoned) {
 		return apperr.New(apperr.CodeNotFound, nil)
 	}
 	return nil

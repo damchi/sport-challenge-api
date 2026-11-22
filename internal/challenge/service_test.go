@@ -50,6 +50,9 @@ type fakeRepository struct {
 	membershipsErr error
 	// others are the memberships Get gives for users other than actor.
 	others map[string]Membership
+	// members serve ParticipantMemberships; membersErr fails it.
+	members    map[string]Membership
+	membersErr error
 	// invitationsAt is the instant of the last read, when its invitations
 	// are judged.
 	invitationsAt time.Time
@@ -123,6 +126,10 @@ func (f *fakeRepository) Participants(_ context.Context, _ string, limit int, af
 		return f.participants[:limit], nil
 	}
 	return f.participants, nil
+}
+
+func (f *fakeRepository) ParticipantMemberships(context.Context, string) (map[string]Membership, error) {
+	return f.members, f.membersErr
 }
 
 func (f *fakeRepository) Get(_ context.Context, _, actorID string, now time.Time) (Challenge, Membership, error) {
@@ -1593,5 +1600,62 @@ func TestServiceActivitiesScopeFailures(t *testing.T) {
 	}
 	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, storageErr) {
 		t.Fatalf("storage failure: error = %v, want the cause kept", err)
+	}
+}
+
+func TestServiceAllActivitiesScope(t *testing.T) {
+	const target = "22222222-2222-2222-2222-222222222222"
+	members := map[string]Membership{actor: active, target: abandoned}
+	tests := []struct {
+		name       string
+		visibility string
+		actor      Membership
+		want       apperr.Code // empty: the scope
+	}{
+		{name: "participant, private", visibility: VisibilityPrivate, actor: active},
+		{name: "abandoned participant", visibility: VisibilityPrivate, actor: abandoned},
+		{name: "creator, public", visibility: VisibilityPublic, actor: creatorActive},
+		{name: "outsider of a public challenge", visibility: VisibilityPublic, actor: outsider, want: apperr.CodeNotFound},
+		{name: "invited to a private challenge", visibility: VisibilityPrivate, actor: invited, want: apperr.CodeNotFound},
+		{name: "outsider of a private challenge", visibility: VisibilityPrivate, actor: outsider, want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			factors := map[string]float64{"run": 1, "ride": 0.3}
+			c := stored(tt.visibility)
+			c.Categories = []Category{
+				{Type: CategoryCumulativeTime, Position: 1},
+				{Type: CategoryCumulativeDistance, Position: 2, Params: Params{Factors: factors}},
+			}
+			repo := &fakeRepository{challenge: c, membership: tt.actor, members: members}
+			got, gotMembers, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AllActivitiesScope(t.Context(), actor, "c")
+			if tt.want != "" {
+				if !errors.Is(err, apperr.New(tt.want, nil)) {
+					t.Fatalf("error = %v, want %s", err, tt.want)
+				}
+				return
+			}
+			want := UserChallenge{ID: c.ID, Title: c.Title, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Factors: factors}
+			if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotMembers, members) {
+				t.Fatalf("AllActivitiesScope() = %+v, %+v, %v, want %+v, %+v", got, gotMembers, err, want, members)
+			}
+		})
+	}
+}
+
+func TestServiceAllActivitiesScopeFailures(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	svc := func(repo *fakeRepository) *Service {
+		return NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
+	}
+	if _, _, err := svc(&fakeRepository{}).AllActivitiesScope(t.Context(), actor, "c"); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("missing challenge: error = %v, want challenge_not_found", err)
+	}
+	if _, _, err := svc(&fakeRepository{err: storageErr}).AllActivitiesScope(t.Context(), actor, "c"); !errors.Is(err, storageErr) {
+		t.Fatalf("storage failure: error = %v, want the cause kept", err)
+	}
+	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: active, membersErr: storageErr}
+	if _, _, err := svc(repo).AllActivitiesScope(t.Context(), actor, "c"); !errors.Is(err, storageErr) {
+		t.Fatalf("members failure: error = %v, want the cause kept", err)
 	}
 }

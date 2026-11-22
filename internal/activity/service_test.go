@@ -99,6 +99,17 @@ func (f *fakeRepository) Record(ctx context.Context, a Activity, decide func(con
 type fakeProfiles struct {
 	complete bool
 	err      error
+	// names serve Names; namesErr fails it, asked records the ids.
+	names    map[string]Name
+	namesErr error
+	asked    *[]string
+}
+
+func (f fakeProfiles) Names(_ context.Context, ids []string) (map[string]Name, error) {
+	if f.asked != nil {
+		*f.asked = ids
+	}
+	return f.names, f.namesErr
 }
 
 func (f fakeProfiles) ProfileComplete(context.Context, string) (bool, error) {
@@ -516,12 +527,20 @@ func checkError(t *testing.T, err error, code apperr.Code, wantErr error) {
 	}
 }
 
-// fakeChallenges gives scope for any challenge, or fails with err; asked
-// records the last call.
+// fakeChallenges gives scope for any challenge, and members for
+// AllActivitiesScope, or fails with err; asked records the last call.
 type fakeChallenges struct {
-	scope Participation
-	err   error
-	asked *[3]string
+	scope   Participation
+	members map[string]Participation
+	err     error
+	asked   *[3]string
+}
+
+func (f fakeChallenges) AllActivitiesScope(_ context.Context, actorID, challengeID string) (Participation, map[string]Participation, error) {
+	if f.asked != nil {
+		*f.asked = [3]string{actorID, challengeID, ""}
+	}
+	return f.scope, f.members, f.err
 }
 
 func (f fakeChallenges) ActivitiesScope(_ context.Context, actorID, challengeID, userID string) (Participation, error) {
@@ -579,7 +598,7 @@ func TestServiceMine(t *testing.T) {
 			}
 			// The query asks one more item, of the actor, in the period,
 			// after the given position.
-			want := ListQuery{UserID: actor, From: &from, To: &to, Limit: tt.limit + 1, After: after}
+			want := ListQuery{UserIDs: []string{actor}, From: &from, To: &to, Limit: tt.limit + 1, After: after}
 			if q := repo.listed; q == nil || !reflect.DeepEqual(*q, want) {
 				t.Fatalf("query %+v, want %+v", q, want)
 			}
@@ -676,7 +695,7 @@ func TestServiceOfParticipant(t *testing.T) {
 		t.Fatalf("scope asked for %v, want the actor, the challenge and the participant", asked)
 	}
 	// Activities of the participant, in the window of the challenge.
-	want := ListQuery{UserID: participant, From: &c1.StartsAt, To: &c1.EndsAt, Limit: 4}
+	want := ListQuery{UserIDs: []string{participant}, From: &c1.StartsAt, To: &c1.EndsAt, Limit: 4}
 	if q := repo.listed; q == nil || !reflect.DeepEqual(*q, want) {
 		t.Fatalf("query %+v, want %+v", q, want)
 	}
@@ -739,5 +758,112 @@ func TestServiceOfParticipantRefusals(t *testing.T) {
 				t.Fatal("activities read despite the refusal")
 			}
 		})
+	}
+}
+
+func TestServiceOfChallenge(t *testing.T) {
+	const other = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+	const gone = "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a"
+	c1 := challengeOf(t, "c1")
+	// other left on Wednesday 2026-06-10, once week 1 was locked: their
+	// activity of week 1 stays locked, counting nowhere.
+	left := leftAt(c1, toronto(t, 2026, 6, 10, 12))
+	week2 := Activity{ID: "5f1e7c1a-0000-4000-8000-000000000001", UserID: participant, SportCode: "yoga", StartedAt: toronto(t, 2026, 6, 10, 7), DurationSeconds: 3600, Source: SourceManual}
+	week1 := Activity{ID: "5f1e7c1a-0000-4000-8000-000000000002", UserID: other, SportCode: "yoga", StartedAt: toronto(t, 2026, 6, 3, 7), DurationSeconds: 3600, Source: SourceManual}
+	// gone deleted their account since the participants were read.
+	ofGone := Activity{ID: "5f1e7c1a-0000-4000-8000-000000000003", UserID: gone, SportCode: "yoga", StartedAt: toronto(t, 2026, 6, 2, 7), DurationSeconds: 3600, Source: SourceManual}
+	extra := Activity{ID: "5f1e7c1a-0000-4000-8000-000000000004", UserID: participant, SportCode: "yoga", StartedAt: toronto(t, 2026, 6, 1, 7), DurationSeconds: 3600, Source: SourceManual}
+	repo := &fakeRepository{listing: []Activity{week2, week1, ofGone, extra}}
+	pseudo := "lea"
+	var asked [3]string
+	var namesAsked []string
+	profiles := fakeProfiles{names: map[string]Name{participant: {Pseudo: &pseudo}, other: {}}, asked: &namesAsked}
+	members := map[string]Participation{participant: c1, other: left, gone: c1}
+	ps := fakeParticipations{t: t, user: "nobody"}
+	svc := NewService(repo, profiles, catalogue, ps, fakeChallenges{scope: c1, members: members, asked: &asked}, clock.NewFake(recordNow))
+	page, err := svc.OfChallenge(t.Context(), actor, "c1", 3, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked != [3]string{actor, "c1", ""} {
+		t.Fatalf("scope asked for %v, want the actor and the challenge", asked)
+	}
+	// Activities of every participant, sorted ids, in the window.
+	want := ListQuery{UserIDs: []string{other, participant, gone}, From: &c1.StartsAt, To: &c1.EndsAt, Limit: 4}
+	if q := repo.listed; q == nil || !reflect.DeepEqual(*q, want) {
+		t.Fatalf("query %+v, want %+v", q, want)
+	}
+	if !reflect.DeepEqual(namesAsked, []string{other, participant, gone}) {
+		t.Fatalf("names asked for %v, want the authors of the page once each, sorted", namesAsked)
+	}
+	// The next page starts after the last activity read, the one of the
+	// deleted account left out.
+	if page.Next == nil || page.Next.ID != ofGone.ID {
+		t.Fatalf("next %+v, want after %s", page.Next, ofGone.ID)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("%d items, want 2 (the deleted account left out)", len(page.Items))
+	}
+	first, second := page.Items[0], page.Items[1]
+	if first.ID != week2.ID || first.Author.Pseudo == nil || *first.Author.Pseudo != pseudo ||
+		!reflect.DeepEqual(challengeIDs(first.Contributions), []string{"c1"}) || first.Locked {
+		t.Fatalf("first %+v, want the activity of the participant counting in c1, not locked", first)
+	}
+	if second.ID != week1.ID || len(second.Contributions) != 0 || !second.Locked {
+		t.Fatalf("second %+v, want the activity of the one who left, counting nowhere, locked", second)
+	}
+}
+
+func TestServiceOfChallengeNoParticipant(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{}, fakeChallenges{scope: challengeOf(t, "c1")}, clock.NewFake(recordNow))
+	page, err := svc.OfChallenge(t.Context(), actor, "c1", 20, nil)
+	if err != nil || page.Items == nil || len(page.Items) != 0 || page.Next != nil {
+		t.Fatalf("OfChallenge() = %+v, %v, want an empty page", page, err)
+	}
+	if repo.listed != nil {
+		t.Fatal("activities read without a participant")
+	}
+}
+
+func TestServiceOfChallengeRefusals(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	members := map[string]Participation{participant: challengeOf(t, "c1")}
+	tests := []struct {
+		name     string
+		scopeErr error
+		limit    int
+		wantErr  error
+	}{
+		{name: "empty page", limit: 0, wantErr: apperr.New(apperr.CodeValidationFailed, nil)},
+		{name: "leaderboard only", scopeErr: apperr.New(apperr.CodeNotFound, nil), limit: 20, wantErr: apperr.New(apperr.CodeNotFound, nil)},
+		{name: "hidden challenge", scopeErr: apperr.New(apperr.CodeChallengeNotFound, nil), limit: 20, wantErr: apperr.New(apperr.CodeChallengeNotFound, nil)},
+		{name: "scope failure", scopeErr: storageErr, limit: 20, wantErr: storageErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{listing: listing(t, participant, 1)}
+			svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{}, fakeChallenges{members: members, err: tt.scopeErr}, clock.NewFake(recordNow))
+			_, err := svc.OfChallenge(t.Context(), actor, "c1", tt.limit, nil)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if repo.listed != nil {
+				t.Fatal("activities read despite the refusal")
+			}
+		})
+	}
+}
+
+func TestServiceOfChallengeFailures(t *testing.T) {
+	storageErr := errors.New("connection reset")
+	c1 := challengeOf(t, "c1")
+	scope := fakeChallenges{scope: c1, members: map[string]Participation{participant: c1}}
+	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, catalogue, fakeParticipations{}, scope, clock.NewFake(recordNow)).OfChallenge(t.Context(), actor, "c1", 20, nil); !errors.Is(err, storageErr) {
+		t.Fatalf("listing failure: error = %v, want the cause kept", err)
+	}
+	repo := &fakeRepository{listing: listing(t, participant, 1)}
+	if _, err := NewService(repo, fakeProfiles{namesErr: storageErr}, catalogue, fakeParticipations{}, scope, clock.NewFake(recordNow)).OfChallenge(t.Context(), actor, "c1", 20, nil); !errors.Is(err, storageErr) {
+		t.Fatalf("names failure: error = %v, want the cause kept", err)
 	}
 }

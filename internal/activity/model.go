@@ -33,13 +33,14 @@ type Recorded struct {
 	Locked bool
 }
 
-// ListQuery selects a page of the activities of a user, deleted ones left
-// out: those started in [From, To), a nil bound being open.
+// ListQuery selects a page of the activities of some users, deleted ones
+// left out: those started in [From, To), a nil bound being open.
 type ListQuery struct {
-	UserID string
-	From   *time.Time
-	To     *time.Time
-	Limit  int
+	// UserIDs are the authors; at least one.
+	UserIDs []string
+	From    *time.Time
+	To      *time.Time
+	Limit   int
 	// After is the position of the last item of the previous page.
 	After *Position
 }
@@ -54,5 +55,27 @@ type Position struct {
 // Page is a page of activities; Next is nil on the last page.
 type Page struct {
 	Items []Recorded
+	Next  *Position
+}
+
+// Name is what a user shows the others: never the e-mail. Each field is nil
+// for a name not set yet.
+type Name struct {
+	Pseudo    *string
+	FirstName *string
+	LastName  *string
+}
+
+// Authored is an activity in the list of a challenge, with the public name
+// of its author.
+type Authored struct {
+	Recorded
+	Author Name
+}
+
+// AuthoredPage is a page of the activities of a challenge; Next is nil on
+// the last page.
+type AuthoredPage struct {
+	Items []Authored
 	Next  *Position
 }

@@ -321,6 +321,29 @@ func (r *Repository) Participants(ctx context.Context, id string, limit int, aft
 	return items, nil
 }
 
+// ParticipantMemberships returns the membership of each participant of
+// challenge id, abandoned ones included and those of deleted accounts left
+// out, by user id: the participation alone (status and abandon), what tells
+// where their activities count.
+func (r *Repository) ParticipantMemberships(ctx context.Context, id string) (map[string]Membership, error) {
+	var rows []struct {
+		UserID      string
+		Status      string
+		AbandonedAt *time.Time
+	}
+	err := r.db.WithContext(ctx).Raw(`SELECT p.user_id, p.status, p.abandoned_at FROM participants p
+		JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
+		WHERE p.challenge_id = ?`, id).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("read participant memberships: %w", err)
+	}
+	out := make(map[string]Membership, len(rows))
+	for _, row := range rows {
+		out[row.UserID] = Membership{Participant: ParticipantStatus(row.Status), AbandonedAt: row.AbandonedAt}
+	}
+	return out, nil
+}
+
 // errAlreadyParticipant means the participation to insert already exists.
 var errAlreadyParticipant = errors.New("already a participant")
 

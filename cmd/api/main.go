@@ -125,7 +125,7 @@ func run() error {
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, standings, clk)
-	activities = activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
+	activities = activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, sports, participations{challenges}, activityScopes{challenges}, clk)
 	leaderboards = leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, cfg.AtRiskThreshold)
 	invitations = invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 	challengeHandler := challenge.NewHandler(challenges)
@@ -227,6 +227,7 @@ func (p participations) Participations(ctx context.Context, userID string) ([]ac
 // scopes is what activityScopes reads from module challenge.
 type scopes interface {
 	ActivitiesScope(ctx context.Context, actorID, id, userID string) (challenge.UserChallenge, error)
+	AllActivitiesScope(ctx context.Context, actorID, id string) (challenge.UserChallenge, map[string]challenge.Membership, error)
 }
 
 // activityScopes gives module activity the challenge where an actor reads
@@ -240,6 +241,27 @@ func (a activityScopes) ActivitiesScope(ctx context.Context, actorID, challengeI
 		return activity.Participation{}, err
 	}
 	return toParticipation(m)
+}
+
+func (a activityScopes) AllActivitiesScope(ctx context.Context, actorID, challengeID string) (activity.Participation, map[string]activity.Participation, error) {
+	c, members, err := a.challenges.AllActivitiesScope(ctx, actorID, challengeID)
+	if err != nil {
+		return activity.Participation{}, nil, err
+	}
+	out, err := toParticipation(c)
+	if err != nil {
+		return activity.Participation{}, nil, err
+	}
+	byUser := make(map[string]activity.Participation, len(members))
+	for id, m := range members {
+		c.Membership = m
+		part, err := toParticipation(c)
+		if err != nil {
+			return activity.Participation{}, nil, err
+		}
+		byUser[id] = part
+	}
+	return out, byUser, nil
 }
 
 // toParticipation turns a challenge of a user into an activity.Participation:
@@ -287,6 +309,26 @@ func (c challengeProfiles) Names(ctx context.Context, ids []string) (map[string]
 	out := make(map[string]challenge.Name, len(names))
 	for id, n := range names {
 		out[id] = challenge.Name{Pseudo: n.Pseudo, FirstName: n.FirstName, LastName: n.LastName}
+	}
+	return out, nil
+}
+
+// activityProfiles gives module activity the profiles, as
+// activity.Profiles.
+type activityProfiles struct{ users profiles }
+
+func (a activityProfiles) ProfileComplete(ctx context.Context, id string) (bool, error) {
+	return a.users.ProfileComplete(ctx, id)
+}
+
+func (a activityProfiles) Names(ctx context.Context, ids []string) (map[string]activity.Name, error) {
+	names, err := a.users.PublicNames(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]activity.Name, len(names))
+	for id, n := range names {
+		out[id] = activity.Name{Pseudo: n.Pseudo, FirstName: n.FirstName, LastName: n.LastName}
 	}
 	return out, nil
 }

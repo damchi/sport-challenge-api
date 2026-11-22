@@ -53,7 +53,7 @@ func newRecording(t *testing.T) recording {
 	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, nil, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, standingsFunc(nil), clk)
-	activities := activity.NewService(activity.NewRepository(gdb), users, sports, participations{challenges}, activityScopes{challenges}, clk)
+	activities := activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, sports, participations{challenges}, activityScopes{challenges}, clk)
 
 	var id string
 	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ('email|runner', 'runner', 'Rose', 'Runner') RETURNING id").Scan(&id); err != nil {
