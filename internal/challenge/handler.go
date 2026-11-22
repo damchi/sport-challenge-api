@@ -182,6 +182,7 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 			Title:            c.Title,
 			Visibility:       api.ChallengeSummaryVisibility(c.Visibility),
 			Timezone:         c.Timezone,
+			ReferenceSport:   c.ReferenceSport,
 			StartsAt:         c.StartsAt.UTC(),
 			EndsAt:           c.EndsAt.UTC(),
 			ParticipantCount: c.ParticipantCount,

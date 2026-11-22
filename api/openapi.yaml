@@ -1870,7 +1870,7 @@ components:
           description: The end of the current week; null when eliminated or outside the weeks.
     ChallengeSummary:
       type: object
-      required: [id, title, visibility, timezone, starts_at, ends_at, participant_count, my_role, my_status, status, my_week]
+      required: [id, title, visibility, timezone, reference_sport, starts_at, ends_at, participant_count, my_role, my_status, status, my_week]
       additionalProperties: false
       properties:
         id:
@@ -1883,6 +1883,10 @@ components:
           enum: [public, private]
         timezone:
           type: string
+        reference_sport:
+          type: string
+          description: Code of the sport the distances are brought back to and the elimination is run in.
+          example: ride
         starts_at:
           type: string
           format: date-time

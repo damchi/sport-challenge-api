@@ -160,6 +160,7 @@ type Summary struct {
 	Title            string
 	Visibility       string
 	Timezone         string
+	ReferenceSport   string
 	StartsAt         time.Time
 	EndsAt           time.Time
 	ParticipantCount int
