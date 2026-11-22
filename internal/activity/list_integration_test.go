@@ -47,7 +47,7 @@ func TestListFiltersAndOrders(t *testing.T) {
 	f.insert(other, toronto(t, 2026, 6, 3, 7), false) // someone else
 	repo := NewRepository(f.gdb)
 
-	got, err := repo.List(t.Context(), ListQuery{UserID: f.user, From: &from, To: &to, Limit: 10})
+	got, err := repo.List(t.Context(), ListQuery{UserIDs: []string{f.user}, From: &from, To: &to, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestListFiltersAndOrders(t *testing.T) {
 		t.Fatalf("first activity %+v, want the row as stored", a)
 	}
 
-	all, err := repo.List(t.Context(), ListQuery{UserID: f.user, Limit: 10})
+	all, err := repo.List(t.Context(), ListQuery{UserIDs: []string{f.user}, Limit: 10})
 	if err != nil || len(all) != 4 {
 		t.Fatalf("List() without a period = %v, %v, want the 4 not deleted", ids(all), err)
 	}
@@ -76,14 +76,14 @@ func TestListPages(t *testing.T) {
 	f.insert(f.user, toronto(t, 2026, 6, 2, 7), false)
 	repo := NewRepository(f.gdb)
 
-	want, err := repo.List(t.Context(), ListQuery{UserID: f.user, Limit: 10})
+	want, err := repo.List(t.Context(), ListQuery{UserIDs: []string{f.user}, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var walked []string
 	var after *Position
 	for range 10 {
-		page, err := repo.List(t.Context(), ListQuery{UserID: f.user, Limit: 2, After: after})
+		page, err := repo.List(t.Context(), ListQuery{UserIDs: []string{f.user}, Limit: 2, After: after})
 		if err != nil {
 			t.Fatal(err)
 		}

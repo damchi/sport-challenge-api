@@ -30,6 +30,7 @@ type repository interface {
 	AddCreator(ctx context.Context, id, actorID, targetID string, now time.Time, decide func(c Challenge, actor, target Membership) (bool, error)) error
 	Delete(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error
 	Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error)
+	ParticipantMemberships(ctx context.Context, id string) (map[string]Membership, error)
 	ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error)
 	LastCreatorChallenges(ctx context.Context, userID string, now time.Time) ([]string, error)
 	Memberships(ctx context.Context, userID string) ([]UserChallenge, error)
@@ -539,11 +540,50 @@ func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID strin
 	if err := ActivitiesRefusal(actor, target, c.Visibility); err != nil {
 		return UserChallenge{}, err
 	}
-	cats, err := s.repo.Categories(ctx, c.ID)
+	out, err := s.userChallenge(ctx, c)
 	if err != nil {
 		return UserChallenge{}, fmt.Errorf("activities scope: %w", err)
 	}
-	out := UserChallenge{ID: c.ID, Title: c.Title, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt, Membership: target}
+	out.Membership = target
+	return out, nil
+}
+
+// AllActivitiesScope returns challenge id with its distance factors, no
+// membership set, and the membership of each of its participants, abandoned
+// ones included and deleted accounts left out, by user id, for actorID to
+// list the activities of all the participants there, once the rule
+// (AllActivitiesRefusal) allows it. A missing or deleted challenge answers
+// 404 challenge_not_found.
+func (s *Service) AllActivitiesScope(ctx context.Context, actorID, id string) (UserChallenge, map[string]Membership, error) {
+	c, actor, err := s.repo.Get(ctx, id, actorID, s.clock.Now())
+	if errors.Is(err, errChallengeNotFound) {
+		return UserChallenge{}, nil, apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err != nil {
+		return UserChallenge{}, nil, fmt.Errorf("all activities scope: %w", err)
+	}
+	if err := AllActivitiesRefusal(actor, c.Visibility); err != nil {
+		return UserChallenge{}, nil, err
+	}
+	out, err := s.userChallenge(ctx, c)
+	if err != nil {
+		return UserChallenge{}, nil, fmt.Errorf("all activities scope: %w", err)
+	}
+	members, err := s.repo.ParticipantMemberships(ctx, c.ID)
+	if err != nil {
+		return UserChallenge{}, nil, fmt.Errorf("all activities scope: %w", err)
+	}
+	return out, members, nil
+}
+
+// userChallenge returns c as a UserChallenge with the factors of its
+// cumulative distance category, if any, and no membership set.
+func (s *Service) userChallenge(ctx context.Context, c Challenge) (UserChallenge, error) {
+	cats, err := s.repo.Categories(ctx, c.ID)
+	if err != nil {
+		return UserChallenge{}, err
+	}
+	out := UserChallenge{ID: c.ID, Title: c.Title, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt}
 	for _, cat := range cats {
 		if cat.Type == CategoryCumulativeDistance {
 			out.Factors = cat.Params.Factors

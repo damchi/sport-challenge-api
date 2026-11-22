@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -19,9 +21,11 @@ type repository interface {
 	EraseUser(ctx context.Context, userID string) error
 }
 
-// Profiles tells whether a user's profile is complete (module user).
+// Profiles tells whether a user's profile is complete, and gives the public
+// name of each user of ids, an anonymized account having none (module user).
 type Profiles interface {
 	ProfileComplete(ctx context.Context, userID string) (bool, error)
+	Names(ctx context.Context, ids []string) (map[string]Name, error)
 }
 
 // Catalogue gives the distance mode of a sport, and false for a sport it
@@ -40,8 +44,15 @@ type Participations interface {
 // actorID to read the activities of userID there; it answers 404
 // challenge_not_found or not_found when the rights matrix forbids it
 // (module challenge).
+//
+// AllActivitiesScope gives challenge challengeID, its membership left unset,
+// and the participation of each of its participants, abandoned ones
+// included and deleted accounts left out, by user id, for actorID to read
+// the activities of all of them there; it answers 404 challenge_not_found
+// or not_found when the rights matrix forbids it.
 type Challenges interface {
 	ActivitiesScope(ctx context.Context, actorID, challengeID, userID string) (Participation, error)
+	AllActivitiesScope(ctx context.Context, actorID, challengeID string) (Participation, map[string]Participation, error)
 }
 
 // Service holds the use cases of the activities.
@@ -213,13 +224,13 @@ func (s *Service) Mine(ctx context.Context, actorID string, period Period, limit
 	if period.From != nil && period.To != nil && !period.From.Before(*period.To) {
 		return Page{}, apperr.InvalidFields(nil, "to")
 	}
-	q := ListQuery{UserID: actorID, From: period.From, To: period.To, Limit: limit + 1, After: after}
-	return s.page(ctx, q, limit, func(ctx context.Context) ([]Participation, error) {
+	q := ListQuery{UserIDs: []string{actorID}, From: period.From, To: period.To, Limit: limit + 1, After: after}
+	return s.page(ctx, q, limit, func(ctx context.Context) (func(string) []Participation, error) {
 		ps, err := s.participations.Participations(ctx, actorID)
 		if err != nil {
 			return nil, fmt.Errorf("read participations: %w", err)
 		}
-		return ps, nil
+		return func(string) []Participation { return ps }, nil
 	})
 }
 
@@ -237,17 +248,67 @@ func (s *Service) OfParticipant(ctx context.Context, actorID, challengeID, userI
 	if err != nil {
 		return Page{}, fmt.Errorf("activities scope: %w", err)
 	}
-	q := ListQuery{UserID: userID, From: &c.StartsAt, To: &c.EndsAt, Limit: limit + 1, After: after}
-	return s.page(ctx, q, limit, func(context.Context) ([]Participation, error) {
-		return []Participation{c}, nil
+	q := ListQuery{UserIDs: []string{userID}, From: &c.StartsAt, To: &c.EndsAt, Limit: limit + 1, After: after}
+	return s.page(ctx, q, limit, func(context.Context) (func(string) []Participation, error) {
+		return func(string) []Participation { return []Participation{c} }, nil
 	})
+}
+
+// OfChallenge returns a page of the activities of all the participants of
+// challenge challengeID (abandoned ones included, deleted accounts left
+// out) started in its window, most recent first, each with its author, for
+// actorID: the participants of the challenge and its creators only, as
+// module challenge decides (Challenges). Where each one counts and whether
+// it is locked are read from this challenge alone, with the participation
+// of its author, as OfParticipant reads them.
+func (s *Service) OfChallenge(ctx context.Context, actorID, challengeID string, limit int, after *Position) (AuthoredPage, error) {
+	if limit < 1 {
+		return AuthoredPage{}, apperr.InvalidFields(nil, "limit")
+	}
+	c, members, err := s.challenges.AllActivitiesScope(ctx, actorID, challengeID)
+	if err != nil {
+		return AuthoredPage{}, fmt.Errorf("all activities scope: %w", err)
+	}
+	if len(members) == 0 {
+		return AuthoredPage{Items: []Authored{}}, nil
+	}
+	ids := slices.Sorted(maps.Keys(members))
+	q := ListQuery{UserIDs: ids, From: &c.StartsAt, To: &c.EndsAt, Limit: limit + 1, After: after}
+	page, err := s.page(ctx, q, limit, func(context.Context) (func(string) []Participation, error) {
+		return func(userID string) []Participation { return []Participation{members[userID]} }, nil
+	})
+	if err != nil {
+		return AuthoredPage{}, err
+	}
+	out := AuthoredPage{Items: make([]Authored, 0, len(page.Items)), Next: page.Next}
+	if len(page.Items) == 0 {
+		return out, nil
+	}
+	authors := make(map[string]struct{}, len(page.Items))
+	for _, rec := range page.Items {
+		authors[rec.UserID] = struct{}{}
+	}
+	names, err := s.profiles.Names(ctx, slices.Sorted(maps.Keys(authors)))
+	if err != nil {
+		return AuthoredPage{}, fmt.Errorf("read names: %w", err)
+	}
+	for _, rec := range page.Items {
+		// An account deleted since the participants were read: listed
+		// nowhere.
+		name, ok := names[rec.UserID]
+		if !ok {
+			continue
+		}
+		out.Items = append(out.Items, Authored{Recorded: rec, Author: name})
+	}
+	return out, nil
 }
 
 // page reads the activities of q, limit asked plus one to tell whether a
 // next page exists, with where each counts and whether it is locked, among
-// the challenges that scope gives (read once, and only for a page with
-// activities).
-func (s *Service) page(ctx context.Context, q ListQuery, limit int, scope func(ctx context.Context) ([]Participation, error)) (Page, error) {
+// the challenges that scope gives for its author (scope read once, and only
+// for a page with activities).
+func (s *Service) page(ctx context.Context, q ListQuery, limit int, scope func(ctx context.Context) (func(userID string) []Participation, error)) (Page, error) {
 	rows, err := s.repo.List(ctx, q)
 	if err != nil {
 		return Page{}, fmt.Errorf("list activities: %w", err)
@@ -262,12 +323,13 @@ func (s *Service) page(ctx context.Context, q ListQuery, limit int, scope func(c
 	if len(rows) == 0 {
 		return page, nil
 	}
-	ps, err := scope(ctx)
+	of, err := scope(ctx)
 	if err != nil {
 		return Page{}, err
 	}
 	now := s.clock.Now()
 	for _, a := range rows {
+		ps := of(a.UserID)
 		page.Items = append(page.Items, Recorded{
 			Activity:      a,
 			Contributions: Contributions(a, ps),

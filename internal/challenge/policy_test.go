@@ -580,6 +580,38 @@ func TestActivitiesRefusal(t *testing.T) {
 	}
 }
 
+func TestAllActivitiesRefusal(t *testing.T) {
+	tests := []struct {
+		name       string
+		actor      Membership
+		visibility string
+		want       apperr.Code // empty: visible
+	}{
+		{name: "participant, private", actor: active, visibility: VisibilityPrivate},
+		{name: "abandoned participant, private", actor: abandoned, visibility: VisibilityPrivate},
+		{name: "creator, public", actor: creatorActive, visibility: VisibilityPublic},
+		{name: "creator who abandoned", actor: creatorAbandoned, visibility: VisibilityPrivate},
+		{name: "outsider of a public challenge: leaderboard only", actor: outsider, visibility: VisibilityPublic, want: apperr.CodeNotFound},
+		{name: "invited to a private challenge: leaderboard only", actor: invited, visibility: VisibilityPrivate, want: apperr.CodeNotFound},
+		{name: "outsider of a private challenge: hidden", actor: outsider, visibility: VisibilityPrivate, want: apperr.CodeChallengeNotFound},
+		{name: "unknown visibility: hidden", actor: creatorActive, visibility: "unlisted", want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := AllActivitiesRefusal(tt.actor, tt.visibility)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("AllActivitiesRefusal() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("AllActivitiesRefusal() = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestDeletionRefusal(t *testing.T) {
 	if err := DeletionRefusal(nil); err != nil {
 		t.Fatalf("no challenge: DeletionRefusal() = %v, want nil", err)

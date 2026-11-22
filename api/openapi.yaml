@@ -814,6 +814,72 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/challenges/{challengeId}/activities:
+    get:
+      operationId: listChallengeActivities
+      summary: List the activities of all the participants
+      description: |
+        The activities of every participant of the challenge (abandoned or
+        excluded ones included) started in its window, deleted ones left
+        out, most recent first (`started_at`, then `id`), each with its
+        author. A deleted account is never listed, nor are its activities.
+        Visible to the participants of the challenge (abandoned or excluded
+        ones included) and its creators, as the list of a participant
+        (`listParticipantActivities`). A challenge the user may not see
+        answers 404 `challenge_not_found`; a visible one the user never
+        joined (a public challenge shows them its leaderboard only)
+        answers 404 `not_found`.
+        `contributions` and `locked` are those of the list of the author
+        (`listParticipantActivities`): read from this challenge only, never
+        from the other challenges of the author; `contributions` is empty
+        for a participant who abandoned.
+        A page may hold fewer than `limit` items (an account deleted while
+        it was read) and still have a `next_cursor`: only a null
+        `next_cursor` ends the list.
+      tags: [activities]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the previous page, as is.
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: A page of activities with their authors.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeActivityPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            A missing, deleted or hidden challenge (`challenge_not_found`), or
+            an actor who never joined it (`not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/challenges/{challengeId}/creators:
     post:
       operationId: addCreator
@@ -2270,6 +2336,74 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Activity"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.
+    ChallengeActivity:
+      type: object
+      description: |
+        An activity in the list of a challenge: the fields of `Activity`,
+        `contributions` and `locked` read from this challenge only, plus its
+        author.
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, speed_mps, pace_seconds_per_km, contributions, locked, user]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        sport_code:
+          type: string
+        sport_label:
+          type: string
+          nullable: true
+          description: Label of the sport `other`, cleaned; null for the others.
+        started_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+        distance_meters:
+          type: integer
+          nullable: true
+        source:
+          type: string
+          enum: [manual]
+        speed_mps:
+          type: number
+          format: double
+          nullable: true
+          description: Speed in meters per second, computed; null without distance.
+        pace_seconds_per_km:
+          type: number
+          format: double
+          nullable: true
+          description: Pace in seconds per kilometer, computed; null without distance.
+        contributions:
+          type: array
+          description: |
+            What the activity brings, now, to this challenge when it counts
+            in it: at most one item, none for an author who abandoned.
+          items:
+            $ref: "#/components/schemas/ActivityContribution"
+        locked:
+          type: boolean
+          description: |
+            True once the week of the activity is locked in this challenge,
+            where it counts, at 7 am, local time of the challenge, on the
+            first day of the next week; for an author who abandoned, only
+            when the week was already locked when they left.
+        user:
+          $ref: "#/components/schemas/LeaderboardUser"
+    ChallengeActivityPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChallengeActivity"
         next_cursor:
           type: string
           nullable: true

@@ -425,7 +425,7 @@ flowchart TD
 | `challenge` | `POST /challenges`, `GET /challenges` (publics et les miens), `GET /challenges/{id}`, `PATCH /challenges/{id}` (titre, description), `POST /challenges/{id}/join`, `POST /challenges/{id}/abandon`, `GET /challenges/{id}/participants`, `DELETE /challenges/{id}/participants/{userId}` (exclure), `POST /challenges/{id}/creators`, `DELETE /challenges/{id}` (créateurs : supprimer le challenge) |
 | `invitation` | `POST /challenges/{id}/invitations`, `POST /invitations/open`, `POST /invitations/accept` (le jeton dans le corps, jamais dans l'URL) |
 | `leaderboard` | `GET /challenges/{id}/leaderboard` (toutes les catégories du challenge ensemble, sans filtre ni pagination) |
-| `activity` | `POST /activities`, `GET /me/activities`, `GET /challenges/{id}/participants/{userId}/activities` (participants du challenge), `PATCH` et `DELETE /activities/{id}` (auteur, tant que la semaine n'est verrouillée dans aucun challenge où l'activité compte) |
+| `activity` | `POST /activities`, `GET /me/activities`, `GET /challenges/{id}/participants/{userId}/activities` et `GET /challenges/{id}/activities` (activités de tous les participants, avec leur auteur ; participants du challenge et créateurs), `PATCH` et `DELETE /activities/{id}` (auteur, tant que la semaine n'est verrouillée dans aucun challenge où l'activité compte) |
 | `sport` | `GET /sports` |
 | `badge` (V1.1) | `GET /me/badges`, `GET /challenges/{id}/badges`, `POST /challenges/{id}/badges` (créateur), `PATCH` et `DELETE /challenges/{id}/badges/{badgeId}` (créateur, tant que personne ne l'a gagné) |
 | uploads (V1.1) | `POST /uploads/avatar` (URL signée) |
@@ -546,6 +546,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Abandonner (« quitter ») un challenge | le participant, pour lui-même ; équivaut à un abandon définitif (✅) |
 | Supprimer le challenge | créateurs, à tout moment (✅) |
 | Voir le détail des activités (date, sport, durée, distance) d'un participant | les participants du même challenge (y compris ceux qui ont abandonné) et les créateurs (✅) ; un non-participant d'un challenge public ne voit que le classement (✅). Le participant visé peut avoir abandonné ou été exclu : ses activités de la fenêtre du challenge restent visibles jusqu'à la fin, **y compris celles saisies après son départ**, qui n'y comptent plus (✅). Jamais pour un compte supprimé : ses activités sont effacées de la base (404 `not_found`, ✅ SC-API-113, SC-API-117) |
+| Voir les activités de tous les participants d'un challenge (fil, avec leur auteur) | les mêmes : participants (y compris ceux qui ont abandonné) et créateurs ; même 404 sinon (✅ 2026-11-21, SC-API-143). Les activités d'un participant qui a abandonné ou a été exclu restent dans le fil, sans compter dans le challenge ; jamais celles d'un compte supprimé |
 
 **Codes de réponse** :
 - ressource inexistante ou privée inaccessible → 404 (`challenge_not_found`…) ;
