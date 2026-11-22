@@ -300,7 +300,7 @@ func TestCreateChallengeRefusals(t *testing.T) {
 func TestListChallenges(t *testing.T) {
 	desc := "abandoned"
 	repo := &fakeRepository{summaries: []Summary{
-		{ID: "11111111-1111-1111-1111-111111111111", Title: "A", Visibility: "public", Timezone: "UTC", StartsAt: now, EndsAt: now.AddDate(0, 0, 14), ParticipantCount: 3, MyStatus: &desc, Creator: true},
+		{ID: "11111111-1111-1111-1111-111111111111", Title: "A", Visibility: "public", Timezone: "UTC", ReferenceSport: "ride", StartsAt: now, EndsAt: now.AddDate(0, 0, 14), ParticipantCount: 3, MyStatus: &desc, Creator: true},
 		{ID: "22222222-2222-2222-2222-222222222222", Title: "B", Visibility: "public", Timezone: "UTC", StartsAt: now.AddDate(0, 0, 1), EndsAt: now.AddDate(0, 0, 15), ParticipantCount: 1},
 	}}
 	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
@@ -314,8 +314,8 @@ func TestListChallenges(t *testing.T) {
 	if len(items) != 1 || first["my_status"] != "abandoned" || first["participant_count"] != 3.0 {
 		t.Fatalf("items %v, want 1 item with my status and the count", out["items"])
 	}
-	if first["my_role"] != "creator" || first["status"] != "ongoing" {
-		t.Fatalf("item %v, want my role creator and the status ongoing", first)
+	if first["my_role"] != "creator" || first["status"] != "ongoing" || first["reference_sport"] != "ride" {
+		t.Fatalf("item %v, want my role creator, the status ongoing and the reference sport", first)
 	}
 	cursor, _ := out["next_cursor"].(string)
 	if cursor == "" {

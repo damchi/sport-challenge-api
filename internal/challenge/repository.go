@@ -68,7 +68,7 @@ const participantCountColumn = `(SELECT count(*) FROM participants p JOIN users 
 // as in membershipQuery, so a summary gives the same role as the challenge
 // itself.
 const listColumns = `
-SELECT c.id, c.title, c.visibility, c.timezone, c.starts_at, c.ends_at,
+SELECT c.id, c.title, c.visibility, c.timezone, c.reference_sport, c.starts_at, c.ends_at,
        ` + participantCountColumn + ` AS participant_count,
        me.status AS my_status,
        EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,

@@ -142,6 +142,48 @@ func TestListScopesAndStatuses(t *testing.T) {
 	}
 }
 
+// TestListGivesTheReferenceSport: both lists read the reference sport of
+// each challenge, a run and a ride one, the same as the detail.
+func TestListGivesTheReferenceSport(t *testing.T) {
+	f := newListFixture(t)
+	if _, err := f.pool.Exec(t.Context(), "UPDATE challenges SET reference_sport = 'ride' WHERE id = '00000000-0000-0000-0000-0000000000b0'"); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		scope string
+		want  map[string]string
+	}{
+		{scope: ScopePublic, want: map[string]string{"B ongoing, mine": "ride", "A upcoming": "run"}},
+		{scope: ScopeMine, want: map[string]string{"B ongoing, mine": "ride", "D private, I abandoned": "run"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.scope, func(t *testing.T) {
+			page, err := f.svc.List(t.Context(), f.me, tt.scope, "", 20, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := 0
+			for _, s := range page.Items {
+				want, ok := tt.want[s.Title]
+				if !ok {
+					continue
+				}
+				found++
+				d, err := f.svc.Get(t.Context(), f.me, s.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if s.ReferenceSport != want || d.ReferenceSport != want {
+					t.Errorf("%s: list %q, detail %q, want %s", s.Title, s.ReferenceSport, d.ReferenceSport, want)
+				}
+			}
+			if found != len(tt.want) {
+				t.Fatalf("found %d of %d challenges in %q", found, len(tt.want), titles(page.Items))
+			}
+		})
+	}
+}
+
 func TestListCountsAndMyStatus(t *testing.T) {
 	f := newListFixture(t)
 	// A deleted account in B is not counted.
