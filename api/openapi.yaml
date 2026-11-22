@@ -1969,7 +1969,7 @@ components:
           description: The end of the current week; null when eliminated or outside the weeks.
     ChallengeSummary:
       type: object
-      required: [id, title, visibility, timezone, reference_sport, starts_at, ends_at, participant_count, my_role, my_status, status, week_count, my_week, best_result]
+      required: [id, title, visibility, timezone, reference_sport, starts_at, ends_at, participant_count, my_role, my_status, status, current_week, week_ends_at, week_count, my_week, best_result]
       additionalProperties: false
       properties:
         id:
@@ -2011,6 +2011,24 @@ components:
           type: integer
           minimum: 1
           description: Number of weeks of the challenge, whatever its status, as `week_count` of the detail.
+        current_week:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: |
+            Number of the current week; null before the start and after the
+            end. As `current_week` of the detail, for everyone, whatever
+            `my_role` and `my_status`; equal to `my_week.week` when `my_week`
+            is given.
+        week_ends_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            End of the current week; null before the start and after the end.
+            As `week_ends_at` of the detail, for everyone, whatever `my_role`
+            and `my_status`; equal to `my_week.week_ends_at` when `my_week` is
+            given.
         my_week:
           type: object
           nullable: true

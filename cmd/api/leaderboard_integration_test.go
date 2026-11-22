@@ -228,6 +228,9 @@ func TestMyWeekIsTheLeaderboard(t *testing.T) {
 		if p := it.MyWeek.Rankings[2].Progress; p == nil || !it.MyWeek.WeekEndsAt.Equal(p.WeekEndsAt) {
 			t.Fatalf("%s: week ends at %s, want the end of the elimination week %+v", it.ID, it.MyWeek.WeekEndsAt, p)
 		}
+		if it.CurrentWeek != it.MyWeek.Week || !it.WeekEndsAt.Equal(it.MyWeek.WeekEndsAt) {
+			t.Fatalf("%s: current week %d ending %s, want my week %d ending %s", it.ID, it.CurrentWeek, it.WeekEndsAt, it.MyWeek.Week, it.MyWeek.WeekEndsAt)
+		}
 	}
 
 	quitter, err := f.challenges.List(t.Context(), f.quitter, challenge.ScopeMine, "", 20, nil)
@@ -236,6 +239,10 @@ func TestMyWeekIsTheLeaderboard(t *testing.T) {
 	}
 	if len(quitter.Items) != 1 || quitter.Items[0].MyWeek != nil {
 		t.Fatalf("quitter's list %+v, want the private challenge without a standing", quitter.Items)
+	}
+	// The current week is still given to the one who abandoned.
+	if it := quitter.Items[0]; it.CurrentWeek != 2 || it.WeekEndsAt.IsZero() {
+		t.Fatalf("quitter's challenge: week %d ending %s, want week 2", it.CurrentWeek, it.WeekEndsAt)
 	}
 }
 

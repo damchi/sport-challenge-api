@@ -322,6 +322,10 @@ func TestListChallenges(t *testing.T) {
 	if v, ok := first["best_result"]; first["week_count"] != 3.0 || !ok || v != nil {
 		t.Fatalf("item %v, want 3 weeks and a null best result", first)
 	}
+	// Given to the one who abandoned too, though they have no my week.
+	if first["current_week"] != 1.0 || first["week_ends_at"] != "2026-03-11T00:00:00Z" {
+		t.Fatalf("item %v, want week 1 ending at the second midnight", first)
+	}
 	if got, _ := json.Marshal(out["counts"]); string(got) != `{"finished":2,"ongoing":4,"upcoming":1}` {
 		t.Fatalf("counts %s, want those of the scope", got)
 	}
@@ -408,6 +412,11 @@ func TestListChallengesBestResult(t *testing.T) {
 	}
 	if v, ok := first["my_week"]; first["week_count"] != 3.0 || !ok || v != nil {
 		t.Fatalf("item %v, want 3 weeks and a null my week", first)
+	}
+	for _, k := range []string{"current_week", "week_ends_at"} {
+		if v, ok := first[k]; !ok || v != nil {
+			t.Fatalf("%s = %v (present %t), want null once finished", k, v, ok)
+		}
 	}
 }
 

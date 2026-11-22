@@ -198,6 +198,10 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 			status := api.ChallengeSummaryMyStatus(*c.MyStatus)
 			item.MyStatus = &status
 		}
+		if c.CurrentWeek > 0 {
+			week, ends := c.CurrentWeek, c.WeekEndsAt.UTC()
+			item.CurrentWeek, item.WeekEndsAt = &week, &ends
+		}
 		if c.MyWeek != nil {
 			item.MyWeek = toMyWeek(*c.MyWeek)
 		}

@@ -168,9 +168,11 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 // and the counts by status use the same instant of the clock; the counts are
 // those of the whole scope, whatever the status filter and the page. The
 // visibility rules are applied by the queries themselves, never by filtering
-// a loaded list. In the actor's own list, each ongoing challenge they are an
-// active participant of has their standing (MyWeek), and each finished one
-// their best frozen result (BestResult), read for the whole page at once.
+// a loaded list. Each item has its number of weeks and its current week, as
+// the detail computes them, for every actor. In the actor's own list, each
+// ongoing challenge they are an active participant of has their standing
+// (MyWeek), and each finished one their best frozen result (BestResult),
+// read for the whole page at once.
 func (s *Service) List(ctx context.Context, actorID, scope, status string, limit int, after *Position) (Page, error) {
 	if limit < 1 {
 		return Page{}, apperr.InvalidFields(nil, "limit")
@@ -200,7 +202,9 @@ func (s *Service) List(ctx context.Context, actorID, scope, status string, limit
 		if err != nil {
 			return Page{}, fmt.Errorf("list challenges: challenge time zone %q: %w", it.Timezone, err)
 		}
-		it.WeekCount = scoring.Window{Start: it.StartsAt, End: it.EndsAt, Location: loc}.Weeks()
+		w := scoring.Window{Start: it.StartsAt, End: it.EndsAt, Location: loc, Now: now}
+		it.WeekCount = w.Weeks()
+		it.CurrentWeek, it.WeekEndsAt = w.CurrentWeek()
 	}
 	page := Page{Items: items, Counts: counts}
 	if len(items) > limit {
