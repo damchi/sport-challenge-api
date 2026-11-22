@@ -320,6 +320,10 @@ func toDetail(d Detail) (api.ChallengeDetail, error) {
 		CanJoin:              d.CanJoin,
 		RegistrationDeadline: d.RegistrationDeadline.UTC(),
 		WeekCount:            d.WeekCount,
+		Weeks:                make([]api.ChallengeWeek, len(d.Weeks)),
+	}
+	for i, w := range d.Weeks {
+		out.Weeks[i] = api.ChallengeWeek{Number: w.Number, StartsAt: w.StartsAt.UTC(), EndsAt: w.EndsAt.UTC()}
 	}
 	if d.Participant != "" {
 		status := api.ChallengeDetailMyStatus(d.Participant)

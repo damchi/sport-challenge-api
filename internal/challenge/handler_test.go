@@ -574,6 +574,14 @@ func TestGetChallenge(t *testing.T) {
 			t.Errorf("%s = %v, want %v", k, out[k], v)
 		}
 	}
+	weeks := []any{
+		map[string]any{"number": 1.0, "starts_at": "2026-03-02T05:00:00Z", "ends_at": "2026-03-09T04:00:00Z"},
+		map[string]any{"number": 2.0, "starts_at": "2026-03-09T04:00:00Z", "ends_at": "2026-03-16T04:00:00Z"},
+		map[string]any{"number": 3.0, "starts_at": "2026-03-16T04:00:00Z", "ends_at": "2026-03-23T04:00:00Z"},
+	}
+	if !reflect.DeepEqual(out["weeks"], weeks) {
+		t.Errorf("weeks = %v, want %v", out["weeks"], weeks)
+	}
 }
 
 func TestGetChallengeNotFoundIsTheSameAnswer(t *testing.T) {
