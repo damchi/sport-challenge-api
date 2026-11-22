@@ -1758,12 +1758,19 @@ components:
             $ref: "#/components/schemas/CategoryRanking"
     CategoryRanking:
       type: object
-      required: [type, entries]
+      required: [type, ranked_count, entries]
       additionalProperties: false
       properties:
         type:
           type: string
           enum: [cumulative_time, cumulative_distance, elimination, points]
+        ranked_count:
+          type: integer
+          minimum: 0
+          description: |
+            How many participants are ranked in the category, abandoned ones
+            and deleted accounts left out: the `ranked_count` of `MyRanking`,
+            frozen with the results once the challenge is over.
         entries:
           type: array
           description: |
@@ -1967,7 +1974,7 @@ components:
             and once every started week is locked.
     ChallengeDetail:
       type: object
-      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, participant_count, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at]
+      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, participant_count, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at, week_count]
       additionalProperties: false
       properties:
         id:
@@ -2034,6 +2041,13 @@ components:
           format: date-time
           nullable: true
           description: End of the current week; null before the start and after the end.
+        week_count:
+          type: integer
+          minimum: 1
+          description: |
+            Number of weeks of the challenge, whatever its status: the last
+            value `current_week` takes. The last week may be shorter than 7
+            days.
     ChallengeUpdate:
       type: object
       additionalProperties: false

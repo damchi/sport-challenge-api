@@ -254,14 +254,18 @@ func (f erasureFixture) leaderboard(challengeID string) leaderboard.Leaderboard 
 	return got
 }
 
-// without returns lb with the entries of userID left out.
+// without returns lb with the entries of userID left out, and no longer
+// counted where it was ranked.
 func without(lb leaderboard.Leaderboard, userID string) leaderboard.Leaderboard {
 	out := leaderboard.Leaderboard{ComputedAt: lb.ComputedAt}
 	for _, c := range lb.Categories {
-		kept := leaderboard.CategoryRanking{Type: c.Type}
+		kept := leaderboard.CategoryRanking{Type: c.Type, RankedCount: c.RankedCount}
 		for _, e := range c.Entries {
-			if e.UserID != userID {
+			switch {
+			case e.UserID != userID:
 				kept.Entries = append(kept.Entries, e)
+			case e.Rank > 0:
+				kept.RankedCount--
 			}
 		}
 		out.Categories = append(out.Categories, kept)
@@ -272,6 +276,18 @@ func without(lb leaderboard.Leaderboard, userID string) leaderboard.Leaderboard 
 func TestAccountDeletionErasesEveryRow(t *testing.T) {
 	f := newErasureFixture(t)
 	finishedBefore, ongoingBefore := f.leaderboard(f.finished), f.leaderboard(f.ongoing)
+	// Frozen, everyone is ranked, carol and gone eliminated in week 2 too;
+	// ongoing, alice, gone and dave.
+	for name, tt := range map[string]struct {
+		lb   leaderboard.Leaderboard
+		want int
+	}{"finished": {finishedBefore, 4}, "ongoing": {ongoingBefore, 3}} {
+		for _, c := range tt.lb.Categories {
+			if c.RankedCount != tt.want {
+				t.Fatalf("%s %s: %d ranked before the deletion, want %d", name, c.Type, c.RankedCount, tt.want)
+			}
+		}
+	}
 	snapshotBefore := f.snapshotEntries()
 	others := map[string]map[string]int{}
 	for _, u := range []string{f.alice, f.bob, f.carol, f.dave, f.erin} {
@@ -342,7 +358,8 @@ func TestAccountDeletionErasesEveryRow(t *testing.T) {
 		}
 	}
 	// The rankings the others see do not change.
-	if got, want := f.leaderboard(f.finished), without(finishedBefore, f.gone); !reflect.DeepEqual(got, want) {
+	// gone is counted no more: 3 ranked in the finished one, 2 in the other.
+	if got, want := f.leaderboard(f.finished), without(finishedBefore, f.gone); !reflect.DeepEqual(got, want) || got.Categories[0].RankedCount != 3 {
 		t.Errorf("finished leaderboard = %+v, want %+v", got, want)
 	}
 	if got, want := f.leaderboard(f.ongoing), without(ongoingBefore, f.gone); !reflect.DeepEqual(got, want) {

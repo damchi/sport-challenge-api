@@ -118,7 +118,7 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, err
 			ranked[j] = Ranked{Entry: e}
 			ranked[j].Name = names[e.UserID]
 		}
-		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
+		board.Categories[i] = CategoryRanking{Type: cat.Type, RankedCount: rankedCount(entries), Entries: ranked}
 	}
 	return board, nil
 }
@@ -198,16 +198,26 @@ func isActive(participants []scoring.Participant, userID string) bool {
 // placeOf is the line of userID in the ranking entries of a category, with
 // how many are ranked in it.
 func placeOf(categoryType string, entries []scoring.Entry, userID string) Place {
-	p := Place{Type: categoryType}
+	p := Place{Type: categoryType, RankedCount: rankedCount(entries)}
 	for _, e := range entries {
-		if e.Rank > 0 {
-			p.RankedCount++
-		}
 		if e.UserID == userID {
 			p.Entry = e
 		}
 	}
 	return p
+}
+
+// rankedCount is how many of the ranking entries of a category are ranked:
+// an abandoned participant has no rank. The count of the leaderboard and of
+// the standings.
+func rankedCount(entries []scoring.Entry) int {
+	n := 0
+	for _, e := range entries {
+		if e.Rank > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // prepare returns the window of challenge c at now and the scorer of each of
@@ -305,6 +315,7 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 	board := Leaderboard{ComputedAt: createdAt, Categories: make([]CategoryRanking, len(c.Categories))}
 	for i, cat := range c.Categories {
 		ranked := make([]Ranked, 0, len(rankings[i].Entries))
+		entries := make([]scoring.Entry, 0, len(rankings[i].Entries))
 		// The ranks are given again without the deleted accounts, in the
 		// frozen order: equal ones still share a rank (1, 1, 3).
 		var frozenRank, rank int
@@ -328,8 +339,9 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 				}
 			}
 			ranked = append(ranked, r)
+			entries = append(entries, r.Entry)
 		}
-		board.Categories[i] = CategoryRanking{Type: cat.Type, Entries: ranked}
+		board.Categories[i] = CategoryRanking{Type: cat.Type, RankedCount: rankedCount(entries), Entries: ranked}
 	}
 	return board, true, nil
 }

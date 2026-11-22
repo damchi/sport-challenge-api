@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -27,6 +29,7 @@ import (
 // joined two challenges, and a stranger who never joined any.
 type leaderboardFixture struct {
 	t          *testing.T
+	pool       *pgxpool.Pool
 	svc        *leaderboard.Service
 	challenges *challenge.Service
 	runner     string
@@ -55,7 +58,7 @@ func newLeaderboardFixture(t *testing.T) leaderboardFixture {
 	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sport.NewService(sport.NewRepository(gdb)), standings, clk)
 	svc = leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
 
-	f := leaderboardFixture{t: t, svc: svc, challenges: challenges}
+	f := leaderboardFixture{t: t, pool: pool, svc: svc, challenges: challenges}
 	insertUser := func(subject string) string {
 		var id string
 		if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ($1, $1, 'Test', 'User') RETURNING id", subject).Scan(&id); err != nil {
@@ -208,7 +211,10 @@ func TestMyWeekIsTheLeaderboard(t *testing.T) {
 				}
 			}
 			r := it.MyWeek.Rankings[i]
-			if r.Type != c.Type || r.Rank != mine.Rank || r.RankedCount != ranked || !reflect.DeepEqual(r.Progress, mine.Progress) {
+			if c.RankedCount != ranked {
+				t.Fatalf("%s %s: leaderboard ranked count %d, want the %d ranked lines", it.ID, c.Type, c.RankedCount, ranked)
+			}
+			if r.Type != c.Type || r.Rank != mine.Rank || r.RankedCount != c.RankedCount || !reflect.DeepEqual(r.Progress, mine.Progress) {
 				t.Fatalf("%s %s: %+v, want rank %d of %d with %+v", it.ID, c.Type, r, mine.Rank, ranked, mine.Progress)
 			}
 		}
@@ -223,5 +229,89 @@ func TestMyWeekIsTheLeaderboard(t *testing.T) {
 	}
 	if len(quitter.Items) != 1 || quitter.Items[0].MyWeek != nil {
 		t.Fatalf("quitter's list %+v, want the private challenge without a standing", quitter.Items)
+	}
+}
+
+// TestRankedCountIsMyRankingCount: in week 3 of a challenge, the leaderboard
+// and the runner's list count the same participants as ranked in each
+// category: the one eliminated in week 2 is, the one who abandoned and the
+// deleted account are not.
+func TestRankedCountIsMyRankingCount(t *testing.T) {
+	f := newLeaderboardFixture(t)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.pool.Exec(t.Context(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertUser := func(subject string) string {
+		t.Helper()
+		var id string
+		if err := f.pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ($1, $1, 'Test', 'User') RETURNING id", subject).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	dropped, gone := insertUser("dropped"), insertUser("gone")
+
+	// Four weeks from 2026-05-25: recordNow is in week 3, week 2 locked.
+	start := toronto(t, 2026, 5, 25, 0)
+	var id string
+	if err := f.pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Summer', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, start.AddDate(0, 0, 28), f.runner).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ typ, params string }{
+		{challenge.CategoryCumulativeTime, `{}`},
+		{challenge.CategoryCumulativeDistance, `{"factors": {"run": 1}}`},
+		{challenge.CategoryElimination, `{"sport": "run", "step_meters": 2000}`},
+	} {
+		exec(`INSERT INTO categories (challenge_id, type, position, params)
+			VALUES ($1, $2, (SELECT count(*) + 1 FROM categories WHERE challenge_id = $1), $3::jsonb)`, id, c.typ, c.params)
+	}
+	exec("INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)", id, f.runner)
+	for _, u := range []string{f.runner, dropped, gone} {
+		exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", id, u, start)
+	}
+	exec(`INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at)
+		VALUES ($1, $2, 'abandoned', $3, $4)`, id, f.quitter, start, start.Add(time.Hour))
+	// runner: 5 then 8 km; dropped: 5 then 5 km, under the 7 km of week 2.
+	for _, run := range []struct {
+		user    string
+		day, km int
+	}{{f.runner, 26, 5}, {f.runner, 2, 8}, {dropped, 26, 5}, {dropped, 2, 5}, {gone, 26, 20}} {
+		month := 5
+		if run.day < 25 {
+			month = 6
+		}
+		exec(`INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters)
+			VALUES ($1, 'run', $2, 1800, $3)`, run.user, toronto(t, 2026, month, run.day, 7), run.km*1000)
+	}
+	exec("UPDATE users SET anonymized_at = $1, pseudo = NULL WHERE id = $2", recordNow, gone)
+
+	board, err := f.svc.Get(t.Context(), f.runner, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.challenges.List(t.Context(), f.runner, challenge.ScopeMine, "", 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine *challenge.Standing
+	for _, it := range page.Items {
+		if it.ID == id {
+			mine = it.MyWeek
+		}
+	}
+	if mine == nil || mine.Week != 3 || len(mine.Rankings) != len(board.Categories) {
+		t.Fatalf("my week %+v, want week 3 in the %d categories", mine, len(board.Categories))
+	}
+	for i, c := range board.Categories {
+		if c.RankedCount != 2 || mine.Rankings[i].RankedCount != c.RankedCount {
+			t.Fatalf("%s: leaderboard counts %d, my week %d, want the runner and dropped", c.Type, c.RankedCount, mine.Rankings[i].RankedCount)
+		}
+	}
+	if p := board.Categories[2].Entries[1].Progress; board.Categories[2].Entries[1].UserID != dropped || p == nil || p.Status != scoring.StatusEliminated {
+		t.Fatalf("second in the elimination: %+v, want dropped, eliminated", board.Categories[2].Entries[1])
 	}
 }

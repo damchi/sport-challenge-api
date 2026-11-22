@@ -314,6 +314,7 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
 		RegistrationDeadline: deadline,
 		CurrentWeek:          week,
 		WeekEndsAt:           weekEnd,
+		WeekCount:            w.Weeks(),
 	}, nil
 }
 

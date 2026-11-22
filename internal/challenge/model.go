@@ -265,4 +265,6 @@ type Detail struct {
 	// CurrentWeek is 0, and WeekEndsAt zero, outside the window.
 	CurrentWeek int
 	WeekEndsAt  time.Time
+	// WeekCount is the number of weeks of the window, whatever the status.
+	WeekCount int
 }

@@ -47,7 +47,7 @@ func (f fakeDetails) ChallengeDetail(_ context.Context, _, id string) (api.Chall
 		Id: uuid.MustParse(id), Title: "Spring run", Visibility: api.ChallengeDetailVisibilityPrivate,
 		Timezone: "America/Toronto", StartsAt: start, EndsAt: end, Categories: []api.Category{},
 		MyRole: api.ChallengeDetailMyRoleParticipant, MyStatus: &status,
-		Status: api.ChallengeDetailStatusOngoing, RegistrationDeadline: deadline,
+		Status: api.ChallengeDetailStatusOngoing, RegistrationDeadline: deadline, WeekCount: 6,
 	}, nil
 }
 

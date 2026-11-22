@@ -847,6 +847,10 @@ func TestServiceGet(t *testing.T) {
 				t.Fatalf("got role %v, %s, can join %v, week %d ending %s; want %v, %s, %v, %d ending %s",
 					d.Role, d.Status, d.CanJoin, d.CurrentWeek, d.WeekEndsAt, tt.wantRole, tt.wantStatus, tt.wantCanJoin, tt.wantWeek, tt.wantWeekEnds)
 			}
+			// 3 weeks whatever the status: the last value current_week takes.
+			if d.WeekCount != 3 {
+				t.Fatalf("week count %d, want 3", d.WeekCount)
+			}
 			if !d.RegistrationDeadline.Equal(deadline) {
 				t.Fatalf("deadline %s, want %s", d.RegistrationDeadline, deadline)
 			}

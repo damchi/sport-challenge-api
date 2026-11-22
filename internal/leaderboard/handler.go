@@ -45,7 +45,7 @@ func (h *Handler) GetLeaderboard(ctx context.Context, req api.GetLeaderboardRequ
 			}
 			entries = append(entries, entry)
 		}
-		out.Categories = append(out.Categories, api.CategoryRanking{Type: api.CategoryRankingType(category.Type), Entries: entries})
+		out.Categories = append(out.Categories, api.CategoryRanking{Type: api.CategoryRankingType(category.Type), RankedCount: category.RankedCount, Entries: entries})
 	}
 	return api.GetLeaderboard200JSONResponse(out), nil
 }
