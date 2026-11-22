@@ -306,6 +306,12 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
 	w := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc, Now: now}
 	deadline := w.RegistrationDeadline()
 	week, weekEnd := w.CurrentWeek()
+	count := w.Weeks()
+	weeks := make([]Week, count)
+	for n := 1; n <= count; n++ {
+		start, end := w.WeekBounds(n)
+		weeks[n-1] = Week{Number: n, StartsAt: start, EndsAt: end}
+	}
 	return Detail{
 		Challenge:            c,
 		Role:                 role,
@@ -315,7 +321,8 @@ func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
 		RegistrationDeadline: deadline,
 		CurrentWeek:          week,
 		WeekEndsAt:           weekEnd,
-		WeekCount:            w.Weeks(),
+		WeekCount:            count,
+		Weeks:                weeks,
 	}, nil
 }
 

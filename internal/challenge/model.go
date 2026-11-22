@@ -267,4 +267,13 @@ type Detail struct {
 	WeekEndsAt  time.Time
 	// WeekCount is the number of weeks of the window, whatever the status.
 	WeekCount int
+	// Weeks are the WeekCount weeks of the window, in order.
+	Weeks []Week
+}
+
+// Week is one week of a challenge, [StartsAt, EndsAt) in UTC.
+type Week struct {
+	Number   int
+	StartsAt time.Time
+	EndsAt   time.Time
 }

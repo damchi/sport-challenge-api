@@ -43,11 +43,15 @@ func (f fakeDetails) ChallengeDetail(_ context.Context, _, id string) (api.Chall
 		return api.ChallengeDetail{}, f.err
 	}
 	status := api.ChallengeDetailMyStatusActive
+	weeks := make([]api.ChallengeWeek, 6)
+	for i := range weeks {
+		weeks[i] = api.ChallengeWeek{Number: i + 1, StartsAt: start.AddDate(0, 0, 7*i), EndsAt: start.AddDate(0, 0, 7*(i+1))}
+	}
 	return api.ChallengeDetail{
 		Id: uuid.MustParse(id), Title: "Spring run", Visibility: api.ChallengeDetailVisibilityPrivate,
 		Timezone: "America/Toronto", StartsAt: start, EndsAt: end, Categories: []api.Category{},
 		MyRole: api.ChallengeDetailMyRoleParticipant, MyStatus: &status,
-		Status: api.ChallengeDetailStatusOngoing, RegistrationDeadline: deadline, WeekCount: 6,
+		Status: api.ChallengeDetailStatusOngoing, RegistrationDeadline: deadline, WeekCount: 6, Weeks: weeks,
 	}, nil
 }
 

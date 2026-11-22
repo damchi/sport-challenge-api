@@ -2040,7 +2040,7 @@ components:
             and once every started week is locked.
     ChallengeDetail:
       type: object
-      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, participant_count, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at, week_count]
+      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, participant_count, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at, week_count, weeks]
       additionalProperties: false
       properties:
         id:
@@ -2114,6 +2114,32 @@ components:
             Number of weeks of the challenge, whatever its status: the last
             value `current_week` takes. The last week may be shorter than 7
             days.
+        weeks:
+          type: array
+          description: |
+            The weeks of the challenge, in order, whatever its status: as many
+            as `week_count`. Each one starts at local midnight in the
+            challenge's time zone (the first instant of the day where a time
+            change skips midnight), in UTC like `starts_at`; the last one may
+            be shorter than 7 days and ends with the challenge. The current
+            week ends at `week_ends_at`.
+          items:
+            $ref: "#/components/schemas/ChallengeWeek"
+    ChallengeWeek:
+      type: object
+      required: [number, starts_at, ends_at]
+      additionalProperties: false
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+          description: Excluded, the start of the next week (or the end of the challenge).
     ChallengeUpdate:
       type: object
       additionalProperties: false

@@ -865,6 +865,71 @@ func TestServiceGet(t *testing.T) {
 	}
 }
 
+// TestServiceGetWeeks: the weeks come from the same rule as the current
+// week, so the current one always ends at WeekEndsAt.
+func TestServiceGetWeeks(t *testing.T) {
+	utc := func(month time.Month, day, hour int) time.Time {
+		return time.Date(2026, month, day, hour, 0, 0, 0, time.UTC)
+	}
+	tests := []struct {
+		name       string
+		start, end time.Time
+		want       []Week
+	}{
+		{
+			name: "4 full weeks in winter", start: utc(1, 5, 5), end: utc(2, 2, 5),
+			want: []Week{
+				{Number: 1, StartsAt: utc(1, 5, 5), EndsAt: utc(1, 12, 5)},
+				{Number: 2, StartsAt: utc(1, 12, 5), EndsAt: utc(1, 19, 5)},
+				{Number: 3, StartsAt: utc(1, 19, 5), EndsAt: utc(1, 26, 5)},
+				{Number: 4, StartsAt: utc(1, 26, 5), EndsAt: utc(2, 2, 5)},
+			},
+		},
+		{
+			name: "short last week", start: utc(1, 5, 5), end: utc(1, 22, 5),
+			want: []Week{
+				{Number: 1, StartsAt: utc(1, 5, 5), EndsAt: utc(1, 12, 5)},
+				{Number: 2, StartsAt: utc(1, 12, 5), EndsAt: utc(1, 19, 5)},
+				{Number: 3, StartsAt: utc(1, 19, 5), EndsAt: utc(1, 22, 5)},
+			},
+		},
+		{
+			// Clocks go forward on 2026-03-08: week 1 lasts 167 hours, the
+			// next ones start at local midnight, 04:00 UTC.
+			name: "time change during week 1", start: utc(3, 2, 5), end: utc(3, 23, 4),
+			want: []Week{
+				{Number: 1, StartsAt: utc(3, 2, 5), EndsAt: utc(3, 9, 4)},
+				{Number: 2, StartsAt: utc(3, 9, 4), EndsAt: utc(3, 16, 4)},
+				{Number: 3, StartsAt: utc(3, 16, 4), EndsAt: utc(3, 23, 4)},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := stored(VisibilityPublic)
+			c.StartsAt, c.EndsAt = tt.start, tt.end
+			// Before the start, the last second of each week, the instant it
+			// ends (the start of the next one, or the end), after the end.
+			moments := []time.Time{tt.start.Add(-time.Hour), tt.end.Add(time.Hour)}
+			for _, w := range tt.want {
+				moments = append(moments, w.EndsAt.Add(-time.Second), w.EndsAt)
+			}
+			for _, at := range moments {
+				d, err := NewService(&fakeRepository{challenge: c}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(at)).Get(t.Context(), actor, c.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(d.Weeks, tt.want) || len(d.Weeks) != d.WeekCount {
+					t.Fatalf("at %s: weeks %+v (count %d), want %+v", at, d.Weeks, d.WeekCount, tt.want)
+				}
+				if d.CurrentWeek > 0 && !d.Weeks[d.CurrentWeek-1].EndsAt.Equal(d.WeekEndsAt) {
+					t.Fatalf("at %s: week %d ends at %s, want week_ends_at %s", at, d.CurrentWeek, d.Weeks[d.CurrentWeek-1].EndsAt, d.WeekEndsAt)
+				}
+			}
+		})
+	}
+}
+
 // TestServiceGetHidesPrivateChallenges: a missing challenge and a private
 // one the actor may not see give the very same error.
 func TestServiceGetHidesPrivateChallenges(t *testing.T) {
