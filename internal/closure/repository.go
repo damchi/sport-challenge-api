@@ -3,6 +3,7 @@ package closure
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -138,6 +139,31 @@ func insertEliminations(tx *gorm.DB, challengeID, categoryID string, eliminated 
 // week may not be locked yet: the service checks it, in the time zone. The
 // snapshots of a challenge are written together, so none means none.
 func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]EndedChallenge, error) {
+	out, err := r.readChallenges(ctx, `c.ends_at <= @now
+		AND NOT EXISTS (SELECT 1 FROM result_snapshot rs WHERE rs.challenge_id = c.id)`, map[string]any{"now": now})
+	if err != nil {
+		return nil, fmt.Errorf("read ended challenges: %w", err)
+	}
+	return out, nil
+}
+
+// Challenge reads challenge id, not deleted, with its categories, whatever
+// its status; false when there is none.
+func (r *Repository) Challenge(ctx context.Context, id string) (EndedChallenge, bool, error) {
+	out, err := r.readChallenges(ctx, `c.id = @id`, map[string]any{"id": id})
+	if err != nil {
+		return EndedChallenge{}, false, fmt.Errorf("read challenge: %w", err)
+	}
+	if len(out) == 0 {
+		return EndedChallenge{}, false, nil
+	}
+	return out[0], true, nil
+}
+
+// readChallenges reads the challenges not deleted that match where (SQL on
+// challenges c, a constant of the callers, never an input; parameters args), each with its categories in position
+// order, the frozen settings of each read from categories.params.
+func (r *Repository) readChallenges(ctx context.Context, where string, args map[string]any) ([]EndedChallenge, error) {
 	var rows []struct {
 		ID                string
 		Timezone          string
@@ -162,13 +188,12 @@ func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]Ende
 			COALESCE((cat.params->>'min_session_seconds')::int, 0) AS min_session_seconds
 		FROM challenges c
 		JOIN categories cat ON cat.challenge_id = c.id
-		WHERE c.deleted_at IS NULL AND c.ends_at <= @now
-			AND NOT EXISTS (SELECT 1 FROM result_snapshot rs WHERE rs.challenge_id = c.id)
+		WHERE c.deleted_at IS NULL AND `+where+`
 		ORDER BY c.ends_at, c.id, cat.position`,
-		map[string]any{"now": now},
+		args,
 	).Scan(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("read ended challenges: %w", err)
+		return nil, err
 	}
 	var out []EndedChallenge
 	for _, row := range rows {
@@ -189,6 +214,42 @@ func (r *Repository) EndedChallenges(ctx context.Context, now time.Time) ([]Ende
 		last.Categories = append(last.Categories, cat)
 	}
 	return out, nil
+}
+
+// LockWeeks takes the week lock alone in the transaction ctx carries
+// (db.LockWeeks), until it ends; outside of one, the lock would be released
+// at once, so it is refused.
+func (r *Repository) LockWeeks(ctx context.Context) error {
+	tx, ok := db.Tx(ctx)
+	if !ok {
+		return errors.New("lock weeks: no transaction")
+	}
+	return db.LockWeeks(tx)
+}
+
+// WithWeeksShared runs fn in a transaction, carried by the ctx it gets,
+// holding the week lock shared (db.ShareWeekLock): a recompute, which takes
+// it alone, runs before or after fn, never during.
+func (r *Repository) WithWeeksShared(ctx context.Context, fn func(ctx context.Context) error) error {
+	return db.InTx(ctx, r.db, func(ctx context.Context) error {
+		if err := db.ShareWeekLock(db.Conn(ctx, r.db)); err != nil {
+			return err
+		}
+		return fn(ctx)
+	})
+}
+
+// ClearResults erases what the worker recorded for challenge id: its
+// eliminations, the closures of its weeks and its result snapshots.
+func (r *Repository) ClearResults(ctx context.Context, id string) error {
+	tx := db.Conn(ctx, r.db)
+	for _, table := range []string{"elimination", "week_closure", "result_snapshot"} {
+		// table is one of the constant names above, never an input.
+		if err := tx.Exec(`DELETE FROM `+table+` WHERE challenge_id = ?`, id).Error; err != nil {
+			return fmt.Errorf("clear %s: %w", table, err)
+		}
+	}
+	return nil
 }
 
 // lockParticipantsQuery takes FOR SHARE the users of the participants of

@@ -8,11 +8,14 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 // Repository reads what the rankings are computed from. Raw SQL, always
-// parameterized: it reads, never writes.
+// parameterized: it reads, never writes. It reads in the transaction ctx
+// carries (db.InTx), if any: a recompute and the preview of an admin change
+// rank what the change wrote before it commits.
 type Repository struct {
 	db *gorm.DB
 }
@@ -50,7 +53,7 @@ func (r *Repository) ParticipantsOf(ctx context.Context, challengeIDs []string) 
 		Status      string
 		AbandonedAt *time.Time
 	}
-	err := r.db.WithContext(ctx).Raw(
+	err := db.Conn(ctx, r.db).Raw(
 		`SELECT p.challenge_id, p.user_id, p.status, p.abandoned_at FROM participants p
 		JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
 		WHERE p.challenge_id IN @ids ORDER BY p.challenge_id, p.joined_at, p.user_id`,
@@ -137,8 +140,9 @@ const elevationColumn = `,
 
 // ActivitiesOf returns, in one query, the totals of the activities not
 // deleted of the active participants of each challenge, started in its
-// window (those of an abandoned participant or a deleted account no longer
-// count), never each activity:
+// window (those of an abandoned participant no longer count but in the
+// weeks locked before they left, those of a deleted account never), never
+// each activity:
 //   - for the weekly sport, the sport of the elimination category, per
 //     participant and week, each total as one activity starting at the start
 //     of its week;
@@ -155,8 +159,10 @@ const elevationColumn = `,
 // also carries the sum of its elevation gains (Activity.ElevationMeters; nil
 // for the other challenges). With a points category, the activities of the
 // abandoned participants are read too, the points category keeping them in
-// the weeks locked before they left; the other scorers do not count them.
-// Those of the deleted accounts never are.
+// the weeks locked before they left; so are, in every challenge, their totals
+// of the weekly sport, the elimination category judging them in the weeks
+// locked before they left (scoring.Elimination.Eliminations); the other
+// scorers do not count them. Those of the deleted accounts never are.
 //
 // Contract: the scorers only sum durations, distances and elevation gains,
 // per participant and sport, and per week for the elimination sport, and the
@@ -218,17 +224,18 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 	// points category). SUM and MAX of a distance are null when none of the
 	// group has one, as is SUM of an elevation gain. groupColumns and
 	// elevationColumns are each one of two constants, never a value.
-	err = r.db.WithContext(ctx).Raw(
+	err = db.Conn(ctx, r.db).Raw(
 		`SELECT w.challenge_id, a.user_id, a.sport_code,
 			CASE WHEN w.points OR a.sport_code = w.weekly THEN width_bucket(a.started_at, w.starts) ELSE 0 END AS week,
 			SUM(a.duration_seconds) AS duration_seconds, SUM(a.distance_meters) AS distance_meters`+groupColumns+elevationColumns+`
 		FROM jsonb_to_recordset(CAST(@windows AS jsonb))
 			AS w(challenge_id uuid, from_at timestamptz, to_at timestamptz, starts timestamptz[], weekly text,
 				points boolean, min_seconds integer)
-		JOIN participants p ON p.challenge_id = w.challenge_id AND (p.status = 'active' OR w.points)
+		JOIN participants p ON p.challenge_id = w.challenge_id
 		JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
 		JOIN activities a ON a.user_id = p.user_id
 		WHERE a.deleted_at IS NULL AND a.started_at >= w.from_at AND a.started_at < w.to_at
+			AND (p.status = 'active' OR w.points OR a.sport_code = w.weekly)
 		GROUP BY 1, 2, 3, 4`,
 		map[string]any{"windows": string(windows)},
 	).Scan(&rows).Error
@@ -268,7 +275,7 @@ func (r *Repository) DeletedAccounts(ctx context.Context, ids []string) (map[str
 		return out, nil
 	}
 	var deleted []string
-	err := r.db.WithContext(ctx).Raw(
+	err := db.Conn(ctx, r.db).Raw(
 		`SELECT id FROM users WHERE id IN @ids AND anonymized_at IS NOT NULL`,
 		map[string]any{"ids": ids},
 	).Scan(&deleted).Error
@@ -290,7 +297,7 @@ func (r *Repository) Snapshots(ctx context.Context, challengeID string) (map[str
 		Payload      []byte
 		CreatedAt    time.Time
 	}
-	err := r.db.WithContext(ctx).Raw(
+	err := db.Conn(ctx, r.db).Raw(
 		`SELECT category_type, payload, created_at FROM result_snapshot WHERE challenge_id = @id ORDER BY created_at`,
 		map[string]any{"id": challengeID},
 	).Scan(&rows).Error
@@ -319,7 +326,7 @@ func (r *Repository) SnapshotsOf(ctx context.Context, challengeIDs []string) (ma
 		CategoryType string
 		Payload      []byte
 	}
-	err := r.db.WithContext(ctx).Raw(
+	err := db.Conn(ctx, r.db).Raw(
 		`SELECT challenge_id, category_type, payload FROM result_snapshot WHERE challenge_id IN @ids`,
 		map[string]any{"ids": challengeIDs},
 	).Scan(&rows).Error

@@ -415,6 +415,9 @@ func TestEliminations(t *testing.T) {
 	}
 	runs := func(user string, distances ...int) []Activity { return sessions("run", user, distances...) }
 	rides := func(user string, distances ...int) []Activity { return sessions("ride", user, distances...) }
+	abandonedAt := func(id string, at time.Time) Participant {
+		return Participant{UserID: id, Abandoned: true, AbandonedAt: &at}
+	}
 	users := func(ids ...string) []Participant {
 		ps := make([]Participant, len(ids))
 		for i, id := range ids {
@@ -496,6 +499,32 @@ func TestEliminations(t *testing.T) {
 			activities:   runs("b", 5000, 7000),
 		},
 		{
+			name:         "abandoned after a week locked: still eliminated in it",
+			now:          locked(3),
+			participants: []Participant{abandonedAt("a", locked(2).Add(time.Hour))},
+			activities:   runs("a", 5000, 6999),
+			want:         []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 6999, MinimumMeters: 7000}},
+		},
+		{
+			name:         "abandoned at the very lock of a week: judged in it",
+			now:          locked(3),
+			participants: []Participant{abandonedAt("a", locked(2))},
+			activities:   runs("a", 5000, 6999),
+			want:         []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 6999, MinimumMeters: 7000}},
+		},
+		{
+			name:         "abandoned just before the lock of a week: not judged in it",
+			now:          locked(3),
+			participants: []Participant{abandonedAt("a", locked(2).Add(-time.Nanosecond))},
+			activities:   runs("a", 5000, 6999),
+		},
+		{
+			name:         "abandoned: the weeks locked after leaving are not judged",
+			now:          locked(4),
+			participants: []Participant{abandonedAt("a", locked(2).Add(time.Hour)), {UserID: "b"}},
+			activities:   slices.Concat(runs("a", 5000, 7000), runs("b", 5000, 7000, 9000, 11000)),
+		},
+		{
 			name:         "an activity of another sport does not count",
 			now:          locked(2),
 			participants: users("a"),
@@ -566,4 +595,31 @@ func TestEliminations(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestEliminationScoreOfAParticipantEliminatedThenAbandoned: eliminated in a
+// week locked before leaving, a participant is still shown as abandoned,
+// unranked and without progress, and the others rank as without them.
+func TestEliminationScoreOfAParticipantEliminatedThenAbandoned(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 4)
+	left := w.WeekLocksAt(2).Add(time.Hour)
+	w.Now = w.WeekLocksAt(3)
+	run := func(user string, week, m int) Activity {
+		s, _ := w.WeekBounds(week)
+		return Activity{UserID: user, SportCode: "run", StartedAt: s.Add(time.Hour), DurationSeconds: 1800, DistanceMeters: meters(m)}
+	}
+	e := Elimination{Sport: "run", StepMeters: 2000}
+	participants := []Participant{{UserID: "a", Abandoned: true, AbandonedAt: &left}, {UserID: "b"}}
+	activities := []Activity{run("a", 1, 5000), run("a", 2, 6999), run("b", 1, 5000), run("b", 2, 7000), run("b", 3, 9000)}
+
+	if got := e.Eliminations(w, participants, activities); len(got) != 1 || got[0].UserID != "a" || got[0].Week != 2 {
+		t.Fatalf("Eliminations() = %+v, want a eliminated in week 2", got)
+	}
+	got := e.Score(w, participants, activities)
+	if len(got) != 2 || got[0].UserID != "b" || got[0].Rank != 1 || got[0].Value != 21000 {
+		t.Fatalf("Score() = %+v, want b first with 21000 m", got)
+	}
+	if a := got[1]; a.UserID != "a" || !a.Abandoned || a.Rank != 0 || a.Progress != nil {
+		t.Fatalf("Score() a = %+v, want abandoned, unranked, without progress", a)
+	}
 }

@@ -95,7 +95,9 @@ func (r *Repository) PublicNames(ctx context.Context, ids []string) (map[string]
 		FirstName *string
 		LastName  *string
 	}
-	err := r.db.WithContext(ctx).Model(&User{}).Select("id, pseudo, first_name, last_name").
+	// In the transaction of ctx, if any: an admin change holding the week
+	// lock reads the names of its preview on its own connection.
+	err := db.Conn(ctx, r.db).Model(&User{}).Select("id, pseudo, first_name, last_name").
 		Where("id IN ? AND anonymized_at IS NULL", ids).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("read public names: %w", err)

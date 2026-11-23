@@ -22,9 +22,10 @@ type repository interface {
 	ParticipantsOf(ctx context.Context, challengeIDs []string) (map[string][]scoring.Participant, error)
 	// ActivitiesOf gives, in one query, the totals of the activities of the
 	// active participants of each challenge started in its window: per
-	// participant and week for its weekly sport, per participant and sport
-	// for the others; with a points category, per participant, week and
-	// sport for every sport, abandoned participants included.
+	// participant and week for its weekly sport (abandoned participants
+	// included), per participant and sport for the others; with a points
+	// category, per participant, week and sport for every sport, abandoned
+	// participants included.
 	ActivitiesOf(ctx context.Context, scopes []Scope) (map[string][]scoring.Activity, error)
 	// Snapshots gives the frozen results of the challenge by category type,
 	// and when they were frozen; none until the worker has finalized it.

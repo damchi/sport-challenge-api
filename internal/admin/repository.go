@@ -15,8 +15,9 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
 
-// Repository reads the tables of every module for the admin reads, and
-// writes the journal of the admin changes (admin_actions), its only write.
+// Repository reads the tables of every module for the admin reads, writes
+// the journal of the admin changes (admin_actions), its only write, and
+// opens the transaction of an admin change (InLockedTx).
 // Raw SQL, always parameterized.
 type Repository struct {
 	db *gorm.DB
@@ -228,11 +229,8 @@ func (r *Repository) Challenge(ctx context.Context, id string) (ChallengeData, e
 			out.ClosedWeeks[w.WeekNumber] = w.ClosedAt
 		}
 
-		if err := tx.Raw(`SELECT u.id AS user_id, u.pseudo AS user_pseudo, u.first_name AS user_first_name,
-			u.last_name AS user_last_name, e.week_number, e.distance_meters, e.required_meters
-			FROM elimination e JOIN users u ON u.id = e.user_id
-			WHERE e.challenge_id = @id ORDER BY e.week_number, u.id`, args).Scan(&out.Eliminations).Error; err != nil {
-			return fmt.Errorf("read eliminations: %w", err)
+		if out.Eliminations, err = readEliminations(tx, id); err != nil {
+			return err
 		}
 		var frozen struct{ FrozenAt *time.Time }
 		if err := tx.Raw(`SELECT min(created_at) AS frozen_at FROM result_snapshot WHERE challenge_id = @id`, args).
@@ -507,3 +505,43 @@ func readActions(tx *gorm.DB, q ActionQuery) ([]Action, error) {
 	}
 	return out, nil
 }
+
+// readEliminations reads the eliminations of challenge id on tx, earliest
+// week first.
+func readEliminations(tx *gorm.DB, id string) ([]EliminationRow, error) {
+	var out []EliminationRow
+	if err := tx.Raw(`SELECT u.id AS user_id, u.pseudo AS user_pseudo, u.first_name AS user_first_name,
+		u.last_name AS user_last_name, e.week_number, e.distance_meters, e.required_meters
+		FROM elimination e JOIN users u ON u.id = e.user_id
+		WHERE e.challenge_id = @id ORDER BY e.week_number, u.id`, map[string]any{"id": id}).Scan(&out).Error; err != nil {
+		return nil, fmt.Errorf("read eliminations: %w", err)
+	}
+	return out, nil
+}
+
+// Eliminations reads the eliminations of challenge id, earliest week first,
+// in the transaction ctx carries (db.InTx).
+func (r *Repository) Eliminations(ctx context.Context, id string) ([]EliminationRow, error) {
+	return readEliminations(db.Conn(ctx, r.db), id)
+}
+
+// InLockedTx runs fn in a transaction, carried by the ctx it gets (db.InTx),
+// that takes the week lock alone before anything else (db.LockWeeks), in
+// the order of the activity writes, waiting 30 s at most for each lock;
+// rolled back when fn fails.
+func (r *Repository) InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return db.InTx(ctx, r.db, func(ctx context.Context) error {
+		tx := db.Conn(ctx, r.db)
+		// While the change waits for the lock, the activity writes wait
+		// behind it: the wait is bounded, as that of the worker.
+		if err := tx.Exec(`SET LOCAL lock_timeout = '30s'`).Error; err != nil {
+			return fmt.Errorf("bound lock wait: %w", err)
+		}
+		if err := db.LockWeeks(tx); err != nil {
+			return err
+		}
+		return fn(ctx)
+	})
+}
+
+var _ correctionStore = (*Repository)(nil)

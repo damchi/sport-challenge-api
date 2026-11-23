@@ -37,6 +37,47 @@ type fakeRepo struct {
 	// deletedSince is how many SaveSnapshots fail as if an account ranked
 	// had been deleted since the ranking.
 	deletedSince int
+	// steps logs, in order, the week locks taken, the transactions run and
+	// the results cleared; lockErr is the error of LockWeeks.
+	steps   []string
+	lockErr error
+}
+
+func (f *fakeRepo) LockWeeks(context.Context) error {
+	f.steps = append(f.steps, "lock")
+	return f.lockErr
+}
+
+func (f *fakeRepo) WithWeeksShared(ctx context.Context, fn func(ctx context.Context) error) error {
+	f.steps = append(f.steps, "shared")
+	return fn(ctx)
+}
+
+// Challenge reads a challenge of ended, else one of challenges with its
+// elimination category alone.
+func (f *fakeRepo) Challenge(_ context.Context, id string) (EndedChallenge, bool, error) {
+	for _, c := range f.ended {
+		if c.ID == id {
+			return c, true, nil
+		}
+	}
+	for _, c := range f.challenges {
+		if c.ID == id {
+			return EndedChallenge{
+				ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt,
+				Categories: []Category{{ID: c.CategoryID, Type: categoryElimination, Sport: c.Sport, StepMeters: c.StepMeters}},
+			}, true, nil
+		}
+	}
+	return EndedChallenge{}, false, nil
+}
+
+func (f *fakeRepo) ClearResults(_ context.Context, id string) error {
+	f.steps = append(f.steps, "clear "+id)
+	delete(f.closed, id)
+	delete(f.recorded, id)
+	delete(f.snapshots, id)
+	return nil
 }
 
 func (f *fakeRepo) AwaitActivityWrites(context.Context) error {

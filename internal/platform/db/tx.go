@@ -35,8 +35,18 @@ func InTx(ctx context.Context, gdb *gorm.DB, fn func(ctx context.Context) error)
 // Conn returns the transaction of InTx that ctx carries, or gdb outside of
 // one, bound to ctx.
 func Conn(ctx context.Context, gdb *gorm.DB) *gorm.DB {
-	if tx, ok := ctx.Value(txKey{}).(*gorm.DB); ok {
-		return tx.WithContext(ctx)
+	if tx, ok := Tx(ctx); ok {
+		return tx
 	}
 	return gdb.WithContext(ctx)
+}
+
+// Tx returns the transaction of InTx that ctx carries, bound to ctx; false
+// outside of one.
+func Tx(ctx context.Context) (*gorm.DB, bool) {
+	tx, ok := ctx.Value(txKey{}).(*gorm.DB)
+	if !ok {
+		return nil, false
+	}
+	return tx.WithContext(ctx), true
 }
