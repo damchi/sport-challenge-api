@@ -365,7 +365,8 @@ sport-challenge-api/
 │   │   └── main.go                  assemble config, base, services, routes et lance le serveur HTTP
 │   ├── worker/
 │   │   └── main.go                  tâches : close-weeks, finalize-challenges, retry-auth0-deletions (V2 : sync, refresh-tokens) ;
-│   │                                appelle directement closure.Service et user.Service
+│   │                                appelle directement closure.Service et user.Service ; chaque passage est
+│   │                                consigné par workerrun.Service
 │   └── migrate/
 │       └── main.go                  applique les migrations embarquées (up, down, force) : job lancé avant chaque déploiement
 ├── internal/
@@ -449,6 +450,11 @@ sport-challenge-api/
 │   │   ├── model.go                 challenges à clore, résultats, instantanés
 │   │   ├── repository.go            clôtures de semaine, éliminations, result_snapshot (SQL brut)
 │   │   └── service.go               clôture de semaine, éliminations, gel des résultats
+│   │
+│   ├── workerrun/                   sans handler : appelé par le worker
+│   │   ├── model.go                 issue d'un passage (réussi, échoué)
+│   │   ├── repository.go            worker_runs : début, fin, rétention des 500 derniers par tâche (SQL brut)
+│   │   └── service.go               consigne chaque passage autour de la tâche, échec compris (code d'erreur stable)
 │   │
 │   ├── badge/                       (cible, V1.1)
 │   │   ├── model.go                 BadgeDefinition (par challenge, règle en JSON), BadgeAward
@@ -535,6 +541,7 @@ flowchart TD
 | `scoring` | Calcule un classement à partir d'activités et de règles, sans dépendance à la base ni à Gin |
 | `leaderboard` | Charge participants et activités, appelle les scorers, renvoie un classement par catégorie |
 | `closure` | Au verrouillage de chaque semaine : éliminations, badges « semaines de suite » ; au verrouillage de la dernière : gel des résultats |
+| `workerrun` | Consigne chaque passage du worker (tâche, début, fin, issue, code d'erreur sans donnée personnelle) et ne garde que les 500 derniers par tâche ; alimente le tableau de bord admin (§2.12) |
 | `badge` | Badges créés par les créateurs d'un challenge (nom, description, condition structurée) ; évaluation à chaque nouvelle activité, attribution idempotente |
 | `integration` | (V2+) Connexion OAuth au fournisseur, réception des webhooks, import, dédoublonnage |
 
