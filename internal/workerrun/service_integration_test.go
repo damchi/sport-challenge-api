@@ -170,3 +170,50 @@ func TestSchemaRefusesInvalidRuns(t *testing.T) {
 		})
 	}
 }
+
+// The last failure of a task is kept however old, for the dashboard; an
+// older failure goes with the other old runs.
+func TestRunKeepsTheLastFailureOfTheTask(t *testing.T) {
+	s, pool, clk := newService(t)
+	ctx := t.Context()
+	lastFailure := runStart.Add(-(keptRuns + 10) * time.Minute)
+	olderFailure := runStart.Add(-(keptRuns + 20) * time.Minute)
+	for _, at := range []time.Time{olderFailure, lastFailure} {
+		if _, err := pool.Exec(ctx, `INSERT INTO worker_runs (task, started_at, ended_at, outcome, error_code)
+			VALUES ('close-weeks', $1, $1, 'failed', 'internal_error')`, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO worker_runs (task, started_at, ended_at, outcome)
+		SELECT 'close-weeks', t, t, 'succeeded' FROM generate_series($1::timestamptz - make_interval(mins => $2), $1::timestamptz - interval '1 minute', interval '1 minute') t`,
+		runStart, keptRuns); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Run(ctx, "close-weeks", func(context.Context) error { clk.Advance(time.Second); return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	var total int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM worker_runs WHERE task = 'close-weeks'`).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	var failures []time.Time
+	rows, err := pool.Query(ctx, `SELECT started_at FROM worker_runs WHERE outcome = 'failed' ORDER BY started_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var at time.Time
+		if err := rows.Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		failures = append(failures, at)
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
+	}
+	if total != keptRuns+1 || len(failures) != 1 || !failures[0].Equal(lastFailure) {
+		t.Fatalf("kept %d runs, failures %v; want %d runs with only the failure of %v", total, failures, keptRuns+1, lastFailure)
+	}
+}

@@ -10,7 +10,8 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 )
 
-// keptRuns is the number of most recent runs kept for each task.
+// keptRuns is the number of most recent runs kept for each task, besides its
+// last failure.
 const keptRuns = 500
 
 // finishTimeout bounds the end of the recording, which runs even when the
@@ -38,7 +39,7 @@ func NewService(repo repository, c clock.Clock, logger *slog.Logger) *Service {
 
 // Run records a run of task around fn: a row when it starts, ended with its
 // outcome when fn returns, failure included; then only the most recent runs
-// of the task are kept. The record only observes: a failure to write it is
+// of the task are kept, with its last failure. The record only observes: a failure to write it is
 // logged, never stops fn nor changes its result, which Run returns.
 func (s *Service) Run(ctx context.Context, task string, fn func(context.Context) error) error {
 	id, err := s.repo.Start(ctx, task, s.clock.Now())

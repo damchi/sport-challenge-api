@@ -46,11 +46,16 @@ func (r *Repository) Finish(ctx context.Context, id string, endedAt time.Time, o
 	return nil
 }
 
-// Trim deletes the runs of task beyond the keep most recent ones.
+// Trim deletes the runs of task beyond the keep most recent ones, except its
+// last failure, which the admin dashboard shows however old it is. IS
+// DISTINCT FROM: a task that never failed has no such run.
 func (r *Repository) Trim(ctx context.Context, task string, keep int) error {
 	err := db.Conn(ctx, r.db).Exec(
 		`DELETE FROM worker_runs WHERE task = @task AND id NOT IN (
-			SELECT id FROM worker_runs WHERE task = @task ORDER BY started_at DESC, id DESC LIMIT @keep)`,
+			SELECT id FROM worker_runs WHERE task = @task ORDER BY started_at DESC, id DESC LIMIT @keep)
+		AND id IS DISTINCT FROM (
+			SELECT id FROM worker_runs WHERE task = @task AND outcome = 'failed'
+			ORDER BY started_at DESC, id DESC LIMIT 1)`,
 		map[string]any{"task": task, "keep": keep},
 	).Error
 	if err != nil {

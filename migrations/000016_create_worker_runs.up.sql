@@ -1,8 +1,8 @@
 -- Runs of the worker (SC-API-155, README §5.4): each task writes a row when
 -- it starts and ends it when it stops, failure included, for the admin
 -- dashboard (last run and last failure of each task, §2.12). Only the 500
--- most recent rows of each task are kept, trimmed by the worker at the end of
--- each run. No personal data: the outcome and a stable error code only, never
+-- most recent rows of each task are kept, plus its last failure however old,
+-- trimmed by the worker at the end of each run. No personal data: the outcome and a stable error code only, never
 -- an error message. started_at has no default: the worker sets it from
 -- platform/clock.
 CREATE TABLE worker_runs (
