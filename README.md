@@ -175,6 +175,18 @@ Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles
 
 - ✅ Gratuit pour le moment.
 
+### 2.11 Page de présentation (landing page)
+
+Décisions du propriétaire du produit du 2026-11-23 (SC-API-151) :
+
+- ✅ Une **page de présentation publique** s'affiche à `/` pour un visiteur **non connecté** ; une personne connectée voit à la place la page d'accueil de l'app, avec ses défis (côté frontend). Elle est servie par le frontend, avec un **contenu statique** : elle n'appelle pas l'API, qui exige une connexion pour toutes ses routes (§5.7). Elle ne liste donc pas les challenges publics, lisibles seulement par un utilisateur connecté (§2.1, §5.7).
+- ✅ Elle ne présente que des règles ✅ de ce README, sans en inventer ni en promettre d'autres, et suit leur évolution. Elle explique, dans cet ordre :
+  1. **Le principe** (§1, §2.1) : créer un défi entre amis, en choisir la durée (de 2 à 52 semaines), la date de début, la visibilité (privé ou public) et si les participants peuvent inviter ; saisir chaque activité **une seule fois** : elle compte dans tous les défis où l'on participe et dont la période contient sa date (§2.5). Gratuit (§2.10).
+  2. **Les semaines** (§2.1, §2.3, §2.5) : découpées dans le fuseau du défi ; une activité compte pour la semaine de son début et se saisit, se modifie ou se supprime jusqu'au **verrouillage**, à 7 h, heure locale du défi, le premier jour de la semaine suivante.
+  3. **Les catégories**, chacune avec son **podium** (§2.3) : le **temps cumulé**, toujours, tous sports confondus ; au choix du créateur, la **distance cumulée** (distances ramenées au sport de référence, §2.4), l'**élimination** (la distance du sport de référence doit atteindre chaque semaine celle de la semaine précédente plus X km ; pas d'élimination en semaine 1) et les **Points** (mini-classements hebdomadaires, points au top 5 ou au top 10). Chaque participant est classé dans toutes les catégories du défi (§2.2).
+  4. **La participation** (§2.2, §2.6) : on rejoint un défi jusqu'à la fin de sa première semaine ; quitter un défi, c'est abandonner toutes ses catégories, définitivement ; les égalités sont des ex aequo (1, 1, 3) ; il n'y a ni handicap ni catégorie de niveau.
+- ✅ Les fonctionnalités prévues après la V1 (notamment la synchronisation Strava, Garmin, Polar et Coros et les badges, §7) **n'y figurent pas**, même comme « bientôt ».
+
 ---
 
 ## 3. Stack technique
@@ -514,7 +526,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 **Groupes de routes**
 - Publiques, sans jeton : `GET /health` et `GET /ready` (sondes de Cloud Run), et les pré-requêtes `OPTIONS` (CORS).
 - Protégées (tout le reste, dont `/api/v1`) : middlewares 1 à 10 ; les routes publiques passent par tous sauf 7 à 9. **Protégé par défaut** : `cmd/api` applique `Authenticate` puis `CurrentUser` à toute route absente d'une liste explicite de routes publiques, et `api/openapi.yaml` exige `bearerAuth` au niveau global (seules les sondes le surchargent avec `security: []`). Une nouvelle route est donc protégée sans rien ajouter ; un test parcourt les routes enregistrées pour le vérifier.
-- ✅ Connexion **obligatoire** pour toutes les routes, y compris la lecture des challenges publics (V1). Pas de middleware `OptionalAuth` pour l'instant.
+- ✅ Connexion **obligatoire** pour toutes les routes, y compris la lecture des challenges publics (V1). Pas de middleware `OptionalAuth` pour l'instant. La page de présentation publique (§2.11) n'y fait pas exception : servie par le frontend, elle n'appelle pas l'API.
 - V2 : `POST /webhooks/{provider}` n'utilise pas le jeton utilisateur mais un middleware de **vérification de signature** du fournisseur.
 
 **Indépendance du fournisseur**
