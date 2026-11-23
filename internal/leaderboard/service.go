@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
@@ -435,7 +436,8 @@ func thaw(categoryType string, r frozenRanking, deleted map[string]bool) []scori
 // scopeOf is what the activities of challenge id, with categories, are read
 // for in window w: the sport of its elimination category summed per week,
 // the groups of its points category, and the elevation gains of its
-// cumulative elevation category; none without such a category.
+// cumulative elevation category or of the weekly elevation criterion of its
+// points category; none without such a category.
 func scopeOf(id string, categories []Category, w scoring.Window) Scope {
 	sc := Scope{ChallengeID: id, Window: w}
 	for _, cat := range categories {
@@ -444,6 +446,9 @@ func scopeOf(id string, categories []Category, w scoring.Window) Scope {
 			sc.WeeklySport = cat.Sport
 		case CategoryPoints:
 			sc.Points = &PointsRead{MinSessionSeconds: cat.MinSessionSeconds}
+			if slices.Contains(cat.Criteria, scoring.CriterionWeeklyElevation) {
+				sc.Elevation = true
+			}
 		case CategoryElevation:
 			sc.Elevation = true
 		}

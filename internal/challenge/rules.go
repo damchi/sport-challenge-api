@@ -47,7 +47,10 @@ const (
 var pointsPodiums = []int{5, 10}
 
 // pointsCriteria are the criteria of the points category.
-var pointsCriteria = []string{scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount}
+var pointsCriteria = []string{
+	scoring.CriterionLongestDuration, scoring.CriterionLongestDistance,
+	scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation,
+}
 
 // Draft is a challenge as its creator describes it.
 type Draft struct {

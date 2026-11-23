@@ -162,8 +162,9 @@ func TestValidate(t *testing.T) {
 		// Points: at least one known criterion, each once; a podium of 5 or
 		// 10; a minimum session of 1 to 180 minutes.
 		{name: "points with every criterion", draft: with(func(d *Draft) {
-			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount)
+			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation)
 		})},
+		{name: "points with the weekly elevation alone", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionWeeklyElevation) })},
 		{name: "points in a top 10", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.Podium = 10 })},
 		{name: "points with a session of 1 min", draft: with(func(d *Draft) {
 			d.Points = points(scoring.CriterionSessionCount)
@@ -177,6 +178,9 @@ func TestValidate(t *testing.T) {
 		{name: "points with an unknown criterion", draft: with(func(d *Draft) { d.Points = points("fastest") }), wantFields: "categories.points.criteria"},
 		{name: "points with a criterion twice", draft: with(func(d *Draft) {
 			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDuration)
+		}), wantFields: "categories.points.criteria"},
+		{name: "points with the weekly elevation twice", draft: with(func(d *Draft) {
+			d.Points = points(scoring.CriterionWeeklyElevation, scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation)
 		}), wantFields: "categories.points.criteria"},
 		{name: "points in a top 3", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.Podium = 3 }), wantFields: "categories.points.podium"},
 		{name: "points with a session of 0 min", draft: with(func(d *Draft) {

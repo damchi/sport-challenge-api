@@ -334,6 +334,7 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		Criteria: []string{scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount},
 		Podium:   5, Factors: factors,
 	}
+	weeklyElevation := scoring.Points{Criteria: []string{scoring.CriterionWeeklyElevation}, Podium: 5}
 	scorers := []struct {
 		name   string
 		scorer scoring.Scorer
@@ -348,6 +349,7 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		{"distance, points category", scoring.Distance{Factors: factors}, groups},
 		{"elimination, points category", elimination, groups},
 		{"points", points, groups},
+		{"points, weekly elevation", weeklyElevation, groups},
 		{"elevation", scoring.Elevation{}, totals},
 		{"elevation, points category", scoring.Elevation{}, groups},
 	}
@@ -384,6 +386,10 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	// The elevation gains must rank someone.
 	if e := (scoring.Elevation{}).Score(w, participants, raw); e[0].Value == 0 {
 		t.Fatalf("elevation ranking %+v: want gains, or the comparison proves little", e)
+	}
+	// The weekly elevation must score too.
+	if e := weeklyElevation.Score(w, participants, raw); e[0].Value == 0 {
+		t.Fatalf("weekly elevation points %+v: want points, or the comparison proves little", e)
 	}
 	// And the points must differ, the abandoned participant's included.
 	w.Now = w.WeekLocksAt(3)

@@ -72,8 +72,9 @@ func (r *Repository) ParticipantsOf(ctx context.Context, challengeIDs []string) 
 
 // Scope is what the activities of a challenge are read for: its window, the
 // sport of its elimination category, summed per week, its points category,
-// nil without one, and whether it has the cumulative elevation category,
-// whose elevation gains are then summed.
+// nil without one, and whether its elevation gains are summed: for the
+// cumulative elevation category, or the weekly elevation criterion of the
+// points category.
 type Scope struct {
 	ChallengeID string
 	Window      scoring.Window
@@ -92,7 +93,8 @@ type PointsRead struct {
 // Activities is ActivitiesOf for challenge challengeID alone, in window w
 // with weeklySport summed per week, the groups of a points category whose
 // minimum session is minSessionSeconds (0 without such a category), and the
-// elevation gains summed when elevation (the cumulative elevation category).
+// elevation gains summed when elevation (the cumulative elevation category,
+// or the weekly elevation criterion of the points category).
 func (r *Repository) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
 	sc := Scope{ChallengeID: challengeID, Window: w, WeeklySport: weeklySport, Elevation: elevation}
 	if minSessionSeconds > 0 {
@@ -127,8 +129,9 @@ const pointsColumns = `,
 			COUNT(*) FILTER (WHERE a.duration_seconds >= w.min_seconds) AS sessions`
 
 // elevationColumn is the column ActivitiesOf adds for the cumulative
-// elevation category: the sum of the elevation gains of a group, null when
-// none of it has one.
+// elevation category and the weekly elevation criterion of the points
+// category: the sum of the elevation gains of a group, every session counted
+// whatever its duration, null when none of it has one.
 const elevationColumn = `,
 			SUM(a.elevation_gain_meters) AS elevation_meters`
 
@@ -146,21 +149,22 @@ const elevationColumn = `,
 // grouped per participant, week and sport, and each group also carries its
 // longest session by duration and by distance and how many of its sessions
 // last at least the minimum (Activity.LongestSeconds, LongestMeters,
-// Sessions; zero for the other challenges). For a challenge with a
-// cumulative elevation category (Scope.Elevation), each group also carries
-// the sum of its elevation gains (Activity.ElevationMeters; nil for the
-// other challenges). With a points category, the activities of the
+// Sessions; zero for the other challenges). For a challenge whose elevation
+// gains are read (Scope.Elevation: the cumulative elevation category, or the
+// weekly elevation criterion of the points category), each total or group
+// also carries the sum of its elevation gains (Activity.ElevationMeters; nil
+// for the other challenges). With a points category, the activities of the
 // abandoned participants are read too, the points category keeping them in
 // the weeks locked before they left; the other scorers do not count them.
 // Those of the deleted accounts never are.
 //
 // Contract: the scorers only sum durations, distances and elevation gains,
 // per participant and sport, and per week for the elimination sport, and the
-// points category only reads the longest session and the count of a
-// participant's sessions per week and sport, so these groups rank exactly as
-// the raw activities do
-// (the equivalent distance of a session is its distance times the factor of
-// its sport, so the longest of a sport is its longest distance); the
+// points category only reads the longest session, the count of a
+// participant's sessions and the sum of their elevation gains per week and
+// sport, so these groups rank exactly as the raw activities do (the
+// equivalent distance of a session is its distance times the factor of its
+// sport, so the longest of a sport is its longest distance); the
 // rankings are still computed from them, never stored. A scorer that would
 // read anything else of one activity needs the raw activities instead. The
 // weeks are cut in Go (Window.WeekBounds) and given to the database as their

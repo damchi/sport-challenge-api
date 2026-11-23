@@ -467,3 +467,164 @@ func TestPointsDaylightSaving(t *testing.T) {
 		})
 	}
 }
+
+func TestPointsWeeklyElevation(t *testing.T) {
+	// 3 weeks in Toronto from Monday 2026-03-02: the clocks go forward on
+	// Sunday 2026-03-08, in week 1 (167 h).
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 3)
+	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
+	lock := w.WeekLocksAt
+	final := lock(3)
+	factors := map[string]float64{"run": 1, "ride": 0.3, "hike": 1}
+	elevation := Points{Criteria: []string{CriterionWeeklyElevation}, Podium: 5, Factors: factors}
+	// climb is a session of sport in week n with an elevation gain.
+	climb := func(user, sport string, start time.Time, gain *int) Activity {
+		a := session(user, sport, start, 3600, meters(10000))
+		a.ElevationMeters = gain
+		return a
+	}
+	in := func(n int) time.Time { return weekStart(n).Add(time.Hour) }
+	abandoned := func(id string, left time.Time) Participant {
+		return Participant{UserID: id, Abandoned: true, AbandonedAt: at(left)}
+	}
+
+	tests := []struct {
+		name         string
+		points       Points
+		now          time.Time
+		participants []Participant
+		activities   []Activity
+		want         []Entry
+	}{
+		{
+			name:         "the elevation gain of the week, summed over the sports, real meters without factor",
+			points:       elevation,
+			now:          final,
+			participants: users("a", "b"),
+			activities: []Activity{
+				// a: 300 + 400 = 700 m; b: a single ride of 600 m, no factor.
+				climb("a", "run", in(1), meters(300)), climb("a", "hike", in(1).Add(2*time.Hour), meters(400)),
+				climb("b", "ride", in(1), meters(600)),
+			},
+			want: []Entry{{UserID: "a", Rank: 1, Value: 10}, {UserID: "b", Rank: 2, Value: 8}},
+		},
+		{
+			name:         "no elevation gain, or 0 m, does not score",
+			points:       elevation,
+			now:          final,
+			participants: users("a", "b", "c"),
+			activities: []Activity{
+				climb("a", "run", in(1), meters(50)), climb("b", "run", in(1), meters(0)), climb("c", "run", in(1), nil),
+			},
+			want: []Entry{{UserID: "a", Rank: 1, Value: 10}, {UserID: "b", Rank: 2}, {UserID: "c", Rank: 2}},
+		},
+		{
+			name:         "a session under the minimum still counts for the elevation gain",
+			points:       elevation,
+			now:          final,
+			participants: users("a", "b"),
+			activities: func() []Activity {
+				short := session("a", "run", in(1), minSession-1, meters(3000))
+				short.ElevationMeters = meters(300)
+				return []Activity{short, climb("b", "run", in(1), meters(100))}
+			}(),
+			want: []Entry{{UserID: "a", Rank: 1, Value: 10}, {UserID: "b", Rank: 2, Value: 8}},
+		},
+		{
+			name:         "three tied at the edge of the top 5 each get the points of 5th",
+			points:       elevation,
+			now:          final,
+			participants: users("a", "b", "c", "d", "e", "f", "g", "h"),
+			activities: []Activity{
+				climb("a", "run", in(1), meters(900)), climb("b", "run", in(1), meters(800)),
+				climb("c", "run", in(1), meters(700)), climb("d", "run", in(1), meters(600)),
+				climb("e", "run", in(1), meters(500)), climb("f", "ride", in(1), meters(500)),
+				climb("g", "hike", in(1), meters(500)), climb("h", "run", in(1), meters(400)),
+			},
+			want: []Entry{
+				{UserID: "a", Rank: 1, Value: 10},
+				{UserID: "b", Rank: 2, Value: 8},
+				{UserID: "c", Rank: 3, Value: 6},
+				{UserID: "d", Rank: 4, Value: 4},
+				{UserID: "e", Rank: 5, Value: 2},
+				{UserID: "f", Rank: 5, Value: 2},
+				{UserID: "g", Rank: 5, Value: 2},
+				{UserID: "h", Rank: 8},
+			},
+		},
+		{
+			name:         "6:59 on the first day of week 2: week 1 still provisional",
+			points:       elevation,
+			now:          lock(1).Add(-time.Minute),
+			participants: users("a", "b"),
+			activities:   []Activity{climb("a", "run", in(1), meters(300)), climb("b", "run", in(1), meters(200))},
+			want:         []Entry{{UserID: "a", Rank: 1, Provisional: points(10)}, {UserID: "b", Rank: 1, Provisional: points(8)}},
+		},
+		{
+			name:         "7:00 on the first day of week 2: week 1 acquired",
+			points:       elevation,
+			now:          lock(1),
+			participants: users("a", "b"),
+			activities:   []Activity{climb("a", "run", in(1), meters(300)), climb("b", "run", in(1), meters(200))},
+			want: []Entry{
+				{UserID: "a", Rank: 1, Value: 10, Provisional: points(0)}, {UserID: "b", Rank: 2, Value: 8, Provisional: points(0)},
+			},
+		},
+		{
+			name:         "across the change of time, a session running into week 2 counts for week 1",
+			points:       elevation,
+			now:          final,
+			participants: users("a", "b"),
+			activities: []Activity{
+				// a: Sunday 23:30 EDT, the last day of week 1 (167 h), 600 m.
+				climb("a", "run", weekStart(2).Add(-30*time.Minute), meters(600)),
+				// b: 300 m in week 1, 900 m at the first instant of week 2.
+				climb("b", "run", in(1), meters(300)), climb("b", "run", weekStart(2), meters(900)),
+			},
+			// Week 1: a 10, b 8; week 2: b alone 10.
+			want: []Entry{{UserID: "b", Rank: 1, Value: 18}, {UserID: "a", Rank: 2, Value: 10}},
+		},
+		{
+			name:         "abandoned after the lock of week 1: kept in week 1, out of week 2",
+			points:       elevation,
+			now:          final,
+			participants: []Participant{abandoned("q", lock(1).Add(time.Hour)), {UserID: "a"}},
+			activities: []Activity{
+				climb("q", "run", in(1), meters(900)), climb("a", "run", in(1), meters(100)),
+				climb("q", "run", in(2), meters(900)), climb("a", "run", in(2), meters(100)),
+			},
+			// a: 8 in week 1 behind q, 10 in week 2 alone.
+			want: []Entry{{UserID: "a", Rank: 1, Value: 18}, {UserID: "q", Abandoned: true}},
+		},
+		{
+			name:         "abandoned before the lock of week 1: out of week 1 too",
+			points:       elevation,
+			now:          final,
+			participants: []Participant{abandoned("q", lock(1).Add(-time.Second)), {UserID: "a"}},
+			activities:   []Activity{climb("q", "run", in(1), meters(900)), climb("a", "run", in(1), meters(100))},
+			want:         []Entry{{UserID: "a", Rank: 1, Value: 10}, {UserID: "q", Abandoned: true}},
+		},
+		{
+			name:         "with the other criteria, each its own weekly ranking",
+			points:       Points{Criteria: []string{CriterionLongestDuration, CriterionWeeklyElevation}, Podium: 5, Factors: factors},
+			now:          final,
+			participants: users("a", "b"),
+			activities: []Activity{
+				// a has the longest session, b the most elevation gain.
+				session("a", "run", in(1), 7200, nil), climb("b", "hike", in(1).Add(3*time.Hour), meters(500)),
+			},
+			// Longest: a 10, b 8; elevation: b 10, a nothing.
+			want: []Entry{{UserID: "b", Rank: 1, Value: 18}, {UserID: "a", Rank: 2, Value: 10}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := w
+			w.Now = tt.now
+			got := tt.points.Score(w, tt.participants, tt.activities)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Score() =\n%s\nwant\n%s", formatEntries(got), formatEntries(tt.want))
+			}
+		})
+	}
+}
