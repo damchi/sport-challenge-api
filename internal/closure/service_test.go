@@ -107,9 +107,11 @@ type fakeData struct {
 	activities   []scoring.Activity
 	loads        int
 	// weekly is the sport the activities were asked to sum per week, and
-	// minSession the minimum session of the points groups asked for.
+	// minSession the minimum session of the points groups asked for, and
+	// elevation whether the elevation gains were.
 	weekly     string
 	minSession int
+	elevation  bool
 }
 
 func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant, error) {
@@ -117,9 +119,9 @@ func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant,
 	return f.participants, nil
 }
 
-func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport string, minSessionSeconds int) ([]scoring.Activity, error) {
+func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
 	f.loads++
-	f.weekly, f.minSession = weeklySport, minSessionSeconds
+	f.weekly, f.minSession, f.elevation = weeklySport, minSessionSeconds, elevation
 	return f.activities, nil
 }
 
@@ -493,6 +495,35 @@ func TestFinalizeChallenges(t *testing.T) {
 		}
 	})
 
+	t.Run("the cumulative elevation category is frozen from the elevation gains", func(t *testing.T) {
+		repo := newFakeRepo()
+		withElevation := c
+		withElevation.Categories = append(slices.Clone(c.Categories), Category{ID: "cat5", Type: categoryElevation})
+		repo.ended = []EndedChallenge{withElevation}
+		gain := func(m int) *int { return &m }
+		climbs := slices.Clone(activities)
+		climbs = append(climbs,
+			scoring.Activity{UserID: "a", SportCode: "hike", StartedAt: c.StartsAt, DurationSeconds: 60, DistanceMeters: gain(100), ElevationMeters: gain(800)},
+			scoring.Activity{UserID: "b", SportCode: "ride", StartedAt: c.StartsAt, DurationSeconds: 60, DistanceMeters: gain(100), ElevationMeters: gain(800)},
+			scoring.Activity{UserID: "quitter", SportCode: "ride", StartedAt: c.StartsAt, DurationSeconds: 60, DistanceMeters: gain(100), ElevationMeters: gain(5000)},
+		)
+		data := &fakeData{participants: participants, activities: climbs}
+		if _, err := NewService(repo, data, clock.NewFake(lock), discard()).FinalizeChallenges(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if !data.elevation {
+			t.Fatal("activities asked without the elevation gains")
+		}
+		want := payload{Entries: []payloadEntry{
+			{UserID: "a", Rank: 1, Value: 800},
+			{UserID: "b", Rank: 1, Value: 800},
+			{UserID: "quitter", Abandoned: true},
+		}}
+		if got := payloadOf(t, repo, "cat5"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("elevation ranking = %+v, want %+v", got, want)
+		}
+	})
+
 	t.Run("an account deleted since the ranking has the challenge ranked again", func(t *testing.T) {
 		repo := newFakeRepo()
 		repo.ended = []EndedChallenge{c}
@@ -616,6 +647,16 @@ func TestEliminationSport(t *testing.T) {
 	}
 	if got := eliminationSport(with[:1]); got != "" {
 		t.Fatalf("without an elimination category: %q, want empty", got)
+	}
+}
+
+func TestHasElevation(t *testing.T) {
+	with := []Category{{Type: categoryCumulativeTime}, {Type: categoryElevation}}
+	if !hasElevation(with) {
+		t.Fatal("with a cumulative elevation category: false, want true")
+	}
+	if hasElevation(with[:1]) {
+		t.Fatal("without a cumulative elevation category: true, want false")
 	}
 }
 

@@ -252,6 +252,8 @@ func (s *Service) scorerOf(cat Category) (scoring.Scorer, error) {
 		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters, AtRisk: s.atRisk}, nil
 	case CategoryPoints:
 		return scoring.Points{Criteria: cat.Criteria, Podium: cat.Podium, Factors: cat.Factors}, nil
+	case CategoryElevation:
+		return scoring.Elevation{}, nil
 	default:
 		return nil, fmt.Errorf("unknown category type %q", cat.Type)
 	}
@@ -431,8 +433,9 @@ func thaw(categoryType string, r frozenRanking, deleted map[string]bool) []scori
 }
 
 // scopeOf is what the activities of challenge id, with categories, are read
-// for in window w: the sport of its elimination category summed per week, and
-// the groups of its points category; neither without such a category.
+// for in window w: the sport of its elimination category summed per week,
+// the groups of its points category, and the elevation gains of its
+// cumulative elevation category; none without such a category.
 func scopeOf(id string, categories []Category, w scoring.Window) Scope {
 	sc := Scope{ChallengeID: id, Window: w}
 	for _, cat := range categories {
@@ -441,6 +444,8 @@ func scopeOf(id string, categories []Category, w scoring.Window) Scope {
 			sc.WeeklySport = cat.Sport
 		case CategoryPoints:
 			sc.Points = &PointsRead{MinSessionSeconds: cat.MinSessionSeconds}
+		case CategoryElevation:
+			sc.Elevation = true
 		}
 	}
 	return sc

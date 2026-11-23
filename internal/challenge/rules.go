@@ -70,6 +70,9 @@ type Draft struct {
 	Elimination *EliminationDraft
 	// Points is the points category, nil when not chosen.
 	Points *PointsDraft
+	// Elevation is whether the challenge has the cumulative elevation gain
+	// category; it has no settings.
+	Elevation bool
 	// ReferenceSport is the sport the distances are brought back to and the
 	// elimination is run in; nil for run (an empty code is refused).
 	ReferenceSport *string

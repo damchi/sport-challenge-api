@@ -44,6 +44,7 @@ func (h *Handler) CreateChallenge(ctx context.Context, req api.CreateChallengeRe
 	}
 	if cats := b.Categories; cats != nil {
 		draft.Distance = cats.CumulativeDistance != nil
+		draft.Elevation = cats.CumulativeElevation != nil
 		if e := cats.Elimination; e != nil {
 			draft.Elimination = &EliminationDraft{StepMeters: e.StepMeters}
 		}

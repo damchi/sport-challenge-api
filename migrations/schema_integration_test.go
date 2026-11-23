@@ -109,7 +109,10 @@ func TestConstraints(t *testing.T) {
 
 		// points category (000014)
 		{name: "the 4 categories", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_distance', 2), ('` + challengeID + `', 'elimination', 3), ('` + challengeID + `', 'points', 4)`},
-		{name: "position 5", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'points', 5)`, constraint: "categories_position_check"},
+
+		// cumulative elevation category (000017)
+		{name: "the 5 categories", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_time', 1), ('` + challengeID + `', 'cumulative_distance', 2), ('` + challengeID + `', 'elimination', 3), ('` + challengeID + `', 'points', 4), ('` + challengeID + `', 'cumulative_elevation', 5)`},
+		{name: "position 6", sql: `INSERT INTO categories (challenge_id, type, position) VALUES ('` + challengeID + `', 'cumulative_elevation', 6)`, constraint: "categories_position_check"},
 
 		// participants (000004)
 		{name: "active participant", sql: `INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL)`},

@@ -51,8 +51,8 @@ type Draft struct {
 	DurationSeconds int
 	// DistanceMeters is nil when no distance is entered.
 	DistanceMeters *int
-	// ElevationGainMeters is nil when no elevation gain is entered. It is
-	// shown only: no category nor badge counts it (README §2.5).
+	// ElevationGainMeters is nil when no elevation gain is entered. Only the
+	// cumulative elevation category counts it, no badge (README §2.5).
 	ElevationGainMeters *int
 }
 

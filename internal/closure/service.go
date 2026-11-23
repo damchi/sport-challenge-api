@@ -58,6 +58,7 @@ const (
 	categoryCumulativeDistance = "cumulative_distance"
 	categoryElimination        = "elimination"
 	categoryPoints             = "points"
+	categoryElevation          = "cumulative_elevation"
 )
 
 // Activities gives the participants of a challenge and, in one query, the
@@ -65,11 +66,11 @@ const (
 // per participant and week for weeklySport, per participant and sport for the
 // others; with minSessionSeconds > 0, the groups of a points category whose
 // minimum session it is: every sport per participant, week and sport,
-// abandoned participants included (module leaderboard, which ranks from the
-// same data).
+// abandoned participants included; with elevation, the sum of the elevation
+// gains of each total (module leaderboard, which ranks from the same data).
 type Activities interface {
 	Participants(ctx context.Context, challengeID string) ([]scoring.Participant, error)
-	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int) ([]scoring.Activity, error)
+	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error)
 }
 
 // Service holds the use cases of the closure.
@@ -166,7 +167,7 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 	if err != nil {
 		return 0, 0, err
 	}
-	activities, err := s.data.Activities(ctx, c.ID, w, c.Sport, 0)
+	activities, err := s.data.Activities(ctx, c.ID, w, c.Sport, 0, false)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -276,7 +277,7 @@ func (s *Service) freeze(ctx context.Context, c EndedChallenge, w scoring.Window
 	if err != nil {
 		return false, err
 	}
-	activities, err := s.data.Activities(ctx, c.ID, w, eliminationSport(c.Categories), minSessionSeconds(c.Categories))
+	activities, err := s.data.Activities(ctx, c.ID, w, eliminationSport(c.Categories), minSessionSeconds(c.Categories), hasElevation(c.Categories))
 	if err != nil {
 		return false, err
 	}
@@ -330,6 +331,17 @@ func minSessionSeconds(categories []Category) int {
 	return 0
 }
 
+// hasElevation reports whether categories has the cumulative elevation
+// category, whose elevation gains are then read.
+func hasElevation(categories []Category) bool {
+	for _, cat := range categories {
+		if cat.Type == categoryElevation {
+			return true
+		}
+	}
+	return false
+}
+
 // scorerOf returns the scorer of a category, from the type and the settings
 // frozen at the creation of the challenge (as the leaderboard does).
 func scorerOf(cat Category) (scoring.Scorer, error) {
@@ -342,6 +354,8 @@ func scorerOf(cat Category) (scoring.Scorer, error) {
 		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters}, nil
 	case categoryPoints:
 		return scoring.Points{Criteria: cat.Criteria, Podium: cat.Podium, Factors: cat.Factors}, nil
+	case categoryElevation:
+		return scoring.Elevation{}, nil
 	default:
 		return nil, fmt.Errorf("unknown category type %q", cat.Type)
 	}

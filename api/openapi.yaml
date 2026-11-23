@@ -1731,10 +1731,19 @@ components:
           $ref: "#/components/schemas/EliminationCreate"
         points:
           $ref: "#/components/schemas/PointsCreate"
+        cumulative_elevation:
+          $ref: "#/components/schemas/CumulativeElevationCreate"
     CumulativeDistanceCreate:
       type: object
       additionalProperties: false
       description: Cumulative distance, with the factors of `distance_factors`; no settings of its own.
+    CumulativeElevationCreate:
+      type: object
+      additionalProperties: false
+      description: |
+        Cumulative elevation gain: the elevation gains of the activities of
+        every sport that takes one, in real meters, without factor (an
+        activity without is 0 m); no settings.
     EliminationCreate:
       type: object
       required: [step_meters]
@@ -1820,12 +1829,12 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, elimination, points]
+          enum: [cumulative_time, cumulative_distance, elimination, points, cumulative_elevation]
         position:
           type: integer
           minimum: 1
-          maximum: 4
-          description: Fixed by type, gaps left by the missing categories (cumulative_time 1, cumulative_distance 2, elimination 3, points 4).
+          maximum: 5
+          description: Fixed by type, gaps left by the missing categories (cumulative_time 1, cumulative_distance 2, elimination 3, points 4, cumulative_elevation 5).
         params:
           $ref: "#/components/schemas/CategoryParams"
     CategoryParams:
@@ -1977,7 +1986,7 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, elimination, points]
+          enum: [cumulative_time, cumulative_distance, elimination, points, cumulative_elevation]
         ranked_count:
           type: integer
           minimum: 0
@@ -1990,8 +1999,9 @@ components:
           description: |
             Every participant but the deleted accounts. Ranked ones first,
             best first; abandoned ones last. `value` is in seconds for
-            `cumulative_time`, in meters for `cumulative_distance` and
-            `elimination`, in points acquired for `points`.
+            `cumulative_time`, in meters for `cumulative_distance`,
+            `elimination` and `cumulative_elevation`, in points acquired for
+            `points`.
           items:
             $ref: "#/components/schemas/LeaderboardEntry"
     LeaderboardEntry:
@@ -2183,7 +2193,7 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, elimination, points]
+          enum: [cumulative_time, cumulative_distance, elimination, points, cumulative_elevation]
         rank:
           type: integer
           minimum: 1
@@ -2217,7 +2227,7 @@ components:
       properties:
         type:
           type: string
-          enum: [cumulative_time, cumulative_distance, elimination, points]
+          enum: [cumulative_time, cumulative_distance, elimination, points, cumulative_elevation]
         rank:
           type: integer
           minimum: 1
@@ -2487,8 +2497,9 @@ components:
           minimum: 0
           maximum: 20000
           description: |
-            Positive elevation gain in meters, optional; display only (no
-            category, no badge counts it). Refused (`elevation_not_allowed`)
+            Positive elevation gain in meters, optional; it counts for the
+            `cumulative_elevation` category alone (no other category, no
+            badge). Refused (`elevation_not_allowed`)
             when the sport's `elevation_allowed` is false or the activity has
             no distance. On a change, leaving it out removes it.
     Activity:

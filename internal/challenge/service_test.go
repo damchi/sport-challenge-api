@@ -416,8 +416,16 @@ func TestServiceCreateOptionalCategories(t *testing.T) {
 			d.Elimination = nil
 			d.Points = points(scoring.CriterionSessionCount)
 		}), []placed{{CategoryCumulativeTime, 1}, {CategoryPoints, 4}}},
-		{"every category", with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount) }), []placed{
-			{CategoryCumulativeTime, 1}, {CategoryCumulativeDistance, 2}, {CategoryElimination, 3}, {CategoryPoints, 4},
+		{"elevation only", with(func(d *Draft) {
+			d.Distance = false
+			d.Elimination = nil
+			d.Elevation = true
+		}), []placed{{CategoryCumulativeTime, 1}, {CategoryElevation, 5}}},
+		{"every category", with(func(d *Draft) {
+			d.Points = points(scoring.CriterionSessionCount)
+			d.Elevation = true
+		}), []placed{
+			{CategoryCumulativeTime, 1}, {CategoryCumulativeDistance, 2}, {CategoryElimination, 3}, {CategoryPoints, 4}, {CategoryElevation, 5},
 		}},
 	}
 	for _, tt := range tests {
