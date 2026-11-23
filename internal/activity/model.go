@@ -15,7 +15,8 @@ type Activity struct {
 	// DurationSeconds is always set; DistanceMeters is nil without distance.
 	DurationSeconds int
 	DistanceMeters  *int
-	// ElevationGainMeters is nil when not entered; shown only.
+	// ElevationGainMeters is nil when not entered; only the cumulative
+	// elevation category counts it.
 	ElevationGainMeters *int
 	Source              string
 	// IdempotencyKey is the key the client sent with the creation, if any.

@@ -71,13 +71,15 @@ func (r *Repository) ParticipantsOf(ctx context.Context, challengeIDs []string) 
 }
 
 // Scope is what the activities of a challenge are read for: its window, the
-// sport of its elimination category, summed per week, and its points
-// category, nil without one.
+// sport of its elimination category, summed per week, its points category,
+// nil without one, and whether it has the cumulative elevation category,
+// whose elevation gains are then summed.
 type Scope struct {
 	ChallengeID string
 	Window      scoring.Window
 	WeeklySport string
 	Points      *PointsRead
+	Elevation   bool
 }
 
 // PointsRead is what the points category needs read: every activity grouped
@@ -88,10 +90,11 @@ type PointsRead struct {
 }
 
 // Activities is ActivitiesOf for challenge challengeID alone, in window w
-// with weeklySport summed per week, and the groups of a points category
-// whose minimum session is minSessionSeconds (0 without such a category).
-func (r *Repository) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int) ([]scoring.Activity, error) {
-	sc := Scope{ChallengeID: challengeID, Window: w, WeeklySport: weeklySport}
+// with weeklySport summed per week, the groups of a points category whose
+// minimum session is minSessionSeconds (0 without such a category), and the
+// elevation gains summed when elevation (the cumulative elevation category).
+func (r *Repository) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
+	sc := Scope{ChallengeID: challengeID, Window: w, WeeklySport: weeklySport, Elevation: elevation}
 	if minSessionSeconds > 0 {
 		sc.Points = &PointsRead{MinSessionSeconds: minSessionSeconds}
 	}
@@ -111,6 +114,9 @@ type scopeRow struct {
 	Weekly      string      `json:"weekly"`
 	Points      bool        `json:"points"`
 	MinSeconds  int         `json:"min_seconds"`
+	// Elevation is not sent to the database: it only says, once read,
+	// whether the totals of the challenge carry their elevation gains.
+	Elevation bool `json:"-"`
 }
 
 // pointsColumns are the columns ActivitiesOf adds for the points category:
@@ -119,6 +125,12 @@ type scopeRow struct {
 const pointsColumns = `,
 			MAX(a.duration_seconds) AS longest_seconds, MAX(a.distance_meters) AS longest_meters,
 			COUNT(*) FILTER (WHERE a.duration_seconds >= w.min_seconds) AS sessions`
+
+// elevationColumn is the column ActivitiesOf adds for the cumulative
+// elevation category: the sum of the elevation gains of a group, null when
+// none of it has one.
+const elevationColumn = `,
+			SUM(a.elevation_gain_meters) AS elevation_meters`
 
 // ActivitiesOf returns, in one query, the totals of the activities not
 // deleted of the active participants of each challenge, started in its
@@ -134,15 +146,19 @@ const pointsColumns = `,
 // grouped per participant, week and sport, and each group also carries its
 // longest session by duration and by distance and how many of its sessions
 // last at least the minimum (Activity.LongestSeconds, LongestMeters,
-// Sessions; zero for the other challenges). The activities of the abandoned
-// participants are then read too, the points category keeping them in the
-// weeks locked before they left; the other scorers do not count them. Those
-// of the deleted accounts never are.
+// Sessions; zero for the other challenges). For a challenge with a
+// cumulative elevation category (Scope.Elevation), each group also carries
+// the sum of its elevation gains (Activity.ElevationMeters; nil for the
+// other challenges). With a points category, the activities of the
+// abandoned participants are read too, the points category keeping them in
+// the weeks locked before they left; the other scorers do not count them.
+// Those of the deleted accounts never are.
 //
-// Contract: the scorers only sum durations and distances, per participant and
-// sport, and per week for the elimination sport, and the points category
-// only reads the longest session and the count of a participant's sessions
-// per week and sport, so these groups rank exactly as the raw activities do
+// Contract: the scorers only sum durations, distances and elevation gains,
+// per participant and sport, and per week for the elimination sport, and the
+// points category only reads the longest session and the count of a
+// participant's sessions per week and sport, so these groups rank exactly as
+// the raw activities do
 // (the equivalent distance of a session is its distance times the factor of
 // its sport, so the longest of a sport is its longest distance); the
 // rankings are still computed from them, never stored. A scorer that would
@@ -157,9 +173,10 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 	}
 	rowsIn := make([]scopeRow, len(scopes))
 	byID := make(map[string]scopeRow, len(scopes))
-	// The columns of the points category are only read when one of the
-	// challenges has it: without, the read is the one of the totals alone.
-	groupColumns := ""
+	// The columns of the points and elevation categories are only read
+	// when one of the challenges has it: without, the read is the one of the
+	// totals alone.
+	groupColumns, elevationColumns := "", ""
 	for i, sc := range scopes {
 		starts := make([]time.Time, sc.Window.Weeks())
 		for n := range starts {
@@ -169,6 +186,10 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 		if sc.Points != nil {
 			rowsIn[i].Points, rowsIn[i].MinSeconds = true, sc.Points.MinSessionSeconds
 			groupColumns = pointsColumns
+		}
+		if sc.Elevation {
+			rowsIn[i].Elevation = true
+			elevationColumns = elevationColumn
 		}
 		byID[sc.ChallengeID] = rowsIn[i]
 	}
@@ -186,15 +207,17 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 		LongestSeconds  int
 		LongestMeters   *int
 		Sessions        int
+		ElevationMeters *int
 	}
 	// width_bucket gives the week: the number of starts at or before the
 	// activity (0 for the other sports, summed over the window, without a
 	// points category). SUM and MAX of a distance are null when none of the
-	// group has one. groupColumns is one of two constants, never a value.
+	// group has one, as is SUM of an elevation gain. groupColumns and
+	// elevationColumns are each one of two constants, never a value.
 	err = r.db.WithContext(ctx).Raw(
 		`SELECT w.challenge_id, a.user_id, a.sport_code,
 			CASE WHEN w.points OR a.sport_code = w.weekly THEN width_bucket(a.started_at, w.starts) ELSE 0 END AS week,
-			SUM(a.duration_seconds) AS duration_seconds, SUM(a.distance_meters) AS distance_meters`+groupColumns+`
+			SUM(a.duration_seconds) AS duration_seconds, SUM(a.distance_meters) AS distance_meters`+groupColumns+elevationColumns+`
 		FROM jsonb_to_recordset(CAST(@windows AS jsonb))
 			AS w(challenge_id uuid, from_at timestamptz, to_at timestamptz, starts timestamptz[], weekly text,
 				points boolean, min_seconds integer)
@@ -225,6 +248,9 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 		}
 		if sc.Points {
 			a.LongestSeconds, a.LongestMeters, a.Sessions = row.LongestSeconds, row.LongestMeters, row.Sessions
+		}
+		if sc.Elevation {
+			a.ElevationMeters = row.ElevationMeters
 		}
 		out[row.ChallengeID] = append(out[row.ChallengeID], a)
 	}

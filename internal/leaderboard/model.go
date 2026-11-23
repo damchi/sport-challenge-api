@@ -12,6 +12,7 @@ const (
 	CategoryCumulativeDistance = "cumulative_distance"
 	CategoryElimination        = "elimination"
 	CategoryPoints             = "points"
+	CategoryElevation          = "cumulative_elevation"
 )
 
 // Challenge is a challenge as the leaderboard needs it: its window and its

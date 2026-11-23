@@ -137,6 +137,9 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		}
 		categories = append(categories, Category{Type: CategoryPoints, Position: positionPoints, Params: params})
 	}
+	if draft.Elevation {
+		categories = append(categories, Category{Type: CategoryElevation, Position: positionElevation, Params: Params{}})
+	}
 
 	// An empty description is no description, as on edit.
 	description := draft.Description

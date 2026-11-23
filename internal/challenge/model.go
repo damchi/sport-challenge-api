@@ -17,6 +17,7 @@ const (
 	CategoryCumulativeDistance = "cumulative_distance"
 	CategoryElimination        = "elimination"
 	CategoryPoints             = "points"
+	CategoryElevation          = "cumulative_elevation"
 )
 
 // Positions of the categories, fixed by type: a missing category leaves a
@@ -26,6 +27,7 @@ const (
 	positionDistance    = 2
 	positionElimination = 3
 	positionPoints      = 4
+	positionElevation   = 5
 )
 
 // Challenge is a row of the challenges table with its categories.

@@ -355,9 +355,76 @@ func TestPointsChallenge(t *testing.T) {
 	})
 }
 
+// TestElevationChallenge: the cumulative elevation category ranks the sums
+// of the elevation gains read, live and in the standings, and its frozen
+// ranking is served once the challenge is over.
+func TestElevationChallenge(t *testing.T) {
+	c := twoWeeks(t)
+	c.Categories = []Category{{Type: CategoryCumulativeTime}, {Type: CategoryElevation}}
+	gain := func(m int) *int { return &m }
+	activities := []scoring.Activity{
+		{UserID: "a", SportCode: "run", StartedAt: c.StartsAt, DurationSeconds: 3600, ElevationMeters: gain(400)},
+		{UserID: "b", SportCode: "ride", StartedAt: c.StartsAt, DurationSeconds: 1800, ElevationMeters: gain(900)},
+		{UserID: "b", SportCode: "swim", StartedAt: c.StartsAt, DurationSeconds: 1800},
+	}
+	participants := []scoring.Participant{{UserID: "a"}, {UserID: "b"}}
+	now := c.StartsAt.Add(48 * time.Hour)
+
+	t.Run("live", func(t *testing.T) {
+		repo := &fakeRepo{participants: participants, activities: activities}
+		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), 24*time.Hour)
+		got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := CategoryRanking{Type: CategoryElevation, RankedCount: 2, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 900}, Name: bobName},
+			{Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 400}, Name: annName},
+		}}
+		if len(got.Categories) != 2 || !reflect.DeepEqual(got.Categories[1], want) {
+			t.Fatalf("Get() = %+v, want the elevation %+v", got.Categories, want)
+		}
+		if len(repo.scopes) != 1 || !repo.scopes[0].Elevation || repo.scopes[0].Points != nil || repo.scopes[0].WeeklySport != "" {
+			t.Fatalf("scopes %+v, want the elevation gains alone", repo.scopes)
+		}
+	})
+
+	t.Run("frozen", func(t *testing.T) {
+		repo := &fakeRepo{snapshots: map[string]json.RawMessage{
+			CategoryCumulativeTime: json.RawMessage(`{"entries":[{"user_id":"a","rank":1,"value":3600,"abandoned":false}]}`),
+			CategoryElevation:      json.RawMessage(`{"entries":[{"user_id":"b","rank":1,"value":900,"abandoned":false},{"user_id":"a","rank":2,"value":400,"abandoned":false}]}`),
+		}}
+		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
+		got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := CategoryRanking{Type: CategoryElevation, RankedCount: 2, Entries: []Ranked{
+			{Entry: scoring.Entry{UserID: "b", Rank: 1, Value: 900}, Name: bobName},
+			{Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 400}, Name: annName},
+		}}
+		if !reflect.DeepEqual(got.Categories[1], want) || repo.calls != 0 {
+			t.Fatalf("Get() = %+v after %d reads, want %+v from the snapshot alone", got.Categories, repo.calls, want)
+		}
+	})
+
+	t.Run("standings", func(t *testing.T) {
+		repo := &fakeRepo{participants: participants, activities: activities}
+		svc := NewService(&fakeChallenges{}, pseudos, repo, clock.NewFake(time.Time{}), 24*time.Hour)
+		got, err := svc.Standings(t.Context(), "a", []Challenge{c}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		place := got["c1"].Categories[1]
+		if want := (Place{Type: CategoryElevation, Entry: scoring.Entry{UserID: "a", Rank: 2, Value: 400}, RankedCount: 2}); !reflect.DeepEqual(place, want) {
+			t.Fatalf("elevation place %+v, want %+v", place, want)
+		}
+	})
+}
+
 func TestScopeOf(t *testing.T) {
 	c := twoWeeks(t)
-	if got := scopeOf("c1", c.Categories, scoring.Window{}); got.ChallengeID != "c1" || got.WeeklySport != "run" || got.Points != nil {
+	if got := scopeOf("c1", c.Categories, scoring.Window{}); got.ChallengeID != "c1" || got.WeeklySport != "run" || got.Points != nil || got.Elevation {
 		t.Fatalf("with an elimination category: %+v, want run per week and no points", got)
 	}
 	c.Categories = []Category{{Type: CategoryCumulativeTime}, {Type: CategoryCumulativeDistance}}
@@ -367,6 +434,9 @@ func TestScopeOf(t *testing.T) {
 	c.Categories = append(c.Categories, Category{Type: CategoryPoints, Criteria: []string{scoring.CriterionSessionCount}, Podium: 5, MinSessionSeconds: 1200})
 	if got := scopeOf("c1", c.Categories, scoring.Window{}); got.WeeklySport != "" || got.Points == nil || got.Points.MinSessionSeconds != 1200 {
 		t.Fatalf("with a points category: %+v, want its groups at 1200 s", got)
+	}
+	if got := scopeOf("c1", append(c.Categories, Category{Type: CategoryElevation}), scoring.Window{}); !got.Elevation {
+		t.Fatalf("with a cumulative elevation category: %+v, want its elevation gains", got)
 	}
 }
 

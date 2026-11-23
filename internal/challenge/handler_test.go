@@ -151,8 +151,9 @@ func TestCreateChallengeOptionalCategories(t *testing.T) {
 		{"elimination", `"categories":{"elimination":{"step_meters":1500}},`, []string{"cumulative_time@1", "elimination@3"}},
 		{"distance", `"categories":{"cumulative_distance":{}},`, []string{"cumulative_time@1", "cumulative_distance@2"}},
 		{"points", `"categories":{"points":{"criteria":["session_count"],"podium":5}},`, []string{"cumulative_time@1", "points@4"}},
-		{"every category", `"categories":{"cumulative_distance":{},"elimination":{"step_meters":1500},"points":{"criteria":["session_count"],"podium":5}},`, []string{
-			"cumulative_time@1", "cumulative_distance@2", "elimination@3", "points@4",
+		{"elevation", `"categories":{"cumulative_elevation":{}},`, []string{"cumulative_time@1", "cumulative_elevation@5"}},
+		{"every category", `"categories":{"cumulative_distance":{},"elimination":{"step_meters":1500},"points":{"criteria":["session_count"],"podium":5},"cumulative_elevation":{}},`, []string{
+			"cumulative_time@1", "cumulative_distance@2", "elimination@3", "points@4", "cumulative_elevation@5",
 		}},
 	}
 	for _, tt := range tests {
@@ -270,6 +271,8 @@ func TestCreateChallengeRefusals(t *testing.T) {
 		{name: "elimination step over 100 km", complete: true, body: strings.Replace(validBody, `"step_meters":2000`, `"step_meters":100001`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.step_meters"},
 		{name: "elimination without step", complete: true, body: strings.Replace(validBody, `{"step_meters":2000}`, `{}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.step_meters"},
 		{name: "null categories", complete: true, body: strings.Replace(validBody, `"categories":{"cumulative_distance":{},"elimination":{"step_meters":2000}}`, `"categories":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories"},
+		{name: "settings of the cumulative elevation", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{}`, `"cumulative_distance":{},"cumulative_elevation":{"factors":{}}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.cumulative_elevation"},
+		{name: "null cumulative elevation", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{}`, `"cumulative_distance":{},"cumulative_elevation":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.cumulative_elevation"},
 		{name: "null cumulative distance", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{}`, `"cumulative_distance":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.cumulative_distance"},
 		{name: "null elimination", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"elimination":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination"},
 		{name: "points without criterion", complete: true, body: strings.Replace(validBody, `"elimination":{"step_meters":2000}`, `"points":{"criteria":[],"podium":5}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.points.criteria"},
@@ -373,6 +376,7 @@ func TestListChallengesMyWeek(t *testing.T) {
 			Status: scoring.StatusAtRisk, MinimumMeters: &minimum, DistanceMeters: 6000, WeekEndsAt: weekEnd,
 		}},
 		{Type: CategoryPoints, Rank: 2, RankedCount: 7, Provisional: &provisional},
+		{Type: CategoryElevation, Rank: 4, RankedCount: 7},
 	}}}}
 	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, standings, clock.NewFake(now))
 
@@ -391,7 +395,8 @@ func TestListChallengesMyWeek(t *testing.T) {
 		`{"elimination":null,"provisional_points":null,"rank":1,"ranked_count":7,"type":"cumulative_time"},` +
 		`{"elimination":null,"provisional_points":null,"rank":5,"ranked_count":7,"type":"cumulative_distance"},` +
 		`{"elimination":{"distance_meters":6000,"eliminated_week":null,"minimum_meters":7000,"status":"at_risk","week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"},"provisional_points":null,"rank":3,"ranked_count":7,"type":"elimination"},` +
-		`{"elimination":null,"provisional_points":12,"rank":2,"ranked_count":7,"type":"points"}` +
+		`{"elimination":null,"provisional_points":12,"rank":2,"ranked_count":7,"type":"points"},` +
+		`{"elimination":null,"provisional_points":null,"rank":4,"ranked_count":7,"type":"cumulative_elevation"}` +
 		`],"week":2,"week_ends_at":"` + weekEnd.UTC().Format(time.RFC3339) + `"}`
 	if string(got) != want {
 		t.Fatalf("my_week\n%s\nwant\n%s", got, want)

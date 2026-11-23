@@ -696,8 +696,8 @@ type deletedAfterReading struct {
 	done bool
 }
 
-func (d *deletedAfterReading) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int) ([]scoring.Activity, error) {
-	out, err := d.Repository.Activities(ctx, challengeID, w, weeklySport, minSessionSeconds)
+func (d *deletedAfterReading) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
+	out, err := d.Repository.Activities(ctx, challengeID, w, weeklySport, minSessionSeconds, elevation)
 	if !d.done {
 		d.done = true
 		d.s.exec(`DELETE FROM activities WHERE user_id = $1`, d.user)
@@ -843,5 +843,92 @@ func TestChallengeWithPoints(t *testing.T) {
 	wantAfter := []scoring.Entry{{UserID: c, Rank: 1, Value: 22}, {UserID: a, Rank: 2, Value: 18}, {UserID: quitter, Abandoned: true}}
 	if got := points(leaderboard.NewRepository(gdb)); !reflect.DeepEqual(got, wantAfter) {
 		t.Fatalf("after the deletion of b: %+v, want %+v, the frozen points unchanged", got, wantAfter)
+	}
+}
+
+// TestChallengeWithElevation: the cumulative elevation category is frozen
+// from the elevation gains of the activities (an account deleted before the
+// freeze is not in it), served as computed, and an account deleted after the
+// freeze leaves it, the others moving up.
+func TestChallengeWithElevation(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, 14)
+	lock := time.Date(2026, 3, 16, 7, 0, 0, 0, loc).UTC()
+	a, b, c, quitter, gone := s.user("a"), s.user("b"), s.user("c"), s.user("quitter"), s.user("gone")
+	var id string
+	s.scan(&id, `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Hills', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, end, a)
+	s.exec(`INSERT INTO categories (challenge_id, type, position, params) VALUES ($1, 'cumulative_time', 1, '{}'), ($1, 'cumulative_elevation', 5, '{}')`, id)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $6), ($1, $3, $6), ($1, $4, $6), ($1, $5, $6)`, id, a, b, c, gone, start)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $4)`,
+		id, quitter, start, time.Date(2026, 3, 10, 8, 0, 0, 0, loc))
+	climb := func(user, sport string, day int, elevation *int) {
+		s.exec(`INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters, elevation_gain_meters) VALUES ($1, $2, $3, 3600, 10000, $4)`,
+			user, sport, start.AddDate(0, 0, day).Add(10*time.Hour), elevation)
+	}
+	m := func(v int) *int { return &v }
+	climb(a, "run", 0, m(300))
+	climb(a, "ride", 8, m(900)) // week 2, another sport
+	climb(b, "hike", 1, m(1100))
+	climb(c, "run", 2, nil) // no elevation gain: 0 m
+	climb(quitter, "run", 1, m(5000))
+	climb(gone, "run", 1, m(9000))
+	s.exec("UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1", gone)
+
+	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(lock), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if got, err := service.FinalizeChallenges(t.Context()); err != nil || got != (FinalizeResult{Challenges: 1}) {
+		t.Fatalf("result = %+v, err = %v, want 1 challenge", got, err)
+	}
+	snaps := s.snapshots(id)
+	want := payload{Entries: []payloadEntry{
+		{UserID: a, Rank: 1, Value: 1200}, {UserID: b, Rank: 2, Value: 1100}, {UserID: c, Rank: 3}, {UserID: quitter, Abandoned: true},
+	}}
+	if len(snaps) != 2 || snaps[1].Type != "cumulative_elevation" || !reflect.DeepEqual(snaps[1].Payload, want) {
+		t.Fatalf("snapshots %+v, want the elevation %+v", snaps, want)
+	}
+
+	ch := leaderboard.Challenge{
+		ID: id, Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end.UTC(),
+		Categories: []leaderboard.Category{{Type: leaderboard.CategoryCumulativeTime}, {Type: leaderboard.CategoryElevation}},
+	}
+	elevation := func(repo interface {
+		ParticipantsOf(context.Context, []string) (map[string][]scoring.Participant, error)
+		ActivitiesOf(context.Context, []leaderboard.Scope) (map[string][]scoring.Activity, error)
+		Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
+		SnapshotsOf(context.Context, []string) (map[string]map[string]json.RawMessage, error)
+		DeletedAccounts(context.Context, []string) (map[string]bool, error)
+	},
+	) []scoring.Entry {
+		t.Helper()
+		svc := leaderboard.NewService(staticChallenge{ch}, noProfiles{}, repo, clock.NewFake(lock.Add(time.Hour)), time.Hour)
+		board, err := svc.Get(t.Context(), auth.Actor{ID: a}, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []scoring.Entry
+		for _, r := range board.Categories[1].Entries {
+			out = append(out, r.Entry)
+		}
+		return out
+	}
+	frozen, computed := elevation(leaderboard.NewRepository(gdb)), elevation(withoutSnapshots{leaderboard.NewRepository(gdb)})
+	if !reflect.DeepEqual(frozen, computed) {
+		t.Fatalf("served from the snapshot = %+v, want what is computed %+v", frozen, computed)
+	}
+
+	s.exec("UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1", a)
+	wantAfter := []scoring.Entry{{UserID: b, Rank: 1, Value: 1100}, {UserID: c, Rank: 2}, {UserID: quitter, Abandoned: true}}
+	if got := elevation(leaderboard.NewRepository(gdb)); !reflect.DeepEqual(got, wantAfter) {
+		t.Fatalf("after the deletion of a: %+v, want %+v", got, wantAfter)
 	}
 }

@@ -192,6 +192,7 @@ func TestGetLeaderboardAnswersTheCategoriesOfTheChallenge(t *testing.T) {
 		{"with the points", append(all, Category{Type: CategoryPoints, Criteria: []string{scoring.CriterionLongestDuration}, Podium: 5, MinSessionSeconds: 1200}), []string{
 			"cumulative_time", "cumulative_distance", "elimination", "points",
 		}},
+		{"with the elevation", []Category{all[0], {Type: CategoryElevation}}, []string{"cumulative_time", "cumulative_elevation"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

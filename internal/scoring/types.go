@@ -10,6 +10,9 @@ type Activity struct {
 	StartedAt       time.Time
 	DurationSeconds int
 	DistanceMeters  *int
+	// ElevationMeters is the elevation gain, nil without one (summed by
+	// the repository, nil when none of the sum has one).
+	ElevationMeters *int
 	// For the points category, an Activity is a group of sessions of a
 	// participant, week and sport, as the repository sums them (a single
 	// session in tests), StartedAt an instant of its week (its first
