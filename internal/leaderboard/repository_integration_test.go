@@ -4,14 +4,17 @@ package leaderboard
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
@@ -871,4 +874,92 @@ func TestResultsFromTheDatabase(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Results() = %+v, want %+v", got, want)
 	}
+}
+
+// TestPageFromTheDatabase: the leaderboard is cut after the podium, live
+// and once frozen, from the same ranking Get computes; a cursor given before
+// an activity changed the order is refused.
+func TestPageFromTheDatabase(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, toronto(t))
+	end := start.AddDate(0, 0, 14)
+	runners := []string{s.user("r1"), s.user("r2"), s.user("r3"), s.user("r4"), s.user("r5"), s.user("r6")}
+	var challengeID, timeCategory string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Summer', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, end, runners[0]).Scan(&challengeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), "INSERT INTO categories (challenge_id, type, position) VALUES ($1, 'cumulative_time', 1) RETURNING id", challengeID).Scan(&timeCategory); err != nil {
+		t.Fatal(err)
+	}
+	for i, r := range runners {
+		s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", challengeID, r, start)
+		s.activity(r, "run", start.Add(time.Duration(i+1)*time.Hour), 6000-600*i, nil, false)
+	}
+	c := Challenge{
+		ID: challengeID, Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: end.UTC(),
+		Categories: []Category{{Type: CategoryCumulativeTime}},
+	}
+	fake := clock.NewFake(start.AddDate(0, 0, 3))
+	svc := NewService(staticChallenge(c), fakeProfiles{}, NewRepository(gdb), fake, 24*time.Hour)
+	me := auth.Actor{ID: runners[5]}
+	pageOf := func(req PageRequest) (CategoryPage, error) {
+		t.Helper()
+		got, err := svc.Page(t.Context(), me, challengeID, req)
+		if err != nil {
+			return CategoryPage{}, err
+		}
+		return got.Categories[0], nil
+	}
+	check := func(name string, page CategoryPage, podium, entries []string, next bool) {
+		t.Helper()
+		if !reflect.DeepEqual(usersOf(page.Podium), podium) || !reflect.DeepEqual(usersOf(page.Entries), entries) || (page.Next != nil) != next || page.Me == nil || page.Me.UserID != runners[5] {
+			t.Fatalf("%s: %+v, want podium %v, entries %v, a next page %t and my line", name, page, podium, entries, next)
+		}
+	}
+
+	first, err := pageOf(PageRequest{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("live, first page", first, runners[:3], runners[3:5], true)
+	second, err := pageOf(PageRequest{Category: CategoryCumulativeTime, Limit: 2, After: first.Next})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("live, last page", second, runners[:3], runners[5:], false)
+
+	// r6 runs again and moves up: the cursor given before is refused.
+	s.activity(runners[5], "run", start.Add(30*time.Hour), 9000, nil, false)
+	var e *apperr.Error
+	if _, err := pageOf(PageRequest{Category: CategoryCumulativeTime, Limit: 2, After: first.Next}); !errors.As(err, &e) || e.Code != apperr.CodeCursorInvalid {
+		t.Fatalf("err = %v, want cursor_invalid", err)
+	}
+
+	// Frozen: the same cut of the snapshot.
+	entries := ""
+	for i, r := range runners {
+		if i > 0 {
+			entries += ","
+		}
+		entries += `{"user_id":"` + r + `","rank":` + strconv.Itoa(i+1) + `,"value":` + strconv.Itoa(9000-i) + `,"abandoned":false}`
+	}
+	s.exec(`INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at) VALUES ($1, $2, 'cumulative_time', $3, $4)`,
+		timeCategory, challengeID, `{"entries":[`+entries+`]}`, end.Add(8*time.Hour))
+	fake.Set(end.AddDate(0, 0, 2))
+	frozen, err := pageOf(PageRequest{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("frozen, first page", frozen, runners[:3], runners[3:5], true)
+	last, err := pageOf(PageRequest{Category: CategoryCumulativeTime, Limit: 2, After: frozen.Next})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("frozen, last page", last, runners[:3], runners[5:], false)
 }

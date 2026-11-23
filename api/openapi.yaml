@@ -745,6 +745,25 @@ paths:
         the weeks started but not locked yet, computed the same way from the
         activities of the moment; null once every started week is locked,
         and in the frozen results.
+
+        Pagination after the podium (the apps show 10, 50 or every line, the
+        podium always). Without `limit`, every category comes whole in
+        `entries`, `podium` and `next_cursor` null. With `limit`, each
+        category gives its `podium` (ranks 1 to 3, equal ones included, so
+        possibly more than 3 lines; never a value of 0, so empty while
+        nobody has scored), then in `entries` up to `limit` lines
+        after it (ranked ones, then those who abandoned), and `next_cursor`
+        for the rest, null at the end. The next page of a category is asked
+        with `category`, the same `limit` or another, and `cursor`: it gives
+        that category alone, its podium again. `category` alone gives that
+        category alone. Only a null `next_cursor` ends a list. In every
+        case, `me` is the line of the user in the category, wherever it is,
+        null when they are not a participant.
+
+        The cursor holds the position in the ranking and its state: when the
+        ranking of the category has changed since (an activity entered, a
+        week locked…), the cursor answers 400 `cursor_invalid` and the client
+        starts again from the first page.
       tags: [challenges]
       parameters:
         - name: challengeId
@@ -753,6 +772,28 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: category
+          in: query
+          description: |
+            The category to answer alone; it must be one of the challenge
+            (otherwise 400 `validation_failed` on `category`). Required with
+            `cursor`, and the category of the cursor.
+          schema:
+            type: string
+            enum: [cumulative_time, cumulative_distance, elimination, points, cumulative_elevation]
+        - name: limit
+          in: query
+          description: How many lines after the podium; without, every line. Required with `cursor`.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the previous page of the category, as is.
+          schema:
+            type: string
+            maxLength: 200
       responses:
         "200":
           description: The leaderboard.
@@ -761,7 +802,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Leaderboard"
         "400":
-          $ref: "#/components/responses/ValidationFailed"
+          description: |
+            The request does not match the contract (`validation_failed`,
+            `params.fields` listing `category`, `limit` or `cursor`), or the
+            ranking of the category changed since the cursor was given
+            (`cursor_invalid`: start again from the first page).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -1477,6 +1526,7 @@ components:
         - elevation_not_allowed
         - week_locked
         - activity_overlap
+        - cursor_invalid
         - rate_limited
         - not_found
         - validation_failed
@@ -1983,7 +2033,7 @@ components:
             $ref: "#/components/schemas/CategoryRanking"
     CategoryRanking:
       type: object
-      required: [type, ranked_count, entries]
+      required: [type, ranked_count, podium, entries, me, next_cursor]
       additionalProperties: false
       properties:
         type:
@@ -1996,16 +2046,39 @@ components:
             How many participants are ranked in the category, abandoned ones
             and deleted accounts left out: the `ranked_count` of `MyRanking`,
             frozen with the results once the challenge is over.
+        podium:
+          type: array
+          nullable: true
+          description: |
+            With `limit`, the lines of ranks 1 to 3, equal ones included,
+            with a value above 0 (a value of 0 is in `entries`); null without
+            `limit`.
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
         entries:
           type: array
           description: |
-            Every participant but the deleted accounts. Ranked ones first,
+            Without `limit`, every participant but the deleted accounts; with
+            `limit`, a page of the lines after the podium. Ranked ones first,
             best first; abandoned ones last. `value` is in seconds for
             `cumulative_time`, in meters for `cumulative_distance`,
             `elimination` and `cumulative_elevation`, in points acquired for
             `points`.
           items:
             $ref: "#/components/schemas/LeaderboardEntry"
+        me:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/LeaderboardEntry"
+          description: |
+            The line of the user in the category (abandoned included),
+            wherever it is in the ranking; null when they are not a
+            participant.
+        next_cursor:
+          type: string
+          nullable: true
+          description: The cursor of the next page of the category; null at the end, and without `limit`.
     LeaderboardEntry:
       type: object
       required: [rank, user, value, abandoned, elimination, provisional_points]
