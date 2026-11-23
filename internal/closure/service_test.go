@@ -526,7 +526,7 @@ func TestFinalizeChallenges(t *testing.T) {
 			{UserID: "a", Rank: 2, Value: 38},
 			{UserID: "quitter", Abandoned: true},
 		}}
-		if got := payloadOf(t, repo, "cat4"); !reflect.DeepEqual(got, want) {
+		if got := withoutWeeks(t, payloadOf(t, repo, "cat4"), 4); !reflect.DeepEqual(got, want) {
 			t.Fatalf("points ranking = %+v, want %+v", got, want)
 		}
 		for _, snap := range repo.snapshots["c1"] {
@@ -564,7 +564,7 @@ func TestFinalizeChallenges(t *testing.T) {
 		want := payload{Entries: []payloadEntry{
 			{UserID: "b", Rank: 1, Value: 36}, {UserID: "a", Rank: 2, Value: 28}, {UserID: "quitter", Abandoned: true},
 		}}
-		if got := payloadOf(t, repo, "cat4"); !reflect.DeepEqual(got, want) {
+		if got := withoutWeeks(t, payloadOf(t, repo, "cat4"), 4); !reflect.DeepEqual(got, want) {
 			t.Fatalf("points ranking = %+v, want %+v", got, want)
 		}
 	})
@@ -786,4 +786,27 @@ func TestRunsAwaitTheActivityWrites(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withoutWeeks checks the weeks frozen in each entry of the points ranking
+// p, of a challenge of weeks weeks: there for everyone, every week for a
+// participant ranked, summing to the value; then returns p without them.
+func withoutWeeks(t *testing.T, p payload, weeks int) payload {
+	t.Helper()
+	out := payload{Entries: make([]payloadEntry, len(p.Entries))}
+	for i, e := range p.Entries {
+		if e.Weeks == nil {
+			t.Fatalf("%s: no weeks frozen", e.UserID)
+		}
+		sum := 0
+		for _, w := range *e.Weeks {
+			sum += w.Points
+		}
+		if !e.Abandoned && (len(*e.Weeks) != weeks || sum != e.Value) {
+			t.Fatalf("%s: weeks %+v, want %d weeks summing to %d", e.UserID, *e.Weeks, weeks, e.Value)
+		}
+		e.Weeks = nil
+		out.Entries[i] = e
+	}
+	return out
 }

@@ -147,6 +147,14 @@ func CanViewActivities(role Role) bool {
 	}
 }
 
+// ReadsActivities reports whether a reader of a challenge with role, an
+// admin or not, may see the activities of its participants (CanViewActivities,
+// an admin reading as RoleAdmin): what the leaderboard needs to show the
+// values behind the points of the points category.
+func ReadsActivities(role Role, admin bool) bool {
+	return admin || CanViewActivities(role)
+}
+
 // ActivitiesRefusal tells why a user with membership actor, an admin or
 // not, may not see the activities of target in a challenge of that
 // visibility, or nil if they may. A challenge the actor may not see is not

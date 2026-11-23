@@ -416,7 +416,11 @@ func (s *Service) freeze(ctx context.Context, c EndedChallenge, w scoring.Window
 				}
 			}
 		}
-		payload, err := json.Marshal(newPayload(scorer.Score(w, participants, activities)))
+		frozen := newPayload(scorer.Score(w, participants, activities))
+		if points, ok := scorer.(scoring.Points); ok {
+			frozen.addBreakdown(points.Breakdown(w, participants, activities))
+		}
+		payload, err := json.Marshal(frozen)
 		if err != nil {
 			return false, fmt.Errorf("encode ranking of category %s: %w", cat.ID, err)
 		}
@@ -496,6 +500,42 @@ type payloadEntry struct {
 	// EliminatedWeek is the week of the elimination, in the elimination
 	// category; absent for a survivor.
 	EliminatedWeek int `json:"eliminated_week,omitempty"`
+	// Weeks is, in the points category only, the points of each week the
+	// participant is ranked in (scoring.Points.Breakdown), frozen with the
+	// rest: an empty list when there is none, absent in the other
+	// categories.
+	Weeks *[]payloadWeek `json:"weeks,omitempty"`
+}
+
+// payloadWeek is what a participant scored in a week of the points category.
+type payloadWeek struct {
+	Week     int                `json:"week"`
+	Points   int                `json:"points"`
+	Criteria []payloadCriterion `json:"criteria"`
+}
+
+// payloadCriterion is the line of a participant in the ranking of a
+// criterion for a week; rank 0 for a value of 0.
+type payloadCriterion struct {
+	Criterion string `json:"criterion"`
+	Rank      int    `json:"rank"`
+	Value     int    `json:"value"`
+	Points    int    `json:"points"`
+}
+
+// addBreakdown sets the weeks of each entry from breakdown, by participant.
+func (p payload) addBreakdown(breakdown map[string][]scoring.WeekPoints) {
+	for i := range p.Entries {
+		weeks := make([]payloadWeek, 0, len(breakdown[p.Entries[i].UserID]))
+		for _, wp := range breakdown[p.Entries[i].UserID] {
+			pw := payloadWeek{Week: wp.Week, Points: wp.Points, Criteria: make([]payloadCriterion, len(wp.Criteria))}
+			for j, c := range wp.Criteria {
+				pw.Criteria[j] = payloadCriterion(c)
+			}
+			weeks = append(weeks, pw)
+		}
+		p.Entries[i].Weeks = &weeks
+	}
 }
 
 func newPayload(entries []scoring.Entry) payload {

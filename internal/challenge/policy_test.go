@@ -722,3 +722,24 @@ func TestDeletionAbandons(t *testing.T) {
 		})
 	}
 }
+
+func TestReadsActivities(t *testing.T) {
+	tests := []struct {
+		role  Role
+		admin bool
+		want  bool
+	}{
+		{RoleCreator, false, true},
+		{RoleParticipant, false, true},
+		{RoleAbandoned, false, true},
+		{RoleInvited, false, false},
+		{RoleOutsider, false, false},
+		{RoleOutsider, true, true},
+		{RoleInvited, true, true},
+	}
+	for _, tt := range tests {
+		if got := ReadsActivities(tt.role, tt.admin); got != tt.want {
+			t.Errorf("ReadsActivities(%v, %v) = %v, want %v", tt.role, tt.admin, got, tt.want)
+		}
+	}
+}

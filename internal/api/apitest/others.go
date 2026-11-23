@@ -128,6 +128,10 @@ func (unimplemented) GetLeaderboard(context.Context, api.GetLeaderboardRequestOb
 	return nil, errNotImplemented
 }
 
+func (unimplemented) GetParticipantPoints(context.Context, api.GetParticipantPointsRequestObject) (api.GetParticipantPointsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
 func (unimplemented) CreateInvitation(context.Context, api.CreateInvitationRequestObject) (api.CreateInvitationResponseObject, error) {
 	return nil, errNotImplemented
 }

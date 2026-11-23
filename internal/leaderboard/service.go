@@ -269,7 +269,22 @@ type frozenRanking struct {
 		Value          int    `json:"value"`
 		Abandoned      bool   `json:"abandoned"`
 		EliminatedWeek int    `json:"eliminated_week"`
+		// Weeks is the breakdown of the points category; nil in the other
+		// categories, and in results frozen before it was stored.
+		Weeks *[]frozenWeek `json:"weeks"`
 	} `json:"entries"`
+}
+
+// frozenWeek is a week of the frozen breakdown of the points category.
+type frozenWeek struct {
+	Week     int `json:"week"`
+	Points   int `json:"points"`
+	Criteria []struct {
+		Criterion string `json:"criterion"`
+		Rank      int    `json:"rank"`
+		Value     int    `json:"value"`
+		Points    int    `json:"points"`
+	} `json:"criteria"`
 }
 
 // frozen builds the leaderboard of a challenge that is over from its result

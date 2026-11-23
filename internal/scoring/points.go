@@ -31,31 +31,27 @@ var _ Scorer = Points{}
 // Score ranks the participants by the points of the locked weeks; those of
 // the weeks started but not locked yet are only Provisional. A week locks at
 // 7 am on the first day of the next week (Window.WeekLocksAt), so a week
-// over stays provisional until then.
+// over stays provisional until then. The points are those of Breakdown,
+// summed.
 //
 // An abandoned participant stays in the weekly rankings of the weeks locked
 // by the time they left, so the points of those weeks do not move; they
 // leave the later ones, and are shown abandoned, without rank nor total.
 func (p Points) Score(w Window, participants []Participant, activities []Activity) []Entry {
-	started := startedWeeks(w)
 	locked := w.LockedWeeks()
-	bests := p.weeklyBests(w, started, activities)
 	acquired := make(map[string]int, len(participants))
 	provisional := make(map[string]int, len(participants))
-	for n := 1; n <= started; n++ {
-		total := acquired
-		if n > locked {
-			total = provisional
-		}
-		ranked := rankedIn(w, n, participants)
-		for _, c := range p.Criteria {
-			for user, v := range p.weekPoints(ranked, bests[n], c) {
-				total[user] += v
+	for user, weeks := range p.Breakdown(w, participants, activities) {
+		for _, wp := range weeks {
+			if wp.Week <= locked {
+				acquired[user] += wp.Points
+			} else {
+				provisional[user] += wp.Points
 			}
 		}
 	}
 	entries := Rank(participants, acquired)
-	if started > locked {
+	if startedWeeks(w) > locked {
 		for i := range entries {
 			if !entries[i].Abandoned {
 				v := provisional[entries[i].UserID]
@@ -64,6 +60,55 @@ func (p Points) Score(w Window, participants []Participant, activities []Activit
 		}
 	}
 	return entries
+}
+
+// WeekPoints is what a participant scored in a week of the points category:
+// the line of each criterion, in the order of the criteria of the category,
+// and their sum.
+type WeekPoints struct {
+	Week     int
+	Points   int
+	Criteria []CriterionPoints
+}
+
+// CriterionPoints is the line of a participant in the ranking of a
+// criterion for a week: their rank in it (0 for a value of 0, which does
+// not score), their value (seconds, equivalent meters, sessions or meters
+// of elevation gain, by criterion) and the points of the scale it gives.
+type CriterionPoints struct {
+	Criterion string
+	Rank      int
+	Value     int
+	Points    int
+}
+
+// Breakdown gives, by participant, the points of each week started at
+// Now, in order: those Score sums (acquired once the week is locked,
+// provisional before). A participant is in the weeks they are ranked in:
+// all of them while active; once abandoned, those locked by the time they
+// left, so that their points do not move.
+func (p Points) Breakdown(w Window, participants []Participant, activities []Activity) map[string][]WeekPoints {
+	started := startedWeeks(w)
+	bests := p.weeklyBests(w, started, activities)
+	out := make(map[string][]WeekPoints, len(participants))
+	for n := 1; n <= started; n++ {
+		ranked := rankedIn(w, n, participants)
+		week := make(map[string]*WeekPoints, len(ranked))
+		for _, r := range ranked {
+			week[r.UserID] = &WeekPoints{Week: n, Criteria: make([]CriterionPoints, 0, len(p.Criteria))}
+		}
+		for _, c := range p.Criteria {
+			for _, line := range p.weekRanking(ranked, bests[n], c) {
+				wp := week[line.UserID]
+				wp.Criteria = append(wp.Criteria, line.CriterionPoints)
+				wp.Points += line.Points
+			}
+		}
+		for _, r := range ranked {
+			out[r.UserID] = append(out[r.UserID], *week[r.UserID])
+		}
+	}
+	return out
 }
 
 // best is what a participant did in a week, for each criterion.
@@ -104,10 +149,18 @@ func (p Points) weeklyBests(w Window, started int, activities []Activity) []map[
 	return bests
 }
 
-// weekPoints ranks the participants of a week on a criterion and gives the
+// criterionLine is the line of a participant in the ranking of a criterion
+// for a week.
+type criterionLine struct {
+	UserID string
+	CriterionPoints
+}
+
+// weekRanking ranks the participants of a week on a criterion and gives the
 // points of the scale to its top: equal values share the rank and the
-// points, at the edge of the top too; a value of 0 does not score.
-func (p Points) weekPoints(ranked []Participant, bests map[string]best, criterion string) map[string]int {
+// points, at the edge of the top too; a value of 0 has no rank and does not
+// score. One line per participant ranked.
+func (p Points) weekRanking(ranked []Participant, bests map[string]best, criterion string) []criterionLine {
 	values := make(map[string]int, len(bests))
 	for user, b := range bests {
 		switch criterion {
@@ -122,11 +175,17 @@ func (p Points) weekPoints(ranked []Participant, bests map[string]best, criterio
 		}
 	}
 	scale := pointsScale(p.Podium)
-	out := make(map[string]int)
-	for _, e := range Rank(ranked, values) {
-		if e.Value > 0 && e.Rank <= len(scale) {
-			out[e.UserID] = scale[e.Rank-1]
+	entries := Rank(ranked, values)
+	out := make([]criterionLine, len(entries))
+	for i, e := range entries {
+		line := criterionLine{UserID: e.UserID, CriterionPoints: CriterionPoints{Criterion: criterion}}
+		if e.Value > 0 {
+			line.Rank, line.Value = e.Rank, e.Value
+			if e.Rank <= len(scale) {
+				line.Points = scale[e.Rank-1]
+			}
 		}
+		out[i] = line
 	}
 	return out
 }

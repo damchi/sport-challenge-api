@@ -52,6 +52,46 @@ func (h *Handler) GetLeaderboard(ctx context.Context, req api.GetLeaderboardRequ
 	return api.GetLeaderboard200JSONResponse(out), nil
 }
 
+// GetParticipantPoints answers where the points of a participant come from
+// in the points category.
+func (h *Handler) GetParticipantPoints(ctx context.Context, req api.GetParticipantPointsRequestObject) (api.GetParticipantPointsResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	b, err := h.service.Breakdown(ctx, actor, req.ChallengeId.String(), req.UserId.String())
+	if err != nil {
+		return nil, err
+	}
+	id, err := uuid.Parse(b.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("participant id: %w", err)
+	}
+	out := api.PointsBreakdown{
+		UserId: id, ComputedAt: b.ComputedAt.UTC(), Abandoned: b.Abandoned, Frozen: b.Frozen,
+		AcquiredPoints: b.Acquired, ProvisionalPoints: b.Provisional, Weeks: make([]api.PointsWeek, len(b.Weeks)),
+	}
+	for i, w := range b.Weeks {
+		criteria := make([]api.PointsCriterion, len(w.Criteria))
+		for j, c := range w.Criteria {
+			criteria[j] = api.PointsCriterion{Criterion: api.PointsCriterionCriterion(c.Criterion), Points: c.Points}
+			if !b.ValuesHidden {
+				value := c.Value
+				criteria[j].Value = &value
+			}
+			if c.Rank > 0 {
+				rank := c.Rank
+				criteria[j].Rank = &rank
+			}
+		}
+		out.Weeks[i] = api.PointsWeek{
+			Number: w.Number, StartsAt: w.StartsAt.UTC(), EndsAt: w.EndsAt.UTC(),
+			Locked: w.Locked, Points: w.Points, Criteria: criteria,
+		}
+	}
+	return api.GetParticipantPoints200JSONResponse(out), nil
+}
+
 // Contract turns the whole rankings of a challenge (Service.Get) into their
 // contract form, as GetLeaderboard answers them without limit: no podium,
 // no line of the reader, no next page.
