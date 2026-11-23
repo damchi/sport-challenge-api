@@ -833,10 +833,10 @@ paths:
         then `id`). Visible to the participants of the challenge (abandoned
         or excluded ones included), its creators and the admins (permission
         `admin` of the access token), on every challenge not deleted. A
-        challenge the user may not see answers 404 `challenge_not_found`; a visible one the
-        user never joined (a public challenge shows them its leaderboard
-        only), or a `userId` who never joined it or whose account was
-        deleted, answers 404 `not_found`.
+        challenge the user may not see answers 404 `challenge_not_found`; a
+        visible one the user never joined (a public challenge shows them its
+        leaderboard only), or a `userId` who never joined it or whose account
+        was deleted, answers 404 `not_found`.
         `contributions` and `locked` are read from this challenge only, never
         from the other challenges of the participant: `contributions` holds
         it when the activity counts in it (never for a participant who
