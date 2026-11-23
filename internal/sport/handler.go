@@ -29,9 +29,10 @@ func (h *Handler) GetSports(ctx context.Context, _ api.GetSportsRequestObject) (
 	list := api.SportList{Sports: make([]api.Sport, 0, len(sports))}
 	for _, s := range sports {
 		list.Sports = append(list.Sports, api.Sport{
-			Code:            s.Code,
-			DistanceMode:    api.SportDistanceMode(s.DistanceMode),
-			SuggestedFactor: s.SuggestedFactor,
+			Code:             s.Code,
+			DistanceMode:     api.SportDistanceMode(s.DistanceMode),
+			SuggestedFactor:  s.SuggestedFactor,
+			ElevationAllowed: s.ElevationAllowed,
 		})
 	}
 	return api.GetSports200JSONResponse{

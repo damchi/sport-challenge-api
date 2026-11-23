@@ -1204,7 +1204,9 @@ paths:
           description: |
             The profile is incomplete (`profile_incomplete`), the sport needs
             a distance (`distance_required`) or takes none
-            (`distance_not_allowed`), the activity overlaps another of the
+            (`distance_not_allowed`), an elevation gain is sent for a sport
+            or an activity that takes none (`elevation_not_allowed`), the
+            activity overlaps another of the
             user (`activity_overlap`), or the week of `started_at` is locked
             in a challenge where the activity counts, or was already locked
             when the user left a challenge (`week_locked`).
@@ -1263,7 +1265,9 @@ paths:
         "422":
           description: |
             The sport needs a distance (`distance_required`) or takes none
-            (`distance_not_allowed`), it would overlap another activity of
+            (`distance_not_allowed`), an elevation gain is sent for a sport
+            or an activity that takes none (`elevation_not_allowed`), it
+            would overlap another activity of
             the user (`activity_overlap`), or the week of the current or the
             new `started_at` is locked in a challenge where the activity
             counts, or was already locked when the user left a challenge
@@ -1463,6 +1467,7 @@ components:
         - last_creator
         - distance_required
         - distance_not_allowed
+        - elevation_not_allowed
         - week_locked
         - activity_overlap
         - rate_limited
@@ -1592,7 +1597,7 @@ components:
             $ref: "#/components/schemas/Sport"
     Sport:
       type: object
-      required: [code, distance_mode, suggested_factor]
+      required: [code, distance_mode, suggested_factor, elevation_allowed]
       additionalProperties: false
       properties:
         code:
@@ -1611,6 +1616,12 @@ components:
           maximum: 2
           description: Suggested distance factor (0.1 to 2, two decimals); null for sports without distance.
           example: 0.3
+        elevation_allowed:
+          type: boolean
+          description: |
+            Whether an activity of this sport may have an elevation gain
+            (`elevation_gain_meters`), with a distance; always false for a
+            sport without distance.
     ChallengeCreate:
       type: object
       required: [title, visibility, timezone, start_date, weeks]
@@ -2457,9 +2468,18 @@ components:
           minimum: 1
           maximum: 1000000
           description: Required or refused according to the sport's `distance_mode`.
+        elevation_gain_meters:
+          type: integer
+          minimum: 0
+          maximum: 20000
+          description: |
+            Positive elevation gain in meters, optional; display only (no
+            category, no badge counts it). Refused (`elevation_not_allowed`)
+            when the sport's `elevation_allowed` is false or the activity has
+            no distance. On a change, leaving it out removes it.
     Activity:
       type: object
-      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, speed_mps, pace_seconds_per_km, contributions, locked]
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, speed_mps, pace_seconds_per_km, contributions, locked]
       additionalProperties: false
       properties:
         id:
@@ -2479,6 +2499,10 @@ components:
         distance_meters:
           type: integer
           nullable: true
+        elevation_gain_meters:
+          type: integer
+          nullable: true
+          description: Positive elevation gain in meters; null when not entered.
         source:
           type: string
           enum: [manual]
@@ -2670,7 +2694,7 @@ components:
         An activity in the list of a challenge: the fields of `Activity`,
         `contributions` and `locked` read from this challenge only, plus its
         author.
-      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, speed_mps, pace_seconds_per_km, contributions, locked, user]
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, speed_mps, pace_seconds_per_km, contributions, locked, user]
       additionalProperties: false
       properties:
         id:
@@ -2690,6 +2714,10 @@ components:
         distance_meters:
           type: integer
           nullable: true
+        elevation_gain_meters:
+          type: integer
+          nullable: true
+          description: Positive elevation gain in meters; null when not entered.
         source:
           type: string
           enum: [manual]

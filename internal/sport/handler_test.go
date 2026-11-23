@@ -67,8 +67,8 @@ func factor(v float64) *float64 { return &v }
 
 func TestGetSports(t *testing.T) {
 	rec := getSports(t, fakeRepository{sports: []Sport{
-		{Code: "other", DistanceMode: "optional", SuggestedFactor: factor(1)},
-		{Code: "ride", DistanceMode: "required", SuggestedFactor: factor(0.3)},
+		{Code: "other", DistanceMode: "optional", SuggestedFactor: factor(1), ElevationAllowed: true},
+		{Code: "ride", DistanceMode: "required", SuggestedFactor: factor(0.3), ElevationAllowed: true},
 		{Code: "yoga", DistanceMode: "none"},
 	}})
 
@@ -85,9 +85,9 @@ func TestGetSports(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []map[string]any{
-		{"code": "other", "distance_mode": "optional", "suggested_factor": 1.0},
-		{"code": "ride", "distance_mode": "required", "suggested_factor": 0.3},
-		{"code": "yoga", "distance_mode": "none", "suggested_factor": nil},
+		{"code": "other", "distance_mode": "optional", "suggested_factor": 1.0, "elevation_allowed": true},
+		{"code": "ride", "distance_mode": "required", "suggested_factor": 0.3, "elevation_allowed": true},
+		{"code": "yoga", "distance_mode": "none", "suggested_factor": nil, "elevation_allowed": false},
 	}
 	if len(body.Sports) != len(want) {
 		t.Fatalf("sports = %v, want %v", body.Sports, want)

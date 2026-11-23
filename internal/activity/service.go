@@ -31,10 +31,11 @@ type Profiles interface {
 	Names(ctx context.Context, ids []string) (map[string]Name, error)
 }
 
-// Catalogue gives the distance mode of a sport, and false for a sport it
-// does not have (module sport).
+// Catalogue gives the rules of a sport (its distance mode and whether it
+// takes an elevation gain), and false for a sport it does not have (module
+// sport).
 type Catalogue interface {
-	DistanceMode(ctx context.Context, code string) (string, bool, error)
+	SportRules(ctx context.Context, code string) (SportRules, bool, error)
 }
 
 // Participations gives the challenges a user joined, deleted ones left out,
@@ -98,14 +99,15 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 	}
 
 	a := Activity{
-		UserID:          actorID,
-		SportCode:       draft.SportCode,
-		SportLabel:      draft.SportLabel,
-		StartedAt:       draft.StartedAt.UTC(),
-		DurationSeconds: draft.DurationSeconds,
-		DistanceMeters:  draft.DistanceMeters,
-		Source:          SourceManual,
-		IdempotencyKey:  idempotencyKey,
+		UserID:              actorID,
+		SportCode:           draft.SportCode,
+		SportLabel:          draft.SportLabel,
+		StartedAt:           draft.StartedAt.UTC(),
+		DurationSeconds:     draft.DurationSeconds,
+		DistanceMeters:      draft.DistanceMeters,
+		ElevationGainMeters: draft.ElevationGainMeters,
+		Source:              SourceManual,
+		IdempotencyKey:      idempotencyKey,
 	}
 	var challenges []Participation
 	stored, created, err := s.repo.Record(ctx, a, func(ctx context.Context) error {
@@ -156,6 +158,9 @@ func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (
 		StartedAt:       draft.StartedAt.UTC(),
 		DurationSeconds: draft.DurationSeconds,
 		DistanceMeters:  draft.DistanceMeters,
+		// Left out of the body, the elevation gain is removed: the body
+		// replaces every field entered.
+		ElevationGainMeters: draft.ElevationGainMeters,
 	}
 	var challenges []Participation
 	stored, err := s.repo.Update(ctx, actorID, id, a, func(ctx context.Context, current Activity) error {
@@ -432,14 +437,14 @@ func (s *Service) page(ctx context.Context, q ListQuery, limit int, scope func(c
 // validate checks draft against the catalogue at the instant of the clock
 // (Validate), an unknown sport giving 400 validation_failed on sport_code.
 func (s *Service) validate(ctx context.Context, draft Draft) (Draft, error) {
-	mode, found, err := s.catalogue.DistanceMode(ctx, draft.SportCode)
+	rules, found, err := s.catalogue.SportRules(ctx, draft.SportCode)
 	if err != nil {
 		return Draft{}, fmt.Errorf("read catalogue: %w", err)
 	}
 	if !found {
 		return Draft{}, apperr.InvalidFields(nil, "sport_code")
 	}
-	return Validate(draft, mode, s.clock.Now())
+	return Validate(draft, rules, s.clock.Now())
 }
 
 // changeable checks that actorID may change current (CanChange, else 404

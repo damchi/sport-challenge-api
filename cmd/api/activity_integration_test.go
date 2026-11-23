@@ -53,7 +53,7 @@ func newRecording(t *testing.T) recording {
 	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, nil, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, challengeStandings{}, clk)
-	activities := activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, sports, participations{challenges}, activityScopes{challenges}, clk)
+	activities := activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, activityCatalogue{sports}, participations{challenges}, activityScopes{challenges}, clk)
 
 	var id string
 	if err := pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo, first_name, last_name) VALUES ('email|runner', 'runner', 'Rose', 'Runner') RETURNING id").Scan(&id); err != nil {
@@ -610,5 +610,77 @@ func TestMySummaryTotals(t *testing.T) {
 	}
 	if sum.ChallengeCount != 4 {
 		t.Fatalf("challenge count %d, want 4: upcoming, ongoing, finished and abandoned; not the one only created, nor the deleted one", sum.ChallengeCount)
+	}
+}
+
+// TestElevationGain follows SC-API-149 against the database: the elevation
+// gain is stored, read back by every listing, replaced or removed by a
+// change, and refused for a sport of the catalogue that takes none.
+func TestElevationGain(t *testing.T) {
+	r := newRecording(t)
+	c := r.challenge([3]int{2026, 6, 1}, 3, "active", false)
+	m := func(v int) *int { return &v }
+	stored := func(id string) *int {
+		t.Helper()
+		var gain *int
+		if err := r.pool.QueryRow(t.Context(), "SELECT elevation_gain_meters FROM activities WHERE id = $1", id).Scan(&gain); err != nil {
+			t.Fatal(err)
+		}
+		return gain
+	}
+	same := func(a, b *int) bool { return (a == nil && b == nil) || (a != nil && b != nil && *a == *b) }
+
+	draft := activity.Draft{SportCode: "hike", StartedAt: toronto(t, 2026, 6, 10, 7), DurationSeconds: 7200, DistanceMeters: m(12000), ElevationGainMeters: m(850)}
+	rec, err := r.activities.Record(t.Context(), r.user, nil, draft)
+	if err != nil || !same(rec.ElevationGainMeters, m(850)) || !same(stored(rec.ID), m(850)) {
+		t.Fatalf("Record() = %+v, %v, want 850 m stored", rec, err)
+	}
+
+	mine, err := r.activities.Mine(t.Context(), r.user, activity.Filter{}, 20, nil)
+	if err != nil || len(mine.Items) != 1 || !same(mine.Items[0].ElevationGainMeters, m(850)) {
+		t.Fatalf("Mine() = %+v, %v, want 850 m", mine, err)
+	}
+	page, err := r.activities.OfParticipant(t.Context(), r.user, c, r.user, 20, nil)
+	if err != nil || len(page.Items) != 1 || !same(page.Items[0].ElevationGainMeters, m(850)) {
+		t.Fatalf("OfParticipant() = %+v, %v, want 850 m", page, err)
+	}
+	all, err := r.activities.OfChallenge(t.Context(), r.user, c, 20, nil)
+	if err != nil || len(all.Items) != 1 || !same(all.Items[0].ElevationGainMeters, m(850)) {
+		t.Fatalf("OfChallenge() = %+v, %v, want 850 m", all, err)
+	}
+
+	draft.ElevationGainMeters = m(0)
+	if got, err := r.activities.Update(t.Context(), r.user, rec.ID, draft); err != nil || !same(got.ElevationGainMeters, m(0)) || !same(stored(rec.ID), m(0)) {
+		t.Fatalf("Update(0) = %+v, %v, want 0 m stored", got, err)
+	}
+	draft.ElevationGainMeters = nil
+	if got, err := r.activities.Update(t.Context(), r.user, rec.ID, draft); err != nil || got.ElevationGainMeters != nil || stored(rec.ID) != nil {
+		t.Fatalf("Update(nil) = %+v, %v, want the elevation gain removed", got, err)
+	}
+
+	// Refused from the catalogue as the migrations seed it.
+	for name, d := range map[string]activity.Draft{
+		"swim":                      {SportCode: "swim", StartedAt: toronto(t, 2026, 6, 9, 7), DurationSeconds: 1800, DistanceMeters: m(1500), ElevationGainMeters: m(5)},
+		"rowing":                    {SportCode: "rowing", StartedAt: toronto(t, 2026, 6, 9, 7), DurationSeconds: 1800, DistanceMeters: m(5000), ElevationGainMeters: m(5)},
+		"yoga":                      {SportCode: "yoga", StartedAt: toronto(t, 2026, 6, 9, 7), DurationSeconds: 1800, ElevationGainMeters: m(5)},
+		"other without distance":    {SportCode: "other", SportLabel: new(string), StartedAt: toronto(t, 2026, 6, 9, 7), DurationSeconds: 1800, ElevationGainMeters: m(5)},
+		"change to swim, gain kept": {SportCode: "swim", StartedAt: draft.StartedAt, DurationSeconds: 1800, DistanceMeters: m(1500), ElevationGainMeters: m(5)},
+	} {
+		if d.SportLabel != nil {
+			*d.SportLabel = "Trail"
+		}
+		var err error
+		if d.StartedAt.Equal(draft.StartedAt) {
+			_, err = r.activities.Update(t.Context(), r.user, rec.ID, d)
+		} else {
+			_, err = r.activities.Record(t.Context(), r.user, nil, d)
+		}
+		var appErr *apperr.Error
+		if !errors.As(err, &appErr) || appErr.Code != apperr.CodeElevationNotAllowed {
+			t.Fatalf("%s: error = %v, want elevation_not_allowed", name, err)
+		}
+	}
+	if r.count() != 1 {
+		t.Fatalf("%d rows, want the hike alone", r.count())
 	}
 }

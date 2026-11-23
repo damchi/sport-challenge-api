@@ -47,6 +47,9 @@ const (
 	CodeDistanceRequired Code = "distance_required"
 	// CodeDistanceNotAllowed refuses a distance for a sport without one.
 	CodeDistanceNotAllowed Code = "distance_not_allowed"
+	// CodeElevationNotAllowed refuses an elevation gain for a sport that
+	// takes none, or for an activity without distance.
+	CodeElevationNotAllowed Code = "elevation_not_allowed"
 	// CodeWeekLocked refuses writing an activity whose week is locked (7 am
 	// on the first day of the next week) in a challenge where it counts, or
 	// was when its author left one (ADR 0001).
@@ -110,6 +113,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "Distance required"}, true
 	case CodeDistanceNotAllowed:
 		return definition{http.StatusUnprocessableEntity, "Distance not allowed"}, true
+	case CodeElevationNotAllowed:
+		return definition{http.StatusUnprocessableEntity, "Elevation gain not allowed"}, true
 	case CodeWeekLocked:
 		return definition{http.StatusUnprocessableEntity, "Week locked"}, true
 	case CodeActivityOverlap:

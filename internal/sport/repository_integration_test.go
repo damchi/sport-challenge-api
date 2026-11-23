@@ -26,14 +26,15 @@ func TestListReturnsTheReferenceData(t *testing.T) {
 	}
 
 	type row struct {
-		mode   string
-		factor float64 // 0 when null
+		mode      string
+		factor    float64 // 0 when null
+		elevation bool    // SC-API-149
 	}
 	want := map[string]row{
-		"climbing": {"none", 0}, "hike": {"required", 1}, "other": {"optional", 1},
-		"ride": {"required", 0.3}, "roller": {"required", 0.5}, "rowing": {"required", 0.5},
-		"run": {"required", 1}, "strength": {"none", 0}, "swim": {"required", 1},
-		"walk": {"required", 1}, "xc_ski": {"required", 0.5}, "yoga": {"none", 0},
+		"climbing": {"none", 0, false}, "hike": {"required", 1, true}, "other": {"optional", 1, true},
+		"ride": {"required", 0.3, true}, "roller": {"required", 0.5, true}, "rowing": {"required", 0.5, false},
+		"run": {"required", 1, true}, "strength": {"none", 0, false}, "swim": {"required", 1, false},
+		"walk": {"required", 1, true}, "xc_ski": {"required", 0.5, true}, "yoga": {"none", 0, false},
 	}
 	if len(sports) != len(want) {
 		t.Fatalf("%d sports, want %d", len(sports), len(want))
@@ -49,8 +50,8 @@ func TestListReturnsTheReferenceData(t *testing.T) {
 		if s.SuggestedFactor != nil {
 			got = *s.SuggestedFactor
 		}
-		if s.DistanceMode != w.mode || got != w.factor || (w.mode == "none") != (s.SuggestedFactor == nil) {
-			t.Errorf("%s = %s %v, want %s %v", s.Code, s.DistanceMode, s.SuggestedFactor, w.mode, w.factor)
+		if s.DistanceMode != w.mode || got != w.factor || (w.mode == "none") != (s.SuggestedFactor == nil) || s.ElevationAllowed != w.elevation {
+			t.Errorf("%s = %s %v %v, want %s %v %v", s.Code, s.DistanceMode, s.SuggestedFactor, s.ElevationAllowed, w.mode, w.factor, w.elevation)
 		}
 	}
 	if !slices.IsSorted(codes) {

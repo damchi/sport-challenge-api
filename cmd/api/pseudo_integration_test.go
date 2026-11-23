@@ -33,7 +33,7 @@ func TestEverythingWorksWithoutAPseudo(t *testing.T) {
 	users := user.NewService(user.NewRepository(gdb), nil, nil, nil, nil, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges := challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, challengeStandings{}, clk)
-	activities := activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, sports, participations{challenges}, activityScopes{challenges}, clk)
+	activities := activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, activityCatalogue{sports}, participations{challenges}, activityScopes{challenges}, clk)
 	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
 
 	insertUser := func(subject, pseudo, first, last *string) string {

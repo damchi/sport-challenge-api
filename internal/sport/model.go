@@ -8,4 +8,7 @@ type Sport struct {
 	DistanceMode string
 	// SuggestedFactor is nil for sports without distance.
 	SuggestedFactor *float64
+	// ElevationAllowed tells whether an activity of the sport may have an
+	// elevation gain; never for a sport without distance.
+	ElevationAllowed bool
 }
