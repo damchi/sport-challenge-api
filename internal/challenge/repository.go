@@ -215,9 +215,10 @@ func readWithMembership(gdb *gorm.DB, id, actorID string, now time.Time) (Challe
 // the membership of actorID in it, its invitations judged at now, in one
 // query: a missing, deleted or private challenge costs the same before the
 // service decides what the actor may see. A missing or deleted challenge
-// gives errChallengeNotFound.
+// gives errChallengeNotFound. It reads in the transaction of ctx, if any
+// (the preview of an admin change ranks what the change wrote).
 func (r *Repository) Get(ctx context.Context, id, actorID string, now time.Time) (Challenge, Membership, error) {
-	return readWithMembership(r.db.WithContext(ctx), id, actorID, now)
+	return readWithMembership(db.Conn(ctx, r.db), id, actorID, now)
 }
 
 // ActiveParticipations returns the challenges, not deleted and not finished
@@ -600,10 +601,11 @@ func (r *Repository) CategoriesOf(ctx context.Context, ids []string) (map[string
 	return out, nil
 }
 
-// Categories returns the categories of challenge id, in position order.
+// Categories returns the categories of challenge id, in position order, in
+// the transaction of ctx, if any (as Get).
 func (r *Repository) Categories(ctx context.Context, id string) ([]Category, error) {
 	var cats []Category
-	if err := r.db.WithContext(ctx).Where("challenge_id = ?", id).Order("position").Find(&cats).Error; err != nil {
+	if err := db.Conn(ctx, r.db).Where("challenge_id = ?", id).Order("position").Find(&cats).Error; err != nil {
 		return nil, fmt.Errorf("read categories: %w", err)
 	}
 	return cats, nil

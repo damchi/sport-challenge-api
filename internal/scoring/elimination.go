@@ -73,20 +73,25 @@ type Eliminated struct {
 }
 
 // Eliminations lists the participants eliminated in the weeks locked at the
-// instant of the window, by week then participant; an abandoned participant
-// is left out (shown as abandoned, not as eliminated). A week judged keeps
-// its eliminations whenever it is computed: running it later only adds the
-// weeks that locked since.
+// instant of the window, by week then participant. An abandoned participant
+// is judged only in the weeks locked when they left (AbandonedAt at or after
+// Window.WeekLocksAt, the bound of the points category): an elimination
+// judged before they left stays, and the weeks locked after are not judged
+// (shown as abandoned, not as eliminated); without AbandonedAt, in none. A
+// week judged keeps its eliminations whenever it is computed, abandons
+// since included: running it later, or again after an admin change (README
+// §2.12), only adds the weeks that locked since.
 func (e Elimination) Eliminations(w Window, participants []Participant, activities []Activity) []Eliminated {
 	weekly := e.weeklyDistances(w, participants, activities)
 	judged := w.LockedWeeks()
 	var out []Eliminated
 	for _, p := range participants {
+		upTo := judged
 		if p.Abandoned {
-			continue
+			upTo = lockedWhenLeft(w, p.AbandonedAt, judged)
 		}
 		distances := weekly[p.UserID]
-		if n := firstEliminatedWeek(distances, judged, e.StepMeters); n > 0 {
+		if n := firstEliminatedWeek(distances, upTo, e.StepMeters); n > 0 {
 			out = append(out, Eliminated{
 				UserID: p.UserID, Week: n, DistanceMeters: distances[n], MinimumMeters: minimumMeters(distances[n-1], e.StepMeters),
 			})
@@ -96,6 +101,19 @@ func (e Elimination) Eliminations(w Window, participants []Participant, activiti
 		return cmp.Or(cmp.Compare(a.Week, b.Week), cmp.Compare(a.UserID, b.UserID))
 	})
 	return out
+}
+
+// lockedWhenLeft is how many of the judged weeks were locked when a
+// participant left at left (nil: none).
+func lockedWhenLeft(w Window, left *time.Time, judged int) int {
+	if left == nil {
+		return 0
+	}
+	n := 0
+	for n < judged && !left.Before(w.WeekLocksAt(n+1)) {
+		n++
+	}
+	return n
 }
 
 // weeklyDistances is the distance covered in the sport by each participant

@@ -263,6 +263,42 @@ func TestCloseWeeksFromTheDatabase(t *testing.T) {
 
 // TestCloseWeeksOfAParticipantWhoAbandonedSinceTheWeekEnded pins the choice
 // documented on CloseWeeks: who is abandoned is read when the task runs.
+// TestCloseWeeksOfAParticipantWhoAbandonedAfterTheLock: in a challenge
+// without points, a participant who leaves after week 2 locked, before the
+// worker judged it, is eliminated in it, from the runs read of an abandoned
+// participant (README §2.3); week 3, locked after leaving, does not judge
+// them.
+func TestCloseWeeksOfAParticipantWhoAbandonedAfterTheLock(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 3, 2, 0, 0, 0, 0, loc)
+	locked := func(n int) time.Time { return time.Date(2026, 3, 2+7*n, 7, 0, 0, 0, loc).UTC() }
+
+	runner := s.user("runner")
+	challengeID, _ := s.challenge(runner, start, false)
+	s.exec(`INSERT INTO participants (challenge_id, user_id, status, joined_at, abandoned_at) VALUES ($1, $2, 'abandoned', $3, $4)`,
+		challengeID, runner, start, locked(2).Add(time.Hour))
+	s.run(runner, start.Add(time.Hour), 5000)
+	s.run(runner, start.AddDate(0, 0, 7).Add(time.Hour), 6999)
+
+	service := NewService(NewRepository(gdb), leaderboard.NewRepository(gdb), clock.NewFake(locked(3)), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if _, err := service.CloseWeeks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []recordedElimination{{User: runner, Week: 2, Run: 6999, Min: 7000}}
+	if got := s.eliminations(challengeID); !reflect.DeepEqual(got, want) {
+		t.Fatalf("eliminations = %+v, want %+v: judged in the week locked before leaving", got, want)
+	}
+}
+
 func TestCloseWeeksOfAParticipantWhoAbandonedSinceTheWeekEnded(t *testing.T) {
 	pool := testdb.New(t)
 	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))

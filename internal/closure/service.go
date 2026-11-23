@@ -15,6 +15,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
@@ -42,6 +43,16 @@ type repository interface {
 	// fails with errRankedAccountDeleted, and records nothing, when an
 	// account ranked in them was deleted since.
 	SaveSnapshots(ctx context.Context, challengeID string, createdAt time.Time, snapshots []Snapshot, last LastWeek) (bool, error)
+	// Challenge reads a challenge not deleted with its categories, whatever
+	// its status; false when there is none.
+	Challenge(ctx context.Context, id string) (EndedChallenge, bool, error)
+	// WithWeeksShared runs fn in a transaction holding the week lock shared.
+	WithWeeksShared(ctx context.Context, fn func(ctx context.Context) error) error
+	// LockWeeks takes the week lock alone in the transaction ctx carries.
+	LockWeeks(ctx context.Context) error
+	// ClearResults erases the eliminations, closures and result snapshots
+	// of a challenge.
+	ClearResults(ctx context.Context, id string) error
 }
 
 // errRankedAccountDeleted is an account deleted between the ranking of a
@@ -64,7 +75,8 @@ const (
 
 // Activities gives the participants of a challenge and, in one query, the
 // totals of the activities of its active participants started in the window,
-// per participant and week for weeklySport, per participant and sport for the
+// per participant and week for weeklySport (abandoned participants included,
+// judged in the weeks locked before they left), per participant and sport for the
 // others; with minSessionSeconds > 0, the groups of a points category whose
 // minimum session it is: every sport per participant, week and sport,
 // abandoned participants included; with elevation, the sum of the elevation
@@ -95,8 +107,11 @@ func NewService(repo repository, data Activities, c clock.Clock, logger *slog.Lo
 // is judged by its activities, which no longer change once it is locked, so
 // when it runs does not change them, even after the challenge is over.
 // The last week of a challenge is left to its finalization. One thing is read
-// as of the run: who is abandoned (see closeChallenge). A challenge in error
-// does not stop the others; the errors are joined.
+// as of the run: who is abandoned and when (see closeChallenge). Each challenge is
+// read again and judged in a transaction holding the week lock shared, so
+// that a recompute (Recompute) runs before or after, never in between. A
+// challenge in error records nothing and does not stop the others; the
+// errors are joined.
 func (s *Service) CloseWeeks(ctx context.Context) (Result, error) {
 	now, err := s.now(ctx)
 	if err != nil {
@@ -108,16 +123,35 @@ func (s *Service) CloseWeeks(ctx context.Context) (Result, error) {
 	}
 	var result Result
 	var errs []error
-	for _, c := range challenges {
-		weeks, eliminations, err := s.closeChallenge(ctx, c, now)
+	// now was read before the lock of each challenge, unlike Recompute: an
+	// earlier instant locks no more weeks, and the writes that checked
+	// against it were awaited (s.now).
+	for _, listed := range challenges {
+		var weeks, eliminations int
+		err := s.repo.WithWeeksShared(ctx, func(ctx context.Context) error {
+			c, ok, err := s.reread(ctx, listed.ID)
+			if err != nil || !ok {
+				return err
+			}
+			closable, ok := closableOf(c)
+			if !ok {
+				return nil
+			}
+			weeks, eliminations, err = s.closeChallenge(ctx, closable, now)
+			return err
+		})
+		if err != nil {
+			// The transaction rolled back: nothing of it was recorded.
+			weeks, eliminations = 0, 0
+		}
 		result.Weeks += weeks
 		result.Eliminations += eliminations
 		if weeks > 0 {
 			result.Challenges++
 		}
 		if err != nil {
-			s.logger.Error("close weeks", slog.String("challenge_id", c.ID), slog.String("error", err.Error()))
-			errs = append(errs, fmt.Errorf("challenge %s: %w", c.ID, err))
+			s.logger.Error("close weeks", slog.String("challenge_id", listed.ID), slog.String("error", err.Error()))
+			errs = append(errs, fmt.Errorf("challenge %s: %w", listed.ID, err))
 		}
 	}
 	return result, errors.Join(errs...)
@@ -162,8 +196,11 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 		return 0, 0, nil
 	}
 
-	// Who is abandoned is read as of now: someone who abandons before the
-	// week is closed is shown as abandoned, not eliminated, and gets no row.
+	// Who is abandoned is read as of now, with when they left: someone who
+	// abandons before a week locks is shown as abandoned, not eliminated, and
+	// gets no row for it; one who abandons after is still judged in it
+	// (scoring.Elimination.Eliminations), so a recompute keeps the
+	// eliminations judged before they left.
 	participants, err := s.data.Participants(ctx, c.ID)
 	if err != nil {
 		return 0, 0, err
@@ -194,6 +231,76 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 	return weeks, eliminations, nil
 }
 
+// reread reads challenge id again under the week lock: a recompute may have
+// changed it since it was listed (its settings, its dates) or deleted it
+// (false).
+func (s *Service) reread(ctx context.Context, id string) (EndedChallenge, bool, error) {
+	c, ok, err := s.repo.Challenge(ctx, id)
+	if err != nil {
+		return EndedChallenge{}, false, fmt.Errorf("read challenge again: %w", err)
+	}
+	return c, ok, nil
+}
+
+// closableOf is c as close-weeks judges it, with its elimination category;
+// false without one: only the elimination category is judged week by week.
+func closableOf(c EndedChallenge) (Challenge, bool) {
+	for _, cat := range c.Categories {
+		if cat.Type == categoryElimination {
+			return Challenge{
+				ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt,
+				CategoryID: cat.ID, Sport: cat.Sport, StepMeters: cat.StepMeters,
+			}, true
+		}
+	}
+	return Challenge{}, false
+}
+
+// Recompute judges challenge id again, as the worker would at the instant of
+// the clock, after an admin change to its past (README §2.12): its
+// eliminations, the closures of its weeks and its result snapshots are
+// erased, every week locked at now but the last is judged again in order
+// (close-weeks), then, once the last week is locked, the results are frozen
+// again with the closure of that week (finalize-challenges). A challenge the
+// change made in progress again (longer, later) thus loses its results until
+// its new end. It is the code of the worker on the same data, so it gives
+// the same result; who is abandoned is read as of now, as by a run.
+//
+// It runs in the transaction of the change, which ctx carries (db.InTx), so
+// that the change and its consequences commit or roll back together; outside
+// of one it is refused. It holds the week lock alone (LockWeeks) until that
+// transaction ends: no activity write and no run of the worker on a
+// challenge is in progress meanwhile, and the clock is read once it is held,
+// so that a week locked at now has all its activities. The change takes the
+// lock first, before any row (db.LockWeeks). 404 challenge_not_found for a
+// challenge unknown or deleted. It checks no right: it is called by the
+// admin changes only (admin.Corrections), never by a handler.
+func (s *Service) Recompute(ctx context.Context, id string) error {
+	if err := s.repo.LockWeeks(ctx); err != nil {
+		return err
+	}
+	now := s.clock.Now()
+	c, ok, err := s.repo.Challenge(ctx, id)
+	if err != nil {
+		return fmt.Errorf("read challenge: %w", err)
+	}
+	if !ok {
+		return apperr.New(apperr.CodeChallengeNotFound, nil)
+	}
+	if err := s.repo.ClearResults(ctx, id); err != nil {
+		return err
+	}
+	if closable, ok := closableOf(c); ok {
+		if _, _, err := s.closeChallenge(ctx, closable, now); err != nil {
+			return err
+		}
+	}
+	if _, err := s.finalizeChallenge(ctx, c, now); err != nil {
+		return err
+	}
+	return nil
+}
+
 // openWeeks lists, in order, the weeks 1 to locked that are not in closed.
 func openWeeks(locked int, closed []int) []int {
 	isClosed := make(map[int]bool, len(closed))
@@ -220,8 +327,9 @@ func openWeeks(locked int, closed []int) []int {
 // is abandoned is read as of the run, which changes nothing after the end:
 // nobody can abandon or be excluded from a challenge that is over, and the
 // activities of a locked week no longer change. Challenges deleted get no
-// snapshot. A challenge in error does not stop the others; the errors are
-// joined.
+// snapshot. Each challenge is read again and frozen in a transaction holding
+// the week lock shared, as in CloseWeeks. A challenge in error does not stop
+// the others; the errors are joined.
 func (s *Service) FinalizeChallenges(ctx context.Context) (FinalizeResult, error) {
 	now, err := s.now(ctx)
 	if err != nil {
@@ -233,14 +341,25 @@ func (s *Service) FinalizeChallenges(ctx context.Context) (FinalizeResult, error
 	}
 	var result FinalizeResult
 	var errs []error
-	for _, c := range challenges {
-		done, err := s.finalizeChallenge(ctx, c, now)
+	for _, listed := range challenges {
+		var done bool
+		err := s.repo.WithWeeksShared(ctx, func(ctx context.Context) error {
+			c, ok, err := s.reread(ctx, listed.ID)
+			if err != nil || !ok {
+				return err
+			}
+			done, err = s.finalizeChallenge(ctx, c, now)
+			return err
+		})
+		if err != nil {
+			done = false
+		}
 		if done {
 			result.Challenges++
 		}
 		if err != nil {
-			s.logger.Error("finalize challenge", slog.String("challenge_id", c.ID), slog.String("error", err.Error()))
-			errs = append(errs, fmt.Errorf("challenge %s: %w", c.ID, err))
+			s.logger.Error("finalize challenge", slog.String("challenge_id", listed.ID), slog.String("error", err.Error()))
+			errs = append(errs, fmt.Errorf("challenge %s: %w", listed.ID, err))
 		}
 	}
 	return result, errors.Join(errs...)

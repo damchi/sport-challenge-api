@@ -534,6 +534,7 @@ func TestActivitiesOfKeepsEachChallengeInItsWindow(t *testing.T) {
 		s.activity(both, "run", at, 600, km(1000+day), false)
 		s.activity(onlySpring, "ride", at, 300, km(2000), false)
 		s.activity(quitter, "run", at, 300, km(9000), false)
+		s.activity(quitter, "ride", at.Add(time.Hour), 300, km(9000), false)
 		s.activity(gone, "run", at, 300, km(9000), false)
 	}
 
@@ -552,11 +553,17 @@ func TestActivitiesOfKeepsEachChallengeInItsWindow(t *testing.T) {
 			t.Fatalf("%s together = %+v, want it alone %+v", sc.ChallengeID, together[sc.ChallengeID], alone[sc.ChallengeID])
 		}
 	}
-	// 3 weeks of runs for both in spring, plus the rides of onlySpring; 2
-	// weeks of runs in summer; nothing of the quitter nor of the deleted
-	// account.
-	if got := len(together[spring]); got != 4 {
-		t.Fatalf("spring: %d totals %+v, want 3 weekly runs and 1 ride total", got, together[spring])
+	// 3 weeks of runs for both in spring, plus the rides of onlySpring, and
+	// the 3 weeks of runs of the quitter, whom the elimination judges in the
+	// weeks locked before they left (README §2.3), but not their rides; 2
+	// weeks of runs in summer; nothing of the deleted account.
+	if got := len(together[spring]); got != 7 {
+		t.Fatalf("spring: %d totals %+v, want 3 weekly runs of both and of the quitter, and 1 ride total", got, together[spring])
+	}
+	for _, a := range together[spring] {
+		if a.UserID == gone || (a.UserID == quitter && a.SportCode != "run") {
+			t.Fatalf("spring total %+v, want none of the deleted account, the weekly sport only of the quitter", a)
+		}
 	}
 	if got := len(together[summer]); got != 2 {
 		t.Fatalf("summer: %d totals %+v, want 2 weekly runs", got, together[summer])

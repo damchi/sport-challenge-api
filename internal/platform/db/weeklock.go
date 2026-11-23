@@ -18,10 +18,25 @@ const (
 
 // ShareWeekLock takes the week lock shared until the end of tx. An activity
 // write takes it before reading the clock to check the lock of its weeks, so
-// that AwaitWeekWrites waits for it; writes do not wait for each other.
+// that AwaitWeekWrites waits for it; the worker takes it for each challenge
+// it judges, so that no admin change (LockWeeks) runs in between. Those who
+// hold it shared do not wait for each other.
 func ShareWeekLock(tx *gorm.DB) error {
 	if err := tx.Exec("SELECT pg_advisory_xact_lock_shared(?, ?)", weekLockClass, weekLockID).Error; err != nil {
 		return fmt.Errorf("share week lock: %w", err)
+	}
+	return nil
+}
+
+// LockWeeks takes the week lock alone until the end of tx: it waits for
+// every transaction holding it shared (activity writes, runs of the worker
+// on a challenge) and holds back the next ones until tx ends. An admin
+// change takes it first in its transaction, before any row, as the activity
+// writes do (ShareWeekLock, then the author's row), so that none waits for
+// the other; it is taken again by the recompute, which changes nothing.
+func LockWeeks(tx *gorm.DB) error {
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(?, ?)", weekLockClass, weekLockID).Error; err != nil {
+		return fmt.Errorf("lock weeks: %w", err)
 	}
 	return nil
 }
