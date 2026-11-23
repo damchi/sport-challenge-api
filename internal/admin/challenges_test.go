@@ -113,6 +113,17 @@ func TestChallenges(t *testing.T) {
 	}
 }
 
+func TestChallengesLimitBelowOne(t *testing.T) {
+	repo := &fakeRepo{rows: []ChallengeRow{{ID: "c1"}, {ID: "c2"}}}
+	got, err := newChallengeService(repo).Challenges(t.Context(), adminActor, ChallengeQuery{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.query.Limit != 2 || len(got.Items) != 1 || got.Next == nil || got.Next.ID != "c1" {
+		t.Fatalf("Challenges() = %+v (asked %d), want one challenge and a next page", got, repo.query.Limit)
+	}
+}
+
 func TestChallengesEmpty(t *testing.T) {
 	got, err := newChallengeService(&fakeRepo{}).Challenges(t.Context(), adminActor, ChallengeQuery{Limit: 20}, "")
 	if err != nil {

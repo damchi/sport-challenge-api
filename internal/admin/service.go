@@ -97,7 +97,9 @@ func (s *Service) Challenges(ctx context.Context, actor auth.Actor, q ChallengeQ
 		q.After = &after
 	}
 	q.Now = s.clock.Now()
-	limit := q.Limit
+	// The contract bounds the limit; a direct call below 1 still gets one
+	// challenge per page.
+	limit := max(q.Limit, 1)
 	// One more than asked tells whether a next page exists.
 	q.Limit = limit + 1
 	rows, err := s.repo.ListChallenges(ctx, q)
