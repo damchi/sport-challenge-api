@@ -213,7 +213,7 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
 - ✅ **Tous les défis**, privés et supprimés compris, avec tout ce que voit un créateur, plus les liens d'invitation (actifs, expirés, révoqués), les semaines verrouillées, les éliminations, l'état des résultats figés et les corrections admin.
 - ✅ Sur les routes existantes (détail, classement, participants, activités d'un défi), l'admin a la **lecture d'un créateur**, sur tous les défis non supprimés : l'app réutilise ses pages. Pour lui, un défi privé non supprimé n'est jamais en 404. Ces routes ne lui donnent **aucun** droit d'écriture : rejoindre, modifier ou exclure y suivent les règles normales ; ses modifications passent par les routes `/admin/*`.
 - ✅ **Tous les utilisateurs**, e-mail compris : état (actif, bloqué, supprimé, suppression Auth0 en attente), date d'inscription, dernière activité, défis, activités.
-- ✅ Un **tableau de bord** : comptes (total, nouveaux sur 7 jours, actifs sur 7 jours), défis par statut et supprimés, activités de la semaine, suppressions Auth0 en attente, dernier passage et dernier échec de chaque tâche du worker, version de l'API.
+- ✅ Un **tableau de bord** : comptes (total, nouveaux sur 7 jours, actifs sur 7 jours), défis par statut et supprimés, activités de la semaine, suppressions Auth0 en attente, dernier passage et dernier échec de chaque tâche du worker, version de l'API. ✅ « Sur 7 jours » et « de la semaine » : les 7 × 24 h qui précèdent la lecture, sans fuseau ; les activités comptées et le compte **actif** (au moins une activité) portent sur la date de saisie, quelle que soit la date de la séance, activités supprimées exclues ; les comptes supprimés ne comptent dans aucun chiffre de comptes ni d'activités ; le nombre de comptes bloqués s'y ajoute avec le blocage (SC-API-165) (décisions du 2026-11-23, SC-API-156).
 - ✅ Le **journal** des actions admin.
 
 **Ce que l'admin peut modifier**
@@ -466,6 +466,13 @@ sport-challenge-api/
 │   │                                et du dernier échec (SQL brut)
 │   │   └── service.go               consigne chaque passage autour de la tâche, échec compris (code d'erreur stable)
 │   │
+│   ├── admin/                       lectures transverses de l'administration (§2.12)
+│   │   ├── model.go                 chiffres du tableau de bord, passages du worker
+│   │   ├── policy.go                RequireAdmin : 404 sans la permission admin
+│   │   ├── repository.go            agrégations du tableau de bord (SQL brut, lecture seule)
+│   │   ├── service.go               lit les chiffres à l'instant de l'horloge
+│   │   └── handler.go               GET /admin/stats
+│   │
 │   ├── badge/                       (cible, V1.1)
 │   │   ├── model.go                 BadgeDefinition (par challenge, règle en JSON), BadgeAward
 │   │   ├── rules.go                 évaluation pure d'une condition de badge (sans base de données) ; testée
@@ -552,6 +559,7 @@ flowchart TD
 | `leaderboard` | Charge participants et activités, appelle les scorers, renvoie un classement par catégorie |
 | `closure` | Au verrouillage de chaque semaine : éliminations, badges « semaines de suite » ; au verrouillage de la dernière : gel des résultats |
 | `workerrun` | Consigne chaque passage du worker (tâche, début, fin, issue, code d'erreur sans donnée personnelle) et ne garde que les 500 derniers par tâche, plus le dernier échec de chacune ; alimente le tableau de bord admin (§2.12) |
+| `admin` | Lectures transverses de l'administration (§2.12) : chiffres du tableau de bord ; les modifications admin restent des cas d'usage de chaque module |
 | `badge` | Badges créés par les créateurs d'un challenge (nom, description, condition structurée) ; évaluation à chaque nouvelle activité, attribution idempotente |
 | `integration` | (V2+) Connexion OAuth au fournisseur, réception des webhooks, import, dédoublonnage |
 
