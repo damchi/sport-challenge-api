@@ -274,16 +274,26 @@ func (r *Repository) DayTotals(ctx context.Context, userID string, bounds []time
 }
 
 // SportCounts returns the number of activities of userID of each sport,
-// deleted ones left out, most frequent first, then by code.
-func (r *Repository) SportCounts(ctx context.Context, userID string) ([]SportCount, error) {
-	var rows []SportCount
-	err := r.db.WithContext(ctx).Raw(`SELECT sport_code, count(*) AS count
+// deleted ones left out, most frequent first, then by code, and the sum of
+// the durations of those same activities, in seconds.
+func (r *Repository) SportCounts(ctx context.Context, userID string) ([]SportCount, int, error) {
+	var rows []struct {
+		SportCount
+		DurationSeconds int
+	}
+	err := r.db.WithContext(ctx).Raw(`SELECT sport_code, count(*) AS count, sum(duration_seconds) AS duration_seconds
 		FROM activities WHERE user_id = ? AND deleted_at IS NULL
 		GROUP BY sport_code ORDER BY count DESC, sport_code`, userID).Scan(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("sport counts: %w", err)
+		return nil, 0, fmt.Errorf("sport counts: %w", err)
 	}
-	return rows, nil
+	out := make([]SportCount, 0, len(rows))
+	duration := 0
+	for _, row := range rows {
+		out = append(out, row.SportCount)
+		duration += row.DurationSeconds
+	}
+	return out, duration, nil
 }
 
 // Weeks returns up to q.Limit weeks of the activities of q.UserID, with

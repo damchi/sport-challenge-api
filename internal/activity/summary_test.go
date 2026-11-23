@@ -28,8 +28,9 @@ func TestServiceMySummary(t *testing.T) {
 	days[0] = Totals{Sessions: 2, DurationSeconds: 5400, DistanceMeters: 12_000}
 	days[3] = Totals{Sessions: 1, DurationSeconds: 3600}
 	sports := []SportCount{{SportCode: "run", Count: 4}, {SportCode: "bike", Count: 1}, {SportCode: "other", Count: 1}}
-	repo := &fakeRepository{days: days, sports: sports}
-	sum, err := newService(t, repo, fakeParticipations{}).MySummary(t.Context(), actor, "America/Toronto")
+	repo := &fakeRepository{days: days, sports: sports, sportsDuration: 21_600}
+	joined := fakeParticipations{challenges: []Participation{challengeOf(t, "c1"), challengeOf(t, "c2")}}
+	sum, err := newService(t, repo, joined).MySummary(t.Context(), actor, "America/Toronto")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +53,9 @@ func TestServiceMySummary(t *testing.T) {
 	if !reflect.DeepEqual(sum.Sports, sports) || sum.Total != 6 {
 		t.Fatalf("sports %+v, total %d, want the counts and their sum 6", sum.Sports, sum.Total)
 	}
+	if sum.TotalDurationSeconds != 21_600 || sum.ChallengeCount != 2 {
+		t.Fatalf("total duration %d, challenge count %d, want 21600 and the 2 challenges joined", sum.TotalDurationSeconds, sum.ChallengeCount)
+	}
 }
 
 func TestServiceMySummaryEmptyWeek(t *testing.T) {
@@ -60,7 +64,7 @@ func TestServiceMySummaryEmptyWeek(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := sum.CurrentWeek
-	if w.Totals != (Totals{}) || len(w.Days) != 7 || sum.Total != 0 || len(sum.Sports) != 0 {
+	if w.Totals != (Totals{}) || len(w.Days) != 7 || sum.Total != 0 || len(sum.Sports) != 0 || sum.TotalDurationSeconds != 0 || sum.ChallengeCount != 0 {
 		t.Fatalf("summary %+v, want zeros and 7 days", sum)
 	}
 	for i, d := range w.Days {
@@ -85,6 +89,9 @@ func TestServiceMySummaryRefusals(t *testing.T) {
 	storageErr := errors.New("connection reset")
 	if _, err := newService(t, &fakeRepository{err: storageErr}, fakeParticipations{}).MySummary(t.Context(), actor, "UTC"); !errors.Is(err, storageErr) {
 		t.Fatalf("error = %v, want the cause kept", err)
+	}
+	if _, err := newService(t, &fakeRepository{}, fakeParticipations{err: storageErr}).MySummary(t.Context(), actor, "UTC"); !errors.Is(err, storageErr) {
+		t.Fatalf("participations failure: error = %v, want the cause kept", err)
 	}
 }
 
@@ -162,8 +169,9 @@ func TestServiceMineSport(t *testing.T) {
 func TestGetMyActivitySummary(t *testing.T) {
 	days := make([]Totals, 7)
 	days[2] = Totals{Sessions: 1, DurationSeconds: 3600, DistanceMeters: 10_000}
-	repo := &fakeRepository{days: days, sports: []SportCount{{SportCode: "run", Count: 1}}}
-	rec, body := serve(t, newService(t, repo, fakeParticipations{}), http.MethodGet, "/api/v1/me/activities/summary?tz=America/Toronto", "", nil)
+	repo := &fakeRepository{days: days, sports: []SportCount{{SportCode: "run", Count: 1}}, sportsDuration: 3600}
+	joined := fakeParticipations{challenges: []Participation{challengeOf(t, "c1")}}
+	rec, body := serve(t, newService(t, repo, joined), http.MethodGet, "/api/v1/me/activities/summary?tz=America/Toronto", "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d (%s), want 200", rec.Code, rec.Body)
 	}
@@ -178,8 +186,8 @@ func TestGetMyActivitySummary(t *testing.T) {
 	if wed, _ := ds[2].(map[string]any); wed["date"] != "2026-06-10" || wed["duration_seconds"] != 3600.0 {
 		t.Fatalf("Wednesday %v, want June 10 with its hour", wed)
 	}
-	if body["total"] != 1.0 {
-		t.Fatalf("total %v, want 1", body["total"])
+	if body["total"] != 1.0 || body["total_duration_seconds"] != 3600.0 || body["challenge_count"] != 1.0 {
+		t.Fatalf("total %v, total_duration_seconds %v, challenge_count %v, want 1, 3600 and 1", body["total"], body["total_duration_seconds"], body["challenge_count"])
 	}
 }
 

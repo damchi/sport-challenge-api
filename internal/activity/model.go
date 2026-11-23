@@ -119,12 +119,16 @@ type SportCount struct {
 	Count     int
 }
 
-// Summary sums the activities of a user: the current week, and the number of
-// activities of each sport, most frequent first, Total in all.
+// Summary sums the activities of a user: the current week, the number of
+// activities of each sport, most frequent first, Total in all, lasting
+// TotalDurationSeconds; and ChallengeCount, the number of challenges the
+// user joined.
 type Summary struct {
-	CurrentWeek CurrentWeek
-	Sports      []SportCount
-	Total       int
+	CurrentWeek          CurrentWeek
+	Sports               []SportCount
+	Total                int
+	TotalDurationSeconds int
+	ChallengeCount       int
 }
 
 // WeekQuery selects a page of the weeks of the activities of UserID, deleted
