@@ -184,11 +184,3 @@ func TestLastWorkerRuns(t *testing.T) {
 		t.Fatalf("LastWorkerRuns() = %+v, want %+v", byKey, want)
 	}
 }
-
-func utc(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
-}

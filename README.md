@@ -467,11 +467,12 @@ sport-challenge-api/
 │   │   └── service.go               consigne chaque passage autour de la tâche, échec compris (code d'erreur stable)
 │   │
 │   ├── admin/                       lectures transverses de l'administration (§2.12)
-│   │   ├── model.go                 chiffres du tableau de bord, passages du worker
+│   │   ├── model.go                 chiffres du tableau de bord, passages du worker, défis vus par l'admin
 │   │   ├── policy.go                RequireAdmin : 404 sans la permission admin
-│   │   ├── repository.go            agrégations du tableau de bord (SQL brut, lecture seule)
-│   │   ├── service.go               lit les chiffres à l'instant de l'horloge
-│   │   └── handler.go               GET /admin/stats
+│   │   ├── repository.go            agrégations du tableau de bord, liste et fiche des défis, supprimés compris
+│   │   │                                (SQL brut, lecture seule ; la fiche lue dans un seul instantané)
+│   │   ├── service.go               lit à l'instant de l'horloge (statuts, semaines verrouillées, liens expirés)
+│   │   └── handler.go               GET /admin/stats, /admin/challenges, /admin/challenges/{id}
 │   │
 │   ├── badge/                       (cible, V1.1)
 │   │   ├── model.go                 BadgeDefinition (par challenge, règle en JSON), BadgeAward
@@ -559,7 +560,7 @@ flowchart TD
 | `leaderboard` | Charge participants et activités, appelle les scorers, renvoie un classement par catégorie |
 | `closure` | Au verrouillage de chaque semaine : éliminations, badges « semaines de suite » ; au verrouillage de la dernière : gel des résultats |
 | `workerrun` | Consigne chaque passage du worker (tâche, début, fin, issue, code d'erreur sans donnée personnelle) et ne garde que les 500 derniers par tâche, plus le dernier échec de chacune ; alimente le tableau de bord admin (§2.12) |
-| `admin` | Lectures transverses de l'administration (§2.12) : chiffres du tableau de bord ; les modifications admin restent des cas d'usage de chaque module |
+| `admin` | Lectures transverses de l'administration (§2.12) : chiffres du tableau de bord, liste et fiche de tous les challenges (supprimés compris) ; les modifications admin restent des cas d'usage de chaque module |
 | `badge` | Badges créés par les créateurs d'un challenge (nom, description, condition structurée) ; évaluation à chaque nouvelle activité, attribution idempotente |
 | `integration` | (V2+) Connexion OAuth au fournisseur, réception des webhooks, import, dédoublonnage |
 
@@ -633,7 +634,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 
 **Autorisation** (pas dans un middleware)
 - Chaque service vérifie le rôle : créateur, participant, public ou admin. Un utilisateur ne peut jamais agir sur une ressource d'un autre en changeant un identifiant.
-- ✅ **Admin** (§2.12) : la permission `admin` vient de la claim `permissions` de l'access token ; `Authenticate` la place dans le contexte avec les autres informations du jeton, et elle se vérifie dans les **politiques des services** (`policy.go`), **jamais dans un middleware**. Les modifications admin sont des cas d'usage admin de chaque service, qui reprennent la validation et laissent de côté les verrous de temps et de rôle ; jamais un `if admin` semé dans les règles existantes. Une route `/admin/*` appelée sans la permission répond 404 `not_found`, pour ne pas révéler son existence.
+- ✅ **Admin** (§2.12) : la permission `admin` vient de la claim `permissions` de l'access token ; `Authenticate` la place dans le contexte avec les autres informations du jeton, et elle se vérifie dans les **politiques des services** (`policy.go`), **jamais dans un middleware**. Les modifications admin sont des cas d'usage admin de chaque service, qui reprennent la validation et laissent de côté les verrous de temps et de rôle ; jamais un `if admin` semé dans les règles existantes. Une route `/admin/*` appelée sans la permission répond 404 `not_found`, pour ne pas révéler son existence. ✅ Limite acceptée (décision du 2026-11-23, SC-API-157) : la validation du contrat passe avant le service, donc une requête mal formée (paramètre hors bornes, identifiant qui n'est pas un UUID) répond 400 `validation_failed`, avec ou sans la permission ; elle ne révèle que l'existence de la route, aucune donnée.
 - ✅ Un challenge privé n'est lisible que par ses créateurs, participants et invités, et par les admins (§2.12) ; un participant qui a abandonné (ou a été exclu) le voit encore, avec le détail des activités, sans pouvoir agir. Un **créateur** qui abandonne garde tous ses droits de créateur (modifier, inviter, exclure, ajouter un créateur, supprimer), mais ne concourt plus : ses activités n'y comptent plus. Une ressource privée inconnue renvoie 404 plutôt que 403 pour ne pas révéler son existence.
 
 **Comment l'autorisation est vérifiée** : chaque cas d'usage du service reçoit explicitement **qui agit** (`actorID`), charge la ressource, puis appelle une fonction de politique pure (`policy.go`) avant toute écriture. Le handler ne peut pas contourner le service, et le repository n'est jamais appelé directement par un handler. Les listes filtrent dans la requête SQL (jamais « tout charger puis retirer »).

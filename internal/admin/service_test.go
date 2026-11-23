@@ -15,15 +15,44 @@ import (
 
 var statsAt = time.Date(2026, 11, 23, 15, 30, 0, 0, time.UTC)
 
-// fakeRepo answers figures and runs, and records the bounds it was asked.
+// fakeRepo answers figures, runs and challenges, and records what it was
+// asked.
 type fakeRepo struct {
 	figures    Figures
 	runs       []TaskRun
 	figuresErr error
 	runsErr    error
 
+	rows         []ChallengeRow
+	creators     map[string][]UserRef
+	data         ChallengeData
+	listErr      error
+	creatorsErr  error
+	challengeErr error
+
 	calls      int
 	now, since time.Time
+	query      ChallengeQuery
+	creatorIDs []string
+	id         string
+}
+
+func (f *fakeRepo) ListChallenges(_ context.Context, q ChallengeQuery) ([]ChallengeRow, error) {
+	f.calls++
+	f.query = q
+	return f.rows, f.listErr
+}
+
+func (f *fakeRepo) CreatorsOf(_ context.Context, ids []string) (map[string][]UserRef, error) {
+	f.calls++
+	f.creatorIDs = ids
+	return f.creators, f.creatorsErr
+}
+
+func (f *fakeRepo) Challenge(_ context.Context, id string) (ChallengeData, error) {
+	f.calls++
+	f.id = id
+	return f.data, f.challengeErr
 }
 
 func (f *fakeRepo) Figures(_ context.Context, now, since time.Time) (Figures, error) {
