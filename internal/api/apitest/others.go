@@ -171,3 +171,7 @@ func (unimplemented) ListAdminUserActivities(context.Context, api.ListAdminUserA
 func (unimplemented) SearchAdminUsers(context.Context, api.SearchAdminUsersRequestObject) (api.SearchAdminUsersResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) ListAdminActions(context.Context, api.ListAdminActionsRequestObject) (api.ListAdminActionsResponseObject, error) {
+	return nil, errNotImplemented
+}

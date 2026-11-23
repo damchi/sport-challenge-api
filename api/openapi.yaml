@@ -1467,8 +1467,9 @@ paths:
       description: |
         Admin only (404 `not_found` otherwise). A challenge, private or
         deleted, with its settings, creators, weeks and how each one was
-        judged, eliminations, frozen results and invitation links. An unknown
-        challenge answers 404 `challenge_not_found`. Read now, never stored.
+        judged, eliminations, frozen results, invitation links and last admin
+        changes. An unknown challenge answers 404 `challenge_not_found`. Read
+        now, never stored.
       tags: [admin]
       parameters:
         - name: challengeId
@@ -1650,6 +1651,57 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/AdminUserNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/admin/actions:
+    get:
+      operationId: listAdminActions
+      summary: Read the journal of the admin changes
+      description: |
+        Admin only (404 `not_found` otherwise). Every admin change, with its
+        reason, most recent first. `target_type` and `target_id` keep the
+        changes of one target (both, or either); `admin_id` those of one
+        admin; `challenge_id` those that touch a challenge, whatever their
+        target (an activity counts in several challenges). The filters add
+        up.
+      tags: [admin]
+      parameters:
+        - name: target_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminActionTargetType"
+        - name: target_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: admin_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: challenge_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/AdminCursor"
+      responses:
+        "200":
+          description: A page of the journal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminActionPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminNotFound"
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
@@ -2055,7 +2107,7 @@ components:
             $ref: "#/components/schemas/AdminUserRef"
     AdminChallengeDetail:
       type: object
-      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, status, created_at, deleted_at, participant_count, creators, weeks, eliminations, results_frozen_at, invitations]
+      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, status, created_at, deleted_at, participant_count, creators, weeks, eliminations, results_frozen_at, invitations, recent_actions]
       additionalProperties: false
       properties:
         id:
@@ -2127,6 +2179,14 @@ components:
           description: Every invitation link of the challenge, most recent first. The token is never kept, so never given.
           items:
             $ref: "#/components/schemas/AdminInvitation"
+        recent_actions:
+          type: array
+          maxItems: 10
+          description: |
+            The last 10 admin changes that touch the challenge, most recent
+            first; the others with `GET /admin/actions?challenge_id=`.
+          items:
+            $ref: "#/components/schemas/AdminAction"
     AdminChallengeWeek:
       type: object
       required: [number, starts_at, ends_at, locks_at, locked, closed_at]
@@ -2409,6 +2469,66 @@ components:
           type: string
           format: date-time
           description: When the activity was recorded.
+    AdminActionPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAction"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.
+    AdminAction:
+      type: object
+      required: [id, admin, created_at, action, target_type, target_id, challenge_ids, old_value, new_value, reason]
+      additionalProperties: false
+      description: An admin change, as the journal keeps it.
+      properties:
+        id:
+          type: string
+          format: uuid
+        admin:
+          $ref: "#/components/schemas/AdminUserRef"
+        created_at:
+          type: string
+          format: date-time
+        action:
+          type: string
+          description: Stable code of the change (`challenge.update`...), translated by the client.
+        target_type:
+          $ref: "#/components/schemas/AdminActionTargetType"
+        target_id:
+          type: string
+          format: uuid
+          description: The id of the target; for a participant, that of its account (its challenge is in `challenge_ids`).
+        challenge_ids:
+          type: array
+          description: Every challenge the change touches; empty when it touches none.
+          items:
+            type: string
+            format: uuid
+        old_value:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: What the change replaced, the fields it changed only; null when it created the target.
+        new_value:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: What the change wrote, the fields it changed only; null when it removed the target.
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: The reason the admin gave.
+    AdminActionTargetType:
+      type: string
+      enum: [challenge, participant, activity, user]
     Health:
       type: object
       required: [status, version, commit]

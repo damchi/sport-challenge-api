@@ -3,16 +3,21 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
 
-// Repository reads the tables of every module for the admin reads. Raw SQL,
-// always parameterized; it never writes.
+// Repository reads the tables of every module for the admin reads, and
+// writes the journal of the admin changes (admin_actions), its only write.
+// Raw SQL, always parameterized.
 type Repository struct {
 	db *gorm.DB
 }
@@ -235,6 +240,11 @@ func (r *Repository) Challenge(ctx context.Context, id string) (ChallengeData, e
 			return fmt.Errorf("read frozen results: %w", err)
 		}
 		out.ResultsFrozenAt = frozen.FrozenAt
+		recent, err := readActions(tx, ActionQuery{ChallengeID: id, Limit: recentActions})
+		if err != nil {
+			return err
+		}
+		out.RecentActions = recent
 		// The rule of the invitation links (module invitation, linkQuery).
 		if err := tx.Raw(`SELECT i.id, u.id AS invited_by_id, u.pseudo AS invited_by_pseudo,
 			u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name,
@@ -386,6 +396,114 @@ func (r *Repository) ListUserActivities(ctx context.Context, id string, q Activi
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+var _ journalStore = (*Repository)(nil)
+
+// InsertAction writes a to the journal, in the transaction ctx carries
+// (db.InTx). Its challenges travel as an array literal of uuids, cast by
+// PostgreSQL: each one is checked here, so that none can add an element.
+func (r *Repository) InsertAction(ctx context.Context, a ActionRecord) error {
+	for _, id := range a.ChallengeIDs {
+		if _, err := uuid.Parse(id); err != nil || strings.ContainsAny(id, ",{}\" \\") {
+			return fmt.Errorf("admin action challenge id %q is not a uuid", id)
+		}
+	}
+	err := db.Conn(ctx, r.db).Exec(`INSERT INTO admin_actions
+		(admin_id, created_at, action, target_type, target_id, challenge_ids, old_value, new_value, reason)
+		VALUES (@admin_id, @created_at, @action, @target_type, @target_id, CAST(@challenge_ids AS uuid[]),
+			CAST(@old_value AS jsonb), CAST(@new_value AS jsonb), @reason)`,
+		map[string]any{
+			"admin_id": a.AdminID, "created_at": a.CreatedAt, "action": a.Action,
+			"target_type": a.TargetType, "target_id": a.TargetID,
+			"challenge_ids": "{" + strings.Join(a.ChallengeIDs, ",") + "}",
+			"old_value":     jsonParam(a.OldValue), "new_value": jsonParam(a.NewValue), "reason": a.Reason,
+		},
+	).Error
+	if err != nil {
+		return fmt.Errorf("insert admin action: %w", err)
+	}
+	return nil
+}
+
+// jsonParam is a JSON value as a parameter: its text, nil (NULL) for none.
+func jsonParam(v []byte) any {
+	if v == nil {
+		return nil
+	}
+	return string(v)
+}
+
+// ListActions returns at most q.Limit actions of the journal of q, most
+// recent first; the key (created_at, id) makes the order total.
+func (r *Repository) ListActions(ctx context.Context, q ActionQuery) ([]Action, error) {
+	return readActions(r.db.WithContext(ctx), q)
+}
+
+// actionRow is an action as read: its challenges as a JSON array.
+type actionRow struct {
+	ID           string
+	Admin        UserRef `gorm:"embedded;embeddedPrefix:admin_"`
+	CreatedAt    time.Time
+	Action       string
+	TargetType   string
+	TargetID     string
+	ChallengeIDs []byte
+	OldValue     []byte
+	NewValue     []byte
+	Reason       string
+}
+
+// readActions reads at most q.Limit actions of q on tx, filtered in SQL.
+// The admin is named as a creator sees an account: a deleted one is never
+// named (its names are erased with it).
+func readActions(tx *gorm.DB, q ActionQuery) ([]Action, error) {
+	var query strings.Builder
+	query.WriteString(`SELECT a.id, u.id AS admin_id, u.pseudo AS admin_pseudo, u.first_name AS admin_first_name,
+		u.last_name AS admin_last_name, a.created_at, a.action, a.target_type, a.target_id,
+		array_to_json(a.challenge_ids) AS challenge_ids, a.old_value, a.new_value, a.reason
+		FROM admin_actions a JOIN users u ON u.id = a.admin_id WHERE true`)
+	args := map[string]any{"limit": q.Limit}
+	if q.TargetType != "" {
+		query.WriteString(" AND a.target_type = @target_type")
+		args["target_type"] = q.TargetType
+	}
+	if q.TargetID != "" {
+		query.WriteString(" AND a.target_id = @target_id")
+		args["target_id"] = q.TargetID
+	}
+	if q.AdminID != "" {
+		query.WriteString(" AND a.admin_id = @admin_id")
+		args["admin_id"] = q.AdminID
+	}
+	if q.ChallengeID != "" {
+		// @> on the GIN index admin_actions_challenge_ids_idx.
+		query.WriteString(" AND a.challenge_ids @> ARRAY[CAST(@challenge_id AS uuid)]")
+		args["challenge_id"] = q.ChallengeID
+	}
+	if q.After != nil {
+		query.WriteString(" AND (a.created_at, a.id) < (@after_created, @after_id)")
+		args["after_created"], args["after_id"] = q.After.CreatedAt, q.After.ID
+	}
+	query.WriteString(" ORDER BY a.created_at DESC, a.id DESC LIMIT @limit")
+
+	var rows []actionRow
+	if err := tx.Raw(query.String(), args).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("read admin actions: %w", err)
+	}
+	out := make([]Action, len(rows))
+	for i, r := range rows {
+		var ids []string
+		if err := json.Unmarshal(r.ChallengeIDs, &ids); err != nil {
+			return nil, fmt.Errorf("admin action challenges: %w", err)
+		}
+		out[i] = Action{
+			ID: r.ID, Admin: r.Admin, CreatedAt: r.CreatedAt, Action: r.Action,
+			TargetType: r.TargetType, TargetID: r.TargetID, ChallengeIDs: ids,
+			OldValue: r.OldValue, NewValue: r.NewValue, Reason: r.Reason,
+		}
 	}
 	return out, nil
 }
