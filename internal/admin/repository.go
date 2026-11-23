@@ -2,13 +2,16 @@ package admin
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
 
-// Repository reads the tables of every module for the dashboard. Raw SQL,
+// Repository reads the tables of every module for the admin reads. Raw SQL,
 // always parameterized; it never writes.
 type Repository struct {
 	db *gorm.DB
@@ -70,6 +73,183 @@ func (r *Repository) LastWorkerRuns(ctx context.Context) ([]TaskRun, error) {
 	).Scan(&out).Error
 	if err != nil {
 		return nil, fmt.Errorf("read last worker runs: %w", err)
+	}
+	return out, nil
+}
+
+// participantCountColumn counts the participations of challenge c,
+// abandoned included, but those of deleted accounts: the count of module
+// challenge.
+const participantCountColumn = `(SELECT count(*) FROM participants p JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
+	WHERE p.challenge_id = c.id)`
+
+// likePattern makes search a pattern of ILIKE … ESCAPE '\' that matches
+// the texts holding it: its wildcards are plain characters.
+func likePattern(search string) string {
+	return "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(search) + "%"
+}
+
+// ListChallenges returns at most q.Limit challenges of q, deleted ones
+// included, filtered in SQL, most recently created first; the key
+// (created_at, id) makes the order total. The status bounds are those of
+// statusAt.
+func (r *Repository) ListChallenges(ctx context.Context, q ChallengeQuery) ([]ChallengeRow, error) {
+	var query strings.Builder
+	query.WriteString(`SELECT c.id, c.title, c.visibility, c.timezone, c.starts_at, c.ends_at, c.created_at, c.deleted_at,
+		` + participantCountColumn + ` AS participant_count
+		FROM challenges c WHERE true`)
+	args := map[string]any{"now": q.Now, "limit": q.Limit}
+	if q.Search != "" {
+		query.WriteString(` AND c.title ILIKE @search ESCAPE '\'`)
+		args["search"] = likePattern(q.Search)
+	}
+	switch q.Status {
+	case StatusUpcoming:
+		query.WriteString(" AND c.starts_at > @now")
+	case StatusOngoing:
+		query.WriteString(" AND c.starts_at <= @now AND c.ends_at > @now")
+	case StatusFinished:
+		query.WriteString(" AND c.ends_at <= @now")
+	}
+	if q.Visibility != "" {
+		query.WriteString(" AND c.visibility = @visibility")
+		args["visibility"] = q.Visibility
+	}
+	if q.Deleted != nil {
+		if *q.Deleted {
+			query.WriteString(" AND c.deleted_at IS NOT NULL")
+		} else {
+			query.WriteString(" AND c.deleted_at IS NULL")
+		}
+	}
+	if q.After != nil {
+		query.WriteString(" AND (c.created_at, c.id) < (@after_created, @after_id)")
+		args["after_created"], args["after_id"] = q.After.CreatedAt, q.After.ID
+	}
+	query.WriteString(" ORDER BY c.created_at DESC, c.id DESC LIMIT @limit")
+
+	var out []ChallengeRow
+	if err := r.db.WithContext(ctx).Raw(query.String(), args).Scan(&out).Error; err != nil {
+		return nil, fmt.Errorf("list challenges: %w", err)
+	}
+	return out, nil
+}
+
+// creatorRow is a creator of a challenge.
+type creatorRow struct {
+	ChallengeID string
+	UserRef     `gorm:"embedded"`
+}
+
+// creatorsQuery reads the creators of the challenges @ids, oldest role
+// first. A deleted account has no creator role left (README §2.2).
+const creatorsQuery = `SELECT cc.challenge_id, u.id, u.pseudo, u.first_name, u.last_name
+	FROM challenge_creators cc JOIN users u ON u.id = cc.user_id
+	WHERE cc.challenge_id IN @ids ORDER BY cc.challenge_id, cc.created_at, u.id`
+
+// CreatorsOf returns the creators of each of ids, oldest role first, in one
+// query.
+func (r *Repository) CreatorsOf(ctx context.Context, ids []string) (map[string][]UserRef, error) {
+	out := make(map[string][]UserRef, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	creators, err := readCreators(r.db.WithContext(ctx), ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range creators {
+		out[c.ChallengeID] = append(out[c.ChallengeID], c.UserRef)
+	}
+	return out, nil
+}
+
+func readCreators(tx *gorm.DB, ids []string) ([]creatorRow, error) {
+	var rows []creatorRow
+	if err := tx.Raw(creatorsQuery, map[string]any{"ids": ids}).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("read creators: %w", err)
+	}
+	return rows, nil
+}
+
+// errChallengeNotFound means no challenge with this id, deleted or not.
+var errChallengeNotFound = errors.New("challenge not found")
+
+// closedWeek is a week the worker judged.
+type closedWeek struct {
+	WeekNumber int
+	ClosedAt   time.Time
+}
+
+// Challenge reads everything stored about challenge id, deleted or not, in
+// one read-only REPEATABLE READ transaction, so that every part comes from
+// the same snapshot. errChallengeNotFound when there is none.
+func (r *Repository) Challenge(ctx context.Context, id string) (ChallengeData, error) {
+	var out ChallengeData
+	opts := &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		args := map[string]any{"id": id}
+		var found []ChallengeRecord
+		if err := tx.Raw(`SELECT c.id, c.title, c.description, c.visibility, c.members_can_invite, c.timezone,
+			c.reference_sport, c.starts_at, c.ends_at, c.created_at, c.deleted_at,
+			`+participantCountColumn+` AS participant_count
+			FROM challenges c WHERE c.id = @id`, args).Scan(&found).Error; err != nil {
+			return fmt.Errorf("read challenge: %w", err)
+		}
+		if len(found) == 0 {
+			return errChallengeNotFound
+		}
+		out.Challenge = found[0]
+
+		if err := tx.Raw(`SELECT type, position, params FROM categories WHERE challenge_id = @id ORDER BY position`, args).
+			Scan(&out.Categories).Error; err != nil {
+			return fmt.Errorf("read categories: %w", err)
+		}
+		creators, err := readCreators(tx, []string{id})
+		if err != nil {
+			return err
+		}
+		for _, c := range creators {
+			out.Creators = append(out.Creators, c.UserRef)
+		}
+
+		var weeks []closedWeek
+		if err := tx.Raw(`SELECT week_number, closed_at FROM week_closure WHERE challenge_id = @id`, args).
+			Scan(&weeks).Error; err != nil {
+			return fmt.Errorf("read closed weeks: %w", err)
+		}
+		out.ClosedWeeks = make(map[int]time.Time, len(weeks))
+		for _, w := range weeks {
+			out.ClosedWeeks[w.WeekNumber] = w.ClosedAt
+		}
+
+		if err := tx.Raw(`SELECT u.id AS user_id, u.pseudo AS user_pseudo, u.first_name AS user_first_name,
+			u.last_name AS user_last_name, e.week_number, e.distance_meters, e.required_meters
+			FROM elimination e JOIN users u ON u.id = e.user_id
+			WHERE e.challenge_id = @id ORDER BY e.week_number, u.id`, args).Scan(&out.Eliminations).Error; err != nil {
+			return fmt.Errorf("read eliminations: %w", err)
+		}
+		var frozen struct{ FrozenAt *time.Time }
+		if err := tx.Raw(`SELECT min(created_at) AS frozen_at FROM result_snapshot WHERE challenge_id = @id`, args).
+			Scan(&frozen).Error; err != nil {
+			return fmt.Errorf("read frozen results: %w", err)
+		}
+		out.ResultsFrozenAt = frozen.FrozenAt
+		// The rule of the invitation links (module invitation, linkQuery).
+		if err := tx.Raw(`SELECT i.id, u.id AS invited_by_id, u.pseudo AS invited_by_pseudo,
+			u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name,
+			i.created_at, i.expires_at, i.revoked_at,
+			(EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = i.invited_by)
+				OR (c.members_can_invite AND EXISTS (SELECT 1 FROM participants
+					WHERE challenge_id = c.id AND user_id = i.invited_by AND status = 'active'))) AS author_can_invite
+			FROM invitations i JOIN challenges c ON c.id = i.challenge_id JOIN users u ON u.id = i.invited_by
+			WHERE i.challenge_id = @id ORDER BY i.created_at DESC, i.id DESC`, args).Scan(&out.Invitations).Error; err != nil {
+			return fmt.Errorf("read invitations: %w", err)
+		}
+		return nil
+	}, opts)
+	if err != nil {
+		return ChallengeData{}, err
 	}
 	return out, nil
 }

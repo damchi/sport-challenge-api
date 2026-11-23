@@ -35,10 +35,16 @@ type adminOnly struct {
 	apitest.Others
 }
 
-// getStats serves GET /api/v1/admin/stats as cmd/api does (authentication,
-// contract validation, handler) with token, and checks the response against
-// the contract.
+// getStats serves GET /api/v1/admin/stats with token (serve).
 func getStats(t *testing.T, svc *Service, token string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	return serve(t, svc, token, "/api/v1/admin/stats")
+}
+
+// serve serves GET target as cmd/api does (authentication, contract
+// validation, handler) with token, and checks the response against the
+// contract.
+func serve(t *testing.T, svc *Service, token, target string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -64,7 +70,6 @@ func getStats(t *testing.T, svc *Service, token string) (*httptest.ResponseRecor
 		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
 
-	const target = "/api/v1/admin/stats"
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()

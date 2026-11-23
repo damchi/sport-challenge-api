@@ -1396,6 +1396,110 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/admin/challenges:
+    get:
+      operationId: listAdminChallenges
+      summary: List every challenge, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Every challenge, private and
+        deleted ones included, most recently created first. The status,
+        filter and field alike, is computed from the current instant, deleted
+        or not. `q` keeps the challenges whose title holds it, case
+        insensitive (accents count); `%` and `_` are plain characters.
+      tags: [admin]
+      parameters:
+        - name: q
+          in: query
+          description: Part of the title to look for.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 80
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [upcoming, ongoing, finished]
+        - name: visibility
+          in: query
+          schema:
+            type: string
+            enum: [public, private]
+        - name: deleted
+          in: query
+          description: true for the deleted challenges only, false for the others only; absent for both.
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the previous page, as is, with the same filters.
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: A page of challenges.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminChallengePage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/admin/challenges/{challengeId}:
+    get:
+      operationId: getAdminChallenge
+      summary: Read any challenge, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). A challenge, private or
+        deleted, with its settings, creators, weeks and how each one was
+        judged, eliminations, frozen results and invitation links. An unknown
+        challenge answers 404 `challenge_not_found`. Read now, never stored.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminChallengeDetail"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            The account has no `admin` permission (`not_found`), or no such
+            challenge (`challenge_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -1685,6 +1789,238 @@ components:
         commit:
           type: string
           example: 0123456789abcdef0123456789abcdef01234567
+    AdminUserRef:
+      type: object
+      required: [id, pseudo, first_name, last_name]
+      additionalProperties: false
+      description: An account, as a creator sees it in the participants. A deleted account is never named.
+      properties:
+        id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+          nullable: true
+          description: Null until the user chooses one.
+        first_name:
+          type: string
+          nullable: true
+          description: Null for an account that has not set it.
+        last_name:
+          type: string
+          nullable: true
+          description: Null for an account that has not set it.
+    AdminChallengePage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminChallengeSummary"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.
+    AdminChallengeSummary:
+      type: object
+      required: [id, title, visibility, status, timezone, starts_at, ends_at, created_at, deleted_at, participant_count, creators]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        visibility:
+          type: string
+          enum: [public, private]
+        status:
+          type: string
+          enum: [upcoming, ongoing, finished]
+          description: From the dates, at the instant of the request, deleted or not.
+        timezone:
+          type: string
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the challenge was deleted; null when it was not.
+        participant_count:
+          type: integer
+          minimum: 0
+          description: Everyone who joined, abandoned included, deleted accounts left out.
+        creators:
+          type: array
+          description: The creators, oldest role first.
+          items:
+            $ref: "#/components/schemas/AdminUserRef"
+    AdminChallengeDetail:
+      type: object
+      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, status, created_at, deleted_at, participant_count, creators, weeks, eliminations, results_frozen_at, invitations]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        visibility:
+          type: string
+          enum: [public, private]
+        members_can_invite:
+          type: boolean
+        timezone:
+          type: string
+        reference_sport:
+          type: string
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        categories:
+          type: array
+          description: The categories of the challenge, in their order.
+          items:
+            $ref: "#/components/schemas/Category"
+        status:
+          type: string
+          enum: [upcoming, ongoing, finished]
+          description: From the dates, at the instant of the request, deleted or not.
+        created_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the challenge was deleted; null when it was not.
+        participant_count:
+          type: integer
+          minimum: 0
+          description: Everyone who joined, abandoned included, deleted accounts left out.
+        creators:
+          type: array
+          description: The creators, oldest role first.
+          items:
+            $ref: "#/components/schemas/AdminUserRef"
+        weeks:
+          type: array
+          description: The weeks of the challenge, in order.
+          items:
+            $ref: "#/components/schemas/AdminChallengeWeek"
+        eliminations:
+          type: array
+          description: The participants eliminated from the elimination category, earliest week first; empty without the category.
+          items:
+            $ref: "#/components/schemas/AdminElimination"
+        results_frozen_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the results were frozen (worker `finalize-challenges`); null while they are not.
+        invitations:
+          type: array
+          description: Every invitation link of the challenge, most recent first. The token is never kept, so never given.
+          items:
+            $ref: "#/components/schemas/AdminInvitation"
+    AdminChallengeWeek:
+      type: object
+      required: [number, starts_at, ends_at, locks_at, locked, closed_at]
+      additionalProperties: false
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+          description: Excluded, the start of the next week (or the end of the challenge).
+        locks_at:
+          type: string
+          format: date-time
+          description: 7 am, local time, the first day of the next week (README §2.5).
+        locked:
+          type: boolean
+          description: Whether `locks_at` is past, so the activities of the week no longer change, worker or not.
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the worker judged the week; null while it has not. `close-weeks`
+            judges the weeks of a challenge with the elimination category
+            only, and `finalize-challenges` the last week of every challenge
+            when it freezes the results: without the elimination category, the
+            other weeks stay null for good. Null too until a run after
+            `locks_at`, and on a deleted challenge, that the worker skips.
+    AdminElimination:
+      type: object
+      required: [user, week_number, distance_meters, required_meters]
+      additionalProperties: false
+      properties:
+        user:
+          $ref: "#/components/schemas/AdminUserRef"
+        week_number:
+          type: integer
+          minimum: 2
+          description: The week the participant was eliminated at.
+        distance_meters:
+          type: integer
+          minimum: 0
+          description: The distance of the reference sport they did that week.
+        required_meters:
+          type: integer
+          minimum: 0
+          description: The minimum they had to reach.
+    AdminInvitation:
+      type: object
+      required: [id, invited_by, created_at, expires_at, revoked_at, status]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        invited_by:
+          $ref: "#/components/schemas/AdminUserRef"
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [active, expired, revoked, cancelled]
+          description: |
+            `revoked` once a creator revoked it, else `expired` once
+            `expires_at` is past, else `cancelled` when its author may no
+            longer invite (no longer a creator, nor an active participant of
+            a challenge whose members may invite: README §5.7), else `active`.
+            A link of a deleted challenge keeps its status: it is valid again
+            once the challenge is restored.
     Health:
       type: object
       required: [status, version, commit]

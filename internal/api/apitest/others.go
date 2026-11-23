@@ -143,3 +143,11 @@ func (unimplemented) AcceptInvitation(context.Context, api.AcceptInvitationReque
 func (unimplemented) GetAdminStats(context.Context, api.GetAdminStatsRequestObject) (api.GetAdminStatsResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) ListAdminChallenges(context.Context, api.ListAdminChallengesRequestObject) (api.ListAdminChallengesResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) GetAdminChallenge(context.Context, api.GetAdminChallengeRequestObject) (api.GetAdminChallengeResponseObject, error) {
+	return nil, errNotImplemented
+}
