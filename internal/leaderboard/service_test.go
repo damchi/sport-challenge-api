@@ -435,8 +435,15 @@ func TestScopeOf(t *testing.T) {
 	if got := scopeOf("c1", c.Categories, scoring.Window{}); got.WeeklySport != "" || got.Points == nil || got.Points.MinSessionSeconds != 1200 {
 		t.Fatalf("with a points category: %+v, want its groups at 1200 s", got)
 	}
+	if got := scopeOf("c1", c.Categories, scoring.Window{}); got.Elevation {
+		t.Fatalf("with points without the weekly elevation: %+v, want no elevation gains", got)
+	}
 	if got := scopeOf("c1", append(c.Categories, Category{Type: CategoryElevation}), scoring.Window{}); !got.Elevation {
 		t.Fatalf("with a cumulative elevation category: %+v, want its elevation gains", got)
+	}
+	weekly := []Category{{Type: CategoryCumulativeTime}, {Type: CategoryPoints, Criteria: []string{scoring.CriterionWeeklyElevation}, Podium: 5, MinSessionSeconds: 1200}}
+	if got := scopeOf("c1", weekly, scoring.Window{}); !got.Elevation || got.Points == nil {
+		t.Fatalf("with the weekly elevation criterion: %+v, want the points groups with their elevation gains", got)
 	}
 }
 

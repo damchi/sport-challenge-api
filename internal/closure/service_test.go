@@ -495,6 +495,39 @@ func TestFinalizeChallenges(t *testing.T) {
 		}
 	})
 
+	t.Run("the weekly elevation criterion is frozen from the elevation gains of each week", func(t *testing.T) {
+		repo := newFakeRepo()
+		withPoints := c
+		withPoints.Categories = append(slices.Clone(c.Categories), Category{
+			ID: "cat4", Type: categoryPoints, Criteria: []string{scoring.CriterionWeeklyElevation}, Podium: 5, MinSessionSeconds: 1200,
+		})
+		repo.ended = []EndedChallenge{withPoints}
+		// a climbs more in weeks 1 and 2, b in weeks 3 and 4.
+		gains := map[string][]int{"a": {500, 400, 100, 0}, "b": {200, 300, 600, 700}}
+		groups := make([]scoring.Activity, len(activities))
+		for i, a := range activities {
+			week := int(a.StartedAt.Sub(start.UTC()).Hours()/24)/7 + 1
+			g := gains[a.UserID][week-1]
+			a.ElevationMeters = &g
+			groups[i] = a
+		}
+		data := &fakeData{participants: participants, activities: groups}
+		if _, err := NewService(repo, data, clock.NewFake(lock), discard()).FinalizeChallenges(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if !data.elevation {
+			t.Fatal("activities asked without the elevation gains")
+		}
+		// b 8 + 8 + 10 + 10; a 10 + 10 + 8, and nothing in week 4 (0 m does
+		// not score). All acquired.
+		want := payload{Entries: []payloadEntry{
+			{UserID: "b", Rank: 1, Value: 36}, {UserID: "a", Rank: 2, Value: 28}, {UserID: "quitter", Abandoned: true},
+		}}
+		if got := payloadOf(t, repo, "cat4"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("points ranking = %+v, want %+v", got, want)
+		}
+	})
+
 	t.Run("the cumulative elevation category is frozen from the elevation gains", func(t *testing.T) {
 		repo := newFakeRepo()
 		withElevation := c
@@ -657,6 +690,15 @@ func TestHasElevation(t *testing.T) {
 	}
 	if hasElevation(with[:1]) {
 		t.Fatal("without a cumulative elevation category: true, want false")
+	}
+	pointsWith := func(criteria ...string) []Category {
+		return []Category{{Type: categoryCumulativeTime}, {Type: categoryPoints, Criteria: criteria, Podium: 5}}
+	}
+	if !hasElevation(pointsWith(scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation)) {
+		t.Fatal("with the weekly elevation criterion: false, want true")
+	}
+	if hasElevation(pointsWith(scoring.CriterionSessionCount)) {
+		t.Fatal("with points without the weekly elevation: true, want false")
 	}
 }
 

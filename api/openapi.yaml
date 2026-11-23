@@ -1766,16 +1766,18 @@ components:
         criteria:
           type: array
           minItems: 1
-          maxItems: 3
+          maxItems: 4
           uniqueItems: true
           description: |
             The longest session by duration (every sport), the longest
             session by equivalent distance (with the factors of
             `distance_factors`), the number of sessions of at least
-            `min_session_minutes`. At least one, each once.
+            `min_session_minutes`, the elevation gain of the week (every
+            sport that takes one, in real meters, without factor). At least
+            one, each once.
           items:
             type: string
-            enum: [longest_duration, longest_distance, session_count]
+            enum: [longest_duration, longest_distance, session_count, weekly_elevation]
         podium:
           type: integer
           enum: [5, 10]
@@ -1861,7 +1863,7 @@ components:
           description: Points category only, its criteria in the order chosen.
           items:
             type: string
-            enum: [longest_duration, longest_distance, session_count]
+            enum: [longest_duration, longest_distance, session_count, weekly_elevation]
         podium:
           type: integer
           enum: [5, 10]

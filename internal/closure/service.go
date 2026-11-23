@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
@@ -331,11 +332,12 @@ func minSessionSeconds(categories []Category) int {
 	return 0
 }
 
-// hasElevation reports whether categories has the cumulative elevation
-// category, whose elevation gains are then read.
+// hasElevation reports whether categories need the elevation gains read:
+// the cumulative elevation category, or the weekly elevation criterion of the
+// points category.
 func hasElevation(categories []Category) bool {
 	for _, cat := range categories {
-		if cat.Type == categoryElevation {
+		if cat.Type == categoryElevation || (cat.Type == categoryPoints && slices.Contains(cat.Criteria, scoring.CriterionWeeklyElevation)) {
 			return true
 		}
 	}

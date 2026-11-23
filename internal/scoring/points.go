@@ -5,6 +5,7 @@ const (
 	CriterionLongestDuration = "longest_duration"
 	CriterionLongestDistance = "longest_distance"
 	CriterionSessionCount    = "session_count"
+	CriterionWeeklyElevation = "weekly_elevation"
 )
 
 // Points is the points category: each week, each criterion ranks the
@@ -17,7 +18,8 @@ const (
 // applied by the repository, which counts the Sessions of each group.
 //
 // The scorer reads groups of sessions (Activity.LongestSeconds,
-// LongestMeters, Sessions), never DurationSeconds nor DistanceMeters.
+// LongestMeters, Sessions, and ElevationMeters, the sum of their elevation
+// gains), never DurationSeconds nor DistanceMeters.
 type Points struct {
 	Criteria []string
 	Podium   int
@@ -69,6 +71,8 @@ type best struct {
 	longestSeconds int
 	longestMeters  int
 	sessions       int
+	// elevationMeters is the elevation gain of the week, in real meters.
+	elevationMeters int
 }
 
 // weeklyBests is, for each started week n, what each user did in it:
@@ -92,6 +96,9 @@ func (p Points) weeklyBests(w Window, started int, activities []Activity) []map[
 			b.longestMeters = max(b.longestMeters, *m)
 		}
 		b.sessions += a.Sessions
+		if a.ElevationMeters != nil {
+			b.elevationMeters += *a.ElevationMeters
+		}
 		bests[n][a.UserID] = b
 	}
 	return bests
@@ -110,6 +117,8 @@ func (p Points) weekPoints(ranked []Participant, bests map[string]best, criterio
 			values[user] = b.longestMeters
 		case CriterionSessionCount:
 			values[user] = b.sessions
+		case CriterionWeeklyElevation:
+			values[user] = b.elevationMeters
 		}
 	}
 	scale := pointsScale(p.Podium)
