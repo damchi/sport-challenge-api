@@ -293,3 +293,42 @@ func TestServiceAdminUpdateRefusals(t *testing.T) {
 		})
 	}
 }
+
+// TestServiceAdminUpdateWithoutEffect: the categories as the database gives
+// them (decoded from JSON), the points among them, show no false change
+// when nothing changes: the journal values stay empty.
+func TestServiceAdminUpdateWithoutEffect(t *testing.T) {
+	c := finished(t)
+	for i, raw := range []string{
+		`{}`,
+		`{"factors": {"run": 1, "walk": 1, "ride": 0.5, "other": 1}}`,
+		`{"sport": "run", "step_meters": 2000}`,
+	} {
+		var p Params
+		if err := p.Scan(raw); err != nil {
+			t.Fatal(err)
+		}
+		c.Categories[i].Params = p
+	}
+	var points, elevation Params
+	if err := points.Scan(`{"criteria": ["longest_duration", "longest_distance"], "podium": 10, "min_session_seconds": 1800,
+		"factors": {"run": 1, "walk": 1, "ride": 0.5, "other": 1}}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := elevation.Scan(`{}`); err != nil {
+		t.Fatal(err)
+	}
+	c.Categories = append(c.Categories,
+		Category{ID: "k4", Type: CategoryPoints, Position: positionPoints, Params: points},
+		Category{ID: "k5", Type: CategoryElevation, Position: positionElevation, Params: elevation})
+	repo := &fakeRepository{challenge: c}
+	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now))
+	four := 4
+	change, err := svc.AdminUpdate(t.Context(), adminActor(), "c1", SettingsChanges{Weeks: &four})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(change.Old) != 0 || len(change.New) != 0 {
+		t.Fatalf("change %v -> %v, want none", change.Old, change.New)
+	}
+}
