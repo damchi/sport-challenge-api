@@ -130,7 +130,7 @@ func run() error {
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, standings, clk)
-	activities = activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, sports, participations{challenges}, activityScopes{challenges}, clk)
+	activities = activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, activityCatalogue{sports}, participations{challenges}, activityScopes{challenges}, clk)
 	leaderboards = leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, cfg.AtRiskThreshold)
 	invitations = invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
 	challengeHandler := challenge.NewHandler(challenges)
@@ -316,6 +316,15 @@ func (c challengeProfiles) Names(ctx context.Context, ids []string) (map[string]
 		out[id] = challenge.Name{Pseudo: n.Pseudo, FirstName: n.FirstName, LastName: n.LastName}
 	}
 	return out, nil
+}
+
+// activityCatalogue gives module activity the rules of a sport of the
+// catalogue.
+type activityCatalogue struct{ sports *sport.Service }
+
+func (c activityCatalogue) SportRules(ctx context.Context, code string) (activity.SportRules, bool, error) {
+	sp, found, err := c.sports.Find(ctx, code)
+	return activity.SportRules{DistanceMode: sp.DistanceMode, ElevationAllowed: sp.ElevationAllowed}, found, err
 }
 
 // activityProfiles gives module activity the profiles, as

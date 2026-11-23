@@ -90,7 +90,7 @@ func (f *fakeRepository) Update(ctx context.Context, _, id string, a Activity, d
 	}
 	out := current
 	out.SportCode, out.SportLabel, out.StartedAt = a.SportCode, a.SportLabel, a.StartedAt
-	out.DurationSeconds, out.DistanceMeters = a.DurationSeconds, a.DistanceMeters
+	out.DurationSeconds, out.DistanceMeters, out.ElevationGainMeters = a.DurationSeconds, a.DistanceMeters, a.ElevationGainMeters
 	f.updated = &out
 	return out, nil
 }
@@ -152,18 +152,24 @@ func (f fakeProfiles) ProfileComplete(context.Context, string) (bool, error) {
 	return f.complete, f.err
 }
 
-// fakeCatalogue has the sports of modes, by code.
+// fakeCatalogue has the sports of rules, by code.
 type fakeCatalogue struct {
-	modes map[string]string
+	rules map[string]SportRules
 	err   error
 }
 
-func (f fakeCatalogue) DistanceMode(_ context.Context, code string) (string, bool, error) {
-	mode, ok := f.modes[code]
-	return mode, ok, f.err
+func (f fakeCatalogue) SportRules(_ context.Context, code string) (SportRules, bool, error) {
+	rules, ok := f.rules[code]
+	return rules, ok, f.err
 }
 
-var catalogue = fakeCatalogue{modes: map[string]string{"run": distanceRequired, "yoga": distanceNone, "other": distanceOptional, "ski_2": distanceOptional}}
+var catalogue = fakeCatalogue{rules: map[string]SportRules{
+	"run":   {DistanceMode: distanceRequired, ElevationAllowed: true},
+	"swim":  {DistanceMode: distanceRequired},
+	"yoga":  {DistanceMode: distanceNone},
+	"other": {DistanceMode: distanceOptional, ElevationAllowed: true},
+	"ski_2": {DistanceMode: distanceOptional},
+}}
 
 // fakeParticipations gives challenges for user, the actor when empty, only;
 // calls counts them.
@@ -358,8 +364,8 @@ func TestServiceRecordRefusals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			profiles := fakeProfiles{complete: !tt.incomplete, err: tt.profileErr}
 			cat := tt.catalogue
-			if cat.modes == nil {
-				cat.modes = catalogue.modes
+			if cat.rules == nil {
+				cat.rules = catalogue.rules
 			}
 			repo := tt.repo
 			if repo == nil {

@@ -19,8 +19,10 @@ import (
 const (
 	maxDurationSeconds = 24 * 60 * 60
 	maxDistanceMeters  = 1_000_000
-	minSportLabel      = 2
-	maxSportLabel      = 40
+	// maxElevationGainMeters bounds the elevation gain (SC-API-149).
+	maxElevationGainMeters = 20_000
+	minSportLabel          = 2
+	maxSportLabel          = 40
 	// futureTolerance absorbs the clock drift of the client's device, for
 	// the start and the end of an activity.
 	futureTolerance = 5 * time.Minute
@@ -49,6 +51,17 @@ type Draft struct {
 	DurationSeconds int
 	// DistanceMeters is nil when no distance is entered.
 	DistanceMeters *int
+	// ElevationGainMeters is nil when no elevation gain is entered. It is
+	// shown only: no category nor badge counts it (README §2.5).
+	ElevationGainMeters *int
+}
+
+// SportRules is what the catalogue says of a sport for its activities: its
+// distance mode (required, none or optional) and whether it takes an
+// elevation gain.
+type SportRules struct {
+	DistanceMode     string
+	ElevationAllowed bool
 }
 
 // End is the instant the activity of draft ends: its start plus its duration.
@@ -56,13 +69,15 @@ func (d Draft) End() time.Time {
 	return d.StartedAt.Add(time.Duration(d.DurationSeconds) * time.Second)
 }
 
-// Validate checks draft at the instant now (from platform/clock), with
-// distanceMode the distance mode of its sport in the catalogue. It returns
-// the draft normalized (label cleaned). An invalid field gives 400
-// validation_failed listing the fields, sorted; a valid distance the sport
-// does not take, or a missing one it needs, gives 422 distance_not_allowed
-// or distance_required.
-func Validate(draft Draft, distanceMode string, now time.Time) (Draft, error) {
+// Validate checks draft at the instant now (from platform/clock), with sport
+// the rules of its sport in the catalogue. It returns the draft normalized
+// (label cleaned). An invalid field gives 400 validation_failed listing the
+// fields, sorted; a valid distance the sport does not take, or a missing one
+// it needs, gives 422 distance_not_allowed or distance_required; a valid
+// elevation gain for a sport that takes none, or for an activity without
+// distance, 422 elevation_not_allowed.
+func Validate(draft Draft, sport SportRules, now time.Time) (Draft, error) {
+	distanceMode := sport.DistanceMode
 	if distanceMode != distanceRequired && distanceMode != distanceNone && distanceMode != distanceOptional {
 		return Draft{}, apperr.New(apperr.CodeInternal, fmt.Errorf("unknown distance mode %q", distanceMode))
 	}
@@ -73,6 +88,9 @@ func Validate(draft Draft, distanceMode string, now time.Time) (Draft, error) {
 	}
 	if d := draft.DistanceMeters; d != nil && (*d <= 0 || *d > maxDistanceMeters) {
 		fields = append(fields, "distance_meters")
+	}
+	if e := draft.ElevationGainMeters; e != nil && (*e < 0 || *e > maxElevationGainMeters) {
+		fields = append(fields, "elevation_gain_meters")
 	}
 	if draft.StartedAt.IsZero() || draft.StartedAt.Before(earliestStart) || draft.StartedAt.After(now.Add(futureTolerance)) {
 		fields = append(fields, "started_at")
@@ -98,6 +116,8 @@ func Validate(draft Draft, distanceMode string, now time.Time) (Draft, error) {
 		return Draft{}, apperr.New(apperr.CodeDistanceRequired, nil)
 	case distanceMode == distanceNone && draft.DistanceMeters != nil:
 		return Draft{}, apperr.New(apperr.CodeDistanceNotAllowed, nil)
+	case draft.ElevationGainMeters != nil && (!sport.ElevationAllowed || draft.DistanceMeters == nil):
+		return Draft{}, apperr.New(apperr.CodeElevationNotAllowed, nil)
 	}
 
 	draft.SportLabel = label

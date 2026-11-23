@@ -81,6 +81,7 @@ func TestConstraints(t *testing.T) {
 		{name: "factor over 2", sql: `INSERT INTO sports VALUES ('canoe', 'required', 2.5)`, constraint: "sports_suggested_factor_check"},
 		{name: "unknown distance mode", sql: `INSERT INTO sports VALUES ('canoe', 'sometimes', 1)`, constraint: "sports_distance_mode_check"},
 		{name: "uppercase code", sql: `INSERT INTO sports VALUES ('Canoe', 'required', 1)`, constraint: "sports_code_check"},
+		{name: "elevation gain for a sport without distance", sql: `INSERT INTO sports (code, distance_mode, suggested_factor, elevation_allowed) VALUES ('dance', 'none', NULL, true)`, constraint: "sports_elevation_allowed_by_mode"},
 		{name: "factor bounds included", sql: `INSERT INTO sports VALUES ('canoe', 'required', 0.1), ('kayak', 'optional', 2)`},
 
 		// challenges (000004)
@@ -133,6 +134,7 @@ func TestConstraints(t *testing.T) {
 		{name: "label bounds included", sql: `INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ('` + userID + `', 'other', 'Go', '2026-12-02Z', 60), ('` + userID + `', 'other', repeat('a', 40), '2026-12-02Z', 60)`},
 		{name: "zero duration", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 0)`, constraint: "activities_duration_seconds_check"},
 		{name: "negative distance", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters) VALUES ('` + userID + `', 'run', '2026-12-02Z', 1800, -1)`, constraint: "activities_distance_meters_check"},
+		{name: "negative elevation gain", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters, elevation_gain_meters) VALUES ('` + userID + `', 'run', '2026-12-02Z', 1800, 5000, -1)`, constraint: "activities_elevation_gain_meters_check"},
 		{name: "unknown source", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, source) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 60, 'fitbit')`, constraint: "activities_source_check"},
 		{name: "other without a label", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'other', '2026-12-02Z', 60)`, constraint: "activities_sport_label_by_sport"},
 		{name: "label on a catalogue sport", sql: `INSERT INTO activities (user_id, sport_code, sport_label, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', 'Hatha', '2026-12-02Z', 60)`, constraint: "activities_sport_label_by_sport"},

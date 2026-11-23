@@ -131,6 +131,25 @@ func TestCreateActivityRecords(t *testing.T) {
 	}
 }
 
+// The elevation gain is shown as entered; null when not entered
+// (SC-API-149).
+func TestCreateActivityElevationGain(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := newService(t, repo, fakeParticipations{})
+	rec, body := postActivity(t, svc, `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"distance_meters":5000,"elevation_gain_meters":320}`, nil)
+	if rec.Code != http.StatusCreated || body["elevation_gain_meters"] != 320.0 {
+		t.Fatalf("got %d %v, want 201 with elevation_gain_meters 320", rec.Code, body)
+	}
+	if repo.recorded == nil || repo.recorded.ElevationGainMeters == nil || *repo.recorded.ElevationGainMeters != 320 {
+		t.Fatalf("recorded %+v, want the elevation gain stored", repo.recorded)
+	}
+
+	rec, body = postActivity(t, newService(t, &fakeRepository{}, fakeParticipations{}), runBody, nil)
+	if v, present := body["elevation_gain_meters"]; rec.Code != http.StatusCreated || !present || v != nil {
+		t.Fatalf("got %d %v, want 201 with elevation_gain_meters null", rec.Code, body)
+	}
+}
+
 // A code of the catalogue may hold digits (constraint sports_code_check):
 // the contract lets it through.
 func TestCreateActivityCodeWithADigit(t *testing.T) {
@@ -204,6 +223,10 @@ func TestCreateActivityRefusals(t *testing.T) {
 		{name: "no token", body: runBody, headers: map[string]string{"Authorization": ""}, status: http.StatusUnauthorized, code: "unauthenticated"},
 		{name: "week locked", body: `{"sport_code":"run","started_at":"2026-06-03T11:00:00Z","duration_seconds":1500,"distance_meters":5000}`, status: http.StatusUnprocessableEntity, code: "week_locked"},
 		{name: "distance required", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500}`, status: http.StatusUnprocessableEntity, code: "distance_required"},
+		{name: "elevation gain for swimming", body: `{"sport_code":"swim","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"distance_meters":1500,"elevation_gain_meters":10}`, status: http.StatusUnprocessableEntity, code: "elevation_not_allowed"},
+		{name: "elevation gain without distance", body: `{"sport_code":"other","sport_label":"Trail","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"elevation_gain_meters":10}`, status: http.StatusUnprocessableEntity, code: "elevation_not_allowed"},
+		{name: "elevation gain over 20000 m", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"distance_meters":5000,"elevation_gain_meters":20001}`, status: http.StatusBadRequest, code: "validation_failed"},
+		{name: "negative elevation gain", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"distance_meters":5000,"elevation_gain_meters":-1}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "code starting with a digit", body: `{"sport_code":"2ski","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "code of 33 characters", body: `{"sport_code":"a` + strings.Repeat("b", 32) + `","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500}`, status: http.StatusBadRequest, code: "validation_failed"},
 		{name: "unknown sport", body: `{"sport_code":"chess","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500}`, status: http.StatusBadRequest, code: "validation_failed"},
@@ -240,6 +263,30 @@ func TestCreateActivityKeyOfDeletedActivity(t *testing.T) {
 }
 
 const activityTarget = "/api/v1/activities/" + activityID
+
+// The body replaces every field entered: an elevation gain sent is set, one
+// left out is removed (SC-API-149).
+func TestUpdateActivityElevationGain(t *testing.T) {
+	withGain := storedRun(t)
+	withGain.ElevationGainMeters = new(int)
+	*withGain.ElevationGainMeters = 150
+	for _, tt := range []struct {
+		name string
+		body string
+		want any
+	}{
+		{name: "set", body: `{"sport_code":"run","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"distance_meters":5000,"elevation_gain_meters":420}`, want: 420.0},
+		{name: "left out", body: runBody, want: nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{stored: map[string]Activity{activityID: withGain}}
+			rec, body := serve(t, newService(t, repo, fakeParticipations{}), http.MethodPatch, activityTarget, tt.body, nil)
+			if v, present := body["elevation_gain_meters"]; rec.Code != http.StatusOK || !present || v != tt.want {
+				t.Fatalf("got %d %v, want 200 with elevation_gain_meters %v", rec.Code, body, tt.want)
+			}
+		})
+	}
+}
 
 func TestUpdateActivityReplaces(t *testing.T) {
 	repo := &fakeRepository{stored: map[string]Activity{activityID: storedRun(t)}}

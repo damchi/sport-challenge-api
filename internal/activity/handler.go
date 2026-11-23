@@ -295,11 +295,12 @@ func toPage(page Page) (api.ActivityPage, error) {
 
 func toDraft(b api.ActivityCreate) Draft {
 	return Draft{
-		SportCode:       b.SportCode,
-		SportLabel:      b.SportLabel,
-		StartedAt:       b.StartedAt,
-		DurationSeconds: b.DurationSeconds,
-		DistanceMeters:  b.DistanceMeters,
+		SportCode:           b.SportCode,
+		SportLabel:          b.SportLabel,
+		StartedAt:           b.StartedAt,
+		DurationSeconds:     b.DurationSeconds,
+		DistanceMeters:      b.DistanceMeters,
+		ElevationGainMeters: b.ElevationGainMeters,
 	}
 }
 
@@ -309,15 +310,16 @@ func toAPI(rec Recorded) (api.Activity, error) {
 		return api.Activity{}, fmt.Errorf("activity id: %w", err)
 	}
 	out := api.Activity{
-		Id:              id,
-		SportCode:       rec.SportCode,
-		SportLabel:      rec.SportLabel,
-		StartedAt:       rec.StartedAt.UTC(),
-		DurationSeconds: rec.DurationSeconds,
-		DistanceMeters:  rec.DistanceMeters,
-		Source:          api.ActivitySource(rec.Source),
-		Contributions:   make([]api.ActivityContribution, 0, len(rec.Contributions)),
-		Locked:          rec.Locked,
+		Id:                  id,
+		SportCode:           rec.SportCode,
+		SportLabel:          rec.SportLabel,
+		StartedAt:           rec.StartedAt.UTC(),
+		DurationSeconds:     rec.DurationSeconds,
+		DistanceMeters:      rec.DistanceMeters,
+		ElevationGainMeters: rec.ElevationGainMeters,
+		Source:              api.ActivitySource(rec.Source),
+		Contributions:       make([]api.ActivityContribution, 0, len(rec.Contributions)),
+		Locked:              rec.Locked,
 	}
 	if rec.DistanceMeters != nil {
 		v := Speed(*rec.DistanceMeters, rec.DurationSeconds)
@@ -350,17 +352,18 @@ func toChallengeActivity(it Authored) (api.ChallengeActivity, error) {
 		return api.ChallengeActivity{}, fmt.Errorf("author id: %w", err)
 	}
 	return api.ChallengeActivity{
-		Id:               a.Id,
-		SportCode:        a.SportCode,
-		SportLabel:       a.SportLabel,
-		StartedAt:        a.StartedAt,
-		DurationSeconds:  a.DurationSeconds,
-		DistanceMeters:   a.DistanceMeters,
-		Source:           api.ChallengeActivitySource(a.Source),
-		SpeedMps:         a.SpeedMps,
-		PaceSecondsPerKm: a.PaceSecondsPerKm,
-		Contributions:    a.Contributions,
-		Locked:           a.Locked,
-		User:             api.LeaderboardUser{Id: userID, Pseudo: it.Author.Pseudo, FirstName: it.Author.FirstName, LastName: it.Author.LastName},
+		Id:                  a.Id,
+		SportCode:           a.SportCode,
+		SportLabel:          a.SportLabel,
+		StartedAt:           a.StartedAt,
+		DurationSeconds:     a.DurationSeconds,
+		DistanceMeters:      a.DistanceMeters,
+		ElevationGainMeters: a.ElevationGainMeters,
+		Source:              api.ChallengeActivitySource(a.Source),
+		SpeedMps:            a.SpeedMps,
+		PaceSecondsPerKm:    a.PaceSecondsPerKm,
+		Contributions:       a.Contributions,
+		Locked:              a.Locked,
+		User:                api.LeaderboardUser{Id: userID, Pseudo: it.Author.Pseudo, FirstName: it.Author.FirstName, LastName: it.Author.LastName},
 	}, nil
 }

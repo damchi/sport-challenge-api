@@ -416,3 +416,23 @@ func TestBestResultIsTheFrozenLeaderboard(t *testing.T) {
 		t.Fatalf("quitter's best result %+v, want none", got)
 	}
 }
+
+// TestElevationGainLeavesTheLeaderboard: the elevation gain is shown only
+// (SC-API-149); entered on every activity, it changes no category.
+func TestElevationGainLeavesTheLeaderboard(t *testing.T) {
+	f := newLeaderboardFixture(t)
+	before, err := f.svc.Get(t.Context(), f.runner, f.public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), "UPDATE activities SET elevation_gain_meters = 1500 WHERE user_id = $1", f.runner); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.svc.Get(t.Context(), f.runner, f.public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("Get() with elevation gain = %+v, want %+v", after, before)
+	}
+}

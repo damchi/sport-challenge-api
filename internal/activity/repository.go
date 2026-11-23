@@ -78,11 +78,11 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 		}
 		var ids []string
 		err := tx.Raw(`INSERT INTO activities
-			(user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, idempotency_key)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			(user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, idempotency_key)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 			RETURNING id`,
-			a.UserID, a.SportCode, a.SportLabel, a.StartedAt, a.DurationSeconds, a.DistanceMeters, a.Source, a.IdempotencyKey,
+			a.UserID, a.SportCode, a.SportLabel, a.StartedAt, a.DurationSeconds, a.DistanceMeters, a.ElevationGainMeters, a.Source, a.IdempotencyKey,
 		).Scan(&ids).Error
 		if err != nil {
 			return fmt.Errorf("insert activity: %w", err)
@@ -132,16 +132,16 @@ func (r *Repository) Update(ctx context.Context, actorID, id string, a Activity,
 			}
 		}
 		err := tx.Exec(`UPDATE activities
-			SET sport_code = ?, sport_label = ?, started_at = ?, duration_seconds = ?, distance_meters = ?
+			SET sport_code = ?, sport_label = ?, started_at = ?, duration_seconds = ?, distance_meters = ?, elevation_gain_meters = ?
 			WHERE id = ?`,
-			a.SportCode, a.SportLabel, a.StartedAt, a.DurationSeconds, a.DistanceMeters, id,
+			a.SportCode, a.SportLabel, a.StartedAt, a.DurationSeconds, a.DistanceMeters, a.ElevationGainMeters, id,
 		).Error
 		if err != nil {
 			return fmt.Errorf("update activity: %w", err)
 		}
 		out = current
 		out.SportCode, out.SportLabel, out.StartedAt = a.SportCode, a.SportLabel, a.StartedAt
-		out.DurationSeconds, out.DistanceMeters = a.DurationSeconds, a.DistanceMeters
+		out.DurationSeconds, out.DistanceMeters, out.ElevationGainMeters = a.DurationSeconds, a.DistanceMeters, a.ElevationGainMeters
 		return nil
 	})
 	if err != nil {
@@ -191,7 +191,7 @@ func (r *Repository) change(ctx context.Context, actorID, id string, decide func
 			return err
 		}
 		var rows []Activity
-		err := tx.Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, idempotency_key
+		err := tx.Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, idempotency_key
 			FROM activities WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE`, id, actorID).Scan(&rows).Error
 		if err != nil {
 			return fmt.Errorf("lock activity: %w", err)
@@ -214,7 +214,7 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Activity, error) 
 		return nil, errors.New("list activities: no user")
 	}
 	tx := r.db.WithContext(ctx).Table("activities").
-		Select("id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source").
+		Select("id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source").
 		Where("user_id IN ? AND deleted_at IS NULL", q.UserIDs)
 	if q.From != nil {
 		tx = tx.Where("started_at >= ?", *q.From)
@@ -331,7 +331,7 @@ func byKey(tx *gorm.DB, userID, key string) (Activity, bool, error) {
 		Activity
 		Deleted bool
 	}
-	err := tx.Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, source, idempotency_key,
+	err := tx.Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, idempotency_key,
 			deleted_at IS NOT NULL AS deleted
 		FROM activities WHERE user_id = ? AND idempotency_key = ?`, userID, key).Scan(&rows).Error
 	if err != nil {

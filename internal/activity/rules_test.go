@@ -41,6 +41,7 @@ func TestValidate(t *testing.T) {
 		name       string
 		draft      Draft
 		mode       string // distance mode of the sport in the catalogue
+		elevation  bool   // whether the sport takes an elevation gain
 		wantCode   apperr.Code
 		wantFields string // validation_failed only
 		wantLabel  string // normalized label of a valid "other" draft
@@ -110,19 +111,38 @@ func TestValidate(t *testing.T) {
 		{name: "starts the second before 2000", draft: with(func(d *Draft) { d.StartedAt = time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC) }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "started_at"},
 		{name: "starts in 1500", draft: with(func(d *Draft) { d.StartedAt = time.Date(1500, 6, 1, 8, 0, 0, 0, time.UTC) }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "started_at"},
 
+		// Elevation gain (SC-API-149): optional, 0 to 20000 m, only for a
+		// sport that takes one and an activity with a distance.
+		{name: "no elevation gain", draft: valid(), mode: "required", elevation: true},
+		{name: "elevation gain of 0", draft: with(func(d *Draft) { d.ElevationGainMeters = ptr(0) }), mode: "required", elevation: true},
+		{name: "elevation gain of 20000 m", draft: with(func(d *Draft) { d.ElevationGainMeters = ptr(20_000) }), mode: "required", elevation: true},
+		{name: "elevation gain of 20001 m", draft: with(func(d *Draft) { d.ElevationGainMeters = ptr(20_001) }), mode: "required", elevation: true, wantCode: apperr.CodeValidationFailed, wantFields: "elevation_gain_meters"},
+		{name: "negative elevation gain", draft: with(func(d *Draft) { d.ElevationGainMeters = ptr(-1) }), mode: "required", elevation: true, wantCode: apperr.CodeValidationFailed, wantFields: "elevation_gain_meters"},
+		{name: "elevation gain for a sport without it", draft: with(func(d *Draft) { d.SportCode = "swim"; d.ElevationGainMeters = ptr(10) }), mode: "required", wantCode: apperr.CodeElevationNotAllowed},
+		{name: "elevation gain of 0 for a sport without it", draft: with(func(d *Draft) { d.SportCode = "swim"; d.ElevationGainMeters = ptr(0) }), mode: "required", wantCode: apperr.CodeElevationNotAllowed},
+		{name: "elevation gain for a sport without distance", draft: with(func(d *Draft) { d.SportCode = "yoga"; d.DistanceMeters = nil; d.ElevationGainMeters = ptr(10) }), mode: "none", wantCode: apperr.CodeElevationNotAllowed},
+		{name: "other with distance and elevation gain", draft: with(func(d *Draft) { d.SportCode = "other"; d.SportLabel = ptr("Trail"); d.ElevationGainMeters = ptr(800) }), mode: "optional", elevation: true, wantLabel: "Trail"},
+		{name: "other without distance, with elevation gain", draft: with(func(d *Draft) { *d = other("Trail"); d.ElevationGainMeters = ptr(800) }), mode: "optional", elevation: true, wantCode: apperr.CodeElevationNotAllowed},
+		{name: "invalid elevation gain comes before the sport rule", draft: with(func(d *Draft) { d.SportCode = "swim"; d.ElevationGainMeters = ptr(-1) }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "elevation_gain_meters"},
+		{name: "refused distance comes before the elevation rule", draft: with(func(d *Draft) { d.SportCode = "yoga"; d.ElevationGainMeters = ptr(10) }), mode: "none", wantCode: apperr.CodeDistanceNotAllowed},
+		{name: "missing distance comes before the elevation rule", draft: with(func(d *Draft) { d.DistanceMeters = nil; d.ElevationGainMeters = ptr(10) }), mode: "required", elevation: true, wantCode: apperr.CodeDistanceRequired},
+
 		{
 			name:     "every invalid field, sorted",
-			draft:    Draft{SportCode: "other", StartedAt: now.Add(time.Hour), DistanceMeters: ptr(0)},
+			draft:    Draft{SportCode: "other", StartedAt: now.Add(time.Hour), DistanceMeters: ptr(0), ElevationGainMeters: ptr(-1)},
 			mode:     "optional",
-			wantCode: apperr.CodeValidationFailed, wantFields: "distance_meters,duration_seconds,sport_label,started_at",
+			wantCode: apperr.CodeValidationFailed, wantFields: "distance_meters,duration_seconds,elevation_gain_meters,sport_label,started_at",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Validate(tt.draft, tt.mode, now)
+			got, err := Validate(tt.draft, SportRules{DistanceMode: tt.mode, ElevationAllowed: tt.elevation}, now)
 			if tt.wantCode == "" {
 				if err != nil {
 					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				if !samePtr(got.ElevationGainMeters, tt.draft.ElevationGainMeters) {
+					t.Fatalf("elevation gain = %v, want %v", got.ElevationGainMeters, tt.draft.ElevationGainMeters)
 				}
 				gotLabel := ""
 				if got.SportLabel != nil {
@@ -152,8 +172,9 @@ func TestValidateDistanceRuleStatus(t *testing.T) {
 	}{
 		{with(func(d *Draft) { d.DistanceMeters = nil }), "required"},
 		{valid(), "none"},
+		{with(func(d *Draft) { d.ElevationGainMeters = ptr(10) }), "required"},
 	} {
-		_, err := Validate(tt.draft, tt.mode, now)
+		_, err := Validate(tt.draft, SportRules{DistanceMode: tt.mode}, now)
 		var appErr *apperr.Error
 		if !errors.As(err, &appErr) || appErr.Status != http.StatusUnprocessableEntity {
 			t.Fatalf("Validate(mode %s) error = %v, want 422", tt.mode, err)
@@ -163,11 +184,16 @@ func TestValidateDistanceRuleStatus(t *testing.T) {
 
 func TestValidateUnknownDistanceMode(t *testing.T) {
 	// The mode comes from the catalogue: an unknown one is a programming error.
-	_, err := Validate(valid(), "sometimes", now)
+	_, err := Validate(valid(), SportRules{DistanceMode: "sometimes"}, now)
 	var appErr *apperr.Error
 	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeInternal {
 		t.Fatalf("Validate() error = %v, want internal_error", err)
 	}
+}
+
+// samePtr tells whether a and b are both nil or point to equal values.
+func samePtr(a, b *int) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 func TestSpeed(t *testing.T) {

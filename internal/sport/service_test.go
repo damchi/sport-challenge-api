@@ -54,3 +54,30 @@ func TestServiceDistanceMode(t *testing.T) {
 		t.Fatalf("error = %v, want it to wrap %v", err, storage)
 	}
 }
+
+func TestServiceFind(t *testing.T) {
+	ride := Sport{Code: "ride", DistanceMode: "required", SuggestedFactor: factor(0.3), ElevationAllowed: true}
+	svc := NewService(fakeRepository{sports: []Sport{ride, {Code: "yoga", DistanceMode: "none"}}})
+	tests := []struct {
+		code  string
+		want  Sport
+		found bool
+	}{
+		{code: "ride", want: ride, found: true},
+		{code: "yoga", want: Sport{Code: "yoga", DistanceMode: "none"}, found: true},
+		{code: "chess"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			got, found, err := svc.Find(t.Context(), tt.code)
+			if err != nil || found != tt.found || got.Code != tt.want.Code || got.DistanceMode != tt.want.DistanceMode || got.ElevationAllowed != tt.want.ElevationAllowed {
+				t.Fatalf("Find(%q) = %+v, %v, %v, want %+v, %v", tt.code, got, found, err, tt.want, tt.found)
+			}
+		})
+	}
+
+	storage := errors.New("connection refused")
+	if _, _, err := NewService(fakeRepository{err: storage}).Find(t.Context(), "run"); !errors.Is(err, storage) {
+		t.Fatalf("error = %v, want it to wrap %v", err, storage)
+	}
+}
