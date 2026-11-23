@@ -1581,7 +1581,10 @@ components:
     AdminNotFound:
       description: |
         The account has no `admin` permission in its access token
-        (`not_found`): an `/admin` route answers as if it did not exist.
+        (`not_found`): an `/admin` route answers as if it did not exist. The
+        contract validates the request first, so a malformed one (a
+        parameter out of its bounds, a path id that is not a UUID) answers
+        400 `validation_failed` whatever the permission.
       content:
         application/json:
           schema:
