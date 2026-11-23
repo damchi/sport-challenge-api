@@ -65,7 +65,7 @@ L'architecture du README §5 est la **cible**, pas un échafaudage à créer d'u
 
 Chaque code est ajouté à `apperr` par le premier ticket qui le renvoie.
 
-`unauthenticated`, `invalid_token`, `token_expired`, `forbidden`, `not_found`, `validation_failed`, `rate_limited`, `internal_error`, `profile_incomplete`, `account_deleted`, `challenge_not_found`, `field_not_editable`, `registration_closed`, `already_participant`, `participation_abandoned`, `challenge_ended`, `cannot_exclude_creator`, `activity_not_found`, `week_locked`, `distance_not_allowed`, `distance_required`, `badge_limit_reached`, `badge_already_awarded`, `invalid_badge_rule`, `invitation_invalid`.
+`unauthenticated`, `invalid_token`, `token_expired`, `forbidden`, `not_found`, `validation_failed`, `rate_limited`, `internal_error`, `profile_incomplete`, `account_deleted`, `account_blocked`, `challenge_not_found`, `field_not_editable`, `registration_closed`, `already_participant`, `participation_abandoned`, `challenge_ended`, `cannot_exclude_creator`, `activity_not_found`, `week_locked`, `distance_not_allowed`, `distance_required`, `badge_limit_reached`, `badge_already_awarded`, `invalid_badge_rule`, `invitation_invalid`.
 
 ## Décisions prises
 
