@@ -162,8 +162,9 @@ const elevationColumn = `,
 // per participant and sport, and per week for the elimination sport, and the
 // points category only reads the longest session, the count of a
 // participant's sessions and the sum of their elevation gains per week and
-// sport, so these groups rank exactly as the raw activities do (the equivalent distance of a session is its distance times the factor of
-// its sport, so the longest of a sport is its longest distance); the
+// sport, so these groups rank exactly as the raw activities do (the
+// equivalent distance of a session is its distance times the factor of its
+// sport, so the longest of a sport is its longest distance); the
 // rankings are still computed from them, never stored. A scorer that would
 // read anything else of one activity needs the raw activities instead. The
 // weeks are cut in Go (Window.WeekBounds) and given to the database as their

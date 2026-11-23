@@ -505,9 +505,9 @@ func TestFinalizeChallenges(t *testing.T) {
 		// a climbs more in weeks 1 and 2, b in weeks 3 and 4.
 		gains := map[string][]int{"a": {500, 400, 100, 0}, "b": {200, 300, 600, 700}}
 		groups := make([]scoring.Activity, len(activities))
+		weeks := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc}
 		for i, a := range activities {
-			week := int(a.StartedAt.Sub(start.UTC()).Hours()/24)/7 + 1
-			g := gains[a.UserID][week-1]
+			g := gains[a.UserID][weeks.WeekOf(a.StartedAt)-1]
 			a.ElevationMeters = &g
 			groups[i] = a
 		}

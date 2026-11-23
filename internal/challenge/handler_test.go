@@ -182,13 +182,17 @@ func TestCreateChallengeOptionalCategories(t *testing.T) {
 // the minimum in seconds and the factors of the longest distance.
 func TestCreateChallengePoints(t *testing.T) {
 	tests := []struct {
-		name       string
-		points     string
-		wantSecond float64
+		name         string
+		points       string
+		wantSecond   float64
+		wantCriteria []any
 	}{
-		{"default minimum session", `{"criteria":["longest_distance","session_count"],"podium":10}`, 1200},
-		{"chosen minimum session", `{"criteria":["longest_distance","session_count"],"podium":10,"min_session_minutes":45}`, 2700},
-		{"every criterion", `{"criteria":["longest_distance","session_count","longest_duration","weekly_elevation"],"podium":10}`, 1200},
+		{"default minimum session", `{"criteria":["longest_distance","session_count"],"podium":10}`, 1200, []any{"longest_distance", "session_count"}},
+		{"chosen minimum session", `{"criteria":["longest_distance","session_count"],"podium":10,"min_session_minutes":45}`, 2700, []any{"longest_distance", "session_count"}},
+		{
+			"every criterion", `{"criteria":["longest_distance","session_count","longest_duration","weekly_elevation"],"podium":10}`, 1200,
+			[]any{"longest_distance", "session_count", "longest_duration", "weekly_elevation"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -203,7 +207,7 @@ func TestCreateChallengePoints(t *testing.T) {
 			params, _ := cats[len(cats)-1].(map[string]any)["params"].(map[string]any)
 			factors, _ := params["factors"].(map[string]any)
 			criteria, _ := params["criteria"].([]any)
-			if len(criteria) < 2 || criteria[0] != "longest_distance" || params["podium"] != 10.0 || params["min_session_seconds"] != tt.wantSecond || factors["ride"] != 0.25 {
+			if !reflect.DeepEqual(criteria, tt.wantCriteria) || params["podium"] != 10.0 || params["min_session_seconds"] != tt.wantSecond || factors["ride"] != 0.25 {
 				t.Fatalf("points params %v, want the criteria, a top 10, %v s and ride at 0.25", params, tt.wantSecond)
 			}
 			if p := repo.created.Categories[len(repo.created.Categories)-1].Params; p.MinSessionSeconds != int(tt.wantSecond) {
