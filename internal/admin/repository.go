@@ -253,3 +253,139 @@ func (r *Repository) Challenge(ctx context.Context, id string) (ChallengeData, e
 	}
 	return out, nil
 }
+
+// userColumns reads an account of users u as an admin sees it. Its state
+// follows the deletion: active until anonymized_at, then pending while
+// pending_auth0_deletions holds its row (removed once Auth0 deleted the
+// identity), deleted after. Its challenges are those it joined or creates,
+// deleted ones included (ListUserChallenges).
+const userColumns = `u.id, u.pseudo, u.first_name, u.last_name, u.email, u.created_at, u.anonymized_at AS deleted_at,
+	CASE WHEN u.anonymized_at IS NULL THEN 'active'
+		WHEN EXISTS (SELECT 1 FROM pending_auth0_deletions d WHERE d.user_id = u.id) THEN 'auth0_deletion_pending'
+		ELSE 'deleted' END AS state,
+	(SELECT max(a.created_at) FROM activities a WHERE a.user_id = u.id AND a.deleted_at IS NULL) AS last_activity_at,
+	(SELECT count(*) FROM (SELECT challenge_id FROM participants WHERE user_id = u.id
+		UNION SELECT challenge_id FROM challenge_creators WHERE user_id = u.id) m) AS challenge_count`
+
+// ListUsers returns at most q.Limit accounts of q, deleted ones included,
+// most recently created first; the key (created_at, id) makes the order
+// total. The search looks in the pseudo, the names and the e-mail.
+func (r *Repository) ListUsers(ctx context.Context, q UserQuery) ([]UserRow, error) {
+	var query strings.Builder
+	query.WriteString(`SELECT ` + userColumns + ` FROM users u WHERE true`)
+	args := map[string]any{"limit": q.Limit}
+	if q.Search != "" {
+		query.WriteString(` AND (u.pseudo ILIKE @search ESCAPE '\' OR u.first_name ILIKE @search ESCAPE '\'
+			OR u.last_name ILIKE @search ESCAPE '\' OR u.email ILIKE @search ESCAPE '\')`)
+		args["search"] = likePattern(q.Search)
+	}
+	if q.After != nil {
+		query.WriteString(" AND (u.created_at, u.id) < (@after_created, @after_id)")
+		args["after_created"], args["after_id"] = q.After.CreatedAt, q.After.ID
+	}
+	query.WriteString(" ORDER BY u.created_at DESC, u.id DESC LIMIT @limit")
+
+	var out []UserRow
+	if err := r.db.WithContext(ctx).Raw(query.String(), args).Scan(&out).Error; err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	return out, nil
+}
+
+// errUserNotFound means no account with this id, deleted or not.
+var errUserNotFound = errors.New("user not found")
+
+// User reads account id, deleted or not; errUserNotFound when there is
+// none.
+func (r *Repository) User(ctx context.Context, id string) (UserRow, error) {
+	var found []UserRow
+	if err := r.db.WithContext(ctx).Raw(`SELECT `+userColumns+` FROM users u WHERE u.id = @id`, map[string]any{"id": id}).
+		Scan(&found).Error; err != nil {
+		return UserRow{}, fmt.Errorf("read user: %w", err)
+	}
+	if len(found) == 0 {
+		return UserRow{}, errUserNotFound
+	}
+	return found[0], nil
+}
+
+// ofUser runs read in one read-only transaction once account id is known
+// to exist, so that an unknown account (errUserNotFound) is told from one
+// with an empty list.
+func (r *Repository) ofUser(ctx context.Context, id string, read func(tx *gorm.DB) error) error {
+	opts := &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var exists bool
+		if err := tx.Raw(`SELECT EXISTS (SELECT 1 FROM users WHERE id = @id)`, map[string]any{"id": id}).
+			Scan(&exists).Error; err != nil {
+			return fmt.Errorf("find user: %w", err)
+		}
+		if !exists {
+			return errUserNotFound
+		}
+		return read(tx)
+	}, opts)
+}
+
+// ListUserChallenges returns at most q.Limit challenges account id joined
+// or creates, deleted ones included, most recently created first, with its
+// role in each; errUserNotFound when there is no such account.
+func (r *Repository) ListUserChallenges(ctx context.Context, id string, q PageQuery) ([]UserChallengeRow, error) {
+	var query strings.Builder
+	query.WriteString(`SELECT c.id, c.title, c.visibility, c.starts_at, c.ends_at, c.created_at, c.deleted_at,
+		cc.user_id IS NOT NULL AS is_creator, p.status AS participant_status, p.joined_at, p.abandoned_at
+		FROM (SELECT challenge_id FROM participants WHERE user_id = @id
+			UNION SELECT challenge_id FROM challenge_creators WHERE user_id = @id) m
+		JOIN challenges c ON c.id = m.challenge_id
+		LEFT JOIN participants p ON p.challenge_id = c.id AND p.user_id = @id
+		LEFT JOIN challenge_creators cc ON cc.challenge_id = c.id AND cc.user_id = @id
+		WHERE true`)
+	args := map[string]any{"id": id, "limit": q.Limit}
+	if q.After != nil {
+		query.WriteString(" AND (c.created_at, c.id) < (@after_created, @after_id)")
+		args["after_created"], args["after_id"] = q.After.CreatedAt, q.After.ID
+	}
+	query.WriteString(" ORDER BY c.created_at DESC, c.id DESC LIMIT @limit")
+
+	var out []UserChallengeRow
+	err := r.ofUser(ctx, id, func(tx *gorm.DB) error {
+		if err := tx.Raw(query.String(), args).Scan(&out).Error; err != nil {
+			return fmt.Errorf("list user challenges: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListUserActivities returns at most q.Limit activities of account id,
+// deleted ones excluded, the most recent session first; the key
+// (started_at, id) makes the order total, on the index
+// activities_user_started_at_idx. errUserNotFound when there is no such
+// account.
+func (r *Repository) ListUserActivities(ctx context.Context, id string, q ActivityQuery) ([]ActivityRow, error) {
+	var query strings.Builder
+	query.WriteString(`SELECT id, sport_code, sport_label, started_at, duration_seconds, distance_meters,
+		elevation_gain_meters, source, created_at
+		FROM activities WHERE user_id = @id AND deleted_at IS NULL`)
+	args := map[string]any{"id": id, "limit": q.Limit}
+	if q.After != nil {
+		query.WriteString(" AND (started_at, id) < (@after_started, @after_id)")
+		args["after_started"], args["after_id"] = q.After.StartedAt, q.After.ID
+	}
+	query.WriteString(" ORDER BY started_at DESC, id DESC LIMIT @limit")
+
+	var out []ActivityRow
+	err := r.ofUser(ctx, id, func(tx *gorm.DB) error {
+		if err := tx.Raw(query.String(), args).Scan(&out).Error; err != nil {
+			return fmt.Errorf("list user activities: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}

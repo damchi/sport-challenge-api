@@ -68,9 +68,10 @@ func TestDeleteAnonymizes(t *testing.T) {
 	if n := count(t, pool, "SELECT count(*) FROM users WHERE auth_subject = 'email|alice'"); n != 0 {
 		t.Fatalf("%d rows still hold the subject, want 0", n)
 	}
-	// The deletion at Auth0 is pending from the commit on.
-	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = 'email|alice'"); n != 1 {
-		t.Fatalf("%d pending deletions, want 1", n)
+	// The deletion at Auth0 is pending from the commit on, linked to the
+	// account for the admin.
+	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = 'email|alice' AND user_id = $1", u.ID); n != 1 {
+		t.Fatalf("%d pending deletions of the account, want 1", n)
 	}
 	// The other user is untouched; the pseudo is free again.
 	if _, err := repo.GetByID(t.Context(), other.ID); err != nil {

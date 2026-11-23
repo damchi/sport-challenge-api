@@ -64,6 +64,8 @@ const (
 	CodeChallengeNotFound Code = "challenge_not_found"
 	// CodeActivityNotFound also answers an activity of another user.
 	CodeActivityNotFound Code = "activity_not_found"
+	// CodeUserNotFound answers an admin read of an unknown account.
+	CodeUserNotFound Code = "user_not_found"
 	// CodeInvitationInvalid answers an unknown, expired or revoked
 	// invitation token alike.
 	CodeInvitationInvalid Code = "invitation_invalid"
@@ -128,6 +130,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusNotFound, "Challenge not found"}, true
 	case CodeActivityNotFound:
 		return definition{http.StatusNotFound, "Activity not found"}, true
+	case CodeUserNotFound:
+		return definition{http.StatusNotFound, "User not found"}, true
 	case CodeInvitationInvalid:
 		return definition{http.StatusNotFound, "Invitation invalid"}, true
 	case CodeNotFound:

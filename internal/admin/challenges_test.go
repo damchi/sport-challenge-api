@@ -59,14 +59,14 @@ func TestChallenges(t *testing.T) {
 		{ID: "c3", StartsAt: listAt.AddDate(0, 0, -14), EndsAt: listAt, CreatedAt: listAt.Add(-3 * time.Minute)},
 	}
 	deletedOnly := true
-	after := &ChallengePosition{CreatedAt: listAt, ID: "c0"}
+	after := &Position{CreatedAt: listAt, ID: "c0"}
 	q := ChallengeQuery{Search: "run", Status: StatusOngoing, Visibility: "private", Deleted: &deletedOnly, After: after}
 
 	tests := []struct {
 		name      string
 		limit     int
 		wantItems []ChallengeSummary
-		wantNext  *ChallengePosition
+		wantNext  *Position
 	}{
 		{
 			name:  "a next page: one more than asked was read",
@@ -75,7 +75,7 @@ func TestChallenges(t *testing.T) {
 				{ChallengeRow: rows[0], Status: StatusUpcoming, Creators: []UserRef{ann, bob}},
 				{ChallengeRow: rows[1], Status: StatusOngoing},
 			},
-			wantNext: &ChallengePosition{CreatedAt: rows[1].CreatedAt, ID: "c2"},
+			wantNext: &Position{CreatedAt: rows[1].CreatedAt, ID: "c2"},
 		},
 		{
 			name:  "the last page",

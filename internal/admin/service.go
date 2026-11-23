@@ -23,6 +23,10 @@ type repository interface {
 	ListChallenges(ctx context.Context, q ChallengeQuery) ([]ChallengeRow, error)
 	CreatorsOf(ctx context.Context, ids []string) (map[string][]UserRef, error)
 	Challenge(ctx context.Context, id string) (ChallengeData, error)
+	ListUsers(ctx context.Context, q UserQuery) ([]UserRow, error)
+	User(ctx context.Context, id string) (UserRow, error)
+	ListUserChallenges(ctx context.Context, id string, q PageQuery) ([]UserChallengeRow, error)
+	ListUserActivities(ctx context.Context, id string, q ActivityQuery) ([]ActivityRow, error)
 }
 
 // Service holds the admin reads.
@@ -97,20 +101,16 @@ func (s *Service) Challenges(ctx context.Context, actor auth.Actor, q ChallengeQ
 		q.After = &after
 	}
 	q.Now = s.clock.Now()
-	// The contract bounds the limit; a direct call below 1 still gets one
-	// challenge per page.
-	limit := max(q.Limit, 1)
-	// One more than asked tells whether a next page exists.
+	limit := pageLimit(q.Limit)
 	q.Limit = limit + 1
 	rows, err := s.repo.ListChallenges(ctx, q)
 	if err != nil {
 		return ChallengePage{}, fmt.Errorf("list challenges: %w", err)
 	}
 	var page ChallengePage
-	if len(rows) > limit {
-		rows = rows[:limit]
-		last := rows[limit-1]
-		page.Next = &ChallengePosition{CreatedAt: last.CreatedAt, ID: last.ID}
+	rows, last, more := cut(rows, limit)
+	if more {
+		page.Next = &Position{CreatedAt: last.CreatedAt, ID: last.ID}
 	}
 	ids := make([]string, len(rows))
 	for i, r := range rows {
@@ -175,24 +175,182 @@ func (s *Service) Challenge(ctx context.Context, actor auth.Actor, id string) (C
 	}, nil
 }
 
-// decodePosition reads a cursor of ListAdminChallenges. It comes from the
-// client: a position that is not one (bad id, no date) answers 400
+// pageLimit is the size of a page for limit: the contract bounds it, and a
+// direct call below 1 still gets one item per page. The repository is asked
+// one more, which tells whether a next page exists (cut).
+func pageLimit(limit int) int {
+	return max(limit, 1)
+}
+
+// cut keeps the first limit of rows, read with limit+1, and tells whether a
+// next page exists; last is the last row kept, the position of the next
+// page.
+func cut[T any](rows []T, limit int) (kept []T, last T, more bool) {
+	if len(rows) <= limit {
+		return rows, last, false
+	}
+	return rows[:limit], rows[limit-1], true
+}
+
+// decodePosition reads the cursor of a list ordered by Position. It comes
+// from the client: a position that is not one (bad id, no date) answers 400
 // validation_failed on the field cursor, as a cursor that does not decode.
-func decodePosition(cursor string) (ChallengePosition, error) {
-	var after ChallengePosition
+func decodePosition(cursor string) (Position, error) {
+	var after Position
 	if err := httpx.DecodeCursor(cursor, &after); err != nil {
-		return ChallengePosition{}, err
+		return Position{}, err
 	}
-	// Normalized: uuid.Parse also accepts forms PostgreSQL refuses
-	// (urn:uuid:..., {...}).
-	id, err := uuid.Parse(after.ID)
+	id, err := positionID(after.ID, after.CreatedAt)
 	if err != nil {
-		return ChallengePosition{}, apperr.InvalidFields(err, "cursor")
+		return Position{}, err
 	}
-	after.ID = id.String()
-	// A position without its date (forged cursor) would restart the list.
-	if after.CreatedAt.IsZero() {
-		return ChallengePosition{}, apperr.InvalidFields(nil, "cursor")
-	}
+	after.ID = id
 	return after, nil
+}
+
+// decodeActivityPosition reads the cursor of the activities of an account,
+// as decodePosition.
+func decodeActivityPosition(cursor string) (ActivityPosition, error) {
+	var after ActivityPosition
+	if err := httpx.DecodeCursor(cursor, &after); err != nil {
+		return ActivityPosition{}, err
+	}
+	id, err := positionID(after.ID, after.StartedAt)
+	if err != nil {
+		return ActivityPosition{}, err
+	}
+	after.ID = id
+	return after, nil
+}
+
+// positionID checks a decoded position and returns its id normalized:
+// uuid.Parse also accepts forms PostgreSQL refuses (urn:uuid:..., {...}).
+// A position without its date (forged cursor) would restart the list.
+func positionID(id string, at time.Time) (string, error) {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return "", apperr.InvalidFields(err, "cursor")
+	}
+	if at.IsZero() {
+		return "", apperr.InvalidFields(nil, "cursor")
+	}
+	return parsed.String(), nil
+}
+
+// Users returns a page of at most q.Limit (at least 1) accounts of q, q.After
+// set here from cursor ("" for the first page), deleted ones included, with
+// their e-mail. Admin only (RequireAdmin), checked before anything is read,
+// the cursor included.
+func (s *Service) Users(ctx context.Context, actor auth.Actor, q UserQuery, cursor string) (UserPage, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return UserPage{}, err
+	}
+	if cursor != "" {
+		after, err := decodePosition(cursor)
+		if err != nil {
+			return UserPage{}, err
+		}
+		q.After = &after
+	}
+	limit := pageLimit(q.Limit)
+	q.Limit = limit + 1
+	rows, err := s.repo.ListUsers(ctx, q)
+	if err != nil {
+		return UserPage{}, fmt.Errorf("list users: %w", err)
+	}
+	items, last, more := cut(rows, limit)
+	page := UserPage{Items: items}
+	if more {
+		page.Next = &Position{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	return page, nil
+}
+
+// User returns account id, deleted or not, with its e-mail. Admin only
+// (RequireAdmin), checked before anything is read; 404 user_not_found when
+// there is no such account.
+func (s *Service) User(ctx context.Context, actor auth.Actor, id string) (UserRow, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return UserRow{}, err
+	}
+	u, err := s.repo.User(ctx, id)
+	if err != nil {
+		return UserRow{}, userError("read user", err)
+	}
+	return u, nil
+}
+
+// UserChallenges returns a page of at most limit (at least 1) challenges
+// account id joined or creates, deleted ones included, each with its role
+// and its status at now. Admin only (RequireAdmin), checked before anything
+// is read, the cursor included; 404 user_not_found when there is no such
+// account.
+func (s *Service) UserChallenges(ctx context.Context, actor auth.Actor, id string, limit int, cursor string) (UserChallengePage, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return UserChallengePage{}, err
+	}
+	var q PageQuery
+	if cursor != "" {
+		after, err := decodePosition(cursor)
+		if err != nil {
+			return UserChallengePage{}, err
+		}
+		q.After = &after
+	}
+	limit = pageLimit(limit)
+	q.Limit = limit + 1
+	rows, err := s.repo.ListUserChallenges(ctx, id, q)
+	if err != nil {
+		return UserChallengePage{}, userError("list user challenges", err)
+	}
+	now := s.clock.Now()
+	var page UserChallengePage
+	rows, last, more := cut(rows, limit)
+	if more {
+		page.Next = &Position{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	page.Items = make([]UserChallenge, len(rows))
+	for i, r := range rows {
+		page.Items[i] = UserChallenge{UserChallengeRow: r, Status: statusAt(now, r.StartsAt, r.EndsAt)}
+	}
+	return page, nil
+}
+
+// UserActivities returns a page of at most limit (at least 1) activities of
+// account id, deleted ones excluded, the most recent session first. Admin
+// only (RequireAdmin), checked before anything is read, the cursor included;
+// 404 user_not_found when there is no such account.
+func (s *Service) UserActivities(ctx context.Context, actor auth.Actor, id string, limit int, cursor string) (ActivityPage, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return ActivityPage{}, err
+	}
+	var q ActivityQuery
+	if cursor != "" {
+		after, err := decodeActivityPosition(cursor)
+		if err != nil {
+			return ActivityPage{}, err
+		}
+		q.After = &after
+	}
+	limit = pageLimit(limit)
+	q.Limit = limit + 1
+	rows, err := s.repo.ListUserActivities(ctx, id, q)
+	if err != nil {
+		return ActivityPage{}, userError("list user activities", err)
+	}
+	items, last, more := cut(rows, limit)
+	page := ActivityPage{Items: items}
+	if more {
+		page.Next = &ActivityPosition{StartedAt: last.StartedAt, ID: last.ID}
+	}
+	return page, nil
+}
+
+// userError gives errUserNotFound its 404 user_not_found, and wraps any
+// other error with what failed.
+func userError(what string, err error) error {
+	if errors.Is(err, errUserNotFound) {
+		return apperr.New(apperr.CodeUserNotFound, err)
+	}
+	return fmt.Errorf("%s: %w", what, err)
 }

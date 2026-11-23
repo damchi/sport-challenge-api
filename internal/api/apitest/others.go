@@ -151,3 +151,23 @@ func (unimplemented) ListAdminChallenges(context.Context, api.ListAdminChallenge
 func (unimplemented) GetAdminChallenge(context.Context, api.GetAdminChallengeRequestObject) (api.GetAdminChallengeResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) ListAdminUsers(context.Context, api.ListAdminUsersRequestObject) (api.ListAdminUsersResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) GetAdminUser(context.Context, api.GetAdminUserRequestObject) (api.GetAdminUserResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) ListAdminUserChallenges(context.Context, api.ListAdminUserChallengesRequestObject) (api.ListAdminUserChallengesResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) ListAdminUserActivities(context.Context, api.ListAdminUserActivitiesRequestObject) (api.ListAdminUserActivitiesResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) SearchAdminUsers(context.Context, api.SearchAdminUsersRequestObject) (api.SearchAdminUsersResponseObject, error) {
+	return nil, errNotImplemented
+}

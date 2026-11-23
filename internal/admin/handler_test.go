@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,8 +47,15 @@ func getStats(t *testing.T, svc *Service, token string) (*httptest.ResponseRecor
 // contract.
 func serve(t *testing.T, svc *Service, token, target string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
+	return serveLogged(t, svc, token, http.MethodGet, target, "", io.Discard)
+}
+
+// serveLogged is serve for method with body (none when ""), the logs of the
+// API, as JSON, written to logs.
+func serveLogged(t *testing.T, svc *Service, token, method, target, body string, logs io.Writer) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	spec, err := api.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -70,11 +78,19 @@ func serve(t *testing.T, svc *Service, token, target string) (*httptest.Response
 		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, target, nil)
+	newRequest := func() *http.Request {
+		if body == "" {
+			return httptest.NewRequest(method, target, nil)
+		}
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+	req := newRequest()
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
-	apitest.ValidateResponse(t, httptest.NewRequest(http.MethodGet, target, nil), rec)
+	apitest.ValidateResponse(t, newRequest(), rec)
 
 	var got map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {

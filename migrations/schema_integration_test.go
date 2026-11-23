@@ -129,6 +129,12 @@ func TestConstraints(t *testing.T) {
 		{name: "same fingerprint twice", sql: `INSERT INTO deleted_subjects (fingerprint) VALUES (sha256('email|1'::bytea)), (sha256('email|1'::bytea))`, constraint: "deleted_subjects_pkey"},
 		{name: "same pending deletion twice", sql: `INSERT INTO pending_auth0_deletions (auth_subject) VALUES ('email|1'), ('email|1')`, constraint: "pending_auth0_deletions_pkey"},
 
+		// pending_auth0_deletions.user_id (000018)
+		{name: "pending deletion of an account", sql: `INSERT INTO pending_auth0_deletions (auth_subject, user_id) VALUES ('email|1', '` + userID + `')`},
+		{name: "pending deletions without an account", sql: `INSERT INTO pending_auth0_deletions (auth_subject) VALUES ('email|1'), ('email|2')`},
+		{name: "same account pending twice", sql: `INSERT INTO pending_auth0_deletions (auth_subject, user_id) VALUES ('email|1', '` + userID + `'), ('email|2', '` + userID + `')`, constraint: "pending_auth0_deletions_user_id_key"},
+		{name: "pending deletion of an unknown account", sql: `INSERT INTO pending_auth0_deletions (auth_subject, user_id) VALUES ('email|1', gen_random_uuid())`, constraint: "pending_auth0_deletions_user_id_fkey"},
+
 		// activities (000006)
 		{name: "valid run", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters) VALUES ('` + userID + `', 'run', '2026-12-02Z', 1800, 5000)`},
 		{name: "yoga without distance", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 3600)`},

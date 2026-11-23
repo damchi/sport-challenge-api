@@ -54,7 +54,7 @@ func TestListAdminChallenges(t *testing.T) {
 		},
 		creators: map[string][]UserRef{challengeID: {{ID: annID, Pseudo: ptr("Ann"), FirstName: ptr("Ann"), LastName: ptr("Lee")}, {ID: bobID}}},
 	}
-	after, err := httpx.EncodeCursor(ChallengePosition{CreatedAt: listAt, ID: "{" + inviteID + "}"})
+	after, err := httpx.EncodeCursor(Position{CreatedAt: listAt, ID: "{" + inviteID + "}"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestListAdminChallenges(t *testing.T) {
 	if q.After == nil || q.After.ID != inviteID || !q.After.CreatedAt.Equal(listAt) {
 		t.Errorf("after = %+v, want the normalized position of the cursor", q.After)
 	}
-	next, err := httpx.EncodeCursor(ChallengePosition{CreatedAt: listAt.Add(-time.Minute), ID: challengeID})
+	next, err := httpx.EncodeCursor(Position{CreatedAt: listAt.Add(-time.Minute), ID: challengeID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,8 +105,8 @@ func TestListAdminChallengesDefaults(t *testing.T) {
 }
 
 func TestListAdminChallengesBadCursor(t *testing.T) {
-	noDate, _ := httpx.EncodeCursor(ChallengePosition{ID: challengeID})
-	badID, _ := httpx.EncodeCursor(ChallengePosition{CreatedAt: listAt, ID: "x"})
+	noDate, _ := httpx.EncodeCursor(Position{ID: challengeID})
+	badID, _ := httpx.EncodeCursor(Position{CreatedAt: listAt, ID: "x"})
 	for name, cursor := range map[string]string{"not base64": "!!", "no date": noDate, "bad id": badID} {
 		t.Run(name, func(t *testing.T) {
 			repo := &fakeRepo{}
