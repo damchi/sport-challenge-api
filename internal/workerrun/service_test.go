@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 )
+
+// discard drops the logs of the tests.
+var discard = slog.New(slog.DiscardHandler)
 
 // fakeRepo records the calls of the service.
 type fakeRepo struct {
@@ -67,22 +71,23 @@ func TestRun(t *testing.T) {
 			name: "wrapped application error keeps its code", fnErr: fmt.Errorf("task: %w", notFound), wantRan: true,
 			wantOutcome: OutcomeFailed, wantCode: "not_found", wantErrs: []error{notFound},
 		},
-		{name: "start not recorded: the task does not run", repo: fakeRepo{startErr: errDB}, wantErrs: []error{errDB}},
+		{name: "start not recorded: the task runs all the same", repo: fakeRepo{startErr: errDB}, wantRan: true},
 		{
-			name: "end not recorded after a failure: both errors", repo: fakeRepo{finishErr: errDB}, fnErr: errTask,
-			wantRan: true, wantOutcome: OutcomeFailed, wantCode: "internal_error", wantErrs: []error{errTask, errDB},
+			name: "start not recorded: the failure of the task is returned", repo: fakeRepo{startErr: errDB}, fnErr: errTask,
+			wantRan: true, wantErrs: []error{errTask},
 		},
 		{
-			name: "trim failed after a success", repo: fakeRepo{trimErr: errDB}, wantRan: true,
-			wantOutcome: OutcomeSucceeded, wantErrs: []error{errDB},
+			name: "end not recorded: the result of the task is kept", repo: fakeRepo{finishErr: errDB}, fnErr: errTask,
+			wantRan: true, wantOutcome: OutcomeFailed, wantCode: "internal_error", wantErrs: []error{errTask},
 		},
+		{name: "trim failed after a success: still a success", repo: fakeRepo{trimErr: errDB}, wantRan: true, wantOutcome: OutcomeSucceeded},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := tt.repo
 			clk := clock.NewFake(start)
 			ran := false
-			err := NewService(&repo, clk).Run(t.Context(), "close-weeks", func(context.Context) error {
+			err := NewService(&repo, clk, discard).Run(t.Context(), "close-weeks", func(context.Context) error {
 				ran = true
 				clk.Advance(time.Minute)
 				return tt.fnErr
@@ -96,12 +101,15 @@ func TestRun(t *testing.T) {
 			if len(tt.wantErrs) == 0 && err != nil {
 				t.Errorf("Run() = %v; want nil", err)
 			}
+			if errors.Is(err, errDB) {
+				t.Errorf("Run() = %v; a recording failure must not reach the result", err)
+			}
 			if ran != tt.wantRan {
 				t.Fatalf("task ran = %v; want %v", ran, tt.wantRan)
 			}
-			if !tt.wantRan {
+			if tt.repo.startErr != nil {
 				if repo.finished || repo.trimmed != 0 {
-					t.Errorf("a run never started was ended or trimmed")
+					t.Errorf("a run never recorded was ended or trimmed")
 				}
 				return
 			}
@@ -130,7 +138,7 @@ func TestRun(t *testing.T) {
 func TestRunEndsTheRowOfACancelledTask(t *testing.T) {
 	repo := &fakeRepo{}
 	ctx, cancel := context.WithCancel(t.Context())
-	err := NewService(repo, clock.NewFake(time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC))).
+	err := NewService(repo, clock.NewFake(time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)), discard).
 		Run(ctx, "finalize-challenges", func(ctx context.Context) error {
 			cancel()
 			return ctx.Err()

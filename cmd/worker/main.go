@@ -102,7 +102,7 @@ func run(args []string) error {
 
 	// The closure judges from the same data as the rankings.
 	service := closure.NewService(closure.NewRepository(gdb), leaderboard.NewRepository(gdb), clk, logger)
-	runs := workerrun.NewService(workerrun.NewRepository(gdb), clk)
+	runs := workerrun.NewService(workerrun.NewRepository(gdb), clk, logger)
 	// Each run is recorded for the admin dashboard, failure included.
 	return runs.Run(ctx, task, func(ctx context.Context) error {
 		switch task {

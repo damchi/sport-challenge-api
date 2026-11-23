@@ -3,7 +3,7 @@ package workerrun
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -26,23 +26,25 @@ type repository interface {
 
 // Service records the runs of the worker tasks.
 type Service struct {
-	repo  repository
-	clock clock.Clock
+	repo   repository
+	clock  clock.Clock
+	logger *slog.Logger
 }
 
 // NewService returns a Service.
-func NewService(repo repository, c clock.Clock) *Service {
-	return &Service{repo: repo, clock: c}
+func NewService(repo repository, c clock.Clock, logger *slog.Logger) *Service {
+	return &Service{repo: repo, clock: c, logger: logger}
 }
 
 // Run records a run of task around fn: a row when it starts, ended with its
 // outcome when fn returns, failure included; then only the most recent runs
-// of the task are kept. fn does not run if its start cannot be recorded. The
-// error of fn is returned, joined with the one of the recording if any.
+// of the task are kept. The record only observes: a failure to write it is
+// logged, never stops fn nor changes its result, which Run returns.
 func (s *Service) Run(ctx context.Context, task string, fn func(context.Context) error) error {
 	id, err := s.repo.Start(ctx, task, s.clock.Now())
 	if err != nil {
-		return fmt.Errorf("record the start of %s: %w", task, err)
+		s.logger.Error("record the start of a run", slog.String("task", task), slog.String("error", err.Error()))
+		return fn(ctx)
 	}
 	runErr := fn(ctx)
 
@@ -54,10 +56,9 @@ func (s *Service) Run(ctx context.Context, task string, fn func(context.Context)
 		outcome, code = OutcomeFailed, errorCode(runErr)
 	}
 	if err := s.repo.Finish(ctx, id, s.clock.Now(), outcome, code); err != nil {
-		return errors.Join(runErr, fmt.Errorf("record the end of %s: %w", task, err))
-	}
-	if err := s.repo.Trim(ctx, task, keptRuns); err != nil {
-		return errors.Join(runErr, fmt.Errorf("trim the runs of %s: %w", task, err))
+		s.logger.Error("record the end of a run", slog.String("task", task), slog.String("error", err.Error()))
+	} else if err := s.repo.Trim(ctx, task, keptRuns); err != nil {
+		s.logger.Error("trim the runs", slog.String("task", task), slog.String("error", err.Error()))
 	}
 	return runErr
 }

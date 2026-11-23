@@ -28,7 +28,7 @@ func newService(t *testing.T) (*Service, *pgxpool.Pool, *clock.FakeClock) {
 		t.Fatal(err)
 	}
 	clk := clock.NewFake(runStart)
-	return NewService(NewRepository(gdb), clk), pool, clk
+	return NewService(NewRepository(gdb), clk, slog.New(slog.NewJSONHandler(io.Discard, nil))), pool, clk
 }
 
 type runRow struct {
