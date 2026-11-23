@@ -36,6 +36,7 @@ func TestNew(t *testing.T) {
 		{CodeAlreadyParticipant, http.StatusConflict},
 		{CodeParticipationAbandoned, http.StatusUnprocessableEntity},
 		{CodeValidationFailed, http.StatusBadRequest},
+		{CodeCursorInvalid, http.StatusBadRequest},
 		{CodeInternal, http.StatusInternalServerError},
 	}
 	for _, tt := range tests {

@@ -87,3 +87,41 @@ type Place struct {
 	Entry       scoring.Entry
 	RankedCount int
 }
+
+// PageRequest is the part of the leaderboard asked for: Category alone when
+// set, and with Limit > 0, the podium then Limit lines after it, from After
+// (nil for the first page). Limit 0 is every line, without podium.
+type PageRequest struct {
+	Category string
+	Limit    int
+	After    *Position
+}
+
+// Position is where the next page of a category starts in its lines after
+// the podium, and the state of the ranking it was given in (Version): a
+// ranking that has changed since refuses it.
+type Position struct {
+	Category string `json:"c"`
+	Offset   int    `json:"o"`
+	Version  string `json:"v"`
+}
+
+// Page is the part of a leaderboard asked for, in category order, computed
+// at ComputedAt.
+type Page struct {
+	ComputedAt time.Time
+	Categories []CategoryPage
+}
+
+// CategoryPage is a category of a Page: its podium (nil without a limit)
+// and its Entries, the page after it or every line, the line of the actor
+// (Me, nil when not a participant), and Next, the position of the next page
+// (nil at the end and without a limit).
+type CategoryPage struct {
+	Type        string
+	RankedCount int
+	Podium      []Ranked
+	Entries     []Ranked
+	Me          *Ranked
+	Next        *Position
+}

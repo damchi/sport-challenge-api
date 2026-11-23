@@ -244,10 +244,14 @@ func TestGetLeaderboardAnswersProvisionalPoints(t *testing.T) {
 }
 
 func TestGetLeaderboardHidesAChallengeTheActorMayNotRead(t *testing.T) {
-	svc := handlerService(t, &fakeChallenges{err: apperr.New(apperr.CodeChallengeNotFound, nil)})
-	rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/leaderboard", true)
-	if rec.Code != http.StatusNotFound || errorCode(body) != "challenge_not_found" {
-		t.Fatalf("status %d (%s), want 404 challenge_not_found", rec.Code, rec.Body)
+	// A page asked for, even of a category the challenge may not have, is
+	// still not found: nothing is checked before the rights.
+	for _, query := range []string{"", "?limit=10", "?category=points&limit=10"} {
+		svc := handlerService(t, &fakeChallenges{err: apperr.New(apperr.CodeChallengeNotFound, nil)})
+		rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/leaderboard"+query, true)
+		if rec.Code != http.StatusNotFound || errorCode(body) != "challenge_not_found" {
+			t.Fatalf("%q: status %d (%s), want 404 challenge_not_found", query, rec.Code, rec.Body)
+		}
 	}
 }
 
@@ -280,6 +284,111 @@ func TestGetLeaderboardRefusesBadRequests(t *testing.T) {
 			rec, body := get(t, svc, tt.target, tt.withToken)
 			if rec.Code != tt.wantCode || errorCode(body) != tt.wantError {
 				t.Fatalf("status %d (%s), want %d %s", rec.Code, rec.Body, tt.wantCode, tt.wantError)
+			}
+		})
+	}
+}
+
+// pagedService ranks five participants in the cumulative time, ann last of
+// the ranked ones, and one who abandoned.
+func pagedService(t *testing.T) *Service {
+	t.Helper()
+	c := twoWeeks(t)
+	c.Categories = []Category{{Type: CategoryCumulativeTime}, {Type: CategoryCumulativeDistance, Factors: map[string]float64{"run": 1}}}
+	ids := []string{
+		"44444444-4444-4444-8444-444444444441", "44444444-4444-4444-8444-444444444442",
+		"44444444-4444-4444-8444-444444444443", "44444444-4444-4444-8444-444444444444", ann,
+	}
+	var participants []scoring.Participant
+	var activities []scoring.Activity
+	for i, id := range ids {
+		participants = append(participants, scoring.Participant{UserID: id})
+		activities = append(activities, scoring.Activity{UserID: id, SportCode: "run", StartedAt: c.StartsAt, DurationSeconds: 1000 - 100*i, DistanceMeters: meters(5000)})
+	}
+	participants = append(participants, scoring.Participant{UserID: gone, Abandoned: true})
+	repo := &fakeRepo{participants: participants, activities: activities}
+	return NewService(&fakeChallenges{c: c}, fakeProfiles{}, repo, clock.NewFake(c.StartsAt.Add(24*time.Hour)), 24*time.Hour)
+}
+
+// TestGetLeaderboardPages: with a limit, the podium, a page after it, my
+// line and the cursor of the next page, which gives that category alone;
+// every answer matches the contract.
+func TestGetLeaderboardPages(t *testing.T) {
+	svc := pagedService(t)
+	base := "/api/v1/challenges/" + challengeID + "/leaderboard"
+	userOf := func(e any) any { return e.(map[string]any)["user"].(map[string]any)["id"] }
+
+	rec, body := get(t, svc, base+"?limit=1", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d (%s), want 200", rec.Code, rec.Body)
+	}
+	categories := body["categories"].([]any)
+	if len(categories) != 2 {
+		t.Fatalf("%d categories, want both", len(categories))
+	}
+	timeCat := categories[0].(map[string]any)
+	podium, entries := timeCat["podium"].([]any), timeCat["entries"].([]any)
+	if len(podium) != 3 || len(entries) != 1 || timeCat["next_cursor"] == nil || userOf(timeCat["me"]) != ann || timeCat["ranked_count"] != 5.0 {
+		t.Fatalf("time category %v, want 3 on the podium, 1 line, a cursor and my line", timeCat)
+	}
+	// The distance: all equal, everyone on the podium, nothing after.
+	distance := categories[1].(map[string]any)
+	if len(distance["podium"].([]any)) != 5 || len(distance["entries"].([]any)) != 1 || distance["next_cursor"] != nil {
+		t.Fatalf("distance category %v, want the 5 equal ones on the podium, then the abandoned one, and the end", distance)
+	}
+
+	cursor := timeCat["next_cursor"].(string)
+	rec, body = get(t, svc, base+"?category=cumulative_time&limit=5&cursor="+cursor, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("next page: status %d (%s), want 200", rec.Code, rec.Body)
+	}
+	categories = body["categories"].([]any)
+	next := categories[0].(map[string]any)
+	if len(categories) != 1 || len(next["entries"].([]any)) != 2 || userOf(next["entries"].([]any)[0]) != ann || next["next_cursor"] != nil {
+		t.Fatalf("next page %v, want the time alone: ann then the abandoned one, and the end", body)
+	}
+
+	rec, body = get(t, svc, base, true)
+	if rec.Code != http.StatusOK || body["categories"].([]any)[0].(map[string]any)["podium"] != nil {
+		t.Fatalf("without limit: status %d, %v, want no podium", rec.Code, body)
+	}
+}
+
+func TestGetLeaderboardPageRefusals(t *testing.T) {
+	base := "/api/v1/challenges/" + challengeID + "/leaderboard"
+	_, first := get(t, pagedService(t), base+"?limit=1", true)
+	cursor := first["categories"].([]any)[0].(map[string]any)["next_cursor"].(string)
+	tests := []struct {
+		name       string
+		query      string
+		wantCode   string
+		wantFields string
+	}{
+		{"limit 0", "?limit=0", "validation_failed", "limit"},
+		{"limit 101", "?limit=101", "validation_failed", "limit"},
+		{"unknown category", "?category=fastest", "validation_failed", "category"},
+		{"category not in the challenge", "?category=points&limit=5", "validation_failed", "category"},
+		{"cursor without limit nor category", "?cursor=" + cursor, "validation_failed", "category,limit"},
+		{"cursor without category", "?limit=5&cursor=" + cursor, "validation_failed", "category"},
+		{"cursor that does not decode", "?category=cumulative_time&limit=5&cursor=%25%25", "validation_failed", "cursor"},
+		{"cursor without position", "?category=cumulative_time&limit=5&cursor=bnVsbA", "validation_failed", "cursor"},
+		{"cursor of another category", "?category=cumulative_distance&limit=5&cursor=" + cursor, "validation_failed", "cursor"},
+		{"cursor of a ranking that changed", "?category=cumulative_time&limit=5&cursor=" + cursor, "cursor_invalid", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := pagedService(t)
+			if tt.wantCode == "cursor_invalid" {
+				// The cursor was given before ann's time jumped to the top.
+				svc.repo.(*fakeRepo).activities[4].DurationSeconds = 5000
+			}
+			rec, body := get(t, svc, base+tt.query, true)
+			if rec.Code != http.StatusBadRequest || errorCode(body) != tt.wantCode {
+				t.Fatalf("status %d, body %v, want 400 %s", rec.Code, body, tt.wantCode)
+			}
+			params, _ := body["error"].(map[string]any)["params"].(map[string]any)
+			if tt.wantFields != "" && params["fields"] != tt.wantFields {
+				t.Fatalf("fields %v, want %s", params["fields"], tt.wantFields)
 			}
 		})
 	}

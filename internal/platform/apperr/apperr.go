@@ -68,6 +68,9 @@ const (
 	// invitation token alike.
 	CodeInvitationInvalid Code = "invitation_invalid"
 	CodeValidationFailed  Code = "validation_failed"
+	// CodeCursorInvalid refuses the cursor of a page of a ranking that has
+	// changed since: the client starts again from the first page.
+	CodeCursorInvalid Code = "cursor_invalid"
 	// CodeRateLimited refuses a request beyond the rate limit of its IP
 	// address or of its user.
 	CodeRateLimited Code = "rate_limited"
@@ -131,6 +134,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusNotFound, "Resource not found"}, true
 	case CodeValidationFailed:
 		return definition{http.StatusBadRequest, "Invalid request"}, true
+	case CodeCursorInvalid:
+		return definition{http.StatusBadRequest, "Ranking changed since the cursor"}, true
 	case CodeRateLimited:
 		return definition{http.StatusTooManyRequests, "Too many requests"}, true
 	case CodeInternal:
