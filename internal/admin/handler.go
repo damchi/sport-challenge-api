@@ -91,7 +91,7 @@ func (h *Handler) ListAdminChallenges(ctx context.Context, req api.ListAdminChal
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
 	p := req.Params
-	q := ChallengeQuery{Limit: defaultLimit, Deleted: p.Deleted}
+	q := ChallengeQuery{Limit: limitOf(p.Limit), Deleted: p.Deleted}
 	if p.Q != nil {
 		q.Search = *p.Q
 	}
@@ -101,15 +101,7 @@ func (h *Handler) ListAdminChallenges(ctx context.Context, req api.ListAdminChal
 	if p.Visibility != nil {
 		q.Visibility = string(*p.Visibility)
 	}
-	if p.Limit != nil {
-		q.Limit = *p.Limit
-	}
-	var cursor string
-	if p.Cursor != nil {
-		cursor = *p.Cursor
-	}
-
-	page, err := h.service.Challenges(ctx, actor, q, cursor)
+	page, err := h.service.Challenges(ctx, actor, q, cursorOf(p.Cursor))
 	if err != nil {
 		return nil, err
 	}
@@ -137,12 +129,8 @@ func (h *Handler) ListAdminChallenges(ctx context.Context, req api.ListAdminChal
 			Creators:         creators,
 		}
 	}
-	if page.Next != nil {
-		cursor, err := httpx.EncodeCursor(page.Next)
-		if err != nil {
-			return nil, err
-		}
-		out.NextCursor = &cursor
+	if out.NextCursor, err = nextCursor(page.Next); err != nil {
+		return nil, err
 	}
 	return api.ListAdminChallenges200JSONResponse(out), nil
 }
@@ -254,4 +242,195 @@ func utc(t *time.Time) *time.Time {
 	}
 	u := t.UTC()
 	return &u
+}
+
+// ListAdminUsers answers a page of every account, deleted ones included,
+// with their e-mail.
+func (h *Handler) ListAdminUsers(ctx context.Context, req api.ListAdminUsersRequestObject) (api.ListAdminUsersResponseObject, error) {
+	out, err := h.users(ctx, UserQuery{Limit: limitOf(req.Params.Limit)}, cursorOf(req.Params.Cursor))
+	if err != nil {
+		return nil, err
+	}
+	return api.ListAdminUsers200JSONResponse(out), nil
+}
+
+// SearchAdminUsers answers a page of the accounts the search of the body
+// finds; the search, maybe an e-mail, never travels in the URL.
+func (h *Handler) SearchAdminUsers(ctx context.Context, req api.SearchAdminUsersRequestObject) (api.SearchAdminUsersResponseObject, error) {
+	q := UserQuery{Limit: defaultLimit}
+	var cursor string
+	if b := req.Body; b != nil {
+		if b.Q != nil {
+			q.Search = *b.Q
+		}
+		q.Limit, cursor = limitOf(b.Limit), cursorOf(b.Cursor)
+	}
+	out, err := h.users(ctx, q, cursor)
+	if err != nil {
+		return nil, err
+	}
+	return api.SearchAdminUsers200JSONResponse(out), nil
+}
+
+// users answers a page of the accounts of q.
+func (h *Handler) users(ctx context.Context, q UserQuery, cursor string) (api.AdminUserPage, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return api.AdminUserPage{}, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	page, err := h.service.Users(ctx, actor, q, cursor)
+	if err != nil {
+		return api.AdminUserPage{}, err
+	}
+	out := api.AdminUserPage{Items: make([]api.AdminUser, len(page.Items))}
+	for i, u := range page.Items {
+		if out.Items[i], err = toAdminUser(u); err != nil {
+			return api.AdminUserPage{}, err
+		}
+	}
+	if out.NextCursor, err = nextCursor(page.Next); err != nil {
+		return api.AdminUserPage{}, err
+	}
+	return out, nil
+}
+
+// GetAdminUser answers an account, deleted or not, with its e-mail.
+func (h *Handler) GetAdminUser(ctx context.Context, req api.GetAdminUserRequestObject) (api.GetAdminUserResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	u, err := h.service.User(ctx, actor, req.UserId.String())
+	if err != nil {
+		return nil, err
+	}
+	out, err := toAdminUser(u)
+	if err != nil {
+		return nil, err
+	}
+	return api.GetAdminUser200JSONResponse(out), nil
+}
+
+// ListAdminUserChallenges answers a page of the challenges of an account.
+func (h *Handler) ListAdminUserChallenges(ctx context.Context, req api.ListAdminUserChallengesRequestObject) (api.ListAdminUserChallengesResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	p := req.Params
+	page, err := h.service.UserChallenges(ctx, actor, req.UserId.String(), limitOf(p.Limit), cursorOf(p.Cursor))
+	if err != nil {
+		return nil, err
+	}
+	out := api.AdminUserChallengePage{Items: make([]api.AdminUserChallenge, len(page.Items))}
+	for i, c := range page.Items {
+		id, err := uuid.Parse(c.ID)
+		if err != nil {
+			return nil, fmt.Errorf("challenge id: %w", err)
+		}
+		item := api.AdminUserChallenge{
+			Id:          id,
+			Title:       c.Title,
+			Visibility:  api.AdminUserChallengeVisibility(c.Visibility),
+			Status:      api.AdminUserChallengeStatus(c.Status),
+			StartsAt:    c.StartsAt.UTC(),
+			EndsAt:      c.EndsAt.UTC(),
+			CreatedAt:   c.CreatedAt.UTC(),
+			DeletedAt:   utc(c.DeletedAt),
+			IsCreator:   c.IsCreator,
+			JoinedAt:    utc(c.JoinedAt),
+			AbandonedAt: utc(c.AbandonedAt),
+		}
+		if c.ParticipantStatus != nil {
+			status := api.AdminUserChallengeParticipantStatus(*c.ParticipantStatus)
+			item.ParticipantStatus = &status
+		}
+		out.Items[i] = item
+	}
+	if out.NextCursor, err = nextCursor(page.Next); err != nil {
+		return nil, err
+	}
+	return api.ListAdminUserChallenges200JSONResponse(out), nil
+}
+
+// ListAdminUserActivities answers a page of the activities of an account.
+func (h *Handler) ListAdminUserActivities(ctx context.Context, req api.ListAdminUserActivitiesRequestObject) (api.ListAdminUserActivitiesResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	p := req.Params
+	page, err := h.service.UserActivities(ctx, actor, req.UserId.String(), limitOf(p.Limit), cursorOf(p.Cursor))
+	if err != nil {
+		return nil, err
+	}
+	out := api.AdminActivityPage{Items: make([]api.AdminActivity, len(page.Items))}
+	for i, a := range page.Items {
+		id, err := uuid.Parse(a.ID)
+		if err != nil {
+			return nil, fmt.Errorf("activity id: %w", err)
+		}
+		out.Items[i] = api.AdminActivity{
+			Id:                  id,
+			SportCode:           a.SportCode,
+			SportLabel:          a.SportLabel,
+			StartedAt:           a.StartedAt.UTC(),
+			DurationSeconds:     a.DurationSeconds,
+			DistanceMeters:      a.DistanceMeters,
+			ElevationGainMeters: a.ElevationGainMeters,
+			Source:              api.AdminActivitySource(a.Source),
+			CreatedAt:           a.CreatedAt.UTC(),
+		}
+	}
+	if out.NextCursor, err = nextCursor(page.Next); err != nil {
+		return nil, err
+	}
+	return api.ListAdminUserActivities200JSONResponse(out), nil
+}
+
+func toAdminUser(u UserRow) (api.AdminUser, error) {
+	id, err := uuid.Parse(u.ID)
+	if err != nil {
+		return api.AdminUser{}, fmt.Errorf("user id: %w", err)
+	}
+	return api.AdminUser{
+		Id:             id,
+		Pseudo:         u.Pseudo,
+		FirstName:      u.FirstName,
+		LastName:       u.LastName,
+		Email:          u.Email,
+		State:          api.AdminUserState(u.State),
+		CreatedAt:      u.CreatedAt.UTC(),
+		DeletedAt:      utc(u.DeletedAt),
+		LastActivityAt: utc(u.LastActivityAt),
+		ChallengeCount: u.ChallengeCount,
+	}, nil
+}
+
+// limitOf is the page size asked, defaultLimit without one.
+func limitOf(limit *int) int {
+	if limit == nil {
+		return defaultLimit
+	}
+	return *limit
+}
+
+// cursorOf is the cursor sent, "" for the first page.
+func cursorOf(cursor *string) string {
+	if cursor == nil {
+		return ""
+	}
+	return *cursor
+}
+
+// nextCursor encodes the position of the next page, nil on the last page.
+func nextCursor[P any](next *P) (*string, error) {
+	if next == nil {
+		return nil, nil
+	}
+	cursor, err := httpx.EncodeCursor(next)
+	if err != nil {
+		return nil, err
+	}
+	return &cursor, nil
 }

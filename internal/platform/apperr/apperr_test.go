@@ -20,6 +20,7 @@ func TestNew(t *testing.T) {
 		{CodeNotFound, http.StatusNotFound},
 		{CodeChallengeNotFound, http.StatusNotFound},
 		{CodeActivityNotFound, http.StatusNotFound},
+		{CodeUserNotFound, http.StatusNotFound},
 		{CodeInvitationInvalid, http.StatusNotFound},
 		{CodeForbidden, http.StatusForbidden},
 		{CodeFieldNotEditable, http.StatusUnprocessableEntity},

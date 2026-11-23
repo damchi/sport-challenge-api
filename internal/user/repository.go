@@ -160,8 +160,9 @@ func (r *Repository) Delete(ctx context.Context, id string, at time.Time, abando
 			return fmt.Errorf("anonymize user: %w", res.Error)
 		}
 		// Recorded with the deletion, not after the commit: a process stopped
-		// before Auth0 is called leaves a row the worker replays.
-		if err := tx.Exec("INSERT INTO pending_auth0_deletions (auth_subject) VALUES (?)", u.AuthSubject).Error; err != nil {
+		// before Auth0 is called leaves a row the worker replays. The account
+		// tells the admin which deleted account still waits for it.
+		if err := tx.Exec("INSERT INTO pending_auth0_deletions (auth_subject, user_id) VALUES (?, ?)", u.AuthSubject, id).Error; err != nil {
 			return fmt.Errorf("insert pending auth0 deletion: %w", err)
 		}
 		subject = u.AuthSubject

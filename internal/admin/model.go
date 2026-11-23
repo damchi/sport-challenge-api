@@ -1,7 +1,7 @@
 // Package admin holds the cross-module reads of the administration of the
-// app (README §2.12): the figures of the dashboard and every challenge,
-// deleted ones included, for the accounts with the admin permission of their
-// access token. The admin changes are use cases of each module, not of
+// app (README §2.12): the figures of the dashboard, every challenge and
+// every account, deleted ones included, for the accounts with the admin
+// permission of their access token. The admin changes are use cases of each module, not of
 // this one.
 package admin
 
@@ -90,13 +90,14 @@ type ChallengeQuery struct {
 	Deleted    *bool
 	Limit      int
 	// After is the position of the last challenge of the previous page.
-	After *ChallengePosition
+	After *Position
 	Now   time.Time
 }
 
-// ChallengePosition is the key of the order of the list, most recently
-// created first, encoded in the cursor.
-type ChallengePosition struct {
+// Position is the key of the order of a list most recently created
+// first (challenges, accounts, challenges of an account), encoded in its
+// cursor.
+type Position struct {
 	CreatedAt time.Time `json:"created_at"`
 	ID        string    `json:"id"`
 }
@@ -134,7 +135,7 @@ type ChallengeSummary struct {
 // ChallengePage is a page of the list; Next is nil on the last page.
 type ChallengePage struct {
 	Items []ChallengeSummary
-	Next  *ChallengePosition
+	Next  *Position
 }
 
 // ChallengeRecord is a challenge with every setting, deleted or not.
@@ -246,4 +247,113 @@ type ChallengeDetail struct {
 	Eliminations    []EliminationRow
 	ResultsFrozenAt *time.Time
 	Invitations     []Invitation
+}
+
+// The states of an account (UserRow.State).
+const (
+	UserActive               = "active"
+	UserAuth0DeletionPending = "auth0_deletion_pending"
+	UserDeleted              = "deleted"
+)
+
+// UserQuery selects a page of accounts: Search "" keeps every account.
+type UserQuery struct {
+	Search string
+	Limit  int
+	// After is the position of the last account of the previous page.
+	After *Position
+}
+
+// UserRow is an account as an admin sees it, e-mail included. A deleted
+// account (DeletedAt) has no name nor e-mail left.
+type UserRow struct {
+	ID        string
+	Pseudo    *string
+	FirstName *string
+	LastName  *string
+	Email     *string
+	State     string
+	CreatedAt time.Time
+	DeletedAt *time.Time
+	// LastActivityAt is the entry of its last activity, deleted ones
+	// excluded.
+	LastActivityAt *time.Time
+	// ChallengeCount counts the challenges it joined or creates, deleted
+	// ones included.
+	ChallengeCount int
+}
+
+// UserPage is a page of accounts; Next is nil on the last page.
+type UserPage struct {
+	Items []UserRow
+	Next  *Position
+}
+
+// PageQuery selects a page of a list of an account.
+type PageQuery struct {
+	Limit int
+	After *Position
+}
+
+// UserChallengeRow is a challenge of an account, as read: its role there,
+// ParticipantStatus, JoinedAt and AbandonedAt nil when it is a creator
+// only.
+type UserChallengeRow struct {
+	ID                string
+	Title             string
+	Visibility        string
+	StartsAt          time.Time
+	EndsAt            time.Time
+	CreatedAt         time.Time
+	DeletedAt         *time.Time
+	IsCreator         bool
+	ParticipantStatus *string
+	JoinedAt          *time.Time
+	AbandonedAt       *time.Time
+}
+
+// UserChallenge is a challenge of an account with its status.
+type UserChallenge struct {
+	UserChallengeRow
+	Status string
+}
+
+// UserChallengePage is a page of the challenges of an account; Next is nil
+// on the last page.
+type UserChallengePage struct {
+	Items []UserChallenge
+	Next  *Position
+}
+
+// ActivityQuery selects a page of the activities of an account.
+type ActivityQuery struct {
+	Limit int
+	After *ActivityPosition
+}
+
+// ActivityPosition is the key of the order of the activities of an
+// account, the most recent session first, encoded in the cursor.
+type ActivityPosition struct {
+	StartedAt time.Time `json:"started_at"`
+	ID        string    `json:"id"`
+}
+
+// ActivityRow is an activity as stored.
+type ActivityRow struct {
+	ID                  string
+	SportCode           string
+	SportLabel          *string
+	StartedAt           time.Time
+	DurationSeconds     int
+	DistanceMeters      *int
+	ElevationGainMeters *int
+	Source              string
+	CreatedAt           time.Time
+}
+
+// ActivityPage is a page of the activities of an account; Next is nil on
+// the last page.
+type ActivityPage struct {
+	Items []ActivityRow
+	Next  *ActivityPosition
 }

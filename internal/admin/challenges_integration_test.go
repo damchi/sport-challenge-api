@@ -84,7 +84,7 @@ func TestRepositoryListChallenges(t *testing.T) {
 		{name: "deleted only", q: ChallengeQuery{Deleted: &yes}, want: []string{gone}},
 		{name: "not deleted", q: ChallengeQuery{Deleted: &no}, want: []string{finished, ongoing, upcoming}},
 		{name: "filters together", q: ChallengeQuery{Search: "course", Visibility: "public", Deleted: &no, Status: StatusUpcoming}, want: []string{upcoming}},
-		{name: "after a position", q: ChallengeQuery{After: &ChallengePosition{CreatedAt: at(3), ID: finished}}, want: []string{ongoing, upcoming}},
+		{name: "after a position", q: ChallengeQuery{After: &Position{CreatedAt: at(3), ID: finished}}, want: []string{ongoing, upcoming}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,7 +130,7 @@ func TestRepositoryListChallenges(t *testing.T) {
 
 	t.Run("pages by cursor", func(t *testing.T) {
 		var seen []string
-		var after *ChallengePosition
+		var after *Position
 		for range 3 {
 			page, err := r.ListChallenges(t.Context(), ChallengeQuery{Now: now, Limit: 2, After: after})
 			if err != nil {
@@ -141,7 +141,7 @@ func TestRepositoryListChallenges(t *testing.T) {
 				break
 			}
 			last := page[len(page)-1]
-			after = &ChallengePosition{CreatedAt: last.CreatedAt, ID: last.ID}
+			after = &Position{CreatedAt: last.CreatedAt, ID: last.ID}
 		}
 		if want := []string{gone, finished, ongoing, upcoming}; !slices.Equal(seen, want) {
 			t.Fatalf("pages = %v, want %v", seen, want)
@@ -154,7 +154,7 @@ func TestRepositoryListChallenges(t *testing.T) {
 		if second > first {
 			first, second = second, first
 		}
-		got, err := r.ListChallenges(t.Context(), ChallengeQuery{Now: now, Limit: 10, After: &ChallengePosition{CreatedAt: at(2), ID: first}})
+		got, err := r.ListChallenges(t.Context(), ChallengeQuery{Now: now, Limit: 10, After: &Position{CreatedAt: at(2), ID: first}})
 		if err != nil {
 			t.Fatal(err)
 		}

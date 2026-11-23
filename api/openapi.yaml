@@ -1500,6 +1500,160 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/admin/users:
+    get:
+      operationId: listAdminUsers
+      summary: List every account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Every account, deleted ones
+        included, most recently registered first, with its e-mail. To look
+        for an account, `POST /admin/users/search`.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/AdminCursor"
+      responses:
+        "200":
+          description: A page of accounts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/admin/users/search:
+    post:
+      operationId: searchAdminUsers
+      summary: Look for accounts, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Reads only, writes nothing:
+        a POST so that the search, which may be an e-mail, is never in the
+        URL, which the platform's request logs record (README §5.7). The
+        accounts of `GET /admin/users` whose pseudo, first name, last name or
+        e-mail holds `q`, case insensitive (accents count); `%` and `_` are
+        plain characters. A deleted account has none of them left, so `q`
+        never finds one. Without `q`, or without a body, every account.
+      tags: [admin]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserSearch"
+      responses:
+        "200":
+          description: A page of accounts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/admin/users/{userId}:
+    get:
+      operationId: getAdminUser
+      summary: Read any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). An account, deleted or not,
+        with its e-mail. Its challenges and activities are the pages of
+        `/admin/users/{userId}/challenges` and `/admin/users/{userId}/activities`.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      responses:
+        "200":
+          description: The account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminUserNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/admin/users/{userId}/challenges:
+    get:
+      operationId: listAdminUserChallenges
+      summary: List the challenges of any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). The challenges the account
+        joined or creates, deleted ones included, most recently created
+        first: the `challenge_count` of the account. A deleted account has
+        none left.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/AdminCursor"
+      responses:
+        "200":
+          description: A page of challenges.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserChallengePage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminUserNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/admin/users/{userId}/activities:
+    get:
+      operationId: listAdminUserActivities
+      summary: List the activities of any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). The activities of the
+        account, deleted ones excluded, the most recent session first
+        (`started_at`). A deleted account has none left.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+        - $ref: "#/components/parameters/AdminLimit"
+        - $ref: "#/components/parameters/AdminCursor"
+      responses:
+        "200":
+          description: A page of activities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminActivityPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminUserNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -1508,6 +1662,28 @@ components:
       bearerFormat: JWT
       description: Auth0 access token of a user (audience of the API); machine-to-machine tokens are refused.
   parameters:
+    AdminUserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AdminLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    AdminCursor:
+      name: cursor
+      in: query
+      description: The `next_cursor` of the previous page, as is, with the same filters.
+      schema:
+        type: string
+        maxLength: 200
     TimeZone:
       name: tz
       in: query
@@ -1589,6 +1765,14 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    AdminUserNotFound:
+      description: |
+        The account has no `admin` permission (`not_found`), or no such
+        account (`user_not_found`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     InternalError:
       description: |
         Technical failure (`internal_error`), logged with its `request_id`;
@@ -1656,6 +1840,7 @@ components:
         - profile_incomplete
         - challenge_not_found
         - activity_not_found
+        - user_not_found
         - invitation_invalid
         - forbidden
         - field_not_editable
@@ -2024,6 +2209,206 @@ components:
             a challenge whose members may invite: README §5.7), else `active`.
             A link of a deleted challenge keeps its status: it is valid again
             once the challenge is restored.
+    AdminUserSearch:
+      type: object
+      additionalProperties: false
+      properties:
+        q:
+          type: string
+          minLength: 1
+          maxLength: 254
+          description: Part of the pseudo, first name, last name or e-mail to look for.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+        cursor:
+          type: string
+          maxLength: 200
+          description: The `next_cursor` of the previous page, as is, with the same `q`.
+    AdminUserPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUser"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.
+    AdminUser:
+      type: object
+      required: [id, pseudo, first_name, last_name, email, state, created_at, deleted_at, last_activity_at, challenge_count]
+      additionalProperties: false
+      description: An account as an admin sees it. A deleted account keeps only its identifier and dates.
+      properties:
+        id:
+          type: string
+          format: uuid
+        pseudo:
+          type: string
+          nullable: true
+          description: Null until the user chooses one, and once the account is deleted.
+        first_name:
+          type: string
+          nullable: true
+          description: Null for an account that has not set it, and once the account is deleted.
+        last_name:
+          type: string
+          nullable: true
+          description: Null for an account that has not set it, and once the account is deleted.
+        email:
+          type: string
+          nullable: true
+          maxLength: 254
+          description: |
+            The e-mail of the access token, seen only by its owner and the
+            admins (README §2.8); null when the token gave none, and once the
+            account is deleted.
+        state:
+          type: string
+          enum: [active, deleted, auth0_deletion_pending]
+          description: |
+            `active` until the account is deleted; then
+            `auth0_deletion_pending` while the deletion of its identity at
+            Auth0 is still to be replayed by the worker, `deleted` once done.
+        created_at:
+          type: string
+          format: date-time
+          description: When the account was created, at its first login.
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the account was deleted; null while it is not.
+        last_activity_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the account last recorded an activity (the date of entry,
+            not of the session, as the active accounts of the dashboard),
+            deleted activities excluded; null without any.
+        challenge_count:
+          type: integer
+          minimum: 0
+          description: The challenges the account joined or creates, deleted ones included.
+    AdminUserChallengePage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserChallenge"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.
+    AdminUserChallenge:
+      type: object
+      required: [id, title, visibility, status, starts_at, ends_at, created_at, deleted_at, is_creator, participant_status, joined_at, abandoned_at]
+      additionalProperties: false
+      description: A challenge of an account, with its role there.
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        visibility:
+          type: string
+          enum: [public, private]
+        status:
+          type: string
+          enum: [upcoming, ongoing, finished]
+          description: From the dates, at the instant of the request, deleted or not.
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the challenge was deleted; null when it was not.
+        is_creator:
+          type: boolean
+          description: Whether the account is a creator of the challenge, initial or added since.
+        participant_status:
+          type: string
+          nullable: true
+          enum: [active, abandoned]
+          description: |
+            The participation of the account: `abandoned` also covers an
+            excluded participant; null for a creator who is not a participant.
+        joined_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the account joined; null when it is not a participant.
+        abandoned_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the participant abandoned or was excluded; null otherwise.
+    AdminActivityPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminActivity"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.
+    AdminActivity:
+      type: object
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, created_at]
+      additionalProperties: false
+      description: An activity as stored.
+      properties:
+        id:
+          type: string
+          format: uuid
+        sport_code:
+          type: string
+        sport_label:
+          type: string
+          nullable: true
+          description: Label of the sport `other`; null for the others.
+        started_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+        distance_meters:
+          type: integer
+          nullable: true
+        elevation_gain_meters:
+          type: integer
+          nullable: true
+          description: Positive elevation gain in meters; null when not entered.
+        source:
+          type: string
+          enum: [manual]
+        created_at:
+          type: string
+          format: date-time
+          description: When the activity was recorded.
     Health:
       type: object
       required: [status, version, commit]
@@ -2099,7 +2484,8 @@ components:
           maxLength: 254
           description: |
             From the access token (claim set by the auth provider); null until
-            a token carries it. Only returned to its owner.
+            a token carries it. Only returned to its owner, and to the admins
+            (`/admin/users`).
         avatar:
           type: string
           nullable: true

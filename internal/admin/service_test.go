@@ -30,11 +30,47 @@ type fakeRepo struct {
 	creatorsErr  error
 	challengeErr error
 
-	calls      int
-	now, since time.Time
-	query      ChallengeQuery
-	creatorIDs []string
-	id         string
+	users             []UserRow
+	user              UserRow
+	userChallenges    []UserChallengeRow
+	activities        []ActivityRow
+	usersErr          error
+	userErr           error
+	userChallengesErr error
+	activitiesErr     error
+
+	calls         int
+	now, since    time.Time
+	query         ChallengeQuery
+	creatorIDs    []string
+	id            string
+	userQuery     UserQuery
+	pageQuery     PageQuery
+	activityQuery ActivityQuery
+}
+
+func (f *fakeRepo) ListUsers(_ context.Context, q UserQuery) ([]UserRow, error) {
+	f.calls++
+	f.userQuery = q
+	return f.users, f.usersErr
+}
+
+func (f *fakeRepo) User(_ context.Context, id string) (UserRow, error) {
+	f.calls++
+	f.id = id
+	return f.user, f.userErr
+}
+
+func (f *fakeRepo) ListUserChallenges(_ context.Context, id string, q PageQuery) ([]UserChallengeRow, error) {
+	f.calls++
+	f.id, f.pageQuery = id, q
+	return f.userChallenges, f.userChallengesErr
+}
+
+func (f *fakeRepo) ListUserActivities(_ context.Context, id string, q ActivityQuery) ([]ActivityRow, error) {
+	f.calls++
+	f.id, f.activityQuery = id, q
+	return f.activities, f.activitiesErr
 }
 
 func (f *fakeRepo) ListChallenges(_ context.Context, q ChallengeQuery) ([]ChallengeRow, error) {
