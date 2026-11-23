@@ -255,7 +255,8 @@ func (r *Repository) DayTotals(ctx context.Context, userID string, bounds []time
 	}
 	args = append(args, userID, bounds[0], bounds[len(bounds)-1])
 	err := r.db.WithContext(ctx).Raw(`SELECT width_bucket(started_at, CAST(ARRAY[`+strings.TrimSuffix(strings.Repeat("?, ", len(bounds)), ", ")+`] AS timestamptz[])) AS day,
-			count(*) AS sessions, sum(duration_seconds) AS duration_seconds, coalesce(sum(distance_meters), 0) AS distance_meters
+			count(*) AS sessions, sum(duration_seconds) AS duration_seconds, coalesce(sum(distance_meters), 0) AS distance_meters,
+			coalesce(sum(elevation_gain_meters), 0) AS elevation_gain_meters
 		FROM activities
 		WHERE user_id = ? AND deleted_at IS NULL AND started_at >= ? AND started_at < ?
 		GROUP BY day`, args...,
@@ -303,7 +304,8 @@ func (r *Repository) SportCounts(ctx context.Context, userID string) ([]SportCou
 func (r *Repository) Weeks(ctx context.Context, q WeekQuery) ([]WeekTotals, error) {
 	tx := r.db.WithContext(ctx).Table("activities").
 		Select(`CAST(date_trunc('week', started_at AT TIME ZONE ?) AS date) AS monday,
-			count(*) AS sessions, sum(duration_seconds) AS duration_seconds, coalesce(sum(distance_meters), 0) AS distance_meters`, q.Zone).
+			count(*) AS sessions, sum(duration_seconds) AS duration_seconds, coalesce(sum(distance_meters), 0) AS distance_meters,
+			coalesce(sum(elevation_gain_meters), 0) AS elevation_gain_meters`, q.Zone).
 		Where("user_id = ? AND deleted_at IS NULL", q.UserID)
 	if q.SportCode != nil {
 		tx = tx.Where("sport_code = ?", *q.SportCode)

@@ -283,6 +283,7 @@ func (s *Service) MySummary(ctx context.Context, actorID, tz string) (Summary, e
 		out.CurrentWeek.Sessions += d.Sessions
 		out.CurrentWeek.DurationSeconds += d.DurationSeconds
 		out.CurrentWeek.DistanceMeters += d.DistanceMeters
+		out.CurrentWeek.ElevationGainMeters += d.ElevationGainMeters
 	}
 	for _, c := range sports {
 		out.Total += c.Count
