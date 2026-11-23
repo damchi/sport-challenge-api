@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -22,7 +23,7 @@ import (
 // the challenge module's, run end to end by cmd/api.
 type staticChallenge Challenge
 
-func (s staticChallenge) Challenge(context.Context, string, string) (Challenge, error) {
+func (s staticChallenge) Challenge(context.Context, auth.Actor, string) (Challenge, error) {
 	return Challenge(s), nil
 }
 
@@ -113,7 +114,7 @@ func TestGetFromTheDatabase(t *testing.T) {
 	}
 	svc := NewService(staticChallenge(c), fakeProfiles{}, NewRepository(gdb), clock.NewFake(end), 24*time.Hour)
 
-	got, err := svc.Get(t.Context(), runner, challengeID)
+	got, err := svc.Get(t.Context(), auth.Actor{ID: runner}, challengeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +182,7 @@ func TestGetServesTheSnapshotsOfAnEndedChallenge(t *testing.T) {
 	svc := NewService(staticChallenge(c), fakeProfiles{}, NewRepository(gdb), fake, 24*time.Hour)
 	valueOf := func() (int, time.Time) {
 		t.Helper()
-		got, err := svc.Get(t.Context(), runner, challengeID)
+		got, err := svc.Get(t.Context(), auth.Actor{ID: runner}, challengeID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +211,7 @@ func TestGetServesTheSnapshotsOfAnEndedChallenge(t *testing.T) {
 		`{"entries":[{"user_id":"`+gone+`","rank":1,"value":9000},{"user_id":"`+runner+`","rank":2,"value":3600}]}`)
 	s.exec("UPDATE users SET anonymized_at = now() WHERE id = $1", gone)
 	named := NewService(staticChallenge(c), fakeProfiles{names: map[string]Name{gone: {Pseudo: pseudo("gone")}}}, NewRepository(gdb), fake, 24*time.Hour)
-	got, err := named.Get(t.Context(), runner, challengeID)
+	got, err := named.Get(t.Context(), auth.Actor{ID: runner}, challengeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,7 +693,7 @@ func TestGetPointsOfAnAccountDeletedBeforeTheFreeze(t *testing.T) {
 	svc := NewService(staticChallenge(ch), fakeProfiles{}, repo, clock.NewFake(at(10, 12)), 24*time.Hour)
 	points := func() []scoring.Entry {
 		t.Helper()
-		board, err := svc.Get(t.Context(), b, challengeID)
+		board, err := svc.Get(t.Context(), auth.Actor{ID: b}, challengeID)
 		if err != nil {
 			t.Fatal(err)
 		}

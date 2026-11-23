@@ -29,10 +29,14 @@ const (
 	gone        = "33333333-3333-4333-8333-333333333333"
 )
 
+// adminToken is the access token acceptingVerifier grants the admin
+// permission to; it accepts any other one without it.
+const adminToken = "admin.access.token"
+
 type acceptingVerifier struct{}
 
-func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
-	return auth.Claims{Subject: "email|123"}, nil
+func (acceptingVerifier) Verify(_ context.Context, raw string) (auth.Claims, error) {
+	return auth.Claims{Subject: "email|123", Admin: raw == adminToken}, nil
 }
 
 type leaderboardOnly struct {
@@ -43,6 +47,16 @@ type leaderboardOnly struct {
 // get serves GET target as cmd/api does (authentication, contract
 // validation, handler) and checks the response against the contract.
 func get(t *testing.T, svc *Service, target string, withToken bool) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	token := ""
+	if withToken {
+		token = "some.access.token"
+	}
+	return getAs(t, svc, target, token)
+}
+
+// getAs is get with token as the access token, none if empty.
+func getAs(t *testing.T, svc *Service, target, token string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -69,8 +83,8 @@ func get(t *testing.T, svc *Service, target string, withToken bool) (*httptest.R
 	})
 
 	req := httptest.NewRequest(http.MethodGet, target, nil)
-	if withToken {
-		req.Header.Set("Authorization", "Bearer some.access.token")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -233,6 +247,18 @@ func TestGetLeaderboardHidesAChallengeTheActorMayNotRead(t *testing.T) {
 	rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/leaderboard", true)
 	if rec.Code != http.StatusNotFound || errorCode(body) != "challenge_not_found" {
 		t.Fatalf("status %d (%s), want 404 challenge_not_found", rec.Code, rec.Body)
+	}
+}
+
+// TestGetLeaderboardPassesTheAdminPermission: the actor asked for the
+// challenge carries the admin permission of the token, and only then.
+func TestGetLeaderboardPassesTheAdminPermission(t *testing.T) {
+	for token, admin := range map[string]bool{adminToken: true, "some.access.token": false} {
+		challenges := &fakeChallenges{}
+		rec, _ := getAs(t, handlerService(t, challenges), "/api/v1/challenges/"+challengeID+"/leaderboard", token)
+		if rec.Code != http.StatusOK || challenges.actor != (auth.Actor{ID: ann, Admin: admin}) {
+			t.Fatalf("token %s: status %d, actor %+v, want 200 and admin %v", token, rec.Code, challenges.actor, admin)
+		}
 	}
 }
 

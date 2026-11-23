@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
@@ -278,21 +279,21 @@ func (s *Service) addRankings(ctx context.Context, actorID string, items []Summa
 }
 
 // Participants returns a page of the participants of challenge id, visible
-// to whoever sees the challenge (ParticipantsRefusal): anyone else gets the
-// same 404 challenge_not_found as for a missing challenge. A deleted
-// (anonymized) account is not listed.
-func (s *Service) Participants(ctx context.Context, actorID, id string, limit int, after *ParticipantPosition) (ParticipantPage, error) {
+// to whoever sees the challenge, admins included (ParticipantsRefusal):
+// anyone else gets the same 404 challenge_not_found as for a missing
+// challenge. A deleted (anonymized) account is not listed.
+func (s *Service) Participants(ctx context.Context, actor auth.Actor, id string, limit int, after *ParticipantPosition) (ParticipantPage, error) {
 	if limit < 1 {
 		return ParticipantPage{}, apperr.InvalidFields(nil, "limit")
 	}
-	c, m, err := s.repo.Get(ctx, id, actorID, s.clock.Now())
+	c, m, err := s.repo.Get(ctx, id, actor.ID, s.clock.Now())
 	if errors.Is(err, errChallengeNotFound) {
 		return ParticipantPage{}, apperr.New(apperr.CodeChallengeNotFound, nil)
 	}
 	if err != nil {
 		return ParticipantPage{}, fmt.Errorf("list participants: %w", err)
 	}
-	if err := ParticipantsRefusal(m, c.Visibility); err != nil {
+	if err := ParticipantsRefusal(m, actor.Admin, c.Visibility); err != nil {
 		return ParticipantPage{}, err
 	}
 	// One more than asked tells whether a next page exists.
@@ -320,20 +321,24 @@ func (s *Service) Participants(ctx context.Context, actorID, id string, limit in
 	return page, nil
 }
 
-// Get returns challenge id as actorID sees it. A missing or deleted
+// Get returns challenge id as actor sees it. A missing or deleted
 // challenge, and a private one the actor may not see, all answer the same
 // 404 challenge_not_found: nothing tells that a private challenge exists.
-func (s *Service) Get(ctx context.Context, actorID, id string) (Detail, error) {
+// An admin sees every challenge not deleted (ReaderRole); the role and the
+// rights shown remain those of their membership.
+func (s *Service) Get(ctx context.Context, actor auth.Actor, id string) (Detail, error) {
 	now := s.clock.Now()
-	c, m, err := s.repo.Get(ctx, id, actorID, now)
+	c, m, err := s.repo.Get(ctx, id, actor.ID, now)
 	if errors.Is(err, errChallengeNotFound) {
 		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
 	}
 	if err != nil {
 		return Detail{}, fmt.Errorf("get challenge: %w", err)
 	}
+	// The admin permission only opens the reading (ReaderRole): the role
+	// shown, and the rights derived from it, stay those of the membership.
 	role := RoleOf(m)
-	if err := RequireView(role, c.Visibility); err != nil {
+	if err := RequireView(ReaderRole(m, actor.Admin), c.Visibility); err != nil {
 		return Detail{}, err
 	}
 	// Only a visible challenge reaches the next reads.
@@ -407,7 +412,7 @@ func (s *Service) UpdateText(ctx context.Context, actorID, id string, frozen []s
 	if err != nil {
 		return Detail{}, fmt.Errorf("update challenge: %w", err)
 	}
-	return s.Get(ctx, actorID, id)
+	return s.Get(ctx, auth.Actor{ID: actorID}, id)
 }
 
 // Join makes actorID an active participant of challenge id, joined at the
@@ -453,7 +458,7 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 	case err != nil:
 		return Detail{}, err
 	}
-	return s.Get(ctx, actorID, id)
+	return s.Get(ctx, auth.Actor{ID: actorID}, id)
 }
 
 // InvitationDeadline returns the end of week 1 of challenge id, when an
@@ -506,7 +511,7 @@ func (s *Service) Abandon(ctx context.Context, actorID, id string) (Detail, erro
 	if err != nil {
 		return Detail{}, err
 	}
-	return s.Get(ctx, actorID, id)
+	return s.Get(ctx, auth.Actor{ID: actorID}, id)
 }
 
 // AbandonAll makes userID abandon every challenge not finished where they
@@ -570,14 +575,14 @@ func (s *Service) Memberships(ctx context.Context, userID string) ([]UserChallen
 }
 
 // ActivitiesScope returns challenge id with the membership of userID in it
-// and its distance factors, for actorID to list the activities of userID
+// and its distance factors, for actor to list the activities of userID
 // there, once the rule (ActivitiesRefusal) allows it. A missing or deleted
 // challenge answers 404 challenge_not_found.
-func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID string) (UserChallenge, error) {
+func (s *Service) ActivitiesScope(ctx context.Context, actor auth.Actor, id, userID string) (UserChallenge, error) {
 	now := s.clock.Now()
-	c, actor, err := s.repo.Get(ctx, id, actorID, now)
-	target := actor
-	if err == nil && userID != actorID {
+	c, m, err := s.repo.Get(ctx, id, actor.ID, now)
+	target := m
+	if err == nil && userID != actor.ID {
 		_, target, err = s.repo.Get(ctx, id, userID, now)
 	}
 	if errors.Is(err, errChallengeNotFound) {
@@ -586,7 +591,7 @@ func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID strin
 	if err != nil {
 		return UserChallenge{}, fmt.Errorf("activities scope: %w", err)
 	}
-	if err := ActivitiesRefusal(actor, target, c.Visibility); err != nil {
+	if err := ActivitiesRefusal(m, actor.Admin, target, c.Visibility); err != nil {
 		return UserChallenge{}, err
 	}
 	out, err := s.userChallenge(ctx, c)
@@ -599,19 +604,19 @@ func (s *Service) ActivitiesScope(ctx context.Context, actorID, id, userID strin
 
 // AllActivitiesScope returns challenge id with its distance factors, no
 // membership set, and the membership of each of its participants, abandoned
-// ones included and deleted accounts left out, by user id, for actorID to
+// ones included and deleted accounts left out, by user id, for actor to
 // list the activities of all the participants there, once the rule
 // (AllActivitiesRefusal) allows it. A missing or deleted challenge answers
 // 404 challenge_not_found.
-func (s *Service) AllActivitiesScope(ctx context.Context, actorID, id string) (UserChallenge, map[string]Membership, error) {
-	c, actor, err := s.repo.Get(ctx, id, actorID, s.clock.Now())
+func (s *Service) AllActivitiesScope(ctx context.Context, actor auth.Actor, id string) (UserChallenge, map[string]Membership, error) {
+	c, m, err := s.repo.Get(ctx, id, actor.ID, s.clock.Now())
 	if errors.Is(err, errChallengeNotFound) {
 		return UserChallenge{}, nil, apperr.New(apperr.CodeChallengeNotFound, nil)
 	}
 	if err != nil {
 		return UserChallenge{}, nil, fmt.Errorf("all activities scope: %w", err)
 	}
-	if err := AllActivitiesRefusal(actor, c.Visibility); err != nil {
+	if err := AllActivitiesRefusal(m, actor.Admin, c.Visibility); err != nil {
 		return UserChallenge{}, nil, err
 	}
 	out, err := s.userChallenge(ctx, c)
@@ -676,7 +681,7 @@ func (s *Service) AddCreator(ctx context.Context, actorID, id, targetID string) 
 	if err != nil {
 		return Detail{}, err
 	}
-	return s.Get(ctx, actorID, id)
+	return s.Get(ctx, auth.Actor{ID: actorID}, id)
 }
 
 // Delete soft-deletes challenge id on behalf of actorID, one of its

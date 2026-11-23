@@ -54,6 +54,13 @@ const (
 	RoleAbandoned
 	RoleParticipant
 	RoleCreator
+	// RoleAdmin is the role an admin reads a challenge with when they are
+	// not one of its creators (ReaderRole): a creator's reading, of every
+	// challenge, and no write at all (README §2.12). It is not a membership:
+	// RoleOf never returns it, and no write rule grants it anything. It
+	// comes after RoleCreator only by declaration order: never compare roles
+	// with < or >, list them (an allowlist), or RoleAdmin would write.
+	RoleAdmin
 )
 
 // RoleOf returns the role of a membership. A creator stays a creator even
@@ -74,10 +81,23 @@ func RoleOf(m Membership) Role {
 	}
 }
 
+// ReaderRole returns the role a user with membership m reads a challenge
+// with, admin telling whether their token carries the admin permission: an
+// admin reads as a creator does (RoleAdmin), unless they are one; anyone
+// else reads with RoleOf(m). Only the read rules take it: the write rules
+// take RoleOf, so the admin permission grants no write through them.
+func ReaderRole(m Membership, admin bool) Role {
+	role := RoleOf(m)
+	if admin && role != RoleCreator {
+		return RoleAdmin
+	}
+	return role
+}
+
 // CanView reports whether role may see a challenge of that visibility and
 // its leaderboard (README §5.7): every logged-in user for a public challenge;
-// creators, participants (abandoned included) and invited users for a
-// private one.
+// creators, participants (abandoned included), invited users and admins
+// for a private one.
 func CanView(role Role, visibility string) bool {
 	switch visibility {
 	case VisibilityPublic:
@@ -85,7 +105,7 @@ func CanView(role Role, visibility string) bool {
 	case VisibilityPrivate:
 		// An allowlist: a role this switch does not know is never let in.
 		switch role {
-		case RoleCreator, RoleParticipant, RoleAbandoned, RoleInvited:
+		case RoleCreator, RoleParticipant, RoleAbandoned, RoleInvited, RoleAdmin:
 			return true
 		default:
 			return false
@@ -105,35 +125,37 @@ func RequireView(role Role, visibility string) error {
 	return nil
 }
 
-// ParticipantsRefusal tells why a user with membership m may not list the
-// participants of a challenge of that visibility, or nil if they may: the
-// list is visible to whoever sees the challenge, and hidden (404) otherwise.
-func ParticipantsRefusal(m Membership, visibility string) error {
-	return RequireView(RoleOf(m), visibility)
+// ParticipantsRefusal tells why a user with membership m, an admin or not,
+// may not list the participants of a challenge of that visibility, or nil
+// if they may: the list is visible to whoever sees the challenge, and hidden
+// (404) otherwise.
+func ParticipantsRefusal(m Membership, admin bool, visibility string) error {
+	return RequireView(ReaderRole(m, admin), visibility)
 }
 
 // CanViewActivities reports whether role may see the activities of a
 // participant (README §5.7): the participants of the challenge, abandoned or
-// excluded ones included, and its creators. An invited user or an outsider
-// sees the leaderboard only.
+// excluded ones included, its creators and the admins. An invited user or an
+// outsider sees the leaderboard only.
 func CanViewActivities(role Role) bool {
 	// An allowlist: a role this switch does not know is never let in.
 	switch role {
-	case RoleCreator, RoleParticipant, RoleAbandoned:
+	case RoleCreator, RoleParticipant, RoleAbandoned, RoleAdmin:
 		return true
 	default:
 		return false
 	}
 }
 
-// ActivitiesRefusal tells why a user with membership actor may not see the
-// activities of target in a challenge of that visibility, or nil if they
-// may. A challenge the actor may not see is not found (404
-// challenge_not_found); a visible one shows its leaderboard only to anyone
-// CanViewActivities lets out (404 not_found); a target who never joined, or
-// whose account was deleted, has no activities there (404 not_found).
-func ActivitiesRefusal(actor, target Membership, visibility string) error {
-	if err := AllActivitiesRefusal(actor, visibility); err != nil {
+// ActivitiesRefusal tells why a user with membership actor, an admin or
+// not, may not see the activities of target in a challenge of that
+// visibility, or nil if they may. A challenge the actor may not see is not
+// found (404 challenge_not_found); a visible one shows its leaderboard only
+// to anyone CanViewActivities lets out (404 not_found); a target who never
+// joined, or whose account was deleted, has no activities there (404
+// not_found).
+func ActivitiesRefusal(actor Membership, admin bool, target Membership, visibility string) error {
+	if err := AllActivitiesRefusal(actor, admin, visibility); err != nil {
 		return err
 	}
 	if target.AccountDeleted || (target.Participant != ParticipantActive && target.Participant != ParticipantAbandoned) {
@@ -142,13 +164,13 @@ func ActivitiesRefusal(actor, target Membership, visibility string) error {
 	return nil
 }
 
-// AllActivitiesRefusal tells why a user with membership actor may not see
-// the activities of the participants of a challenge of that visibility, or
-// nil if they may: a challenge the actor may not see is not found (404
-// challenge_not_found); anyone else CanViewActivities excludes sees its
-// leaderboard only (404 not_found).
-func AllActivitiesRefusal(actor Membership, visibility string) error {
-	role := RoleOf(actor)
+// AllActivitiesRefusal tells why a user with membership actor, an admin or
+// not, may not see the activities of the participants of a challenge of
+// that visibility, or nil if they may: a challenge the actor may not see is
+// not found (404 challenge_not_found); anyone else CanViewActivities
+// excludes sees its leaderboard only (404 not_found).
+func AllActivitiesRefusal(actor Membership, admin bool, visibility string) error {
+	role := ReaderRole(actor, admin)
 	if err := RequireView(role, visibility); err != nil {
 		return err
 	}

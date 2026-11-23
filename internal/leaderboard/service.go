@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
@@ -35,11 +36,11 @@ type repository interface {
 	DeletedAccounts(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
-// Challenges gives challenge challengeID, with its categories, for actorID
-// to read its leaderboard; it answers 404 challenge_not_found when the
-// rights matrix forbids it (module challenge).
+// Challenges gives challenge challengeID, with its categories, for actor to
+// read its leaderboard; it answers 404 challenge_not_found when the rights
+// matrix forbids it (module challenge).
 type Challenges interface {
-	Challenge(ctx context.Context, actorID, challengeID string) (Challenge, error)
+	Challenge(ctx context.Context, actor auth.Actor, challengeID string) (Challenge, error)
 }
 
 // Profiles gives the public name of each user of ids; an anonymized account
@@ -65,7 +66,7 @@ func NewService(challenges Challenges, profiles Profiles, repo repository, c clo
 }
 
 // Get returns the ranking of every category of challenge id, in position
-// order, as actorID may read it (the rule is the challenge module's, and
+// order, as actor may read it (the rule is the challenge module's, and
 // nothing is loaded before it passes). Abandoned participants are listed in
 // each category, unranked; deleted accounts are not listed at all. The weeks
 // locked at the instant of the clock are judged (7 am, local time, on the first
@@ -73,8 +74,8 @@ func NewService(challenges Challenges, profiles Profiles, repo repository, c clo
 // served; until the worker has frozen them, at the earliest when the last
 // week locks, the ranking is computed, which gives the same result once it
 // is locked: the weeks are locked by the clock, not by the worker.
-func (s *Service) Get(ctx context.Context, actorID, id string) (Leaderboard, error) {
-	c, err := s.challenges.Challenge(ctx, actorID, id)
+func (s *Service) Get(ctx context.Context, actor auth.Actor, id string) (Leaderboard, error) {
+	c, err := s.challenges.Challenge(ctx, actor, id)
 	if err != nil {
 		return Leaderboard{}, err
 	}

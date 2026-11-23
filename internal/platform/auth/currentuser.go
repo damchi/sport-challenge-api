@@ -28,6 +28,28 @@ func UserID(ctx context.Context) (string, bool) {
 	return id, ok && id != ""
 }
 
+// Actor is who calls a read use case: the local user and whether the
+// request's token carries the admin permission (README §2.12). Admin is a
+// fact about the token, not a decision: only the policies of the services
+// tell what it lets the actor read.
+type Actor struct {
+	ID    string
+	Admin bool
+}
+
+// ActorFrom returns the actor of the request: the local user CurrentUser
+// put in the context, with the admin permission of the claims Authenticate
+// put there. It is false without a local user.
+func ActorFrom(ctx context.Context) (Actor, bool) {
+	id, ok := UserID(ctx)
+	if !ok {
+		return Actor{}, false
+	}
+	// No claims: the zero value, not an admin.
+	claims, _ := ClaimsFromContext(ctx)
+	return Actor{ID: id, Admin: claims.Admin}, true
+}
+
 // CurrentUser runs after Authenticate: it turns the token's subject into the
 // local user and puts its identifier in the request context. A deleted
 // account answers 401 account_deleted; any other failure is a 500, logged by

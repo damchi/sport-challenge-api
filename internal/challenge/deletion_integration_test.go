@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/user"
 )
@@ -135,7 +136,7 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 	if n := count(t, pool, "SELECT count(*) FROM challenge_creators WHERE challenge_id = $1 AND user_id = $2", finished.ID, member); n != 1 {
 		t.Fatalf("%d creator rows, want the link kept", n)
 	}
-	page, err := svc.Participants(t.Context(), creatorID, ongoing, 20, nil)
+	page, err := svc.Participants(t.Context(), auth.Actor{ID: creatorID}, ongoing, 20, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

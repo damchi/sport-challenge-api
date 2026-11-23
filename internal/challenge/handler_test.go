@@ -24,10 +24,14 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
+// adminToken is the access token acceptingVerifier grants the admin
+// permission to; it accepts any other one without it.
+const adminToken = "admin.access.token"
+
 type acceptingVerifier struct{}
 
-func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
-	return auth.Claims{Subject: "email|123"}, nil
+func (acceptingVerifier) Verify(_ context.Context, raw string) (auth.Claims, error) {
+	return auth.Claims{Subject: "email|123", Admin: raw == adminToken}, nil
 }
 
 type challengesOnly struct {
@@ -44,6 +48,12 @@ func post(t *testing.T, svc *Service, body string) (*httptest.ResponseRecorder, 
 }
 
 func serve(t *testing.T, svc *Service, method, target, body string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	return serveAs(t, svc, "some.access.token", method, target, body)
+}
+
+// serveAs is serve with token as the access token.
+func serveAs(t *testing.T, svc *Service, token, method, target, body string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -74,7 +84,7 @@ func serve(t *testing.T, svc *Service, method, target, body string) (*httptest.R
 		reader = strings.NewReader(body)
 	}
 	req := httptest.NewRequest(method, target, reader)
-	req.Header.Set("Authorization", "Bearer some.access.token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -543,6 +553,48 @@ func TestListParticipantsHidden(t *testing.T) {
 			}
 			if repo.participantsAsked != nil {
 				t.Fatal("participants read despite the refusal")
+			}
+		})
+	}
+}
+
+// TestAdminReadsAPrivateChallenge: the admin permission of the token lets
+// its holder read a private challenge they are not in (detail, with the role
+// of their membership, and participants); without it, the same challenge is
+// not found. Writes never take the permission: an edit stays hidden.
+func TestAdminReadsAPrivateChallenge(t *testing.T) {
+	const challengePath = "/api/v1/challenges/11111111-1111-1111-1111-111111111111"
+	tests := []struct {
+		name   string
+		token  string
+		method string
+		target string
+		body   string
+		status int
+	}{
+		{name: "admin reads the detail", token: adminToken, method: http.MethodGet, target: challengePath, status: http.StatusOK},
+		{name: "admin lists the participants", token: adminToken, method: http.MethodGet, target: participantsPath, status: http.StatusOK},
+		{name: "user: detail hidden", token: "some.access.token", method: http.MethodGet, target: challengePath, status: http.StatusNotFound},
+		{name: "user: participants hidden", token: "some.access.token", method: http.MethodGet, target: participantsPath, status: http.StatusNotFound},
+		{name: "admin may not edit", token: adminToken, method: http.MethodPatch, target: challengePath, body: `{"title":"Taken over"}`, status: http.StatusNotFound},
+		{name: "admin may not join", token: adminToken, method: http.MethodPost, target: challengePath + "/join", status: http.StatusNotFound},
+		{name: "admin may not delete", token: adminToken, method: http.MethodDelete, target: challengePath, status: http.StatusNotFound},
+		{name: "admin may not exclude", token: adminToken, method: http.MethodDelete, target: participantsPath + "/22222222-2222-2222-2222-222222222222", status: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPrivate), participants: participants(1)}
+			svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
+			rec, out := serveAs(t, svc, tt.token, tt.method, tt.target, tt.body)
+			if rec.Code != tt.status {
+				t.Fatalf("status %d (%s), want %d", rec.Code, rec.Body, tt.status)
+			}
+			e, _ := out["error"].(map[string]any)
+			if tt.status == http.StatusNotFound && e["code"] != "challenge_not_found" {
+				t.Fatalf("error %v, want challenge_not_found", out)
+			}
+			if tt.target == challengePath && tt.method == http.MethodGet && rec.Code == http.StatusOK && out["my_role"] != "outsider" {
+				t.Fatalf("my_role %v, want outsider: the role of the membership", out["my_role"])
 			}
 		})
 	}

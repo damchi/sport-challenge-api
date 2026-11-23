@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 )
 
@@ -575,19 +576,27 @@ type fakeChallenges struct {
 	scope   Participation
 	members map[string]Participation
 	err     error
-	asked   *[3]string
+	asked   *scopeCall
 }
 
-func (f fakeChallenges) AllActivitiesScope(_ context.Context, actorID, challengeID string) (Participation, map[string]Participation, error) {
+// scopeCall is a call to fakeChallenges; userID is empty for
+// AllActivitiesScope.
+type scopeCall struct {
+	actor       auth.Actor
+	challengeID string
+	userID      string
+}
+
+func (f fakeChallenges) AllActivitiesScope(_ context.Context, actor auth.Actor, challengeID string) (Participation, map[string]Participation, error) {
 	if f.asked != nil {
-		*f.asked = [3]string{actorID, challengeID, ""}
+		*f.asked = scopeCall{actor: actor, challengeID: challengeID}
 	}
 	return f.scope, f.members, f.err
 }
 
-func (f fakeChallenges) ActivitiesScope(_ context.Context, actorID, challengeID, userID string) (Participation, error) {
+func (f fakeChallenges) ActivitiesScope(_ context.Context, actor auth.Actor, challengeID, userID string) (Participation, error) {
 	if f.asked != nil {
-		*f.asked = [3]string{actorID, challengeID, userID}
+		*f.asked = scopeCall{actor: actor, challengeID: challengeID, userID: userID}
 	}
 	return f.scope, f.err
 }
@@ -725,15 +734,15 @@ func TestServiceOfParticipant(t *testing.T) {
 	rows := listing(t, participant, 2)
 	week1 := Activity{ID: "5f1e7c1a-0000-4000-8000-000000000099", UserID: participant, SportCode: "yoga", StartedAt: toronto(t, 2026, 6, 3, 7), DurationSeconds: 3600, Source: SourceManual}
 	repo := &fakeRepository{listing: append(rows, week1, week1)}
-	var asked [3]string
+	var asked scopeCall
 	calls := 0
 	ps := fakeParticipations{t: t, user: participant, calls: &calls}
 	svc := NewService(repo, fakeProfiles{}, catalogue, ps, fakeChallenges{scope: c1, asked: &asked}, clock.NewFake(recordNow))
-	page, err := svc.OfParticipant(t.Context(), actor, "c1", participant, 3, nil)
+	page, err := svc.OfParticipant(t.Context(), auth.Actor{ID: actor}, "c1", participant, 3, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asked != [3]string{actor, "c1", participant} {
+	if asked != (scopeCall{actor: auth.Actor{ID: actor}, challengeID: "c1", userID: participant}) {
 		t.Fatalf("scope asked for %v, want the actor, the challenge and the participant", asked)
 	}
 	// Activities of the participant, in the window of the challenge.
@@ -766,7 +775,7 @@ func TestServiceOfParticipantAbandoned(t *testing.T) {
 	c1.Active = false
 	repo := &fakeRepository{listing: listing(t, participant, 1)}
 	ps := fakeParticipations{t: t, user: participant, challenges: []Participation{c1}}
-	page, err := NewService(repo, fakeProfiles{}, catalogue, ps, fakeChallenges{scope: c1}, clock.NewFake(recordNow)).OfParticipant(t.Context(), actor, "c1", participant, 20, nil)
+	page, err := NewService(repo, fakeProfiles{}, catalogue, ps, fakeChallenges{scope: c1}, clock.NewFake(recordNow)).OfParticipant(t.Context(), auth.Actor{ID: actor}, "c1", participant, 20, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -792,7 +801,7 @@ func TestServiceOfParticipantRefusals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{listing: listing(t, participant, 1)}
 			svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{t: t, user: participant}, fakeChallenges{err: tt.scopeErr}, clock.NewFake(recordNow))
-			_, err := svc.OfParticipant(t.Context(), actor, "c1", participant, tt.limit, nil)
+			_, err := svc.OfParticipant(t.Context(), auth.Actor{ID: actor}, "c1", participant, tt.limit, nil)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
@@ -817,17 +826,17 @@ func TestServiceOfChallenge(t *testing.T) {
 	extra := Activity{ID: "5f1e7c1a-0000-4000-8000-000000000004", UserID: participant, SportCode: "yoga", StartedAt: toronto(t, 2026, 6, 1, 7), DurationSeconds: 3600, Source: SourceManual}
 	repo := &fakeRepository{listing: []Activity{week2, week1, ofGone, extra}}
 	pseudo := "lea"
-	var asked [3]string
+	var asked scopeCall
 	var namesAsked []string
 	profiles := fakeProfiles{names: map[string]Name{participant: {Pseudo: &pseudo}, other: {}}, asked: &namesAsked}
 	members := map[string]Participation{participant: c1, other: left, gone: c1}
 	ps := fakeParticipations{t: t, user: "nobody"}
 	svc := NewService(repo, profiles, catalogue, ps, fakeChallenges{scope: c1, members: members, asked: &asked}, clock.NewFake(recordNow))
-	page, err := svc.OfChallenge(t.Context(), actor, "c1", 3, nil)
+	page, err := svc.OfChallenge(t.Context(), auth.Actor{ID: actor}, "c1", 3, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asked != [3]string{actor, "c1", ""} {
+	if asked != (scopeCall{actor: auth.Actor{ID: actor}, challengeID: "c1"}) {
 		t.Fatalf("scope asked for %v, want the actor and the challenge", asked)
 	}
 	// Activities of every participant, sorted ids, in the window.
@@ -859,7 +868,7 @@ func TestServiceOfChallenge(t *testing.T) {
 func TestServiceOfChallengeNoParticipant(t *testing.T) {
 	repo := &fakeRepository{}
 	svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{}, fakeChallenges{scope: challengeOf(t, "c1")}, clock.NewFake(recordNow))
-	page, err := svc.OfChallenge(t.Context(), actor, "c1", 20, nil)
+	page, err := svc.OfChallenge(t.Context(), auth.Actor{ID: actor}, "c1", 20, nil)
 	if err != nil || page.Items == nil || len(page.Items) != 0 || page.Next != nil {
 		t.Fatalf("OfChallenge() = %+v, %v, want an empty page", page, err)
 	}
@@ -886,7 +895,7 @@ func TestServiceOfChallengeRefusals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{listing: listing(t, participant, 1)}
 			svc := NewService(repo, fakeProfiles{}, catalogue, fakeParticipations{}, fakeChallenges{members: members, err: tt.scopeErr}, clock.NewFake(recordNow))
-			_, err := svc.OfChallenge(t.Context(), actor, "c1", tt.limit, nil)
+			_, err := svc.OfChallenge(t.Context(), auth.Actor{ID: actor}, "c1", tt.limit, nil)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
@@ -901,11 +910,11 @@ func TestServiceOfChallengeFailures(t *testing.T) {
 	storageErr := errors.New("connection reset")
 	c1 := challengeOf(t, "c1")
 	scope := fakeChallenges{scope: c1, members: map[string]Participation{participant: c1}}
-	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, catalogue, fakeParticipations{}, scope, clock.NewFake(recordNow)).OfChallenge(t.Context(), actor, "c1", 20, nil); !errors.Is(err, storageErr) {
+	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, catalogue, fakeParticipations{}, scope, clock.NewFake(recordNow)).OfChallenge(t.Context(), auth.Actor{ID: actor}, "c1", 20, nil); !errors.Is(err, storageErr) {
 		t.Fatalf("listing failure: error = %v, want the cause kept", err)
 	}
 	repo := &fakeRepository{listing: listing(t, participant, 1)}
-	if _, err := NewService(repo, fakeProfiles{namesErr: storageErr}, catalogue, fakeParticipations{}, scope, clock.NewFake(recordNow)).OfChallenge(t.Context(), actor, "c1", 20, nil); !errors.Is(err, storageErr) {
+	if _, err := NewService(repo, fakeProfiles{namesErr: storageErr}, catalogue, fakeParticipations{}, scope, clock.NewFake(recordNow)).OfChallenge(t.Context(), auth.Actor{ID: actor}, "c1", 20, nil); !errors.Is(err, storageErr) {
 		t.Fatalf("names failure: error = %v, want the cause kept", err)
 	}
 }

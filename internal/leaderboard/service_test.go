@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
@@ -15,12 +16,13 @@ import (
 type fakeChallenges struct {
 	c   Challenge
 	err error
-	// asked records the actor and the challenge of the last call.
-	asked [2]string
+	// actor and asked record the actor and the challenge of the last call.
+	actor auth.Actor
+	asked string
 }
 
-func (f *fakeChallenges) Challenge(_ context.Context, actorID, id string) (Challenge, error) {
-	f.asked = [2]string{actorID, id}
+func (f *fakeChallenges) Challenge(_ context.Context, actor auth.Actor, id string) (Challenge, error) {
+	f.actor, f.asked = actor, id
 	return f.c, f.err
 }
 
@@ -167,7 +169,7 @@ func TestGetRanksEveryCategory(t *testing.T) {
 	now := at(15, 7)
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), 24*time.Hour)
 
-	got, err := svc.Get(t.Context(), "actor", "c1")
+	got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +220,7 @@ func TestTimeOnlyChallenge(t *testing.T) {
 		repo := &fakeRepo{participants: participants, activities: activities}
 		now := at(4, 12)
 		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), 24*time.Hour)
-		got, err := svc.Get(t.Context(), "actor", "c1")
+		got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,7 +245,7 @@ func TestTimeOnlyChallenge(t *testing.T) {
 			frozenAt: frozenAt,
 		}
 		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
-		got, err := svc.Get(t.Context(), "actor", "c1")
+		got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,7 +303,7 @@ func TestPointsChallenge(t *testing.T) {
 	t.Run("live", func(t *testing.T) {
 		repo := &fakeRepo{participants: participants, activities: activities}
 		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), 24*time.Hour)
-		got, err := svc.Get(t.Context(), "actor", "c1")
+		got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -323,7 +325,7 @@ func TestPointsChallenge(t *testing.T) {
 			CategoryPoints:         json.RawMessage(`{"entries":[{"user_id":"b","rank":1,"value":18,"abandoned":false},{"user_id":"a","rank":2,"value":10,"abandoned":false}]}`),
 		}}
 		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
-		got, err := svc.Get(t.Context(), "actor", "c1")
+		got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -389,7 +391,7 @@ func TestGetJudgesWeeksAtTheClockInstant(t *testing.T) {
 
 	rank := func() []Ranked {
 		t.Helper()
-		got, err := svc.Get(t.Context(), "actor", "c1")
+		got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -432,7 +434,7 @@ func TestGetUsesTheAtRiskSetting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(now), tt.atRisk)
-			got, err := svc.Get(t.Context(), "actor", "c1")
+			got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -460,7 +462,7 @@ func TestGetFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := NewService(tt.challenges, tt.profiles, tt.repo, clock.NewFake(time.Now()), time.Hour)
-			if _, err := svc.Get(t.Context(), "actor", "c1"); !errors.Is(err, boom) {
+			if _, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1"); !errors.Is(err, boom) {
 				t.Fatalf("Get() error = %v, want %v", err, boom)
 			}
 			if tt.repo.calls != tt.wantCalls {
@@ -482,7 +484,7 @@ func TestGetRejectsWhatItCannotRank(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepo{}
 			svc := NewService(&fakeChallenges{c: tt.c}, pseudos, repo, clock.NewFake(time.Now()), time.Hour)
-			if _, err := svc.Get(t.Context(), "actor", "c1"); err == nil {
+			if _, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1"); err == nil {
 				t.Fatal("Get() succeeded, want an error")
 			}
 			if repo.calls != 0 {
@@ -495,11 +497,11 @@ func TestGetRejectsWhatItCannotRank(t *testing.T) {
 func TestGetAsksForTheActorAndTheChallenge(t *testing.T) {
 	challenges := &fakeChallenges{c: twoWeeks(t)}
 	svc := NewService(challenges, pseudos, &fakeRepo{}, clock.NewFake(time.Now()), time.Hour)
-	if _, err := svc.Get(t.Context(), "actor", "c1"); err != nil {
+	if _, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1"); err != nil {
 		t.Fatal(err)
 	}
-	if challenges.asked != [2]string{"actor", "c1"} {
-		t.Fatalf("challenge asked as %v, want [actor c1]", challenges.asked)
+	if challenges.actor != (auth.Actor{ID: "actor"}) || challenges.asked != "c1" {
+		t.Fatalf("challenge asked as %+v %s, want actor c1", challenges.actor, challenges.asked)
 	}
 }
 
@@ -521,7 +523,7 @@ func TestGetServesTheFrozenResults(t *testing.T) {
 	// Long after the end, and c has no name: it is not deleted, still listed.
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt.AddDate(0, 1, 0)), 24*time.Hour)
 
-	got, err := svc.Get(t.Context(), "actor", "c1")
+	got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +566,7 @@ func TestGetFrozenLeavesOutDeletedAccounts(t *testing.T) {
 	profiles := &recordingProfiles{fakeProfiles: pseudos}
 	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt), time.Hour)
 
-	got, err := svc.Get(t.Context(), "actor", "c1")
+	got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,7 +605,7 @@ func TestGetFrozenAfterTheErasure(t *testing.T) {
 	}}
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(c.EndsAt), time.Hour)
 
-	got, err := svc.Get(t.Context(), "actor", "c1")
+	got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +647,7 @@ func TestGetComputesWhatIsNotFrozenYet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepo{participants: []scoring.Participant{{UserID: "a"}}, snapshots: tt.snapshots}
 			svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(tt.now), 24*time.Hour)
-			if _, err := svc.Get(t.Context(), "actor", "c1"); err != nil {
+			if _, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1"); err != nil {
 				t.Fatal(err)
 			}
 			if repo.calls != 2 {
@@ -676,7 +678,7 @@ func TestGetFrozenFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := NewService(&fakeChallenges{c: c}, pseudos, tt.repo, clock.NewFake(c.EndsAt), time.Hour)
-			if _, err := svc.Get(t.Context(), "actor", "c1"); err == nil {
+			if _, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1"); err == nil {
 				t.Fatal("Get() succeeded, want an error")
 			}
 			if tt.repo.calls != 0 {
@@ -697,7 +699,7 @@ func TestGetFrozenNamesEveryCategory(t *testing.T) {
 	}}
 	profiles := &recordingProfiles{fakeProfiles: pseudos}
 	svc := NewService(&fakeChallenges{c: c}, profiles, repo, clock.NewFake(c.EndsAt), time.Hour)
-	got, err := svc.Get(t.Context(), "actor", "c1")
+	got, err := svc.Get(t.Context(), auth.Actor{ID: "actor"}, "c1")
 	if err != nil {
 		t.Fatal(err)
 	}

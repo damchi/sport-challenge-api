@@ -24,11 +24,11 @@ func NewHandler(service *Service) *Handler {
 
 // GetLeaderboard answers the leaderboard of a challenge.
 func (h *Handler) GetLeaderboard(ctx context.Context, req api.GetLeaderboardRequestObject) (api.GetLeaderboardResponseObject, error) {
-	actorID, ok := auth.UserID(ctx)
+	actor, ok := auth.ActorFrom(ctx)
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	board, err := h.service.Get(ctx, actorID, req.ChallengeId.String())
+	board, err := h.service.Get(ctx, actor, req.ChallengeId.String())
 	if err != nil {
 		return nil, err
 	}

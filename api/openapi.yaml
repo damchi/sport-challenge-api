@@ -448,6 +448,9 @@ paths:
         and fields computed by the server from the current instant. A
         challenge that does not exist, was deleted, or is private and not
         visible to the user answers the same 404 `challenge_not_found`.
+        An admin (permission `admin` of the access token) sees every
+        challenge not deleted; `my_role` and `can_join` stay those of their
+        own membership: this route gives them no write.
       tags: [challenges]
       parameters:
         - name: challengeId
@@ -661,9 +664,10 @@ paths:
       summary: List the participants
       description: |
         Visible to whoever sees the challenge: every user for a public one;
-        its creators, participants (abandoned included) and invited users
-        for a private one. Anyone else, like a missing or deleted challenge,
-        gets the same 404 `challenge_not_found`. Every participant is listed,
+        its creators, participants (abandoned included), invited users and
+        admins (permission `admin` of the access token) for a private one.
+        Anyone else, like a missing or deleted challenge, gets the same 404
+        `challenge_not_found`. Every participant is listed,
         abandoned or excluded ones included (shown as abandoned), in order
         of registration; a deleted account is not listed at all.
       tags: [challenges]
@@ -712,9 +716,10 @@ paths:
         The ranking of each category of the challenge, always computed from the
         raw activities at `computed_at`. Visible to whoever sees the
         challenge: every user for a public one (a non-participant sees the
-        ranking only); its creators, participants (abandoned included) and
-        invited users for a private one. Anyone else, like a missing or
-        deleted challenge, gets the same 404 `challenge_not_found`.
+        ranking only); its creators, participants (abandoned included),
+        invited users and admins (permission `admin` of the access token)
+        for a private one. Anyone else, like a missing or deleted challenge,
+        gets the same 404 `challenge_not_found`.
 
         Equal values share a rank (1, 1, 3). Participants who abandoned
         (also the excluded) are listed last in every category, with
@@ -826,8 +831,9 @@ paths:
         The activities of participant `userId` started in the window of the
         challenge, deleted ones left out, most recent first (`started_at`,
         then `id`). Visible to the participants of the challenge (abandoned
-        or excluded ones included) and its creators. A challenge the user
-        may not see answers 404 `challenge_not_found`; a visible one the
+        or excluded ones included), its creators and the admins (permission
+        `admin` of the access token), on every challenge not deleted. A
+        challenge the user may not see answers 404 `challenge_not_found`; a visible one the
         user never joined (a public challenge shows them its leaderboard
         only), or a `userId` who never joined it or whose account was
         deleted, answers 404 `not_found`.
@@ -901,7 +907,8 @@ paths:
         out, most recent first (`started_at`, then `id`), each with its
         author. A deleted account is never listed, nor are its activities.
         Visible to the participants of the challenge (abandoned or excluded
-        ones included) and its creators, as the list of a participant
+        ones included), its creators and the admins (permission `admin` of
+        the access token), as the list of a participant
         (`listParticipantActivities`). A challenge the user may not see
         answers 404 `challenge_not_found`; a visible one the user never
         joined (a public challenge shows them its leaderboard only)

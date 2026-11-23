@@ -22,10 +22,14 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
 )
 
+// adminToken is the access token acceptingVerifier grants the admin
+// permission to; it accepts any other one without it.
+const adminToken = "admin.access.token"
+
 type acceptingVerifier struct{}
 
-func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
-	return auth.Claims{Subject: "email|123"}, nil
+func (acceptingVerifier) Verify(_ context.Context, raw string) (auth.Claims, error) {
+	return auth.Claims{Subject: "email|123", Admin: raw == adminToken}, nil
 }
 
 type activitiesOnly struct {
@@ -469,14 +473,14 @@ func TestListParticipantActivities(t *testing.T) {
 	run := storedRun(t)
 	run.UserID = participant
 	repo := &fakeRepository{listing: []Activity{run}}
-	var asked [3]string
+	var asked scopeCall
 	ps := fakeParticipations{t: t, user: participant, challenges: []Participation{c1, other}}
 	svc := NewService(repo, fakeProfiles{}, catalogue, ps, fakeChallenges{scope: c1, asked: &asked}, clock.NewFake(recordNow))
 	rec, body := serve(t, svc, http.MethodGet, participantActivities, "", nil)
 	if rec.Code != http.StatusOK || body["next_cursor"] != nil {
 		t.Fatalf("status %d (%s), want 200 and a single page", rec.Code, rec.Body)
 	}
-	if asked != [3]string{actor, c1.ChallengeID, participant} {
+	if asked != (scopeCall{actor: auth.Actor{ID: actor}, challengeID: c1.ChallengeID, userID: participant}) {
 		t.Fatalf("scope asked for %v", asked)
 	}
 	items, _ := body["items"].([]any)
@@ -484,6 +488,22 @@ func TestListParticipantActivities(t *testing.T) {
 	// The other challenge of the participant is never shown.
 	if ids := contributionIDs(first); len(ids) != 1 || ids[0] != c1.ChallengeID {
 		t.Fatalf("contributions %v, want [%s] only", first["contributions"], c1.ChallengeID)
+	}
+}
+
+// TestListActivitiesPassTheAdminPermission: the actor asked for the scope
+// carries the admin permission of the token, on both lists.
+func TestListActivitiesPassTheAdminPermission(t *testing.T) {
+	c1 := challengeOf(t, "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b")
+	admin := map[string]string{"Authorization": "Bearer " + adminToken}
+	for _, target := range []string{participantActivities, challengeActivities} {
+		var asked scopeCall
+		scope := fakeChallenges{scope: c1, members: map[string]Participation{}, asked: &asked}
+		svc := NewService(&fakeRepository{}, fakeProfiles{}, catalogue, fakeParticipations{t: t, user: participant}, scope, clock.NewFake(recordNow))
+		rec, _ := serve(t, svc, http.MethodGet, target, "", admin)
+		if rec.Code != http.StatusOK || asked.actor != (auth.Actor{ID: actor, Admin: true}) {
+			t.Fatalf("%s: status %d (%s), actor %+v, want 200 and the admin permission", target, rec.Code, rec.Body, asked.actor)
+		}
 	}
 }
 
@@ -530,14 +550,14 @@ func TestListChallengeActivities(t *testing.T) {
 	repo := &fakeRepository{listing: []Activity{run, run}}
 	pseudo := "lea"
 	profiles := fakeProfiles{names: map[string]Name{participant: {Pseudo: &pseudo}}}
-	var asked [3]string
+	var asked scopeCall
 	scope := fakeChallenges{scope: c1, members: map[string]Participation{participant: c1}, asked: &asked}
 	svc := NewService(repo, profiles, catalogue, fakeParticipations{t: t, user: "nobody"}, scope, clock.NewFake(recordNow))
 	rec, body := serve(t, svc, http.MethodGet, challengeActivities+"?limit=1", "", nil)
 	if rec.Code != http.StatusOK || body["next_cursor"] == nil {
 		t.Fatalf("status %d (%s), want 200 and a next page", rec.Code, rec.Body)
 	}
-	if asked != [3]string{actor, c1.ChallengeID, ""} {
+	if asked != (scopeCall{actor: auth.Actor{ID: actor}, challengeID: c1.ChallengeID}) {
 		t.Fatalf("scope asked for %v", asked)
 	}
 	items, _ := body["items"].([]any)

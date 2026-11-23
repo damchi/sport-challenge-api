@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 )
 
@@ -45,18 +46,18 @@ type Participations interface {
 }
 
 // Challenges gives challenge challengeID, as a participation of userID, for
-// actorID to read the activities of userID there; it answers 404
+// actor to read the activities of userID there; it answers 404
 // challenge_not_found or not_found when the rights matrix forbids it
 // (module challenge).
 //
 // AllActivitiesScope gives challenge challengeID, its membership left unset,
 // and the participation of each of its participants, abandoned ones
-// included and deleted accounts left out, by user id, for actorID to read
+// included and deleted accounts left out, by user id, for actor to read
 // the activities of all of them there; it answers 404 challenge_not_found
 // or not_found when the rights matrix forbids it.
 type Challenges interface {
-	ActivitiesScope(ctx context.Context, actorID, challengeID, userID string) (Participation, error)
-	AllActivitiesScope(ctx context.Context, actorID, challengeID string) (Participation, map[string]Participation, error)
+	ActivitiesScope(ctx context.Context, actor auth.Actor, challengeID, userID string) (Participation, error)
+	AllActivitiesScope(ctx context.Context, actor auth.Actor, challengeID string) (Participation, map[string]Participation, error)
 }
 
 // Service holds the use cases of the activities.
@@ -331,16 +332,16 @@ func (s *Service) MyWeeks(ctx context.Context, actorID, tz string, sport *string
 }
 
 // OfParticipant returns a page of the activities of userID started in the
-// window of challenge challengeID, most recent first, for actorID: the
-// participants of the challenge (abandoned ones included) and its creators
-// only, as module challenge decides (Challenges). Where each one counts and
+// window of challenge challengeID, most recent first, for actor: the
+// participants of the challenge (abandoned ones included), its creators and
+// the admins only, as module challenge decides (Challenges). Where each one counts and
 // whether it is locked are read from this challenge alone: the other
 // challenges of userID, private ones maybe, never show through.
-func (s *Service) OfParticipant(ctx context.Context, actorID, challengeID, userID string, limit int, after *Position) (Page, error) {
+func (s *Service) OfParticipant(ctx context.Context, actor auth.Actor, challengeID, userID string, limit int, after *Position) (Page, error) {
 	if limit < 1 {
 		return Page{}, apperr.InvalidFields(nil, "limit")
 	}
-	c, err := s.challenges.ActivitiesScope(ctx, actorID, challengeID, userID)
+	c, err := s.challenges.ActivitiesScope(ctx, actor, challengeID, userID)
 	if err != nil {
 		return Page{}, fmt.Errorf("activities scope: %w", err)
 	}
@@ -353,15 +354,15 @@ func (s *Service) OfParticipant(ctx context.Context, actorID, challengeID, userI
 // OfChallenge returns a page of the activities of all the participants of
 // challenge challengeID (abandoned ones included, deleted accounts left
 // out) started in its window, most recent first, each with its author, for
-// actorID: the participants of the challenge and its creators only, as
-// module challenge decides (Challenges). Where each one counts and whether
+// actor: the participants of the challenge, its creators and the admins
+// only, as module challenge decides (Challenges). Where each one counts and whether
 // it is locked are read from this challenge alone, with the participation
 // of its author, as OfParticipant reads them.
-func (s *Service) OfChallenge(ctx context.Context, actorID, challengeID string, limit int, after *Position) (AuthoredPage, error) {
+func (s *Service) OfChallenge(ctx context.Context, actor auth.Actor, challengeID string, limit int, after *Position) (AuthoredPage, error) {
 	if limit < 1 {
 		return AuthoredPage{}, apperr.InvalidFields(nil, "limit")
 	}
-	c, members, err := s.challenges.AllActivitiesScope(ctx, actorID, challengeID)
+	c, members, err := s.challenges.AllActivitiesScope(ctx, actor, challengeID)
 	if err != nil {
 		return AuthoredPage{}, fmt.Errorf("all activities scope: %w", err)
 	}

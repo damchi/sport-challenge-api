@@ -11,6 +11,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -73,7 +74,7 @@ func TestEverythingWorksWithoutAPseudo(t *testing.T) {
 	}
 
 	firstNames := map[string]string{creator: "Ana", joiner: "Bo"}
-	page, err := challenges.Participants(t.Context(), creator, c.ID, 10, nil)
+	page, err := challenges.Participants(t.Context(), auth.Actor{ID: creator}, c.ID, 10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestEverythingWorksWithoutAPseudo(t *testing.T) {
 		}
 	}
 
-	board, err := leaderboards.Get(t.Context(), joiner, c.ID)
+	board, err := leaderboards.Get(t.Context(), auth.Actor{ID: joiner}, c.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

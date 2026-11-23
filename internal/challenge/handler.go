@@ -254,11 +254,11 @@ func toProgress(p scoring.Progress) *api.EliminationProgress {
 
 // GetChallenge answers a challenge as the authenticated user sees it.
 func (h *Handler) GetChallenge(ctx context.Context, req api.GetChallengeRequestObject) (api.GetChallengeResponseObject, error) {
-	actorID, ok := auth.UserID(ctx)
+	actor, ok := auth.ActorFrom(ctx)
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	out, err := h.ChallengeDetail(ctx, actorID, req.ChallengeId.String())
+	out, err := h.detail(ctx, actor, req.ChallengeId.String())
 	if err != nil {
 		return nil, err
 	}
@@ -266,10 +266,15 @@ func (h *Handler) GetChallenge(ctx context.Context, req api.GetChallengeRequestO
 }
 
 // ChallengeDetail gives challenge id as actorID sees it, in the shape of
-// the contract: for GetChallenge, and for the routes of other modules that
-// answer a challenge (accepting an invitation).
+// the contract, for the routes of other modules that answer a challenge
+// (accepting an invitation): the admin permission plays no part there.
 func (h *Handler) ChallengeDetail(ctx context.Context, actorID, id string) (api.ChallengeDetail, error) {
-	d, err := h.service.Get(ctx, actorID, id)
+	return h.detail(ctx, auth.Actor{ID: actorID}, id)
+}
+
+// detail gives challenge id as actor sees it, in the shape of the contract.
+func (h *Handler) detail(ctx context.Context, actor auth.Actor, id string) (api.ChallengeDetail, error) {
+	d, err := h.service.Get(ctx, actor, id)
 	if err != nil {
 		return api.ChallengeDetail{}, err
 	}
@@ -399,7 +404,7 @@ func (h *Handler) AbandonChallenge(ctx context.Context, req api.AbandonChallenge
 
 // ListParticipants answers a page of the participants of a challenge.
 func (h *Handler) ListParticipants(ctx context.Context, req api.ListParticipantsRequestObject) (api.ListParticipantsResponseObject, error) {
-	actorID, ok := auth.UserID(ctx)
+	actor, ok := auth.ActorFrom(ctx)
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
@@ -425,7 +430,7 @@ func (h *Handler) ListParticipants(ctx context.Context, req api.ListParticipants
 		}
 	}
 
-	page, err := h.service.Participants(ctx, actorID, req.ChallengeId.String(), limit, after)
+	page, err := h.service.Participants(ctx, actor, req.ChallengeId.String(), limit, after)
 	if err != nil {
 		return nil, err
 	}

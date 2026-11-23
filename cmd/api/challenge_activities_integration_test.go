@@ -12,6 +12,7 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 )
 
 // insertActivity stores an activity of userID started at startedAt, deleted
@@ -77,7 +78,7 @@ func TestListChallengeActivities(t *testing.T) {
 	// Most recent first, then by id, descending.
 	slices.SortStableFunc(listed[:3], func(a, b string) int { return strings.Compare(b, a) })
 
-	whole, err := r.activities.OfChallenge(t.Context(), runner, c, 100, nil)
+	whole, err := r.activities.OfChallenge(t.Context(), auth.Actor{ID: runner}, c, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +90,7 @@ func TestListChallengeActivities(t *testing.T) {
 	var paged []string
 	var after *activity.Position
 	for range len(listed) {
-		page, err := r.activities.OfChallenge(t.Context(), runner, c, 2, after)
+		page, err := r.activities.OfChallenge(t.Context(), auth.Actor{ID: runner}, c, 2, after)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +109,7 @@ func TestListChallengeActivities(t *testing.T) {
 			t.Errorf("activity %s: author %+v, want %s", it.ID, it.Author, names[it.UserID])
 		}
 		// As the list of the author shows it, at the same instant.
-		own, err := r.activities.OfParticipant(t.Context(), runner, c, it.UserID, 100, nil)
+		own, err := r.activities.OfParticipant(t.Context(), auth.Actor{ID: runner}, c, it.UserID, 100, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +144,7 @@ func TestListChallengeActivities(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			page, err := r.activities.OfChallenge(t.Context(), tt.actor, tt.challenge, 100, nil)
+			page, err := r.activities.OfChallenge(t.Context(), auth.Actor{ID: tt.actor}, tt.challenge, 100, nil)
 			if tt.want != "" {
 				var appErr *apperr.Error
 				if !errors.As(err, &appErr) || appErr.Code != tt.want {

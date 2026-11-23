@@ -231,8 +231,8 @@ func (p participations) Participations(ctx context.Context, userID string) ([]ac
 
 // scopes is what activityScopes reads from module challenge.
 type scopes interface {
-	ActivitiesScope(ctx context.Context, actorID, id, userID string) (challenge.UserChallenge, error)
-	AllActivitiesScope(ctx context.Context, actorID, id string) (challenge.UserChallenge, map[string]challenge.Membership, error)
+	ActivitiesScope(ctx context.Context, actor auth.Actor, id, userID string) (challenge.UserChallenge, error)
+	AllActivitiesScope(ctx context.Context, actor auth.Actor, id string) (challenge.UserChallenge, map[string]challenge.Membership, error)
 }
 
 // activityScopes gives module activity the challenge where an actor reads
@@ -240,16 +240,16 @@ type scopes interface {
 // applies the rights matrix.
 type activityScopes struct{ challenges scopes }
 
-func (a activityScopes) ActivitiesScope(ctx context.Context, actorID, challengeID, userID string) (activity.Participation, error) {
-	m, err := a.challenges.ActivitiesScope(ctx, actorID, challengeID, userID)
+func (a activityScopes) ActivitiesScope(ctx context.Context, actor auth.Actor, challengeID, userID string) (activity.Participation, error) {
+	m, err := a.challenges.ActivitiesScope(ctx, actor, challengeID, userID)
 	if err != nil {
 		return activity.Participation{}, err
 	}
 	return toParticipation(m)
 }
 
-func (a activityScopes) AllActivitiesScope(ctx context.Context, actorID, challengeID string) (activity.Participation, map[string]activity.Participation, error) {
-	c, members, err := a.challenges.AllActivitiesScope(ctx, actorID, challengeID)
+func (a activityScopes) AllActivitiesScope(ctx context.Context, actor auth.Actor, challengeID string) (activity.Participation, map[string]activity.Participation, error) {
+	c, members, err := a.challenges.AllActivitiesScope(ctx, actor, challengeID)
 	if err != nil {
 		return activity.Participation{}, nil, err
 	}
@@ -365,7 +365,7 @@ func (l leaderboardProfiles) Names(ctx context.Context, ids []string) (map[strin
 
 // details is what leaderboardChallenges reads from module challenge.
 type details interface {
-	Get(ctx context.Context, actorID, id string) (challenge.Detail, error)
+	Get(ctx context.Context, actor auth.Actor, id string) (challenge.Detail, error)
 }
 
 // leaderboardChallenges gives module leaderboard the challenge an actor
@@ -374,8 +374,8 @@ type details interface {
 // loaded.
 type leaderboardChallenges struct{ challenges details }
 
-func (l leaderboardChallenges) Challenge(ctx context.Context, actorID, id string) (leaderboard.Challenge, error) {
-	d, err := l.challenges.Get(ctx, actorID, id)
+func (l leaderboardChallenges) Challenge(ctx context.Context, actor auth.Actor, id string) (leaderboard.Challenge, error) {
+	d, err := l.challenges.Get(ctx, actor, id)
 	if err != nil {
 		return leaderboard.Challenge{}, err
 	}
@@ -451,7 +451,7 @@ func toRankings(places []leaderboard.Place) []challenge.Ranking {
 // invited is what invitationChallenges reads from module challenge.
 type invited interface {
 	InvitationDeadline(ctx context.Context, actorID, id string) (time.Time, error)
-	Get(ctx context.Context, actorID, id string) (challenge.Detail, error)
+	Get(ctx context.Context, actor auth.Actor, id string) (challenge.Detail, error)
 	Join(ctx context.Context, actorID, id string) (challenge.Detail, error)
 }
 
@@ -465,7 +465,8 @@ func (i invitationChallenges) InvitationDeadline(ctx context.Context, actorID, c
 }
 
 func (i invitationChallenges) Preview(ctx context.Context, actorID, challengeID string) (invitation.Challenge, error) {
-	d, err := i.challenges.Get(ctx, actorID, challengeID)
+	// An invitation is opened as a user: the admin permission plays no part.
+	d, err := i.challenges.Get(ctx, auth.Actor{ID: actorID}, challengeID)
 	if err != nil {
 		return invitation.Challenge{}, err
 	}

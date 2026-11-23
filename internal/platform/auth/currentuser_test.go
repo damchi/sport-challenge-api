@@ -133,6 +133,31 @@ func TestUserIDOutsideAProtectedRoute(t *testing.T) {
 	}
 }
 
+// TestActorFrom: the actor is the local user, with the admin permission of
+// the claims; no local user, no actor.
+func TestActorFrom(t *testing.T) {
+	withUser := context.WithValue(t.Context(), userIDKey{}, localUserID)
+	tests := []struct {
+		name   string
+		ctx    context.Context
+		want   Actor
+		wantOK bool
+	}{
+		{name: "nothing", ctx: t.Context()},
+		{name: "claims without a local user", ctx: context.WithValue(t.Context(), claimsKey{}, Claims{Admin: true})},
+		{name: "local user, no claims", ctx: withUser, want: Actor{ID: localUserID}, wantOK: true},
+		{name: "local user, not admin", ctx: context.WithValue(withUser, claimsKey{}, Claims{Subject: "email|1"}), want: Actor{ID: localUserID}, wantOK: true},
+		{name: "local user, admin", ctx: context.WithValue(withUser, claimsKey{}, Claims{Subject: "email|1", Admin: true}), want: Actor{ID: localUserID, Admin: true}, wantOK: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, ok := ActorFrom(tt.ctx); got != tt.want || ok != tt.wantOK {
+				t.Fatalf("ActorFrom() = %+v, %v, want %+v, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestProtect(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))

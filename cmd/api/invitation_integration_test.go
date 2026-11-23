@@ -15,6 +15,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/invitation"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -105,7 +106,7 @@ func TestInvitationValidityAgreesAcrossModules(t *testing.T) {
 			exec("INSERT INTO invitation_recipients VALUES ($1, $2, $3)", invitationID, linked, start)
 
 			_, linkErr := invitations.Link(t.Context(), opener, base64.RawURLEncoding.EncodeToString(raw))
-			_, readErr := challenges.Get(t.Context(), linked, id)
+			_, readErr := challenges.Get(t.Context(), auth.Actor{ID: linked}, id)
 			if opened, read := linkErr == nil, readErr == nil; opened != want || read != want {
 				t.Fatalf("link opened %v (%v), challenge read %v (%v), want both %v (CanInvite)", opened, linkErr, read, readErr, want)
 			}
@@ -173,7 +174,7 @@ func TestAcceptInvitation(t *testing.T) {
 	}
 
 	// Opening the link: a preview, and from then on the challenge is read.
-	if _, err := challenges.Get(t.Context(), guest, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+	if _, err := challenges.Get(t.Context(), auth.Actor{ID: guest}, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("before opening the link: error = %v, want challenge_not_found", err)
 	}
 	preview, err := invitations.Preview(t.Context(), guest, token)
@@ -181,7 +182,7 @@ func TestAcceptInvitation(t *testing.T) {
 		preview.ID != want.ID || preview.Title != want.Title || !preview.StartsAt.Equal(want.StartsAt) || !preview.EndsAt.Equal(want.EndsAt) {
 		t.Fatalf("Preview() = %+v, %v, want %+v", preview, err, want)
 	}
-	if d, err := challenges.Get(t.Context(), guest, id); err != nil || d.Role != challenge.RoleInvited || !d.CanJoin {
+	if d, err := challenges.Get(t.Context(), auth.Actor{ID: guest}, id); err != nil || d.Role != challenge.RoleInvited || !d.CanJoin {
 		t.Fatalf("after opening the link: %+v, %v, want invited, may join", d.Role, err)
 	}
 	// An invited user who has not joined may not invite.

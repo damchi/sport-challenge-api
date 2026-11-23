@@ -18,6 +18,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -127,7 +128,7 @@ func newLeaderboardFixture(t *testing.T) leaderboardFixture {
 func TestLeaderboardOfAPublicChallengeIsOpenToAStranger(t *testing.T) {
 	f := newLeaderboardFixture(t)
 
-	got, err := f.svc.Get(t.Context(), f.stranger, f.public)
+	got, err := f.svc.Get(t.Context(), auth.Actor{ID: f.stranger}, f.public)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,14 +167,19 @@ func TestLeaderboardOfAPrivateChallengeIsHiddenFromAStranger(t *testing.T) {
 		"missing challenge":                   {f.runner, "0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8"},
 		"deleted challenge, even its creator": {f.runner, f.deleted},
 	} {
-		_, err := f.svc.Get(t.Context(), tt.actor, tt.challenge)
+		_, err := f.svc.Get(t.Context(), auth.Actor{ID: tt.actor}, tt.challenge)
 		var appErr *apperr.Error
 		if !errors.As(err, &appErr) || appErr.Code != apperr.CodeChallengeNotFound {
 			t.Fatalf("%s: error = %v, want challenge_not_found", name, err)
 		}
 	}
-	// Its creator reads it, and so does a participant who abandoned.
-	for name, actor := range map[string]string{"creator": f.runner, "participant who abandoned": f.quitter} {
+	// Its creator reads it, so does a participant who abandoned, and so does
+	// an admin who is not in it (README §2.12); the deleted one stays hidden
+	// from the admin too.
+	if _, err := f.svc.Get(t.Context(), auth.Actor{ID: f.stranger, Admin: true}, f.deleted); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("admin, deleted challenge: error = %v, want challenge_not_found", err)
+	}
+	for name, actor := range map[string]auth.Actor{"creator": {ID: f.runner}, "participant who abandoned": {ID: f.quitter}, "admin not in it": {ID: f.stranger, Admin: true}} {
 		got, err := f.svc.Get(t.Context(), actor, f.private)
 		if err != nil {
 			t.Fatalf("%s of the private challenge: %v", name, err)
@@ -199,7 +205,7 @@ func TestMyWeekIsTheLeaderboard(t *testing.T) {
 		t.Fatalf("%d challenges, want the public and the private ones", len(page.Items))
 	}
 	for _, it := range page.Items {
-		board, err := f.svc.Get(t.Context(), f.runner, it.ID)
+		board, err := f.svc.Get(t.Context(), auth.Actor{ID: f.runner}, it.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +309,7 @@ func TestRankedCountIsMyRankingCount(t *testing.T) {
 	}
 	exec("UPDATE users SET anonymized_at = $1, pseudo = NULL WHERE id = $2", recordNow, gone)
 
-	board, err := f.svc.Get(t.Context(), f.runner, id)
+	board, err := f.svc.Get(t.Context(), auth.Actor{ID: f.runner}, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +406,7 @@ func TestBestResultIsTheFrozenLeaderboard(t *testing.T) {
 		}
 		return page.Items[0].BestResult
 	}
-	board, err := f.svc.Get(t.Context(), f.runner, id)
+	board, err := f.svc.Get(t.Context(), auth.Actor{ID: f.runner}, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,14 +427,14 @@ func TestBestResultIsTheFrozenLeaderboard(t *testing.T) {
 // (SC-API-149); entered on every activity, it changes no category.
 func TestElevationGainLeavesTheLeaderboard(t *testing.T) {
 	f := newLeaderboardFixture(t)
-	before, err := f.svc.Get(t.Context(), f.runner, f.public)
+	before, err := f.svc.Get(t.Context(), auth.Actor{ID: f.runner}, f.public)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.pool.Exec(t.Context(), "UPDATE activities SET elevation_gain_meters = 1500 WHERE user_id = $1", f.runner); err != nil {
 		t.Fatal(err)
 	}
-	after, err := f.svc.Get(t.Context(), f.runner, f.public)
+	after, err := f.svc.Get(t.Context(), auth.Actor{ID: f.runner}, f.public)
 	if err != nil {
 		t.Fatal(err)
 	}
