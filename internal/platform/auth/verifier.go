@@ -27,6 +27,10 @@ type Claims struct {
 	Email     string
 	ExpiresAt time.Time
 	Scopes    []string
+	// Admin is true when the token carries the "admin" permission (README
+	// §2.12). It is a fact about the token, not a decision: only the
+	// policies of the services grant or refuse an action with it.
+	Admin bool
 }
 
 // TokenVerifier checks an access token and returns its claims.

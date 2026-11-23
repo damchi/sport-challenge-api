@@ -1519,7 +1519,7 @@ components:
       enum: [fr, en]
     Me:
       type: object
-      required: [id, pseudo, first_name, last_name, email, avatar, language, profile_complete]
+      required: [id, pseudo, first_name, last_name, email, avatar, language, profile_complete, is_admin]
       additionalProperties: false
       properties:
         id:
@@ -1565,6 +1565,13 @@ components:
         profile_complete:
           type: boolean
           description: True once the first name and the last name are set, with or without a pseudo.
+        is_admin:
+          type: boolean
+          description: |
+            True when the access token of the request carries the `admin`
+            permission (Auth0 role, README §2.12); never stored. Only lets the
+            apps show the administration: every admin route checks the
+            permission again.
     MeUpdate:
       type: object
       additionalProperties: false
