@@ -121,12 +121,13 @@ func (h *Handler) GetMyActivitySummary(ctx context.Context, req api.GetMyActivit
 	w := sum.CurrentWeek
 	out := api.ActivitySummary{
 		CurrentWeek: api.CurrentActivityWeek{
-			StartsAt:        w.StartsAt.UTC(),
-			EndsAt:          w.EndsAt.UTC(),
-			Sessions:        w.Sessions,
-			DurationSeconds: w.DurationSeconds,
-			DistanceMeters:  w.DistanceMeters,
-			Days:            make([]api.ActivityDay, 0, len(w.Days)),
+			StartsAt:            w.StartsAt.UTC(),
+			EndsAt:              w.EndsAt.UTC(),
+			Sessions:            w.Sessions,
+			DurationSeconds:     w.DurationSeconds,
+			DistanceMeters:      w.DistanceMeters,
+			ElevationGainMeters: w.ElevationGainMeters,
+			Days:                make([]api.ActivityDay, 0, len(w.Days)),
 		},
 		Sports:               make([]api.SportCount, 0, len(sum.Sports)),
 		Total:                sum.Total,
@@ -171,11 +172,12 @@ func (h *Handler) ListMyActivityWeeks(ctx context.Context, req api.ListMyActivit
 	out := api.ActivityWeekPage{Items: make([]api.ActivityWeek, 0, len(page.Items))}
 	for _, w := range page.Items {
 		out.Items = append(out.Items, api.ActivityWeek{
-			StartsAt:        w.StartsAt.UTC(),
-			EndsAt:          w.EndsAt.UTC(),
-			Sessions:        w.Sessions,
-			DurationSeconds: w.DurationSeconds,
-			DistanceMeters:  w.DistanceMeters,
+			StartsAt:            w.StartsAt.UTC(),
+			EndsAt:              w.EndsAt.UTC(),
+			Sessions:            w.Sessions,
+			DurationSeconds:     w.DurationSeconds,
+			DistanceMeters:      w.DistanceMeters,
+			ElevationGainMeters: w.ElevationGainMeters,
 		})
 	}
 	if page.Next != nil {

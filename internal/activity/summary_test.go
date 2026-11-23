@@ -25,8 +25,8 @@ func wantInvalid(t *testing.T, err error, field string) {
 // in the zone asked, day by day.
 func TestServiceMySummary(t *testing.T) {
 	days := make([]Totals, 7)
-	days[0] = Totals{Sessions: 2, DurationSeconds: 5400, DistanceMeters: 12_000}
-	days[3] = Totals{Sessions: 1, DurationSeconds: 3600}
+	days[0] = Totals{Sessions: 2, DurationSeconds: 5400, DistanceMeters: 12_000, ElevationGainMeters: 300}
+	days[3] = Totals{Sessions: 1, DurationSeconds: 3600, DistanceMeters: 4000, ElevationGainMeters: 150}
 	sports := []SportCount{{SportCode: "run", Count: 4}, {SportCode: "bike", Count: 1}, {SportCode: "other", Count: 1}}
 	repo := &fakeRepository{days: days, sports: sports, sportsDuration: 21_600}
 	joined := fakeParticipations{challenges: []Participation{challengeOf(t, "c1"), challengeOf(t, "c2")}}
@@ -38,7 +38,7 @@ func TestServiceMySummary(t *testing.T) {
 	if !w.StartsAt.Equal(toronto(t, 2026, 6, 8, 0)) || !w.EndsAt.Equal(toronto(t, 2026, 6, 15, 0)) {
 		t.Fatalf("week [%s, %s), want Monday June 8 to Monday June 15, Toronto", w.StartsAt, w.EndsAt)
 	}
-	if w.Totals != (Totals{Sessions: 3, DurationSeconds: 9000, DistanceMeters: 12_000}) {
+	if w.Totals != (Totals{Sessions: 3, DurationSeconds: 9000, DistanceMeters: 16_000, ElevationGainMeters: 450}) {
 		t.Fatalf("week totals %+v, want the sum of the days", w.Totals)
 	}
 	if len(w.Days) != 7 || !w.Days[0].Date.Equal(date(2026, 6, 8)) || !w.Days[6].Date.Equal(date(2026, 6, 14)) {
@@ -168,7 +168,7 @@ func TestServiceMineSport(t *testing.T) {
 
 func TestGetMyActivitySummary(t *testing.T) {
 	days := make([]Totals, 7)
-	days[2] = Totals{Sessions: 1, DurationSeconds: 3600, DistanceMeters: 10_000}
+	days[2] = Totals{Sessions: 1, DurationSeconds: 3600, DistanceMeters: 10_000, ElevationGainMeters: 250}
 	repo := &fakeRepository{days: days, sports: []SportCount{{SportCode: "run", Count: 1}}, sportsDuration: 3600}
 	joined := fakeParticipations{challenges: []Participation{challengeOf(t, "c1")}}
 	rec, body := serve(t, newService(t, repo, joined), http.MethodGet, "/api/v1/me/activities/summary?tz=America/Toronto", "", nil)
@@ -176,7 +176,7 @@ func TestGetMyActivitySummary(t *testing.T) {
 		t.Fatalf("status %d (%s), want 200", rec.Code, rec.Body)
 	}
 	week, _ := body["current_week"].(map[string]any)
-	if week["starts_at"] != "2026-06-08T04:00:00Z" || week["ends_at"] != "2026-06-15T04:00:00Z" || week["sessions"] != 1.0 || week["distance_meters"] != 10_000.0 {
+	if week["starts_at"] != "2026-06-08T04:00:00Z" || week["ends_at"] != "2026-06-15T04:00:00Z" || week["sessions"] != 1.0 || week["distance_meters"] != 10_000.0 || week["elevation_gain_meters"] != 250.0 {
 		t.Fatalf("current_week %v, want the Toronto week with its totals", week)
 	}
 	ds, _ := week["days"].([]any)
@@ -230,7 +230,7 @@ func TestMyActivityRoutesRefusals(t *testing.T) {
 
 func TestListMyActivityWeeks(t *testing.T) {
 	repo := &fakeRepository{weeks: []WeekTotals{
-		{Monday: date(2026, 6, 8), Totals: Totals{Sessions: 4, DurationSeconds: 9360, DistanceMeters: 26_000}},
+		{Monday: date(2026, 6, 8), Totals: Totals{Sessions: 4, DurationSeconds: 9360, DistanceMeters: 26_000, ElevationGainMeters: 820}},
 		{Monday: date(2026, 6, 1), Totals: Totals{Sessions: 1, DurationSeconds: 600}},
 	}}
 	svc := newService(t, repo, fakeParticipations{})
@@ -242,7 +242,7 @@ func TestListMyActivityWeeks(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items %v, want one", body["items"])
 	}
-	if w, _ := items[0].(map[string]any); w["starts_at"] != "2026-06-08T04:00:00Z" || w["sessions"] != 4.0 || w["distance_meters"] != 26_000.0 {
+	if w, _ := items[0].(map[string]any); w["starts_at"] != "2026-06-08T04:00:00Z" || w["sessions"] != 4.0 || w["distance_meters"] != 26_000.0 || w["elevation_gain_meters"] != 820.0 {
 		t.Fatalf("week %v, want June 8 with its totals", w)
 	}
 	if q := repo.weekQuery; q == nil || q.SportCode == nil || *q.SportCode != "run" {

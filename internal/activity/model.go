@@ -84,16 +84,18 @@ type AuthoredPage struct {
 	Next  *Position
 }
 
-// Totals sum a set of activities: their number, their durations and their
-// distances, an activity without distance adding 0.
+// Totals sum a set of activities: their number, their durations, their
+// distances and their elevation gains, an activity without distance or
+// elevation gain adding 0.
 type Totals struct {
-	Sessions        int
-	DurationSeconds int
-	DistanceMeters  int
+	Sessions            int
+	DurationSeconds     int
+	DistanceMeters      int
+	ElevationGainMeters int
 }
 
 // Day is a local day of a week of activities, with its totals (the distance
-// left out).
+// and the elevation gain left out).
 type Day struct {
 	// Date is the local day, as a date (midnight UTC).
 	Date            time.Time

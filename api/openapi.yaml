@@ -2569,7 +2569,7 @@ components:
           description: Pass it as `cursor` for the next page; null on the last page.
     ActivityWeek:
       type: object
-      required: [starts_at, ends_at, sessions, duration_seconds, distance_meters]
+      required: [starts_at, ends_at, sessions, duration_seconds, distance_meters, elevation_gain_meters]
       additionalProperties: false
       properties:
         starts_at:
@@ -2591,6 +2591,10 @@ components:
           type: integer
           minimum: 0
           description: Sum of the distances entered; an activity without distance adds 0.
+        elevation_gain_meters:
+          type: integer
+          minimum: 0
+          description: Sum of the elevation gains entered, over the same activities as `distance_meters`; an activity without one adds 0.
     ActivityWeekPage:
       type: object
       required: [items, next_cursor]
@@ -2621,7 +2625,7 @@ components:
           minimum: 0
     CurrentActivityWeek:
       type: object
-      required: [starts_at, ends_at, sessions, duration_seconds, distance_meters, days]
+      required: [starts_at, ends_at, sessions, duration_seconds, distance_meters, elevation_gain_meters, days]
       additionalProperties: false
       properties:
         starts_at:
@@ -2642,6 +2646,10 @@ components:
           type: integer
           minimum: 0
           description: Sum of the distances entered; an activity without distance adds 0.
+        elevation_gain_meters:
+          type: integer
+          minimum: 0
+          description: Sum of the elevation gains entered, over the same activities as `distance_meters`; an activity without one adds 0.
         days:
           type: array
           description: The 7 days of the week, Monday to Sunday, empty ones included.

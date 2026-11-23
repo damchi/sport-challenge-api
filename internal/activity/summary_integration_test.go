@@ -171,3 +171,69 @@ func TestListFiltersBySport(t *testing.T) {
 		}
 	}
 }
+
+// climb stores a run of userID started at startedAt, of 5 km, with gain
+// meters of elevation gain when set, deleted when deleted.
+func (f fixture) climb(userID string, startedAt time.Time, gain *int, deleted bool) {
+	f.t.Helper()
+	var deletedAt *time.Time
+	if deleted {
+		deletedAt = &recordNow
+	}
+	if _, err := f.pool.Exec(f.t.Context(), `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters, elevation_gain_meters, deleted_at)
+		VALUES ($1, 'run', $2, 1800, 5000, $3, $4)`, userID, startedAt, gain, deletedAt); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// TestWeeklyElevationGain sums the elevation gains of a week (SC-API-150):
+// an activity without one adds 0, a deleted one and someone else's are left
+// out, and a week holds what started from Monday 00:00 to the next, local.
+func TestWeeklyElevationGain(t *testing.T) {
+	f := setupRecord(t)
+	svc := f.service()
+
+	// A week without any activity: 0.
+	sum, err := svc.MySummary(t.Context(), f.user, "America/Toronto")
+	if err != nil || sum.CurrentWeek.ElevationGainMeters != 0 {
+		t.Fatalf("empty week = %+v, %v, want 0 m", sum.CurrentWeek, err)
+	}
+
+	f.climb(f.user, toronto(t, 2026, 6, 8, 0), ptr(300), false)                     // first instant of the week of recordNow
+	f.climb(f.user, toronto(t, 2026, 6, 9, 7), nil, false)                          // no elevation gain: adds 0
+	f.climb(f.user, toronto(t, 2026, 6, 10, 7), ptr(0), false)                      // entered as 0
+	f.climb(f.user, time.Date(2026, 6, 15, 3, 59, 0, 0, time.UTC), ptr(450), false) // Sunday 23:59 in Toronto
+	f.climb(f.user, toronto(t, 2026, 6, 15, 0), ptr(1000), false)                   // next Monday 00:00: the next week
+	f.climb(f.user, toronto(t, 2026, 6, 8, 0).Add(-time.Minute), ptr(2000), false)  // previous Sunday 23:59
+	f.climb(f.user, toronto(t, 2026, 6, 11, 7), ptr(5000), true)                    // deleted
+	f.climb(f.otherUser(), toronto(t, 2026, 6, 11, 7), ptr(5000), false)            // someone else
+
+	sum, err = svc.MySummary(t.Context(), f.user, "America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := sum.CurrentWeek; w.Sessions != 4 || w.ElevationGainMeters != 750 {
+		t.Fatalf("week of recordNow = %+v, want 4 activities and 750 m", w.Totals)
+	}
+
+	page, err := svc.MyWeeks(t.Context(), f.user, "America/Toronto", nil, 10, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]int, 0, len(page.Items))
+	for _, w := range page.Items {
+		got = append(got, w.ElevationGainMeters)
+	}
+	// Weeks of June 15, June 8 and June 1, most recent first.
+	if want := []int{1000, 750, 2000}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("weekly elevation gains %v, want %v", got, want)
+	}
+
+	// The sport filter keeps the same activities as for the distance.
+	yoga := "yoga"
+	f.session(f.user, "yoga", nil, toronto(t, 2026, 6, 12, 7), 3600, nil, false)
+	page, err = svc.MyWeeks(t.Context(), f.user, "America/Toronto", &yoga, 10, nil)
+	if err != nil || len(page.Items) != 1 || page.Items[0].ElevationGainMeters != 0 {
+		t.Fatalf("yoga weeks = %+v, %v, want one week with 0 m", page.Items, err)
+	}
+}
