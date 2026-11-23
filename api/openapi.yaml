@@ -191,13 +191,15 @@ paths:
       description: |
         The activities of the authenticated user, deleted ones left out,
         most recent first (`started_at`, then `id`). `from` and `to` keep
-        those started in `[from, to)`; `to` must come after `from`. Each one
+        those started in `[from, to)`; `to` must come after `from`; `sport`
+        those of one sport. Each one
         lists the challenges where it counts now and whether it is `locked`
         (its week is locked in one of them: 7 am, local time of that
         challenge, on the first day of the next week, the day of its
         `week_ends_at`).
       tags: [activities]
       parameters:
+        - $ref: "#/components/parameters/SportFilter"
         - name: from
           in: query
           schema:
@@ -228,6 +230,76 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActivityPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/me/activities/summary:
+    get:
+      operationId: getMyActivitySummary
+      summary: Summarize my activities
+      description: |
+        Totals of the activities of the authenticated user, deleted ones left
+        out, whether they count in a challenge or not: those of the current
+        week, day by day, and the number of activities of each sport. A week
+        runs from Monday 00:00 to the next Monday 00:00 in `tz` (the first
+        instant of the day where a time change skips midnight), so it can last
+        167 or 169 hours; it is not the week of a challenge.
+      tags: [activities]
+      parameters:
+        - $ref: "#/components/parameters/TimeZone"
+      responses:
+        "200":
+          description: The summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivitySummary"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/me/activities/weeks:
+    get:
+      operationId: listMyActivityWeeks
+      summary: List the totals of my weeks
+      description: |
+        The weeks with at least one activity of the authenticated user
+        (deleted ones left out; of `sport` only, when given), most recent
+        first, with their totals. Weeks are cut as in
+        `GET /api/v1/me/activities/summary`.
+      tags: [activities]
+      parameters:
+        - $ref: "#/components/parameters/TimeZone"
+        - $ref: "#/components/parameters/SportFilter"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the previous page, as is.
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: A page of weeks.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityWeekPage"
         "400":
           $ref: "#/components/responses/ValidationFailed"
         "401":
@@ -1240,6 +1312,30 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Auth0 access token of a user (audience of the API); machine-to-machine tokens are refused.
+  parameters:
+    TimeZone:
+      name: tz
+      in: query
+      required: true
+      description: |
+        IANA time zone the weeks and days are cut in (that of the activity
+        entry: the one the challenges in progress share, else the device's).
+        An unknown zone gives `validation_failed` on `tz`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        example: America/Toronto
+    SportFilter:
+      name: sport
+      in: query
+      description: |
+        Keeps the activities of this sport of the catalogue (`other` keeps
+        every activity of the sport `other`). An unknown sport keeps none.
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9_]{0,31}$"
+        example: run
   responses:
     Unauthorized:
       description: |
@@ -2446,6 +2542,115 @@ components:
           type: string
           nullable: true
           description: Pass it as `cursor` for the next page; null on the last page.
+    ActivityWeek:
+      type: object
+      required: [starts_at, ends_at, sessions, duration_seconds, distance_meters]
+      additionalProperties: false
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          description: Monday 00:00 in `tz`.
+        ends_at:
+          type: string
+          format: date-time
+          description: Excluded, the next Monday 00:00 in `tz`.
+        sessions:
+          type: integer
+          minimum: 0
+          description: Number of activities started in the week.
+        duration_seconds:
+          type: integer
+          minimum: 0
+        distance_meters:
+          type: integer
+          minimum: 0
+          description: Sum of the distances entered; an activity without distance adds 0.
+    ActivityWeekPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityWeek"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Pass it as `cursor` for the next page; null on the last page.
+    ActivityDay:
+      type: object
+      required: [date, sessions, duration_seconds]
+      additionalProperties: false
+      properties:
+        date:
+          type: string
+          format: date
+          description: Local day in `tz`.
+        sessions:
+          type: integer
+          minimum: 0
+        duration_seconds:
+          type: integer
+          minimum: 0
+    CurrentActivityWeek:
+      type: object
+      required: [starts_at, ends_at, sessions, duration_seconds, distance_meters, days]
+      additionalProperties: false
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          description: Monday 00:00 in `tz`.
+        ends_at:
+          type: string
+          format: date-time
+          description: Excluded, the next Monday 00:00 in `tz`.
+        sessions:
+          type: integer
+          minimum: 0
+        duration_seconds:
+          type: integer
+          minimum: 0
+        distance_meters:
+          type: integer
+          minimum: 0
+          description: Sum of the distances entered; an activity without distance adds 0.
+        days:
+          type: array
+          description: The 7 days of the week, Monday to Sunday, empty ones included.
+          minItems: 7
+          maxItems: 7
+          items:
+            $ref: "#/components/schemas/ActivityDay"
+    SportCount:
+      type: object
+      required: [sport_code, count]
+      additionalProperties: false
+      properties:
+        sport_code:
+          type: string
+          description: Code of the catalogue; every activity of the sport `other` counts under `other`, whatever its label.
+        count:
+          type: integer
+          minimum: 1
+    ActivitySummary:
+      type: object
+      required: [current_week, sports, total]
+      additionalProperties: false
+      properties:
+        current_week:
+          $ref: "#/components/schemas/CurrentActivityWeek"
+        sports:
+          type: array
+          description: The sports of my activities, most frequent first (then by code).
+          items:
+            $ref: "#/components/schemas/SportCount"
+        total:
+          type: integer
+          minimum: 0
+          description: Number of my activities, the sum of the counts of `sports`.
     ChallengeActivity:
       type: object
       description: |

@@ -18,6 +18,9 @@ type repository interface {
 	Update(ctx context.Context, actorID, id string, a Activity, decide func(ctx context.Context, current Activity) error) (Activity, error)
 	Delete(ctx context.Context, actorID, id string, at time.Time, decide func(ctx context.Context, current Activity) error) error
 	List(ctx context.Context, q ListQuery) ([]Activity, error)
+	DayTotals(ctx context.Context, userID string, bounds []time.Time) ([]Totals, error)
+	SportCounts(ctx context.Context, userID string) ([]SportCount, error)
+	Weeks(ctx context.Context, q WeekQuery) ([]WeekTotals, error)
 	EraseUser(ctx context.Context, userID string) error
 }
 
@@ -207,24 +210,27 @@ func (s *Service) Delete(ctx context.Context, actorID, id string) error {
 	return nil
 }
 
-// Period keeps the activities started in [From, To); a nil bound is open.
-type Period struct {
-	From *time.Time
-	To   *time.Time
+// Filter keeps the activities started in [From, To), a nil bound being
+// open, and those of sport Sport only when set (an unknown sport keeps
+// none).
+type Filter struct {
+	From  *time.Time
+	To    *time.Time
+	Sport *string
 }
 
-// Mine returns a page of the activities of actorID started in period, most
+// Mine returns a page of the activities of actorID that filter keeps, most
 // recent first, each with the challenges where it counts now and whether it
-// is locked. A period whose To does not come after its From gives 400
+// is locked. A filter whose To does not come after its From gives 400
 // validation_failed on to.
-func (s *Service) Mine(ctx context.Context, actorID string, period Period, limit int, after *Position) (Page, error) {
+func (s *Service) Mine(ctx context.Context, actorID string, filter Filter, limit int, after *Position) (Page, error) {
 	if limit < 1 {
 		return Page{}, apperr.InvalidFields(nil, "limit")
 	}
-	if period.From != nil && period.To != nil && !period.From.Before(*period.To) {
+	if filter.From != nil && filter.To != nil && !filter.From.Before(*filter.To) {
 		return Page{}, apperr.InvalidFields(nil, "to")
 	}
-	q := ListQuery{UserIDs: []string{actorID}, From: period.From, To: period.To, Limit: limit + 1, After: after}
+	q := ListQuery{UserIDs: []string{actorID}, From: filter.From, To: filter.To, SportCode: filter.Sport, Limit: limit + 1, After: after}
 	return s.page(ctx, q, limit, func(ctx context.Context) (func(string) []Participation, error) {
 		ps, err := s.participations.Participations(ctx, actorID)
 		if err != nil {
@@ -232,6 +238,82 @@ func (s *Service) Mine(ctx context.Context, actorID string, period Period, limit
 		}
 		return func(string) []Participation { return ps }, nil
 	})
+}
+
+// MySummary sums the activities of actorID, deleted ones left out, whether
+// they count in a challenge or not: the week of the clock's now in the IANA
+// zone tz (localWeek), day by day, and the number of activities of each
+// sport. An unknown zone gives 400 validation_failed on tz.
+func (s *Service) MySummary(ctx context.Context, actorID, tz string) (Summary, error) {
+	loc, err := loadZone(tz)
+	if err != nil {
+		return Summary{}, apperr.InvalidFields(err, "tz")
+	}
+	w := weekOf(s.clock.Now(), loc)
+	days, err := s.repo.DayTotals(ctx, actorID, w.Bounds[:])
+	if err != nil {
+		return Summary{}, fmt.Errorf("read day totals: %w", err)
+	}
+	if len(days) != 7 {
+		return Summary{}, fmt.Errorf("read day totals: %d days, want 7", len(days))
+	}
+	sports, err := s.repo.SportCounts(ctx, actorID)
+	if err != nil {
+		return Summary{}, fmt.Errorf("read sport counts: %w", err)
+	}
+	out := Summary{
+		CurrentWeek: CurrentWeek{Week: Week{StartsAt: w.Start(), EndsAt: w.End()}, Days: make([]Day, 0, len(days))},
+		Sports:      sports,
+	}
+	for i, d := range days {
+		out.CurrentWeek.Days = append(out.CurrentWeek.Days, Day{Date: w.Day(i), Sessions: d.Sessions, DurationSeconds: d.DurationSeconds})
+		out.CurrentWeek.Sessions += d.Sessions
+		out.CurrentWeek.DurationSeconds += d.DurationSeconds
+		out.CurrentWeek.DistanceMeters += d.DistanceMeters
+	}
+	for _, c := range sports {
+		out.Total += c.Count
+	}
+	return out, nil
+}
+
+// MyWeeks returns a page of the weeks of the activities of actorID in the
+// IANA zone tz (localWeek) that have at least one activity, deleted ones
+// left out, of sport when set (an unknown sport keeps none), most recent
+// first, after the week after when set, each with its totals. An unknown
+// zone gives 400 validation_failed on tz.
+func (s *Service) MyWeeks(ctx context.Context, actorID, tz string, sport *string, limit int, after *WeekPosition) (WeekPage, error) {
+	if limit < 1 {
+		return WeekPage{}, apperr.InvalidFields(nil, "limit")
+	}
+	loc, err := loadZone(tz)
+	if err != nil {
+		return WeekPage{}, apperr.InvalidFields(err, "tz")
+	}
+	q := WeekQuery{UserID: actorID, Zone: tz, SportCode: sport, Limit: limit + 1}
+	if after != nil {
+		// The weeks before that one: the activities started before it.
+		before := weekStarting(after.Monday, loc).Start()
+		q.Before = &before
+	}
+	rows, err := s.repo.Weeks(ctx, q)
+	if errors.Is(err, errUnknownZone) {
+		return WeekPage{}, apperr.InvalidFields(err, "tz")
+	}
+	if err != nil {
+		return WeekPage{}, fmt.Errorf("list weeks: %w", err)
+	}
+	var page WeekPage
+	if len(rows) > limit {
+		rows = rows[:limit]
+		page.Next = &WeekPosition{Monday: rows[limit-1].Monday}
+	}
+	page.Items = make([]Week, 0, len(rows))
+	for _, row := range rows {
+		w := weekStarting(row.Monday, loc)
+		page.Items = append(page.Items, Week{StartsAt: w.Start(), EndsAt: w.End(), Totals: row.Totals})
+	}
+	return page, nil
 }
 
 // OfParticipant returns a page of the activities of userID started in the
