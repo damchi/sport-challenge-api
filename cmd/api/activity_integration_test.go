@@ -192,7 +192,7 @@ func TestActivityContributions(t *testing.T) {
 		t.Fatalf("Record() contributions %+v, want %+v", rec.Contributions, want)
 	}
 
-	mine, err := r.activities.Mine(t.Context(), r.user, activity.Period{}, 20, nil)
+	mine, err := r.activities.Mine(t.Context(), r.user, activity.Filter{}, 20, nil)
 	if err != nil || len(mine.Items) != 1 || !reflect.DeepEqual(mine.Items[0].Contributions, want) {
 		t.Fatalf("Mine() = %+v, %v, want contributions %+v", mine, err, want)
 	}
@@ -435,7 +435,7 @@ func TestListParticipantActivitiesVisibility(t *testing.T) {
 	// 2026-06-04, whose week 1 (holding the activity) ended on 2026-06-11.
 	// It locks the activity for its author but never shows through here.
 	r.challenge([3]int{2026, 6, 4}, 3, "active", false)
-	mine, err := r.activities.Mine(t.Context(), r.user, activity.Period{}, 1, nil)
+	mine, err := r.activities.Mine(t.Context(), r.user, activity.Filter{}, 1, nil)
 	if err != nil || len(mine.Items) != 1 || mine.Items[0].ID != in.ID || !mine.Items[0].Locked {
 		t.Fatalf("Mine() = %+v, %v, want the activity locked for its author", mine, err)
 	}
@@ -550,14 +550,14 @@ func TestListMyActivities(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := r.activities.Mine(t.Context(), r.user, activity.Period{}, 1, nil)
+	page, err := r.activities.Mine(t.Context(), r.user, activity.Filter{}, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Items) != 1 || page.Items[0].ID != week2.ID || page.Items[0].Locked || !slices.Equal(challengeIDs(page.Items[0].Contributions), []string{c}) || page.Next == nil {
 		t.Fatalf("first page %+v, want the run of week 2, unlocked, and a next page", page)
 	}
-	page, err = r.activities.Mine(t.Context(), r.user, activity.Period{}, 1, page.Next)
+	page, err = r.activities.Mine(t.Context(), r.user, activity.Filter{}, 1, page.Next)
 	if err != nil {
 		t.Fatal(err)
 	}

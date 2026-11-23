@@ -31,6 +31,41 @@ type fakeRepository struct {
 	// listing serves List; listed records its query.
 	listing []Activity
 	listed  *ListQuery
+	// days serve DayTotals (zeros when nil), bounds records its bounds;
+	// sports serve SportCounts; weeks serve Weeks, weekQuery records its
+	// query and weeksErr fails it.
+	days      []Totals
+	bounds    []time.Time
+	sports    []SportCount
+	weeks     []WeekTotals
+	weekQuery *WeekQuery
+	weeksErr  error
+}
+
+func (f *fakeRepository) DayTotals(_ context.Context, _ string, bounds []time.Time) ([]Totals, error) {
+	f.bounds = bounds
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.days == nil {
+		return make([]Totals, len(bounds)-1), nil
+	}
+	return f.days, nil
+}
+
+func (f *fakeRepository) SportCounts(context.Context, string) ([]SportCount, error) {
+	return f.sports, f.err
+}
+
+func (f *fakeRepository) Weeks(_ context.Context, q WeekQuery) ([]WeekTotals, error) {
+	f.weekQuery = &q
+	if f.weeksErr != nil {
+		return nil, f.weeksErr
+	}
+	if len(f.weeks) > q.Limit {
+		return f.weeks[:q.Limit], nil
+	}
+	return f.weeks, nil
 }
 
 // EraseUser is covered by the integration tests.
@@ -583,7 +618,7 @@ func TestServiceMine(t *testing.T) {
 			repo := &fakeRepository{listing: listing(t, actor, tt.available)}
 			from, to := toronto(t, 2026, 6, 1, 0), toronto(t, 2026, 6, 15, 0)
 			after := &Position{StartedAt: toronto(t, 2026, 6, 12, 0), ID: "5f1e7c1a-0000-4000-8000-000000000009"}
-			page, err := newService(t, repo, fakeParticipations{challenges: []Participation{c1}}).Mine(t.Context(), actor, Period{From: &from, To: &to}, tt.limit, after)
+			page, err := newService(t, repo, fakeParticipations{challenges: []Participation{c1}}).Mine(t.Context(), actor, Filter{From: &from, To: &to}, tt.limit, after)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -615,7 +650,7 @@ func TestServiceMineCountsAndLocks(t *testing.T) {
 	week1 := Activity{ID: "a1", UserID: actor, StartedAt: toronto(t, 2026, 6, 3, 7), DurationSeconds: 60, Source: SourceManual}
 	before := Activity{ID: "a0", UserID: actor, StartedAt: toronto(t, 2026, 5, 20, 7), DurationSeconds: 60, Source: SourceManual}
 	repo := &fakeRepository{listing: []Activity{week2, week1, before}}
-	page, err := newService(t, repo, fakeParticipations{challenges: []Participation{c1, c2}}).Mine(t.Context(), actor, Period{}, 20, nil)
+	page, err := newService(t, repo, fakeParticipations{challenges: []Participation{c1, c2}}).Mine(t.Context(), actor, Filter{}, 20, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -641,18 +676,18 @@ func TestServiceMineRefusals(t *testing.T) {
 	before := from.Add(-time.Second)
 	tests := []struct {
 		name   string
-		period Period
+		filter Filter
 		limit  int
 		field  string
 	}{
 		{name: "empty page", limit: 0, field: "limit"},
-		{name: "to before from", period: Period{From: &from, To: &before}, limit: 20, field: "to"},
-		{name: "to equal to from: empty period", period: Period{From: &from, To: &from}, limit: 20, field: "to"},
+		{name: "to before from", filter: Filter{From: &from, To: &before}, limit: 20, field: "to"},
+		{name: "to equal to from: empty period", filter: Filter{From: &from, To: &from}, limit: 20, field: "to"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{}
-			_, err := newService(t, repo, fakeParticipations{}).Mine(t.Context(), actor, tt.period, tt.limit, nil)
+			_, err := newService(t, repo, fakeParticipations{}).Mine(t.Context(), actor, tt.filter, tt.limit, nil)
 			var appErr *apperr.Error
 			if !errors.As(err, &appErr) || appErr.Code != apperr.CodeValidationFailed || appErr.Params[apperr.FieldsParam] != tt.field {
 				t.Fatalf("error = %v, want validation_failed on %s", err, tt.field)
@@ -666,10 +701,10 @@ func TestServiceMineRefusals(t *testing.T) {
 
 func TestServiceMineFailures(t *testing.T) {
 	storageErr := errors.New("connection reset")
-	if _, err := newService(t, &fakeRepository{err: storageErr}, fakeParticipations{}).Mine(t.Context(), actor, Period{}, 20, nil); !errors.Is(err, storageErr) {
+	if _, err := newService(t, &fakeRepository{err: storageErr}, fakeParticipations{}).Mine(t.Context(), actor, Filter{}, 20, nil); !errors.Is(err, storageErr) {
 		t.Fatalf("listing failure: error = %v, want the cause kept", err)
 	}
-	if _, err := newService(t, &fakeRepository{listing: listing(t, actor, 1)}, fakeParticipations{err: storageErr}).Mine(t.Context(), actor, Period{}, 20, nil); !errors.Is(err, storageErr) {
+	if _, err := newService(t, &fakeRepository{listing: listing(t, actor, 1)}, fakeParticipations{err: storageErr}).Mine(t.Context(), actor, Filter{}, 20, nil); !errors.Is(err, storageErr) {
 		t.Fatalf("participations failure: error = %v, want the cause kept", err)
 	}
 }

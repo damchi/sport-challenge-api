@@ -3,8 +3,10 @@ package activity
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -94,7 +96,7 @@ func (h *Handler) ListMyActivities(ctx context.Context, req api.ListMyActivities
 	if err != nil {
 		return nil, err
 	}
-	page, err := h.service.Mine(ctx, actorID, Period{From: p.From, To: p.To}, limitOf(p.Limit), after)
+	page, err := h.service.Mine(ctx, actorID, Filter{From: p.From, To: p.To, Sport: p.Sport}, limitOf(p.Limit), after)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +105,85 @@ func (h *Handler) ListMyActivities(ctx context.Context, req api.ListMyActivities
 		return nil, err
 	}
 	return api.ListMyActivities200JSONResponse(out), nil
+}
+
+// GetMyActivitySummary answers the totals of the current week and the
+// number of activities of each sport of the authenticated user.
+func (h *Handler) GetMyActivitySummary(ctx context.Context, req api.GetMyActivitySummaryRequestObject) (api.GetMyActivitySummaryResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	sum, err := h.service.MySummary(ctx, actorID, req.Params.Tz)
+	if err != nil {
+		return nil, err
+	}
+	w := sum.CurrentWeek
+	out := api.ActivitySummary{
+		CurrentWeek: api.CurrentActivityWeek{
+			StartsAt:        w.StartsAt.UTC(),
+			EndsAt:          w.EndsAt.UTC(),
+			Sessions:        w.Sessions,
+			DurationSeconds: w.DurationSeconds,
+			DistanceMeters:  w.DistanceMeters,
+			Days:            make([]api.ActivityDay, 0, len(w.Days)),
+		},
+		Sports: make([]api.SportCount, 0, len(sum.Sports)),
+		Total:  sum.Total,
+	}
+	for _, d := range w.Days {
+		out.CurrentWeek.Days = append(out.CurrentWeek.Days, api.ActivityDay{
+			Date:            openapi_types.Date{Time: d.Date},
+			Sessions:        d.Sessions,
+			DurationSeconds: d.DurationSeconds,
+		})
+	}
+	for _, c := range sum.Sports {
+		out.Sports = append(out.Sports, api.SportCount{SportCode: c.SportCode, Count: c.Count})
+	}
+	return api.GetMyActivitySummary200JSONResponse(out), nil
+}
+
+// ListMyActivityWeeks answers a page of the weeks of the activities of the
+// authenticated user, with their totals.
+func (h *Handler) ListMyActivityWeeks(ctx context.Context, req api.ListMyActivityWeeksRequestObject) (api.ListMyActivityWeeksResponseObject, error) {
+	actorID, ok := auth.UserID(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	p := req.Params
+	var after *WeekPosition
+	if p.Cursor != nil {
+		after = &WeekPosition{}
+		if err := httpx.DecodeCursor(*p.Cursor, after); err != nil {
+			return nil, err
+		}
+		if after.Monday.IsZero() || after.Monday.Weekday() != time.Monday {
+			return nil, apperr.InvalidFields(nil, "cursor")
+		}
+	}
+	page, err := h.service.MyWeeks(ctx, actorID, p.Tz, p.Sport, limitOf(p.Limit), after)
+	if err != nil {
+		return nil, err
+	}
+	out := api.ActivityWeekPage{Items: make([]api.ActivityWeek, 0, len(page.Items))}
+	for _, w := range page.Items {
+		out.Items = append(out.Items, api.ActivityWeek{
+			StartsAt:        w.StartsAt.UTC(),
+			EndsAt:          w.EndsAt.UTC(),
+			Sessions:        w.Sessions,
+			DurationSeconds: w.DurationSeconds,
+			DistanceMeters:  w.DistanceMeters,
+		})
+	}
+	if page.Next != nil {
+		cursor, err := httpx.EncodeCursor(page.Next)
+		if err != nil {
+			return nil, err
+		}
+		out.NextCursor = &cursor
+	}
+	return api.ListMyActivityWeeks200JSONResponse(out), nil
 }
 
 // ListParticipantActivities answers a page of the activities of a

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
@@ -20,6 +22,10 @@ var errActivityOverlap = errors.New("activity overlaps another")
 
 // errActivityNotFound means no activity has this id, or a deleted one.
 var errActivityNotFound = errors.New("activity not found")
+
+// invalidParameterValue is SQLSTATE 22023: here, a time zone PostgreSQL
+// does not know (Weeks).
+const invalidParameterValue = "22023"
 
 // Repository stores the activities in PostgreSQL.
 type Repository struct {
@@ -201,8 +207,8 @@ func (r *Repository) change(ctx context.Context, actorID, id string, decide func
 }
 
 // List returns up to q.Limit activities of the users of q.UserIDs, deleted
-// ones left out, started in [q.From, q.To), most recent first (started_at,
-// id), after the position q.After when set.
+// ones left out, started in [q.From, q.To), of sport q.SportCode when set,
+// most recent first (started_at, id), after the position q.After when set.
 func (r *Repository) List(ctx context.Context, q ListQuery) ([]Activity, error) {
 	if len(q.UserIDs) == 0 {
 		return nil, errors.New("list activities: no user")
@@ -216,12 +222,93 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Activity, error) 
 	if q.To != nil {
 		tx = tx.Where("started_at < ?", *q.To)
 	}
+	if q.SportCode != nil {
+		tx = tx.Where("sport_code = ?", *q.SportCode)
+	}
 	if q.After != nil {
 		tx = tx.Where("(started_at, id) < (?, ?)", q.After.StartedAt, q.After.ID)
 	}
 	var rows []Activity
 	if err := tx.Order("started_at DESC, id DESC").Limit(q.Limit).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list activities: %w", err)
+	}
+	return rows, nil
+}
+
+// DayTotals returns the totals of the activities of userID, deleted ones
+// left out, started on each day of bounds: item i sums those started in
+// [bounds[i], bounds[i+1]), so it has one item less than bounds (at least
+// two, in increasing order).
+func (r *Repository) DayTotals(ctx context.Context, userID string, bounds []time.Time) ([]Totals, error) {
+	if len(bounds) < 2 {
+		return nil, errors.New("day totals: fewer than two bounds")
+	}
+	var rows []struct {
+		Day int
+		Totals
+	}
+	// width_bucket gives 1 for [bounds[0], bounds[1]), and so on. One
+	// placeholder per bound: GORM would turn a slice into a row.
+	args := make([]any, 0, len(bounds)+3)
+	for _, b := range bounds {
+		args = append(args, b)
+	}
+	args = append(args, userID, bounds[0], bounds[len(bounds)-1])
+	err := r.db.WithContext(ctx).Raw(`SELECT width_bucket(started_at, CAST(ARRAY[`+strings.TrimSuffix(strings.Repeat("?, ", len(bounds)), ", ")+`] AS timestamptz[])) AS day,
+			count(*) AS sessions, sum(duration_seconds) AS duration_seconds, coalesce(sum(distance_meters), 0) AS distance_meters
+		FROM activities
+		WHERE user_id = ? AND deleted_at IS NULL AND started_at >= ? AND started_at < ?
+		GROUP BY day`, args...,
+	).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("day totals: %w", err)
+	}
+	out := make([]Totals, len(bounds)-1)
+	for _, row := range rows {
+		if row.Day < 1 || row.Day > len(out) {
+			return nil, fmt.Errorf("day totals: bucket %d out of the days", row.Day)
+		}
+		out[row.Day-1] = row.Totals
+	}
+	return out, nil
+}
+
+// SportCounts returns the number of activities of userID of each sport,
+// deleted ones left out, most frequent first, then by code.
+func (r *Repository) SportCounts(ctx context.Context, userID string) ([]SportCount, error) {
+	var rows []SportCount
+	err := r.db.WithContext(ctx).Raw(`SELECT sport_code, count(*) AS count
+		FROM activities WHERE user_id = ? AND deleted_at IS NULL
+		GROUP BY sport_code ORDER BY count DESC, sport_code`, userID).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("sport counts: %w", err)
+	}
+	return rows, nil
+}
+
+// Weeks returns up to q.Limit weeks of the activities of q.UserID, with
+// their totals, as WeekQuery selects them: a week is cut on the local dates
+// in q.Zone, from Monday (date_trunc of the local time). A zone PostgreSQL
+// does not know gives errUnknownZone.
+func (r *Repository) Weeks(ctx context.Context, q WeekQuery) ([]WeekTotals, error) {
+	tx := r.db.WithContext(ctx).Table("activities").
+		Select(`CAST(date_trunc('week', started_at AT TIME ZONE ?) AS date) AS monday,
+			count(*) AS sessions, sum(duration_seconds) AS duration_seconds, coalesce(sum(distance_meters), 0) AS distance_meters`, q.Zone).
+		Where("user_id = ? AND deleted_at IS NULL", q.UserID)
+	if q.SportCode != nil {
+		tx = tx.Where("sport_code = ?", *q.SportCode)
+	}
+	if q.Before != nil {
+		tx = tx.Where("started_at < ?", *q.Before)
+	}
+	var rows []WeekTotals
+	err := tx.Group("monday").Order("monday DESC").Limit(q.Limit).Scan(&rows).Error
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.As(err, &pgErr) && pgErr.Code == invalidParameterValue:
+		return nil, fmt.Errorf("list weeks: %w", errUnknownZone)
+	case err != nil:
+		return nil, fmt.Errorf("list weeks: %w", err)
 	}
 	return rows, nil
 }

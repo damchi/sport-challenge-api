@@ -108,6 +108,14 @@ func (unimplemented) ListMyActivities(context.Context, api.ListMyActivitiesReque
 	return nil, errNotImplemented
 }
 
+func (unimplemented) GetMyActivitySummary(context.Context, api.GetMyActivitySummaryRequestObject) (api.GetMyActivitySummaryResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) ListMyActivityWeeks(context.Context, api.ListMyActivityWeeksRequestObject) (api.ListMyActivityWeeksResponseObject, error) {
+	return nil, errNotImplemented
+}
+
 func (unimplemented) ListParticipantActivities(context.Context, api.ListParticipantActivitiesRequestObject) (api.ListParticipantActivitiesResponseObject, error) {
 	return nil, errNotImplemented
 }
