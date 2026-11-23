@@ -66,6 +66,9 @@ func TestValidate(t *testing.T) {
 		// catalogue: empty for required.
 		referenceMode string
 		wantFields    string // empty: valid
+		// pastAllowed: valid for an admin (ValidateSettings), whose first
+		// day may be in the past; every other case is judged alike.
+		pastAllowed bool
 	}{
 		{name: "valid", draft: valid()},
 		{name: "private, members can invite", draft: with(func(d *Draft) { d.Visibility = "private"; d.MembersCanInvite = true })},
@@ -120,7 +123,10 @@ func TestValidate(t *testing.T) {
 		{name: "starts the same day next year", draft: with(func(d *Draft) { d.StartDate = "2027-03-04" })},
 		{name: "starts the day after next year", draft: with(func(d *Draft) { d.StartDate = "2027-03-05" }), wantFields: "start_date"},
 		{name: "starts in year 9999", draft: with(func(d *Draft) { d.StartDate = "9999-12-31" }), wantFields: "start_date"},
-		{name: "started yesterday", draft: with(func(d *Draft) { d.StartDate = "2026-03-03" }), wantFields: "start_date"},
+		// The first day may be in the past for an admin (ValidateSettings),
+		// never more than a year ahead.
+		{name: "started yesterday", draft: with(func(d *Draft) { d.StartDate = "2026-03-03" }), wantFields: "start_date", pastAllowed: true},
+		{name: "started two years ago", draft: with(func(d *Draft) { d.StartDate = "2024-03-04" }), wantFields: "start_date", pastAllowed: true},
 		{name: "not a date", draft: with(func(d *Draft) { d.StartDate = "04/03/2026" }), wantFields: "start_date"},
 		{name: "impossible date", draft: with(func(d *Draft) { d.StartDate = "2026-02-30" }), wantFields: "start_date"},
 		{name: "date with a time", draft: with(func(d *Draft) { d.StartDate = "2026-03-04T00:00:00Z" }), wantFields: "start_date"},
@@ -257,19 +263,32 @@ func TestValidate(t *testing.T) {
 			case unknownSport:
 				mode = ""
 			}
-			_, err := Validate(tt.draft, now, distanceSports, mode)
-			if tt.wantFields == "" {
-				if err != nil {
-					t.Fatalf("Validate() error = %v, want nil", err)
+			adminFields := tt.wantFields
+			if tt.pastAllowed {
+				adminFields = ""
+			}
+			for _, v := range []struct {
+				name     string
+				validate func(Draft, time.Time, map[string]bool, string) (Window, error)
+				want     string
+			}{
+				{"Validate", Validate, tt.wantFields},
+				{"ValidateSettings", ValidateSettings, adminFields},
+			} {
+				_, err := v.validate(tt.draft, now, distanceSports, mode)
+				if v.want == "" {
+					if err != nil {
+						t.Fatalf("%s() error = %v, want nil", v.name, err)
+					}
+					continue
 				}
-				return
-			}
-			var appErr *apperr.Error
-			if !errors.As(err, &appErr) || appErr.Code != apperr.CodeValidationFailed || appErr.Status != http.StatusBadRequest {
-				t.Fatalf("Validate() error = %v, want 400 validation_failed", err)
-			}
-			if got := appErr.Params[apperr.FieldsParam]; got != tt.wantFields {
-				t.Fatalf("fields = %q, want %q", got, tt.wantFields)
+				var appErr *apperr.Error
+				if !errors.As(err, &appErr) || appErr.Code != apperr.CodeValidationFailed || appErr.Status != http.StatusBadRequest {
+					t.Fatalf("%s() error = %v, want 400 validation_failed", v.name, err)
+				}
+				if got := appErr.Params[apperr.FieldsParam]; got != v.want {
+					t.Fatalf("%s() fields = %q, want %q", v.name, got, v.want)
+				}
 			}
 		})
 	}

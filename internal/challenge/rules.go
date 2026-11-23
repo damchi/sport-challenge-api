@@ -149,6 +149,19 @@ type Window struct {
 // hours). A broken rule gives 400 validation_failed listing the fields,
 // sorted.
 func Validate(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string) (Window, error) {
+	return validate(draft, now, distanceSports, referenceMode, false)
+}
+
+// ValidateSettings checks the settings an admin gives a challenge (README
+// §2.12) with the rules of the creation (Validate), but the first day, which
+// may be in the past: the admin moves a challenge in progress or finished.
+// It is still at most a year ahead.
+func ValidateSettings(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string) (Window, error) {
+	return validate(draft, now, distanceSports, referenceMode, true)
+}
+
+// validate is Validate, the first day allowed in the past with pastAllowed.
+func validate(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string, pastAllowed bool) (Window, error) {
 	var fields []string
 
 	if !validTitle(draft.Title) {
@@ -195,7 +208,7 @@ func Validate(draft Draft, now time.Time, distanceSports map[string]bool, refere
 		y, m, d := now.In(loc).Date()
 		today := scoring.StartOfDay(y, m, d, loc)
 		// At most a year ahead: the same day next year, in local days.
-		if start.Before(today) || start.After(scoring.StartOfDay(y+1, m, d, loc)) {
+		if (!pastAllowed && start.Before(today)) || start.After(scoring.StartOfDay(y+1, m, d, loc)) {
 			fields = append(fields, "start_date")
 		}
 		window = Window{

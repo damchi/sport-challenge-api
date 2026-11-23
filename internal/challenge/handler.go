@@ -43,17 +43,8 @@ func (h *Handler) CreateChallenge(ctx context.Context, req api.CreateChallengeRe
 		ReferenceSport: b.ReferenceSport,
 	}
 	if cats := b.Categories; cats != nil {
-		draft.Distance = cats.CumulativeDistance != nil
-		draft.Elevation = cats.CumulativeElevation != nil
-		if e := cats.Elimination; e != nil {
-			draft.Elimination = &EliminationDraft{StepMeters: e.StepMeters}
-		}
-		if p := cats.Points; p != nil {
-			draft.Points = &PointsDraft{Podium: int(p.Podium), MinSessionMinutes: p.MinSessionMinutes}
-			for _, c := range p.Criteria {
-				draft.Points.Criteria = append(draft.Points.Criteria, string(c))
-			}
-		}
+		choice := CategoryChoiceOf(*cats)
+		draft.Distance, draft.Elimination, draft.Points, draft.Elevation = choice.Distance, choice.Elimination, choice.Points, choice.Elevation
 	}
 	if b.MembersCanInvite != nil {
 		draft.MembersCanInvite = *b.MembersCanInvite
@@ -71,6 +62,22 @@ func (h *Handler) CreateChallenge(ctx context.Context, req api.CreateChallengeRe
 		return nil, err
 	}
 	return api.CreateChallenge201JSONResponse(out), nil
+}
+
+// CategoryChoiceOf reads the optional categories of the contract, each
+// present to be chosen, at creation and in an admin change.
+func CategoryChoiceOf(cats api.CategoriesCreate) CategoryChoice {
+	choice := CategoryChoice{Distance: cats.CumulativeDistance != nil, Elevation: cats.CumulativeElevation != nil}
+	if e := cats.Elimination; e != nil {
+		choice.Elimination = &EliminationDraft{StepMeters: e.StepMeters}
+	}
+	if p := cats.Points; p != nil {
+		choice.Points = &PointsDraft{Podium: int(p.Podium), MinSessionMinutes: p.MinSessionMinutes}
+		for _, c := range p.Criteria {
+			choice.Points.Criteria = append(choice.Points.Criteria, string(c))
+		}
+	}
+	return choice
 }
 
 func toAPI(c Challenge) (api.Challenge, error) {

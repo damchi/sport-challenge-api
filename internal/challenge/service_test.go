@@ -67,6 +67,9 @@ type fakeRepository struct {
 	categoriesOf    map[string][]Category
 	categoriesAsked []string
 	categoriesErr   error
+	// settings is what UpdateSettings wrote, from f.challenge and its
+	// categories.
+	settings *Challenge
 }
 
 func (f *fakeRepository) Counts(_ context.Context, q ListQuery) (Counts, error) {

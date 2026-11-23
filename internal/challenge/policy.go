@@ -255,6 +255,16 @@ func CanEdit(role Role) bool {
 	return role == RoleCreator
 }
 
+// AdminRefusal lets an actor with the admin permission of their access
+// token change any setting of a challenge (README §2.12); anyone else gets
+// 404 not_found, as on every admin route.
+func AdminRefusal(admin bool) error {
+	if !admin {
+		return apperr.New(apperr.CodeNotFound, nil)
+	}
+	return nil
+}
+
 // RequireEdit is CanEdit for a use case: 403 forbidden, as the actor may
 // already see the challenge.
 func RequireEdit(role Role) error {

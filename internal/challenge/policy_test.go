@@ -175,6 +175,17 @@ func TestCanEdit(t *testing.T) {
 	}
 }
 
+func TestAdminRefusal(t *testing.T) {
+	if err := AdminRefusal(true); err != nil {
+		t.Fatalf("admin refused: %v", err)
+	}
+	err := AdminRefusal(false)
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeNotFound || appErr.Status != http.StatusNotFound {
+		t.Fatalf("AdminRefusal(false) = %v, want 404 not_found", err)
+	}
+}
+
 func TestRequireEdit(t *testing.T) {
 	if err := RequireEdit(RoleCreator); err != nil {
 		t.Fatalf("creator refused: %v", err)

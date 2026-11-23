@@ -26,6 +26,9 @@ type repository interface {
 	Categories(ctx context.Context, id string) ([]Category, error)
 	CategoriesOf(ctx context.Context, ids []string) (map[string][]Category, error)
 	UpdateText(ctx context.Context, id string, changes TextChanges) error
+	// UpdateSettings writes the challenge decide returns, columns and
+	// categories, under the lock of challenge id.
+	UpdateSettings(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, []Category) (Challenge, error)) error
 	Join(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error
 	Abandon(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (bool, time.Time, error)) error
 	Exclude(ctx context.Context, id, actorID, targetID string, now time.Time, decide func(c Challenge, actor, target Membership) (bool, time.Time, error)) error
@@ -123,12 +126,40 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		factors = referenceFactors(suggested, reference)
 		maps.Copy(factors, draft.DistanceFactors)
 	}
+
+	c, err := s.repo.Create(ctx, Challenge{
+		Title:            strings.TrimSpace(draft.Title),
+		Description:      noEmpty(draft.Description),
+		Visibility:       draft.Visibility,
+		MembersCanInvite: draft.MembersCanInvite,
+		Timezone:         draft.Timezone,
+		ReferenceSport:   reference,
+		StartsAt:         window.StartsAt,
+		EndsAt:           window.EndsAt,
+		CreatedBy:        actorID,
+		Categories:       categoriesOf(draft, factors),
+	}, now)
+	if errors.Is(err, errAccountDeleted) {
+		return Challenge{}, apperr.New(apperr.CodeAccountDeleted, nil)
+	}
+	if err != nil {
+		return Challenge{}, fmt.Errorf("store challenge: %w", err)
+	}
+	return c, nil
+}
+
+// categoriesOf builds the categories of draft, in position order: the
+// cumulative time always, then those chosen. factors go to the categories
+// that use them (the cumulative distance, the points with the longest
+// distance); the elimination is run in the reference sport; the minimum
+// session of the points is stored in seconds.
+func categoriesOf(draft Draft, factors map[string]float64) []Category {
 	categories := []Category{{Type: CategoryCumulativeTime, Position: positionTime, Params: Params{}}}
 	if draft.Distance {
 		categories = append(categories, Category{Type: CategoryCumulativeDistance, Position: positionDistance, Params: Params{Factors: factors}})
 	}
 	if e := draft.Elimination; e != nil {
-		categories = append(categories, Category{Type: CategoryElimination, Position: positionElimination, Params: Params{Sport: reference, StepMeters: e.StepMeters}})
+		categories = append(categories, Category{Type: CategoryElimination, Position: positionElimination, Params: Params{Sport: draft.reference(), StepMeters: e.StepMeters}})
 	}
 	if p := draft.Points; p != nil {
 		params := Params{Criteria: p.Criteria, Podium: p.Podium, MinSessionSeconds: p.minSessionMinutes() * 60}
@@ -140,31 +171,16 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 	if draft.Elevation {
 		categories = append(categories, Category{Type: CategoryElevation, Position: positionElevation, Params: Params{}})
 	}
+	return categories
+}
 
-	// An empty description is no description, as on edit.
-	description := draft.Description
+// noEmpty is description, none when empty: an empty description is no
+// description, at creation as on edit.
+func noEmpty(description *string) *string {
 	if description != nil && *description == "" {
-		description = nil
+		return nil
 	}
-	c, err := s.repo.Create(ctx, Challenge{
-		Title:            strings.TrimSpace(draft.Title),
-		Description:      description,
-		Visibility:       draft.Visibility,
-		MembersCanInvite: draft.MembersCanInvite,
-		Timezone:         draft.Timezone,
-		ReferenceSport:   reference,
-		StartsAt:         window.StartsAt,
-		EndsAt:           window.EndsAt,
-		CreatedBy:        actorID,
-		Categories:       categories,
-	}, now)
-	if errors.Is(err, errAccountDeleted) {
-		return Challenge{}, apperr.New(apperr.CodeAccountDeleted, nil)
-	}
-	if err != nil {
-		return Challenge{}, fmt.Errorf("store challenge: %w", err)
-	}
-	return c, nil
+	return description
 }
 
 // List returns a page of challenges for actorID: public ones, or those the

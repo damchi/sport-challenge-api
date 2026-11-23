@@ -1501,6 +1501,70 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateAdminChallenge
+      summary: Change any setting of a challenge, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Changes the settings of a
+        challenge, those frozen at creation included, in progress or finished
+        (README §2.12): every field of the creation, checked by the same
+        rules, but the first day, which may be in the past (at most a year
+        ahead, as at creation). A field left out keeps its value. The
+        cumulative time is always there: `categories` replaces the optional
+        categories, those it leaves out being removed. A new reference sport
+        starts again from the suggested factors brought back to it; otherwise
+        the factors of the challenge stay. `distance_factors` then replaces
+        those it names. A new first day or time zone moves the expiry of the
+        invitation links not revoked to the new end of week 1.
+        The challenge is then judged again as the worker would (its
+        eliminations and frozen results erased, its locked weeks judged again,
+        its results frozen again once its last week is locked), the change
+        recorded in the journal with its `reason` and the challenge marked as
+        corrected, all in one transaction. With `dry_run`, everything is
+        rolled back and the answer tells what the change would do. An unknown
+        or deleted challenge answers 404 `challenge_not_found`. The body is
+        optional in the contract only so that a non-admin always gets 404
+        first: without one, the missing `reason` answers 400
+        `validation_failed`.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminChallengeUpdate"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            The account has no `admin` permission (`not_found`), or no such
+            challenge, or a deleted one (`challenge_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
   /api/v1/admin/users:
     get:
       operationId: listAdminUsers
@@ -1825,6 +1889,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    Busy:
+      description: |
+        The change waited too long for the activity writes and the runs of
+        the worker in progress (`busy`): nothing was written. Try again in a
+        moment.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     InternalError:
       description: |
         Technical failure (`internal_error`), logged with its `request_id`;
@@ -1912,6 +1985,7 @@ components:
         - rate_limited
         - not_found
         - validation_failed
+        - busy
         - internal_error
     AdminStats:
       type: object
@@ -2231,6 +2305,150 @@ components:
           type: integer
           minimum: 2
           description: The week the participant was eliminated at.
+        distance_meters:
+          type: integer
+          minimum: 0
+          description: The distance of the reference sport they did that week.
+        required_meters:
+          type: integer
+          minimum: 0
+          description: The minimum they had to reach.
+    AdminChallengeUpdate:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      description: |
+        The fields to change, as at creation (`ChallengeCreate`); a field
+        left out keeps its value, `null` is refused.
+      properties:
+        reason:
+          type: string
+          description: |
+            Why the admin makes the change, kept in the journal: 3 to 500
+            characters once surrounding spaces are removed, 3 of them
+            visible; no control character but line breaks and tabs.
+        dry_run:
+          type: boolean
+          description: Preview the change, writing nothing. `false` when absent.
+        title:
+          type: string
+          description: As at creation.
+        description:
+          type: string
+          maxLength: 2000
+          description: As at creation; an empty string removes it.
+        visibility:
+          type: string
+          enum: [public, private]
+        members_can_invite:
+          type: boolean
+        timezone:
+          type: string
+          description: |
+            IANA time zone; the first local day stays the same day in it
+            unless `start_date` is given.
+          example: America/Toronto
+        start_date:
+          type: string
+          format: date
+          description: First local day, in the past or at most a year ahead in `timezone`.
+          example: "2026-12-07"
+        weeks:
+          type: integer
+          minimum: 2
+          maximum: 52
+          description: Duration in whole weeks.
+        categories:
+          description: |
+            Replaces the optional categories as a whole, with their settings:
+            a setting left out takes its default, as at creation (the
+            `min_session_minutes` of the points goes back to 20).
+          allOf:
+            - $ref: "#/components/schemas/CategoriesCreate"
+        reference_sport:
+          type: string
+          description: As at creation; a new one starts again from the suggested factors.
+          pattern: "^[a-z][a-z0-9_]{0,31}$"
+          example: run
+        distance_factors:
+          type: object
+          description: |
+            Factors that replace those of the challenge, by sport code, with
+            the rules of the creation: distance sports only, 0.1 to 2, two
+            decimals at most, the reference sport refused; only with the
+            cumulative distance or the `longest_distance` criterion.
+          additionalProperties:
+            type: number
+            format: double
+            minimum: 0.1
+            maximum: 2
+          example:
+            ride: 0.25
+    AdminCorrection:
+      type: object
+      required: [dry_run, challenges]
+      additionalProperties: false
+      properties:
+        dry_run:
+          type: boolean
+          description: Whether this was a preview, nothing written.
+        challenges:
+          type: array
+          description: Every challenge the change touches, judged again.
+          items:
+            $ref: "#/components/schemas/AdminChallengePreview"
+    AdminChallengePreview:
+      type: object
+      required: [challenge_id, before, after, eliminations]
+      additionalProperties: false
+      description: What a change does to a challenge.
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        before:
+          description: The rankings before the change, whole (no `limit`).
+          allOf:
+            - $ref: "#/components/schemas/Leaderboard"
+        after:
+          description: The rankings after the change and the new judgement, whole.
+          allOf:
+            - $ref: "#/components/schemas/Leaderboard"
+        eliminations:
+          type: array
+          description: |
+            The participants whose elimination the change gives, removes or
+            moves to another week or distance.
+          items:
+            $ref: "#/components/schemas/AdminEliminationChange"
+    AdminEliminationChange:
+      type: object
+      required: [user, before, after]
+      additionalProperties: false
+      properties:
+        user:
+          $ref: "#/components/schemas/AdminUserRef"
+        before:
+          description: The elimination before the change; null when not eliminated.
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminEliminationJudgement"
+        after:
+          description: The elimination after the change; null when not eliminated.
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminEliminationJudgement"
+    AdminEliminationJudgement:
+      type: object
+      required: [week_number, distance_meters, required_meters]
+      additionalProperties: false
+      properties:
+        week_number:
+          type: integer
+          minimum: 2
+          description: The week the participant is eliminated at.
         distance_meters:
           type: integer
           minimum: 0

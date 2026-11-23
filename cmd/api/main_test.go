@@ -103,8 +103,8 @@ const webOrigin = "https://app.example.com"
 
 // testHandlers are the handlers of the tests of the router. No request in
 // these tests reaches a business handler: their services stay nil, except
-// that of module admin, whose policy refuses a non-admin before its storage
-// (nil too) is reached.
+// those of module admin, whose policy refuses a non-admin before their
+// storage and dependencies (nil too) are reached.
 func testHandlers() server {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	return server{
@@ -113,7 +113,8 @@ func testHandlers() server {
 		sportHandler:     sport.NewHandler(nil),
 		challengeHandler: challenge.NewHandler(nil),
 		activityHandler:  activity.NewHandler(nil),
-		adminHandler:     admin.NewHandler(admin.NewService(nil, clock.Real{}, buildinfo.Get())),
+		adminHandler: admin.NewHandler(admin.NewService(nil, clock.Real{}, buildinfo.Get()),
+			admin.NewChallengeCorrections(admin.NewCorrections(nil, nil, nil, nil), nil, nil)),
 	}
 }
 
