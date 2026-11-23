@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -197,7 +198,7 @@ func TestCreateStoresTheReferenceSport(t *testing.T) {
 					t.Errorf("factor of %s = %v, want %v", code, f, want)
 				}
 			}
-			d, err := svc.Get(t.Context(), userID, c.ID)
+			d, err := svc.Get(t.Context(), auth.Actor{ID: userID}, c.ID)
 			if err != nil {
 				t.Fatal(err)
 			}

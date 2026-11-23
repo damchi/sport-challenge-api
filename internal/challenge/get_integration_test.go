@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
@@ -26,7 +27,7 @@ func TestGetReadsTheChallengeAndMyPlace(t *testing.T) {
 	}
 
 	// The creator sees it, categories in position order.
-	d, err := svc.Get(t.Context(), creatorID, c.ID)
+	d, err := svc.Get(t.Context(), auth.Actor{ID: creatorID}, c.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,8 +48,73 @@ func TestGetReadsTheChallengeAndMyPlace(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, 'abandoned', $3, $3)", c.ID, other, now); err != nil {
 		t.Fatal(err)
 	}
-	if d, err := svc.Get(t.Context(), other, c.ID); err != nil || d.Role != RoleAbandoned {
+	if d, err := svc.Get(t.Context(), auth.Actor{ID: other}, c.ID); err != nil || d.Role != RoleAbandoned {
 		t.Fatalf("got %+v, %v, want the abandoned role", d.Role, err)
+	}
+}
+
+// TestAdminReadsEveryChallenge: an admin reads a private challenge they are
+// not in (detail, participants, activities) with the role of their
+// membership, never one deleted, and gets no write through these use cases
+// (README §2.12); without the permission the same user gets 404.
+func TestAdminReadsEveryChallenge(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, creatorID := setup(t, &pseudo)
+	c, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Visibility = VisibilityPrivate }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminID := insertProfile(t, pool, "email|admin")
+	admin := auth.Actor{ID: adminID, Admin: true}
+	notFound := apperr.New(apperr.CodeChallengeNotFound, nil)
+
+	if _, err := svc.Get(t.Context(), auth.Actor{ID: adminID}, c.ID); !errors.Is(err, notFound) {
+		t.Fatalf("without the permission: error = %v, want challenge_not_found", err)
+	}
+	d, err := svc.Get(t.Context(), admin, c.ID)
+	if err != nil || d.Role != RoleOutsider || d.CanJoin || len(d.Categories) != 3 {
+		t.Fatalf("admin: %+v, %v, want the challenge, role outsider, may not join", d, err)
+	}
+	if page, err := svc.Participants(t.Context(), admin, c.ID, 20, nil); err != nil || len(page.Items) != 1 || page.Items[0].UserID != creatorID {
+		t.Fatalf("admin participants: %+v, %v, want the creator", page, err)
+	}
+	if scope, err := svc.ActivitiesScope(t.Context(), admin, c.ID, creatorID); err != nil || scope.Participant != ParticipantActive {
+		t.Fatalf("admin activities of the creator: %+v, %v, want the active creator", scope, err)
+	}
+	if _, members, err := svc.AllActivitiesScope(t.Context(), admin, c.ID); err != nil || len(members) != 1 {
+		t.Fatalf("admin activities of all: %+v, %v, want the creator", members, err)
+	}
+
+	// No write: the write use cases never take the permission.
+	title := "Taken over"
+	if _, err := svc.UpdateText(t.Context(), adminID, c.ID, nil, TextChanges{Title: &title}); !errors.Is(err, notFound) {
+		t.Fatalf("admin edit: error = %v, want challenge_not_found", err)
+	}
+	if _, err := svc.Join(t.Context(), adminID, c.ID); !errors.Is(err, notFound) {
+		t.Fatalf("admin join: error = %v, want challenge_not_found", err)
+	}
+	if err := svc.Exclude(t.Context(), adminID, c.ID, creatorID); !errors.Is(err, notFound) {
+		t.Fatalf("admin exclusion: error = %v, want challenge_not_found", err)
+	}
+	if err := svc.Delete(t.Context(), adminID, c.ID); !errors.Is(err, notFound) {
+		t.Fatalf("admin deletion: error = %v, want challenge_not_found", err)
+	}
+	if _, err := svc.Abandon(t.Context(), adminID, c.ID); !errors.Is(err, notFound) {
+		t.Fatalf("admin abandon: error = %v, want challenge_not_found", err)
+	}
+	if _, err := svc.AddCreator(t.Context(), adminID, c.ID, adminID); !errors.Is(err, notFound) {
+		t.Fatalf("admin creator: error = %v, want challenge_not_found", err)
+	}
+
+	// A deleted challenge is out of these routes, for an admin too.
+	if err := svc.Delete(t.Context(), creatorID, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Get(t.Context(), admin, c.ID); !errors.Is(err, notFound) {
+		t.Fatalf("deleted: error = %v, want challenge_not_found", err)
+	}
+	if _, err := svc.Participants(t.Context(), admin, c.ID, 20, nil); !errors.Is(err, notFound) {
+		t.Fatalf("deleted participants: error = %v, want challenge_not_found", err)
 	}
 }
 
@@ -64,7 +130,7 @@ func TestGetCountsTheParticipants(t *testing.T) {
 	}
 	countOf := func(actor string) int {
 		t.Helper()
-		d, err := svc.Get(t.Context(), actor, c.ID)
+		d, err := svc.Get(t.Context(), auth.Actor{ID: actor}, c.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +207,7 @@ func TestGetNotFoundIsTheSameForEveryCase(t *testing.T) {
 	}
 	var first *apperr.Error
 	for name, tc := range cases {
-		_, err := svc.Get(t.Context(), tc.actor, tc.id)
+		_, err := svc.Get(t.Context(), auth.Actor{ID: tc.actor}, tc.id)
 		var appErr *apperr.Error
 		if !errors.As(err, &appErr) || appErr.Code != apperr.CodeChallengeNotFound {
 			t.Fatalf("%s: error = %v, want challenge_not_found", name, err)
@@ -174,7 +240,7 @@ func TestGetRegistrationDeadline(t *testing.T) {
 	clk := clock.NewFake(deadline.Add(-time.Second))
 	reader := NewService(NewRepository(gdb), nil, nil, fakeStandings{}, clk)
 
-	d, err := reader.Get(t.Context(), outsider, c.ID)
+	d, err := reader.Get(t.Context(), auth.Actor{ID: outsider}, c.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +249,7 @@ func TestGetRegistrationDeadline(t *testing.T) {
 	}
 
 	clk.Set(deadline)
-	if d, err = reader.Get(t.Context(), outsider, c.ID); err != nil {
+	if d, err = reader.Get(t.Context(), auth.Actor{ID: outsider}, c.ID); err != nil {
 		t.Fatal(err)
 	}
 	if d.CanJoin || d.CurrentWeek != 2 {
@@ -242,23 +308,23 @@ func TestGetInvited(t *testing.T) {
 	// Holds the token of a valid invitation, never opened while logged in.
 	unlinked := insertTestUser(t, pool, "email|unlinked")
 
-	d, err := svc.Get(t.Context(), guest, c.ID)
+	d, err := svc.Get(t.Context(), auth.Actor{ID: guest}, c.ID)
 	if err != nil || d.Role != RoleInvited || !d.CanJoin {
 		t.Fatalf("linked to a valid invitation: %+v, %v, want invited, may join", d.Role, err)
 	}
 	for name, user := range map[string]string{"revoked": revokedGuest, "invited elsewhere": otherGuest, "token not linked": unlinked} {
-		if _, err := svc.Get(t.Context(), user, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		if _, err := svc.Get(t.Context(), auth.Actor{ID: user}, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 			t.Fatalf("%s: error = %v, want challenge_not_found", name, err)
 		}
 	}
 
 	// The invitation expires at the exact end of week 1.
 	clk.Set(deadline.Add(-time.Second))
-	if d, err := svc.Get(t.Context(), guest, c.ID); err != nil || d.Role != RoleInvited {
+	if d, err := svc.Get(t.Context(), auth.Actor{ID: guest}, c.ID); err != nil || d.Role != RoleInvited {
 		t.Fatalf("one second before the expiry: %+v, %v, want invited", d.Role, err)
 	}
 	clk.Set(deadline)
-	if _, err := svc.Get(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+	if _, err := svc.Get(t.Context(), auth.Actor{ID: guest}, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("at the expiry: error = %v, want challenge_not_found", err)
 	}
 
@@ -267,7 +333,7 @@ func TestGetInvited(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), "UPDATE invitations SET revoked_at = $1 WHERE id = $2", now, valid); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Get(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+	if _, err := svc.Get(t.Context(), auth.Actor{ID: guest}, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("revoked after the link: error = %v, want challenge_not_found", err)
 	}
 
@@ -293,7 +359,7 @@ func TestGetInvited(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), "INSERT INTO participants VALUES ($1, $2, 'active', $3, NULL)", c.ID, joined, now); err != nil {
 		t.Fatal(err)
 	}
-	if d, err := svc.Get(t.Context(), friend, c.ID); err != nil || d.Role != RoleInvited {
+	if d, err := svc.Get(t.Context(), auth.Actor{ID: friend}, c.ID); err != nil || d.Role != RoleInvited {
 		t.Fatalf("invited by an active participant: %+v, %v, want invited", d.Role, err)
 	}
 	if err := svc.Exclude(t.Context(), creatorID, c.ID, member); err != nil {
@@ -301,10 +367,10 @@ func TestGetInvited(t *testing.T) {
 	}
 	// Excluding the member cancels their link for whoever has not joined
 	// yet; whoever joined stays a participant.
-	if _, err := svc.Get(t.Context(), friend, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+	if _, err := svc.Get(t.Context(), auth.Actor{ID: friend}, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("author excluded, not joined: error = %v, want challenge_not_found", err)
 	}
-	if d, err := svc.Get(t.Context(), joined, c.ID); err != nil || d.Role != RoleParticipant || d.Participant != ParticipantActive {
+	if d, err := svc.Get(t.Context(), auth.Actor{ID: joined}, c.ID); err != nil || d.Role != RoleParticipant || d.Participant != ParticipantActive {
 		t.Fatalf("author excluded, joined before: %+v, %v, want an active participant", d.Role, err)
 	}
 }
@@ -337,13 +403,13 @@ func TestGetInvitedByADeletedAccount(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), "INSERT INTO invitation_recipients VALUES ($1, $2, $3)", invitation, guest, now); err != nil {
 		t.Fatal(err)
 	}
-	if d, err := svc.Get(t.Context(), guest, c.ID); err != nil || d.Role != RoleInvited {
+	if d, err := svc.Get(t.Context(), auth.Actor{ID: guest}, c.ID); err != nil || d.Role != RoleInvited {
 		t.Fatalf("author's account active: %+v, %v, want invited", d.Role, err)
 	}
 	if _, err := pool.Exec(t.Context(), "UPDATE users SET anonymized_at = now() WHERE id = $1", author); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Get(t.Context(), guest, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+	if _, err := svc.Get(t.Context(), auth.Actor{ID: guest}, c.ID); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("author's account deleted: error = %v, want challenge_not_found", err)
 	}
 	// Joining reads the same membership, under the lock: refused too.
@@ -731,7 +797,7 @@ func TestExcludeIsStoredAsAnAbandon(t *testing.T) {
 		t.Fatalf("stored %s at %s, want abandoned at the clock's now", status, abandonedAt)
 	}
 	// Shown as an abandon, with no mention of the exclusion.
-	if d, err := svc.Get(t.Context(), member, id); err != nil || d.Role != RoleAbandoned || d.Participant != ParticipantAbandoned {
+	if d, err := svc.Get(t.Context(), auth.Actor{ID: member}, id); err != nil || d.Role != RoleAbandoned || d.Participant != ParticipantAbandoned {
 		t.Fatalf("detail for the excluded: %+v, %v, want an abandon", d.Role, err)
 	}
 	// Excluded is final, like an abandon; excluding again changes nothing.
@@ -965,7 +1031,7 @@ func TestDeleteMakesTheChallengeDisappear(t *testing.T) {
 	}
 	// Gone for everyone, creator included; data kept.
 	for name, user := range map[string]string{"creator": creatorID, "participant": member} {
-		if _, err := svc.Get(t.Context(), user, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		if _, err := svc.Get(t.Context(), auth.Actor{ID: user}, id); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 			t.Fatalf("%s reads: %v, want challenge_not_found", name, err)
 		}
 	}
@@ -1094,7 +1160,7 @@ func TestParticipantsListingTellsCreators(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := svc.Participants(t.Context(), ids[3], id, 20, nil)
+	page, err := svc.Participants(t.Context(), auth.Actor{ID: ids[3]}, id, 20, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1153,7 +1219,7 @@ func TestParticipantsListing(t *testing.T) {
 	var got []Participant
 	var after *ParticipantPosition
 	for range 3 {
-		page, err := svc.Participants(t.Context(), outsider, id, 2, after)
+		page, err := svc.Participants(t.Context(), auth.Actor{ID: outsider}, id, 2, after)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1180,14 +1246,14 @@ func TestParticipantsListing(t *testing.T) {
 		t.Fatalf("joined at %s, want the instant of the join", got[2].JoinedAt)
 	}
 	// Nor are its activities, even asked by its id.
-	if _, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[2]); !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) {
+	if _, err := svc.ActivitiesScope(t.Context(), auth.Actor{ID: creatorID}, id, ids[2]); !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) {
 		t.Fatalf("activities of the deleted account: %v, want not_found", err)
 	}
 	// With the instant of the abandon: the weeks locked by then stay locked.
-	if scope, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[1]); err != nil || scope.AbandonedAt == nil || !scope.AbandonedAt.Equal(abandonedAt) {
+	if scope, err := svc.ActivitiesScope(t.Context(), auth.Actor{ID: creatorID}, id, ids[1]); err != nil || scope.AbandonedAt == nil || !scope.AbandonedAt.Equal(abandonedAt) {
 		t.Fatalf("activities of the abandoned participant: %+v, %v, want them, abandoned at %s", scope, err, abandonedAt)
 	}
-	if scope, err := svc.ActivitiesScope(t.Context(), creatorID, id, ids[3]); err != nil || scope.AbandonedAt != nil {
+	if scope, err := svc.ActivitiesScope(t.Context(), auth.Actor{ID: creatorID}, id, ids[3]); err != nil || scope.AbandonedAt != nil {
 		t.Fatalf("activities of the active participant: %+v, %v, want them, not abandoned", scope, err)
 	}
 	// Excluding it or making it a creator answers as for someone who never
@@ -1203,18 +1269,18 @@ func TestParticipantsListing(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), "UPDATE challenges SET visibility = 'private' WHERE id = $1", id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Participants(t.Context(), ids[1], id, 20, nil); err != nil {
+	if _, err := svc.Participants(t.Context(), auth.Actor{ID: ids[1]}, id, 20, nil); err != nil {
 		t.Fatalf("abandoned participant of a private challenge: %v", err)
 	}
 	notFound := apperr.New(apperr.CodeChallengeNotFound, nil)
-	if _, err := svc.Participants(t.Context(), outsider, id, 20, nil); !errors.Is(err, notFound) {
+	if _, err := svc.Participants(t.Context(), auth.Actor{ID: outsider}, id, 20, nil); !errors.Is(err, notFound) {
 		t.Fatalf("outsider of a private challenge: %v, want challenge_not_found", err)
 	}
 	// Deleted: hidden for everyone.
 	if err := svc.Delete(t.Context(), creatorID, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Participants(t.Context(), creatorID, id, 20, nil); !errors.Is(err, notFound) {
+	if _, err := svc.Participants(t.Context(), auth.Actor{ID: creatorID}, id, 20, nil); !errors.Is(err, notFound) {
 		t.Fatalf("deleted challenge: %v, want challenge_not_found", err)
 	}
 }
@@ -1238,7 +1304,7 @@ func TestGetWeekCount(t *testing.T) {
 	read := func(at time.Time) Detail {
 		t.Helper()
 		clk.Set(at)
-		d, err := reader.Get(t.Context(), creatorID, c.ID)
+		d, err := reader.Get(t.Context(), auth.Actor{ID: creatorID}, c.ID)
 		if err != nil {
 			t.Fatal(err)
 		}

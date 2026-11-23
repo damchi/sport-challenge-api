@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -161,7 +162,7 @@ func TestListWeekCountIsTheDetails(t *testing.T) {
 	}
 	var got []int
 	for _, it := range page.Items {
-		d, err := f.svc.Get(t.Context(), f.me, it.ID)
+		d, err := f.svc.Get(t.Context(), auth.Actor{ID: f.me}, it.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -191,7 +192,7 @@ func TestListCurrentWeekIsTheDetails(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, it := range page.Items {
-					d, err := f.svc.Get(t.Context(), actor, it.ID)
+					d, err := f.svc.Get(t.Context(), auth.Actor{ID: actor}, it.ID)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -244,7 +245,7 @@ func TestListGivesTheReferenceSport(t *testing.T) {
 					continue
 				}
 				found++
-				d, err := f.svc.Get(t.Context(), f.me, s.ID)
+				d, err := f.svc.Get(t.Context(), auth.Actor{ID: f.me}, s.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -359,7 +360,7 @@ func TestListRoleAndStatus(t *testing.T) {
 				if !ok || s.Role != w.role || s.Status != w.status {
 					t.Errorf("%s = role %v, status %q, want %+v", s.Title, s.Role, s.Status, w)
 				}
-				d, err := f.svc.Get(t.Context(), f.me, s.ID)
+				d, err := f.svc.Get(t.Context(), auth.Actor{ID: f.me}, s.ID)
 				if err != nil {
 					t.Fatal(err)
 				}

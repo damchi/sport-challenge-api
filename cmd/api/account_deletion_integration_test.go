@@ -20,6 +20,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/closure"
 	"github.com/damchi/sport-challenge-api/internal/invitation"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -247,7 +248,7 @@ func (f erasureFixture) snapshotEntries() map[string][]map[string]any {
 
 func (f erasureFixture) leaderboard(challengeID string) leaderboard.Leaderboard {
 	f.t.Helper()
-	got, err := f.leaderboards.Get(f.t.Context(), f.alice, challengeID)
+	got, err := f.leaderboards.Get(f.t.Context(), auth.Actor{ID: f.alice}, challengeID)
 	if err != nil {
 		f.t.Fatal(err)
 	}

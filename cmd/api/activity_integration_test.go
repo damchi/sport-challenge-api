@@ -19,6 +19,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/closure"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -196,7 +197,7 @@ func TestActivityContributions(t *testing.T) {
 	if err != nil || len(mine.Items) != 1 || !reflect.DeepEqual(mine.Items[0].Contributions, want) {
 		t.Fatalf("Mine() = %+v, %v, want contributions %+v", mine, err, want)
 	}
-	page, err := r.activities.OfParticipant(t.Context(), r.user, first, r.user, 20, nil)
+	page, err := r.activities.OfParticipant(t.Context(), auth.Actor{ID: r.user}, first, r.user, 20, nil)
 	if err != nil || len(page.Items) != 1 || !reflect.DeepEqual(page.Items[0].Contributions, want[:1]) {
 		t.Fatalf("OfParticipant() = %+v, %v, want contributions %+v", page, err, want[:1])
 	}
@@ -459,7 +460,7 @@ func TestListParticipantActivitiesVisibility(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			page, err := r.activities.OfParticipant(t.Context(), tt.actor, tt.challenge, tt.target, 20, nil)
+			page, err := r.activities.OfParticipant(t.Context(), auth.Actor{ID: tt.actor}, tt.challenge, tt.target, 20, nil)
 			if tt.want != "" {
 				var appErr *apperr.Error
 				if !errors.As(err, &appErr) || appErr.Code != tt.want {
@@ -519,7 +520,7 @@ func TestListActivitiesOfAnAbandonedParticipant(t *testing.T) {
 	if _, err := r.record(toronto(t, 2026, 5, 20, 7)); err != nil { // before the window
 		t.Fatal(err)
 	}
-	page, err := r.activities.OfParticipant(t.Context(), runner, c, r.user, 20, nil)
+	page, err := r.activities.OfParticipant(t.Context(), auth.Actor{ID: runner}, c, r.user, 20, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,11 +641,11 @@ func TestElevationGain(t *testing.T) {
 	if err != nil || len(mine.Items) != 1 || !same(mine.Items[0].ElevationGainMeters, m(850)) {
 		t.Fatalf("Mine() = %+v, %v, want 850 m", mine, err)
 	}
-	page, err := r.activities.OfParticipant(t.Context(), r.user, c, r.user, 20, nil)
+	page, err := r.activities.OfParticipant(t.Context(), auth.Actor{ID: r.user}, c, r.user, 20, nil)
 	if err != nil || len(page.Items) != 1 || !same(page.Items[0].ElevationGainMeters, m(850)) {
 		t.Fatalf("OfParticipant() = %+v, %v, want 850 m", page, err)
 	}
-	all, err := r.activities.OfChallenge(t.Context(), r.user, c, 20, nil)
+	all, err := r.activities.OfChallenge(t.Context(), auth.Actor{ID: r.user}, c, 20, nil)
 	if err != nil || len(all.Items) != 1 || !same(all.Items[0].ElevationGainMeters, m(850)) {
 		t.Fatalf("OfChallenge() = %+v, %v, want 850 m", all, err)
 	}

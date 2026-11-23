@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
@@ -872,6 +873,7 @@ func TestServiceGet(t *testing.T) {
 		name         string
 		visibility   string
 		membership   Membership
+		admin        bool
 		now          time.Time
 		wantRole     Role
 		wantStatus   string
@@ -884,11 +886,16 @@ func TestServiceGet(t *testing.T) {
 		{name: "end of week 1: registration closed", visibility: VisibilityPublic, now: deadline, wantRole: RoleOutsider, wantStatus: StatusOngoing, wantWeek: 2, wantWeekEnds: time.Date(2026, 3, 16, 4, 0, 0, 0, time.UTC)},
 		{name: "participant", visibility: VisibilityPrivate, membership: Membership{Participant: ParticipantActive}, now: deadline.Add(-time.Hour), wantRole: RoleParticipant, wantStatus: StatusOngoing, wantWeek: 1, wantWeekEnds: deadline},
 		{name: "finished, creator", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantActive}, now: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), wantRole: RoleCreator, wantStatus: StatusFinished},
+		// An admin reads a private challenge they are not in, with the role
+		// and the rights of their membership: none to join it.
+		{name: "admin outsider of a private challenge", visibility: VisibilityPrivate, admin: true, now: deadline.Add(-time.Hour), wantRole: RoleOutsider, wantStatus: StatusOngoing, wantWeek: 1, wantWeekEnds: deadline},
+		{name: "admin participant", visibility: VisibilityPrivate, membership: Membership{Participant: ParticipantActive}, admin: true, now: deadline.Add(-time.Hour), wantRole: RoleParticipant, wantStatus: StatusOngoing, wantWeek: 1, wantWeekEnds: deadline},
+		{name: "admin outsider of a public challenge: joins like anyone", visibility: VisibilityPublic, admin: true, now: deadline.Add(-time.Hour), wantRole: RoleOutsider, wantStatus: StatusOngoing, wantCanJoin: true, wantWeek: 1, wantWeekEnds: deadline},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership}
-			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).Get(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).Get(t.Context(), auth.Actor{ID: actor, Admin: tt.admin}, "11111111-1111-1111-1111-111111111111")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -957,7 +964,7 @@ func TestServiceGetWeeks(t *testing.T) {
 				moments = append(moments, w.EndsAt.Add(-time.Second), w.EndsAt)
 			}
 			for _, at := range moments {
-				d, err := NewService(&fakeRepository{challenge: c}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(at)).Get(t.Context(), actor, c.ID)
+				d, err := NewService(&fakeRepository{challenge: c}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(at)).Get(t.Context(), auth.Actor{ID: actor}, c.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -979,7 +986,7 @@ func TestServiceGetHidesPrivateChallenges(t *testing.T) {
 	private := &fakeRepository{challenge: stored(VisibilityPrivate)}
 	var errs []*apperr.Error
 	for _, repo := range []*fakeRepository{missing, private} {
-		_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), actor, "11111111-1111-1111-1111-111111111111")
+		_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), auth.Actor{ID: actor}, "11111111-1111-1111-1111-111111111111")
 		if repo.categoriesRead {
 			t.Fatal("categories read before the visibility check")
 		}
@@ -996,9 +1003,18 @@ func TestServiceGetHidesPrivateChallenges(t *testing.T) {
 	}
 }
 
+// TestServiceGetAdminMissing: a missing or deleted challenge (the
+// repository finds neither) is not found for an admin either.
+func TestServiceGetAdminMissing(t *testing.T) {
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), auth.Actor{ID: actor, Admin: true}, "11111111-1111-1111-1111-111111111111")
+	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("error = %v, want challenge_not_found", err)
+	}
+}
+
 func TestServiceGetStorageFailure(t *testing.T) {
 	storage := errors.New("connection refused")
-	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), actor, "x")
+	_, err := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), auth.Actor{ID: actor}, "x")
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
@@ -1476,7 +1492,7 @@ func TestServiceParticipants(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(VisibilityPublic), participants: participants(tt.available)}
 			after := &ParticipantPosition{JoinedAt: now, UserID: "00000000-0000-0000-0000-000000000009"}
 			profiles := fakeProfiles{names: map[string]Name{"00000000-0000-0000-0000-000000000001": marie}}
-			page, err := NewService(repo, profiles, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, after)
+			page, err := NewService(repo, profiles, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), auth.Actor{ID: actor}, "c", tt.limit, after)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1509,9 +1525,11 @@ func TestServiceParticipantsVisibility(t *testing.T) {
 		name       string
 		visibility string
 		membership Membership
+		admin      bool
 		want       apperr.Code // empty: listed
 	}{
 		{name: "outsider of a public challenge", visibility: VisibilityPublic},
+		{name: "admin outsider of a private challenge", visibility: VisibilityPrivate, admin: true},
 		{name: "participant of a private challenge", visibility: VisibilityPrivate, membership: Membership{Participant: ParticipantActive}},
 		{name: "abandoned participant of a private challenge", visibility: VisibilityPrivate, membership: Membership{Participant: ParticipantAbandoned}},
 		{name: "outsider of a private challenge: hidden", visibility: VisibilityPrivate, want: apperr.CodeChallengeNotFound},
@@ -1519,7 +1537,7 @@ func TestServiceParticipantsVisibility(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: stored(tt.visibility), membership: tt.membership, participants: participants(2)}
-			_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", 20, nil)
+			_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), auth.Actor{ID: actor, Admin: tt.admin}, "c", 20, nil)
 			if tt.want == "" {
 				if err != nil {
 					t.Fatalf("error = %v, want the list", err)
@@ -1553,7 +1571,7 @@ func TestServiceParticipantsFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewService(tt.repo, tt.profiles, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), actor, "c", tt.limit, nil)
+			_, err := NewService(tt.repo, tt.profiles, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Participants(t.Context(), auth.Actor{ID: actor}, "c", tt.limit, nil)
 			if tt.wantCode != "" && !errors.Is(err, apperr.New(tt.wantCode, nil)) {
 				t.Fatalf("error = %v, want %s", err, tt.wantCode)
 			}
@@ -1651,7 +1669,7 @@ func TestServiceActivitiesScopeWithoutDistanceCategory(t *testing.T) {
 	c := stored(VisibilityPublic)
 	c.Categories = []Category{{Type: CategoryCumulativeTime, Position: 1}}
 	repo := &fakeRepository{challenge: c, membership: active}
-	got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor)
+	got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), auth.Actor{ID: actor}, "c", actor)
 	if err != nil || got.ID != c.ID || got.Factors != nil {
 		t.Fatalf("ActivitiesScope() = %+v, %v, want the challenge with no factors", got, err)
 	}
@@ -1663,6 +1681,7 @@ func TestServiceActivitiesScope(t *testing.T) {
 		name       string
 		visibility string
 		actor      Membership
+		admin      bool
 		others     map[string]Membership
 		userID     string
 		want       apperr.Code // empty: the scope
@@ -1674,6 +1693,8 @@ func TestServiceActivitiesScope(t *testing.T) {
 		{name: "outsider of a public challenge", visibility: VisibilityPublic, actor: outsider, others: map[string]Membership{target: active}, userID: target, want: apperr.CodeNotFound},
 		{name: "outsider of a private challenge", visibility: VisibilityPrivate, actor: outsider, others: map[string]Membership{target: active}, userID: target, want: apperr.CodeChallengeNotFound},
 		{name: "target never joined", visibility: VisibilityPublic, actor: active, others: map[string]Membership{}, userID: target, want: apperr.CodeNotFound},
+		{name: "admin outsider of a private challenge", visibility: VisibilityPrivate, actor: outsider, admin: true, others: map[string]Membership{target: active}, userID: target, wantMember: active},
+		{name: "admin, target never joined", visibility: VisibilityPrivate, actor: outsider, admin: true, others: map[string]Membership{}, userID: target, want: apperr.CodeNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1685,7 +1706,7 @@ func TestServiceActivitiesScope(t *testing.T) {
 				{Type: CategoryElimination, Position: 3, Params: Params{Sport: "run", StepMeters: 1000}},
 			}
 			repo := &fakeRepository{challenge: c, membership: tt.actor, others: tt.others}
-			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", tt.userID)
+			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), auth.Actor{ID: actor, Admin: tt.admin}, "c", tt.userID)
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) {
 					t.Fatalf("error = %v, want %s", err, tt.want)
@@ -1702,10 +1723,10 @@ func TestServiceActivitiesScope(t *testing.T) {
 
 func TestServiceActivitiesScopeFailures(t *testing.T) {
 	storageErr := errors.New("connection reset")
-	if _, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+	if _, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), auth.Actor{ID: actor}, "c", actor); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing challenge: error = %v, want challenge_not_found", err)
 	}
-	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), actor, "c", actor); !errors.Is(err, storageErr) {
+	if _, err := NewService(&fakeRepository{err: storageErr}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).ActivitiesScope(t.Context(), auth.Actor{ID: actor}, "c", actor); !errors.Is(err, storageErr) {
 		t.Fatalf("storage failure: error = %v, want the cause kept", err)
 	}
 }
@@ -1717,9 +1738,12 @@ func TestServiceAllActivitiesScope(t *testing.T) {
 		name       string
 		visibility string
 		actor      Membership
+		admin      bool
 		want       apperr.Code // empty: the scope
 	}{
 		{name: "participant, private", visibility: VisibilityPrivate, actor: active},
+		{name: "admin outsider of a private challenge", visibility: VisibilityPrivate, actor: outsider, admin: true},
+		{name: "admin invited to a private challenge", visibility: VisibilityPrivate, actor: invited, admin: true},
 		{name: "abandoned participant", visibility: VisibilityPrivate, actor: abandoned},
 		{name: "creator, public", visibility: VisibilityPublic, actor: creatorActive},
 		{name: "outsider of a public challenge", visibility: VisibilityPublic, actor: outsider, want: apperr.CodeNotFound},
@@ -1735,7 +1759,7 @@ func TestServiceAllActivitiesScope(t *testing.T) {
 				{Type: CategoryCumulativeDistance, Position: 2, Params: Params{Factors: factors}},
 			}
 			repo := &fakeRepository{challenge: c, membership: tt.actor, members: members}
-			got, gotMembers, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AllActivitiesScope(t.Context(), actor, "c")
+			got, gotMembers, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AllActivitiesScope(t.Context(), auth.Actor{ID: actor, Admin: tt.admin}, "c")
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) {
 					t.Fatalf("error = %v, want %s", err, tt.want)
@@ -1755,14 +1779,14 @@ func TestServiceAllActivitiesScopeFailures(t *testing.T) {
 	svc := func(repo *fakeRepository) *Service {
 		return NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
 	}
-	if _, _, err := svc(&fakeRepository{}).AllActivitiesScope(t.Context(), actor, "c"); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+	if _, _, err := svc(&fakeRepository{}).AllActivitiesScope(t.Context(), auth.Actor{ID: actor}, "c"); !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing challenge: error = %v, want challenge_not_found", err)
 	}
-	if _, _, err := svc(&fakeRepository{err: storageErr}).AllActivitiesScope(t.Context(), actor, "c"); !errors.Is(err, storageErr) {
+	if _, _, err := svc(&fakeRepository{err: storageErr}).AllActivitiesScope(t.Context(), auth.Actor{ID: actor}, "c"); !errors.Is(err, storageErr) {
 		t.Fatalf("storage failure: error = %v, want the cause kept", err)
 	}
 	repo := &fakeRepository{challenge: stored(VisibilityPublic), membership: active, membersErr: storageErr}
-	if _, _, err := svc(repo).AllActivitiesScope(t.Context(), actor, "c"); !errors.Is(err, storageErr) {
+	if _, _, err := svc(repo).AllActivitiesScope(t.Context(), auth.Actor{ID: actor}, "c"); !errors.Is(err, storageErr) {
 		t.Fatalf("members failure: error = %v, want the cause kept", err)
 	}
 }

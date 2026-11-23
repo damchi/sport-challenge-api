@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
+	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
@@ -326,7 +327,7 @@ func (s seed) snapshots(challengeID string) []storedSnapshot {
 
 type staticChallenge struct{ c leaderboard.Challenge }
 
-func (s staticChallenge) Challenge(context.Context, string, string) (leaderboard.Challenge, error) {
+func (s staticChallenge) Challenge(context.Context, auth.Actor, string) (leaderboard.Challenge, error) {
 	return s.c, nil
 }
 
@@ -468,7 +469,7 @@ func TestFinalizeChallengesFromTheDatabase(t *testing.T) {
 		) leaderboard.Leaderboard {
 			t.Helper()
 			svc := leaderboard.NewService(staticChallenge{c}, noProfiles{}, repo, clock.NewFake(end.Add(48*time.Hour)), time.Hour)
-			got, err := svc.Get(t.Context(), a, challengeID)
+			got, err := svc.Get(t.Context(), auth.Actor{ID: a}, challengeID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -818,7 +819,7 @@ func TestChallengeWithPoints(t *testing.T) {
 	) []scoring.Entry {
 		t.Helper()
 		svc := leaderboard.NewService(staticChallenge{ch}, noProfiles{}, repo, clock.NewFake(lock.Add(time.Hour)), time.Hour)
-		board, err := svc.Get(t.Context(), a, id)
+		board, err := svc.Get(t.Context(), auth.Actor{ID: a}, id)
 		if err != nil {
 			t.Fatal(err)
 		}

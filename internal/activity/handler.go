@@ -193,7 +193,7 @@ func (h *Handler) ListMyActivityWeeks(ctx context.Context, req api.ListMyActivit
 // ListParticipantActivities answers a page of the activities of a
 // participant in a challenge.
 func (h *Handler) ListParticipantActivities(ctx context.Context, req api.ListParticipantActivitiesRequestObject) (api.ListParticipantActivitiesResponseObject, error) {
-	actorID, ok := auth.UserID(ctx)
+	actor, ok := auth.ActorFrom(ctx)
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
@@ -202,7 +202,7 @@ func (h *Handler) ListParticipantActivities(ctx context.Context, req api.ListPar
 	if err != nil {
 		return nil, err
 	}
-	page, err := h.service.OfParticipant(ctx, actorID, req.ChallengeId.String(), req.UserId.String(), limitOf(p.Limit), after)
+	page, err := h.service.OfParticipant(ctx, actor, req.ChallengeId.String(), req.UserId.String(), limitOf(p.Limit), after)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (h *Handler) ListParticipantActivities(ctx context.Context, req api.ListPar
 // ListChallengeActivities answers a page of the activities of all the
 // participants of a challenge, each with its author.
 func (h *Handler) ListChallengeActivities(ctx context.Context, req api.ListChallengeActivitiesRequestObject) (api.ListChallengeActivitiesResponseObject, error) {
-	actorID, ok := auth.UserID(ctx)
+	actor, ok := auth.ActorFrom(ctx)
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
@@ -225,7 +225,7 @@ func (h *Handler) ListChallengeActivities(ctx context.Context, req api.ListChall
 	if err != nil {
 		return nil, err
 	}
-	page, err := h.service.OfChallenge(ctx, actorID, req.ChallengeId.String(), limitOf(p.Limit), after)
+	page, err := h.service.OfChallenge(ctx, actor, req.ChallengeId.String(), limitOf(p.Limit), after)
 	if err != nil {
 		return nil, err
 	}

@@ -40,6 +40,48 @@ func TestRoleOf(t *testing.T) {
 	}
 }
 
+// TestReaderRole: an admin reads as a creator does (RoleAdmin) whatever
+// their membership, a creator they are excepted; anyone else reads with the
+// role of their membership.
+func TestReaderRole(t *testing.T) {
+	tests := []struct {
+		name  string
+		m     Membership
+		admin bool
+		want  Role
+	}{
+		{name: "outsider", m: outsider, want: RoleOutsider},
+		{name: "invited", m: invited, want: RoleInvited},
+		{name: "creator", m: creatorActive, want: RoleCreator},
+		{name: "admin outsider", m: outsider, admin: true, want: RoleAdmin},
+		{name: "admin invited", m: invited, admin: true, want: RoleAdmin},
+		{name: "admin participant", m: active, admin: true, want: RoleAdmin},
+		{name: "admin abandoned", m: abandoned, admin: true, want: RoleAdmin},
+		{name: "admin creator", m: creatorActive, admin: true, want: RoleCreator},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ReaderRole(tt.m, tt.admin); got != tt.want {
+				t.Fatalf("ReaderRole(%+v, %v) = %v, want %v", tt.m, tt.admin, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRoleAdminWritesNothing: the admin role reads only; every write of the
+// existing routes stays refused to it (README §2.12).
+func TestRoleAdminWritesNothing(t *testing.T) {
+	if CanEdit(RoleAdmin) || CanExclude(RoleAdmin) || CanAddCreator(RoleAdmin) || CanDelete(RoleAdmin) {
+		t.Fatal("RoleAdmin may edit, exclude, add a creator or delete")
+	}
+	if CanInvite(RoleAdmin, true) {
+		t.Fatal("RoleAdmin may invite")
+	}
+	if err := RequireEdit(RoleAdmin); !errors.Is(err, apperr.New(apperr.CodeForbidden, nil)) {
+		t.Fatalf("RequireEdit(RoleAdmin) = %v, want forbidden", err)
+	}
+}
+
 // TestCanView follows the rights matrix of README §5.7: a public challenge
 // is visible to every logged-in user; a private one to its creators,
 // participants (abandoned included) and invited users only.
@@ -67,6 +109,11 @@ func TestCanView(t *testing.T) {
 		{name: "outsider, unlisted", role: RoleOutsider, visibility: "unlisted", want: false},
 		{name: "creator, empty", role: RoleCreator, visibility: "", want: false},
 		{name: "outsider, empty", role: RoleOutsider, visibility: "", want: false},
+		// An admin reads every challenge (README §2.12), but only of a known
+		// visibility.
+		{name: "admin, public", role: RoleAdmin, visibility: VisibilityPublic, want: true},
+		{name: "admin, private", role: RoleAdmin, visibility: VisibilityPrivate, want: true},
+		{name: "admin, unlisted", role: RoleAdmin, visibility: "unlisted", want: false},
 		{name: "role 99, private", role: Role(99), visibility: VisibilityPrivate, want: false},
 		{name: "role -1, private", role: Role(-1), visibility: VisibilityPrivate, want: false},
 	}
@@ -487,9 +534,13 @@ func TestParticipantsRefusal(t *testing.T) {
 	tests := []struct {
 		name       string
 		m          Membership
+		admin      bool
 		visibility string
 		want       apperr.Code // empty: listed
 	}{
+		{name: "admin outsider of a private challenge", m: outsider, admin: true, visibility: VisibilityPrivate},
+		{name: "admin invited to a private challenge", m: invited, admin: true, visibility: VisibilityPrivate},
+		{name: "admin, unknown visibility: hidden", m: outsider, admin: true, visibility: "unlisted", want: apperr.CodeChallengeNotFound},
 		{name: "outsider of a public challenge", m: outsider, visibility: VisibilityPublic},
 		{name: "creator of a private challenge", m: creatorActive, visibility: VisibilityPrivate},
 		{name: "creator who abandoned", m: creatorAbandoned, visibility: VisibilityPrivate},
@@ -501,7 +552,7 @@ func TestParticipantsRefusal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ParticipantsRefusal(tt.m, tt.visibility)
+			err := ParticipantsRefusal(tt.m, tt.admin, tt.visibility)
 			if tt.want == "" {
 				if err != nil {
 					t.Fatalf("ParticipantsRefusal() = %v, want nil", err)
@@ -529,6 +580,7 @@ func TestCanViewActivities(t *testing.T) {
 		{role: RoleAbandoned, want: true},
 		{role: RoleInvited},
 		{role: RoleOutsider},
+		{role: RoleAdmin, want: true},
 		{role: Role(99)},
 	}
 	for _, tt := range tests {
@@ -542,10 +594,17 @@ func TestActivitiesRefusal(t *testing.T) {
 	tests := []struct {
 		name       string
 		actor      Membership
+		admin      bool
 		target     Membership
 		visibility string
 		want       apperr.Code // empty: visible
 	}{
+		{name: "admin outsider, private", actor: outsider, admin: true, target: active, visibility: VisibilityPrivate},
+		{name: "admin outsider, public", actor: outsider, admin: true, target: abandoned, visibility: VisibilityPublic},
+		{name: "admin invited, private", actor: invited, admin: true, target: active, visibility: VisibilityPrivate},
+		{name: "admin, target who never joined", actor: outsider, admin: true, target: outsider, visibility: VisibilityPrivate, want: apperr.CodeNotFound},
+		{name: "admin, target account deleted", actor: outsider, admin: true, target: Membership{Participant: ParticipantActive, AccountDeleted: true}, visibility: VisibilityPrivate, want: apperr.CodeNotFound},
+		{name: "admin, unknown visibility: hidden", actor: outsider, admin: true, target: active, visibility: "unlisted", want: apperr.CodeChallengeNotFound},
 		{name: "participant, public", actor: active, target: active, visibility: VisibilityPublic},
 		{name: "participant, private", actor: active, target: active, visibility: VisibilityPrivate},
 		{name: "abandoned participant, private", actor: abandoned, target: active, visibility: VisibilityPrivate},
@@ -566,7 +625,7 @@ func TestActivitiesRefusal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ActivitiesRefusal(tt.actor, tt.target, tt.visibility)
+			err := ActivitiesRefusal(tt.actor, tt.admin, tt.target, tt.visibility)
 			if tt.want == "" {
 				if err != nil {
 					t.Fatalf("ActivitiesRefusal() = %v, want nil", err)
@@ -584,9 +643,13 @@ func TestAllActivitiesRefusal(t *testing.T) {
 	tests := []struct {
 		name       string
 		actor      Membership
+		admin      bool
 		visibility string
 		want       apperr.Code // empty: visible
 	}{
+		{name: "admin outsider, private", actor: outsider, admin: true, visibility: VisibilityPrivate},
+		{name: "admin outsider, public", actor: outsider, admin: true, visibility: VisibilityPublic},
+		{name: "admin, unknown visibility: hidden", actor: outsider, admin: true, visibility: "unlisted", want: apperr.CodeChallengeNotFound},
 		{name: "participant, private", actor: active, visibility: VisibilityPrivate},
 		{name: "abandoned participant, private", actor: abandoned, visibility: VisibilityPrivate},
 		{name: "creator, public", actor: creatorActive, visibility: VisibilityPublic},
@@ -598,7 +661,7 @@ func TestAllActivitiesRefusal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := AllActivitiesRefusal(tt.actor, tt.visibility)
+			err := AllActivitiesRefusal(tt.actor, tt.admin, tt.visibility)
 			if tt.want == "" {
 				if err != nil {
 					t.Fatalf("AllActivitiesRefusal() = %v, want nil", err)
