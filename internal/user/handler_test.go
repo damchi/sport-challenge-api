@@ -22,10 +22,12 @@ import (
 
 const meID = "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f"
 
-type acceptingVerifier struct{}
+// acceptingVerifier accepts any token; admin sets the admin permission of
+// its claims.
+type acceptingVerifier struct{ admin bool }
 
-func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
-	return auth.Claims{Subject: "email|123"}, nil
+func (v acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
+	return auth.Claims{Subject: "email|123", Admin: v.admin}, nil
 }
 
 // newMeRouter serves the /me operations as cmd/api does: authentication,
@@ -37,6 +39,13 @@ func newMeRouter(t *testing.T, repo repository) *gin.Engine {
 
 // newMeRouterFor serves the /me operations of svc.
 func newMeRouterFor(t *testing.T, svc *Service) *gin.Engine {
+	t.Helper()
+	return newMeRouterWith(t, svc, acceptingVerifier{})
+}
+
+// newMeRouterWith serves the /me operations of svc, with tokens verified by
+// verifier.
+func newMeRouterWith(t *testing.T, svc *Service, verifier auth.TokenVerifier) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -50,7 +59,7 @@ func newMeRouterFor(t *testing.T, svc *Service) *gin.Engine {
 	}
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
-		auth.Authenticate(acceptingVerifier{}, logger),
+		auth.Authenticate(verifier, logger),
 		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return meID, nil }, logger),
 	))
 	strict := api.NewStrictHandlerWithOptions(meHandlers{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
@@ -147,6 +156,32 @@ func TestGetMe(t *testing.T) {
 				if !ok || (want == nil && got != nil) || (want != nil && got != *want) {
 					t.Fatalf("%s = %v, want %v", field, got, want)
 				}
+			}
+		})
+	}
+}
+
+// TestMeIsAdmin: is_admin comes from the admin permission of the request's
+// token, on every route that answers the profile.
+func TestMeIsAdmin(t *testing.T) {
+	user := User{ID: meID, FirstName: ptr("Marie-Ève"), LastName: ptr("Tremblay")}
+	tests := []struct {
+		name   string
+		method string
+		body   string
+		admin  bool
+	}{
+		{name: "GET without the permission", method: http.MethodGet},
+		{name: "GET with the admin permission", method: http.MethodGet, admin: true},
+		{name: "PATCH without the permission", method: http.MethodPatch, body: `{"language":"fr"}`},
+		{name: "PATCH with the admin permission", method: http.MethodPatch, body: `{"language":"fr"}`, admin: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(fakeRepository{user: user, changes: &ProfileChanges{}}, nil, nil, nil, nil, discard)
+			res := do(t, newMeRouterWith(t, svc, acceptingVerifier{admin: tt.admin}), tt.method, tt.body)
+			if res.status != http.StatusOK || res.body["is_admin"] != tt.admin {
+				t.Fatalf("got %d is_admin = %v, want 200 with is_admin = %v", res.status, res.body["is_admin"], tt.admin)
 			}
 		})
 	}

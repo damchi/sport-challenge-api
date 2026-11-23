@@ -1,6 +1,6 @@
 # Configuration d'Auth0
 
-Procédure manuelle, suivie pour le seul tenant du projet, à refaire à l'identique si un autre tenant est créé un jour. Elle crée ce dont l'API a besoin pour valider les jetons (ticket SC-API-017) et supprimer un compte chez Auth0 (ticket SC-API-039).
+Procédure manuelle, suivie pour le seul tenant du projet, à refaire à l'identique si un autre tenant est créé un jour. Elle crée ce dont l'API a besoin pour valider les jetons (ticket SC-API-017), supprimer un compte chez Auth0 (ticket SC-API-039) et reconnaître un admin (ticket SC-API-153).
 
 Aucun secret dans le dépôt. Les valeurs non secrètes (domaine, audience, identifiant de la SPA) vont dans la configuration ; le seul secret (client de l'API de gestion) va dans Secret Manager.
 
@@ -12,6 +12,7 @@ Aucun secret dans le dépôt. Les valeurs non secrètes (domaine, audience, iden
 - ✅ Connexion : e-mail par code à usage unique, seule méthode en V1. Pas de mot de passe. Le lien magique n'est pas utilisé : le New Universal Login ne le propose pas. Les connexions sociales (Google, Apple) sont reportées : leur procédure est en fin de document.
 - ✅ V1 web uniquement : seule l'application SPA est créée. L'application native (mobile) viendra en V2 (section « V2 : application native »).
 - ✅ Suppression de compte : l'API supprime aussi l'utilisateur chez Auth0 (décision D7), avec une application machine à machine limitée à `delete:users`.
+- ✅ Admin (README §2.12, décision du 2026-11-23) : un rôle Auth0 « admin », attribué à la main, porte la permission `admin` ; l'API la lit dans la claim `permissions` de l'access token, rien n'est stocké en base. Une Action post-login exige la double authentification de tout compte qui a le rôle (étape 9).
 - ✅ L'API identifie un utilisateur uniquement par la claim `sub`, jamais par l'e-mail. Quand des connexions sociales seront ajoutées, une même personne qui se connecte avec Google puis avec le code par e-mail (même adresse) obtiendra deux comptes : ne jamais activer de liaison automatique de comptes par e-mail (risque de prise de compte). La liaison de comptes est une question produit ouverte (❓).
 
 ## Environnements
@@ -55,13 +56,13 @@ Le tenant étant partagé, cette étape est faite deux fois, avec les mêmes ré
    - Maximum Access Token Lifetime : 900 (15 min). Un jeton reste valide jusqu'à son expiration, même après une suppression de compte ou une exclusion : la rotation des refresh tokens rend une durée courte sans effet pour l'utilisateur.
    - Implicit / Hybrid Flow Access Token Lifetime : 900 (sans effet puisque le grant Implicit est désactivé, mais aligné).
    - Allow Offline Access : activé (nécessaire aux refresh tokens).
-   - Enable RBAC : désactivé (l'autorisation se fait dans les services de l'API, pas dans le jeton).
+   - Enable RBAC : activé, et Add Permissions in the Access Token : activé. Le jeton porte alors la claim `permissions` avec les permissions des rôles de l'utilisateur sur cette API ; l'API n'y lit que `admin` (étape 9). Le jeton ne fait que dire qui est admin : l'autorisation se fait toujours dans les services de l'API. Sans ces deux réglages, la claim est absente et personne n'est admin.
    - Allow Skipping User Consent : activé. Sport Challenge Web est une application interne (first-party) : l'utilisateur n'a pas à autoriser l'accès à sa propre API. En local, l'écran de consentement reste affiché malgré ce réglage : Auth0 ne le saute jamais pour une application servie depuis localhost, faute de pouvoir vérifier son origine. Il suffit de l'accepter une fois par utilisateur de test.
-4. Aucune permission (scope) à créer pour l'instant.
+4. Onglet Permissions : une seule permission, `admin` (description : Administration de Sport Challenge), sur chacune des deux API. Aucune autre.
 5. Supprimer l'application de test : Auth0 crée en général, avec l'API, une application machine à machine Sport Challenge API (Test Application) autorisée sur cette audience. Avec son secret, n'importe qui obtiendrait un jeton valide pour l'API (`sub` en `…@clients`). La supprimer (**Applications**), puis vérifier dans l'onglet Machine To Machine Applications de l'API (ou Application Access, selon la version) qu'aucune application n'est autorisée.
 6. Autoriser la SPA de l'environnement en accès utilisateur (obligatoire), et elle seule : Sport Challenge Web sur Sport Challenge API, Sport Challenge Web (local) sur Sport Challenge Local API. Jamais la SPA locale sur l'API de production. Sans ce réglage, la connexion du frontend échoue avec `Client "<Client ID de la SPA>" is not authorized to access resource server "<audience>"`. À faire une fois la SPA créée (étape 3) :
    - **APIs** → l'API → Settings → Application Access Policy → User-Delegated Access : Per-app authorization. Seules les applications autorisées une à une obtiennent alors un jeton utilisateur pour l'API.
-   - Onglet Application Access → Edit sur la SPA de l'environnement → User-Delegated Access : Grant Access, sans aucune permission (l'API n'en définit pas).
+   - Onglet Application Access → Edit sur la SPA de l'environnement → User-Delegated Access : Grant Access, en cochant la permission `admin` et aucune autre. L'accorder à la SPA ne la donne à personne : seul un utilisateur qui a le rôle (étape 9) la reçoit dans son jeton. Au premier passage (à confirmer) : si la claim `permissions` de l'admin la porte aussi sans ce réglage, la décocher, pour n'accorder à la SPA que le strict nécessaire.
    - Aucune autre application n'y a d'accès, ni utilisateur ni machine à machine (étape 2.5).
 
 ## 3. Créer l'application web (SPA)
@@ -156,11 +157,50 @@ L'API lit l'e-mail de l'utilisateur dans l'access token (SC-API-116) : un access
 3. Deploy, puis le déclencheur post-login (**Actions** → Triggers → post-login, à confirmer) : glisser l'Action dans le flux, Apply.
 4. Vérifier : se connecter depuis le frontend, puis `GET /api/v1/me` renvoie `email`. Un jeton obtenu avant l'ajout de l'Action n'a pas la claim : l'e-mail arrive au jeton suivant (rafraîchissement ou nouvelle connexion).
 
-L'e-mail est une donnée personnelle : l'API ne le journalise jamais et ne le renvoie qu'à son titulaire (README §2.8).
+L'e-mail est une donnée personnelle : l'API ne le journalise jamais et ne le renvoie qu'à son titulaire et aux admins (README §2.8, §2.12).
+
+## 9. Rôle admin et double authentification
+
+L'API reconnaît un admin à la permission `admin` de la claim `permissions` de son access token (SC-API-153), lue telle quelle : une autre valeur (`Admin`, `admin:read`) ne compte pas. `GET /api/v1/me` renvoie alors `is_admin: true` ; chaque route d'administration revérifie la permission dans les politiques de ses services.
+
+1. **User Management** → Roles (à confirmer ; ancienne navigation : User Management → Roles) → Create Role : nom `admin`, description Administration de Sport Challenge.
+2. Onglet Permissions du rôle → Add Permissions : la permission `admin` de Sport Challenge API, puis celle de Sport Challenge Local API (le tenant est partagé : le même rôle sert au local et à la production). La permission `admin` n'appartient qu'à ce rôle : ne jamais l'attribuer directement à un utilisateur (**User Management** → Users → l'utilisateur → Permissions) ni la mettre dans un autre rôle. L'API se fie à la permission, alors que l'Action de l'étape 5 exige la double authentification d'après le rôle (une Action ne voit que les rôles) : un autre chemin donnerait un admin sans second facteur.
+3. Onglet Users du rôle → Assign Users : le compte du propriétaire du produit, à la main, et lui seul tant qu'il n'y a qu'un admin (README §2.12). Le compte doit s'être connecté une fois pour exister dans le tenant.
+4. Double authentification (**Security** → Multi-factor Auth, à confirmer) : activer au moins One-time Password (application d'authentification) et, si possible, WebAuthn with FIDO Security Keys ; Define policies → Require Multi-factor Auth : Never (seule l'Action ci-dessous l'exige, pour les seuls admins). Vérifier que le forfait le permet, et qu'Auth0 accepte la double authentification avec la connexion par code e-mail (à confirmer) : sinon, s'arrêter et en parler avant d'attribuer le rôle.
+5. **Actions** → Create Action → Build from scratch : nom Require MFA for admins, trigger Login / Post Login, runtime Node le plus récent proposé. Code :
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     const roles = event.authorization?.roles ?? [];
+     if (!roles.includes('admin')) {
+       return;
+     }
+     const mfaDone = (event.authentication?.methods ?? []).some((m) => m.name === 'mfa');
+     if (event.transaction?.protocol === 'oauth2-refresh-token') {
+       // A refresh cannot prompt for a second factor: refuse it when the
+       // session never went through one (role given after the login), so the
+       // admin logs in again.
+       if (!mfaDone) {
+         api.access.deny('mfa_required');
+       }
+       return;
+     }
+     api.multifactor.enable('any', { allowRememberBrowser: false });
+   };
+   ```
+6. Deploy, puis le déclencheur post-login : placer l'Action dans le flux, avant ou après Add e-mail to access token (l'ordre est indifférent), Apply.
+7. Vérifier :
+   - se connecter avec le compte admin depuis le frontend : Auth0 demande le second facteur (à enrôler à la première connexion) et `GET /api/v1/me` renvoie `is_admin: true` ;
+   - laisser expirer l'access token de l'admin (15 min) : le frontend le rafraîchit sans nouvelle connexion. S'il est refusé, Auth0 ne transmet pas les méthodes de la session à l'Action au rafraîchissement (à confirmer) : corriger l'Action avant de s'en servir, sinon l'admin est déconnecté toutes les 15 minutes ;
+   - un compte sans le rôle se connecte sans second facteur et reçoit `is_admin: false`.
+
+   La connexion silencieuse (`prompt=none`) d'un admin échoue avec `interaction_required` quand Auth0 doit demander le second facteur : le frontend repasse alors par la connexion interactive.
+
+Limite connue : retirer le rôle (onglet Users du rôle → Remove) ne prend effet qu'à l'expiration de l'access token en cours, 15 minutes au plus (étape 2.3) ; le jeton suivant, obtenu par rafraîchissement, n'a plus la permission. Pour couper l'accès tout de suite, révoquer aussi les sessions et les refresh tokens de l'utilisateur (**User Management** → Users → l'utilisateur → Sessions / Authorized Applications, à confirmer) : l'access token déjà émis reste valide jusqu'à son expiration.
 
 ## Points d'attention pour l'API (ticket SC-API-017)
 
 - Jetons machine à machine : refuser un access token dont `gty` vaut `client-credentials` ou dont `sub` se termine par `@clients`, en défense en profondeur de l'étape 2.5.
+- Permission admin (SC-API-153) : l'API lit la claim `permissions` sous ce nom exact (tableau de chaînes ; tout autre type rend le jeton invalide) et n'y cherche que `admin`, à l'identique ; elle lit de même la claim de l'e-mail sous son nom exact. `Authenticate` la pose dans le contexte avec les autres claims ; la décision se prend dans les politiques des services, jamais dans un middleware.
 - Domaine personnalisé (étape 7, prévu en production) : l'émetteur des jetons devient `https://<custom-domain>/`, et `AUTH0_DOMAIN` doit être ce domaine. L'API de gestion, elle, garde l'adresse et l'audience du domaine du tenant (`https://<tenant>.ca.auth0.com/api/v2/`) : le client de suppression (ticket SC-API-039) les construit depuis `AUTH0_MGMT_DOMAIN` (SC-API-114), qui vaut `AUTH0_DOMAIN` si elle est absente. Elle doit donc être réglée sur le domaine du tenant en même temps que `AUTH0_DOMAIN` passe au domaine personnalisé. La validation des jetons (émetteur, JWKS) reste sur `AUTH0_DOMAIN`.
 
 ## Valeurs à reporter
@@ -181,8 +221,8 @@ Pour le tenant, une fois la procédure terminée :
 Pour le tenant :
 
 - [ ] Tenant en région Canada (`ca` dans le domaine de l'application ou dans l'adresse du dashboard).
-- [ ] Les deux API (Sport Challenge API, Sport Challenge Local API) en RS256, durée de vie des access tokens à 15 min, accès hors ligne activé, Allow Skipping User Consent activé.
-- [ ] Les deux API en Per-app authorization ; chacune n'autorise que la SPA de son environnement en accès utilisateur, sans permission (étape 2.6).
+- [ ] Les deux API (Sport Challenge API, Sport Challenge Local API) en RS256, durée de vie des access tokens à 15 min, accès hors ligne activé, Allow Skipping User Consent activé, RBAC et Add Permissions in the Access Token activés, une seule permission `admin`.
+- [ ] Les deux API en Per-app authorization ; chacune n'autorise que la SPA de son environnement en accès utilisateur, avec au plus la permission `admin` (étape 2.6).
 - [ ] Application de test de l'API et Default App supprimées ; aucune application machine à machine autorisée sur l'API.
 - [ ] SPA : Sport Challenge Web avec les seules URL de production, Sport Challenge Web (local) avec les seules URL `localhost`, sans joker ; rotation des refresh tokens activée ; grant Implicit décoché.
 - [ ] Profil d'authentification en Identifier First ; seule la connexion par code e-mail est activée sur les deux SPA ; google-oauth2 désactivée ; connexion par mot de passe supprimée.
@@ -190,6 +230,9 @@ Pour le tenant :
 - [ ] Application machine à machine Sport Challenge API (management) limitée à `delete:users`, Sport Challenge API (local) sans aucune API autorisée ; grant Client Credentials seul, aucune connexion ; secret de production dans Secret Manager seulement, accès réservé au compte de service de l'API ; le `.env` local porte celui de l'application locale.
 - [ ] Connexion de test réussie depuis le frontend (ou **Authentication** → Passwordless → Email → Try dans le dashboard).
 - [ ] Action Add e-mail to access token déployée et placée dans le flux post-login (étape 8) ; `GET /api/v1/me` renvoie l'e-mail.
+- [ ] Rôle `admin` avec la permission `admin` des deux API, attribué au seul compte du propriétaire du produit ; Action Require MFA for admins déployée dans le flux post-login ; second facteur demandé à la connexion de l'admin, rafraîchissement de son jeton accepté, `is_admin: true` pour lui seul (étape 9).
+- [ ] Aucun utilisateur n'a la permission `admin` en direct, et aucun autre rôle ne la porte (étape 9.2).
+- [ ] L'API de production a pour `AUTH0_AUDIENCE` l'audience de Sport Challenge API (`https://api.sport-challenge`), jamais celle de l'API locale : le rôle `admin` porte la permission sur les deux.
 - [ ] Après la fin de l'essai : protections de l'étape 6 toujours actives.
 - [ ] Production : domaine personnalisé Auth0 actif, `AUTH0_DOMAIN` réglé sur ce domaine et `AUTH0_MGMT_DOMAIN` sur le domaine du tenant (étape 7) ; suppression de compte testée ensuite.
 

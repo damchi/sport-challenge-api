@@ -31,7 +31,7 @@ func (h *Handler) GetMe(ctx context.Context, _ api.GetMeRequestObject) (api.GetM
 	if err != nil {
 		return nil, err
 	}
-	me, err := toMe(u)
+	me, err := toMe(u, isAdmin(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (h *Handler) PatchMe(ctx context.Context, req api.PatchMeRequestObject) (ap
 	if err != nil {
 		return nil, err
 	}
-	me, err := toMe(u)
+	me, err := toMe(u, isAdmin(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,14 @@ func actor(ctx context.Context) (string, error) {
 	return id, nil
 }
 
-func toMe(u User) (api.Me, error) {
+// isAdmin tells whether the request's token carries the admin permission.
+// It only informs the apps: every admin route checks it again in its policy.
+func isAdmin(ctx context.Context) bool {
+	claims, ok := auth.ClaimsFromContext(ctx)
+	return ok && claims.Admin
+}
+
+func toMe(u User, admin bool) (api.Me, error) {
 	id, err := uuid.Parse(u.ID)
 	if err != nil {
 		return api.Me{}, fmt.Errorf("user id: %w", err)
@@ -106,6 +113,7 @@ func toMe(u User) (api.Me, error) {
 		LastName:        u.LastName,
 		Email:           u.Email,
 		ProfileComplete: u.ProfileComplete(),
+		IsAdmin:         admin,
 	}
 	if u.Language != nil {
 		lang := api.Language(*u.Language)

@@ -2,9 +2,11 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +32,9 @@ const (
 	// machineGrantType marks Auth0 machine-to-machine (client credentials) tokens.
 	machineGrantType = "client-credentials"
 	machineSubSuffix = "@clients"
+	// adminPermission is the Auth0 RBAC permission of the "admin" role
+	// (docs/auth0-setup.md).
+	adminPermission = "admin"
 )
 
 // Auth0Verifier verifies Auth0 access tokens: RS256 signature checked against
@@ -103,15 +108,54 @@ func jwksClient() *http.Client {
 	}
 }
 
+const (
+	// emailClaim is the custom claim an Auth0 post-login Action adds with the
+	// user's e-mail (docs/auth0-setup.md): an access token has no "email"
+	// claim, and Auth0 only keeps custom claims with a namespace.
+	emailClaim = "https://sport-challenge/email"
+	// permissionsClaim holds the Auth0 RBAC permissions of the user on this
+	// API ("Add Permissions in the Access Token").
+	permissionsClaim = "permissions"
+)
+
 // tokenClaims are the claims read from an Auth0 access token.
 type tokenClaims struct {
 	jwt.RegisteredClaims
 	Scope     string `json:"scope"`
 	GrantType string `json:"gty"`
-	// Email is the custom claim an Auth0 post-login Action adds with the
-	// user's e-mail (docs/auth0-setup.md): an access token has no "email"
-	// claim, and Auth0 only keeps custom claims with a namespace.
-	Email string `json:"https://sport-challenge/email"`
+	// Email and Permissions are read by UnmarshalJSON on their exact claim
+	// names.
+	Email       string   `json:"-"`
+	Permissions []string `json:"-"`
+}
+
+// UnmarshalJSON decodes the claims, reading the e-mail and the permissions
+// on their exact names: encoding/json matches field names regardless of
+// case, and only the claims Auth0 sets under these names may grant them.
+// A permissions claim that is not an array of strings fails, hence an
+// invalid token.
+func (c *tokenClaims) UnmarshalJSON(data []byte) error {
+	type plain tokenClaims // no UnmarshalJSON: no recursion
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if v, ok := raw[emailClaim]; ok {
+		if err := json.Unmarshal(v, &p.Email); err != nil {
+			return fmt.Errorf("claim %s: %w", emailClaim, err)
+		}
+	}
+	if v, ok := raw[permissionsClaim]; ok {
+		if err := json.Unmarshal(v, &p.Permissions); err != nil {
+			return fmt.Errorf("claim %s: %w", permissionsClaim, err)
+		}
+	}
+	*c = tokenClaims(p)
+	return nil
 }
 
 // Verify implements TokenVerifier.
@@ -137,5 +181,6 @@ func (v *Auth0Verifier) Verify(ctx context.Context, rawToken string) (Claims, er
 		Email:     c.Email,
 		ExpiresAt: c.ExpiresAt.Time,
 		Scopes:    strings.Fields(c.Scope),
+		Admin:     slices.Contains(c.Permissions, adminPermission),
 	}, nil
 }

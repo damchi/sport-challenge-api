@@ -210,6 +210,7 @@ func TestVerifyExposesOnlyTheExpectedClaims(t *testing.T) {
 	}{
 		{name: "namespaced e-mail claim", claims: map[string]any{"https://sport-challenge/email": "marie@example.com", "email": "other@example.com"}, wantEmail: "marie@example.com"},
 		{name: "plain e-mail claim only: ignored", claims: map[string]any{"email": "someone@example.com"}},
+		{name: "namespaced e-mail claim with another case: ignored", claims: map[string]any{"HTTPS://SPORT-CHALLENGE/EMAIL": "someone@example.com"}},
 		{name: "no e-mail", claims: map[string]any{}},
 	}
 	for _, tt := range tests {
@@ -222,6 +223,50 @@ func TestVerifyExposesOnlyTheExpectedClaims(t *testing.T) {
 			want := Claims{Subject: "email|123", Email: tt.wantEmail, ExpiresAt: exp, Scopes: []string{"openid", "profile", "email"}}
 			if got.Subject != want.Subject || got.Email != want.Email || !got.ExpiresAt.Equal(want.ExpiresAt) || !slices.Equal(got.Scopes, want.Scopes) {
 				t.Fatalf("Verify() = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestVerifyReadsTheAdminPermission: only the exact "admin" permission of the
+// Auth0 RBAC "permissions" claim makes an admin; a malformed claim rejects
+// the token rather than guessing.
+func TestVerifyReadsTheAdminPermission(t *testing.T) {
+	key := newSigningKey(t, "key-1")
+	v := newTestVerifier(t, newJWKSServer(t, key), time.Minute)
+
+	tests := []struct {
+		name      string
+		claims    map[string]any
+		wantAdmin bool
+		wantErr   error
+	}{
+		{name: "admin permission", claims: map[string]any{"permissions": []string{"admin"}}, wantAdmin: true},
+		{name: "admin among other permissions", claims: map[string]any{"permissions": []string{"read:stats", "admin"}}, wantAdmin: true},
+		{name: "no permissions claim", claims: map[string]any{}},
+		{name: "empty permissions", claims: map[string]any{"permissions": []string{}}},
+		{name: "other permissions only", claims: map[string]any{"permissions": []string{"read:stats"}}},
+		{name: "look-alike permissions", claims: map[string]any{"permissions": []string{"Admin", "admin:read", " admin", "administrator"}}},
+		{name: "admin in the scope, not a permission", claims: map[string]any{"scope": "openid admin"}},
+		{name: "admin in a namespaced claim, not a permission", claims: map[string]any{"https://sport-challenge/permissions": []string{"admin"}}},
+		{name: "claim name with another case", claims: map[string]any{"Permissions": []string{"admin"}, "PERMISSIONS": []string{"admin"}}},
+		{name: "claim name with another case next to the real one", claims: map[string]any{"permissions": []string{"read:stats"}, "Permissions": []string{"admin"}}},
+		{name: "permissions as a string", claims: map[string]any{"permissions": "admin"}, wantErr: ErrInvalidToken},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := v.Verify(t.Context(), sign(t, key, with(tt.claims)))
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Verify() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Admin != tt.wantAdmin {
+				t.Fatalf("Admin = %v, want %v", got.Admin, tt.wantAdmin)
 			}
 		})
 	}
