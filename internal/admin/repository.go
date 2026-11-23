@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
 
@@ -525,16 +527,31 @@ func (r *Repository) Eliminations(ctx context.Context, id string) ([]Elimination
 	return readEliminations(db.Conn(ctx, r.db), id)
 }
 
+// lockTimeout bounds the wait of an admin change for each lock, in the
+// syntax of lock_timeout.
+const lockTimeout = "30s"
+
+// lockNotAvailable is the SQLSTATE of a lock waited for longer than
+// lock_timeout.
+const lockNotAvailable = "55P03"
+
 // InLockedTx runs fn in a transaction, carried by the ctx it gets (db.InTx),
 // that takes the week lock alone before anything else (db.LockWeeks), in
 // the order of the activity writes, waiting 30 s at most for each lock;
-// rolled back when fn fails.
+// rolled back when fn fails. A lock waited for longer answers 503 busy,
+// everything rolled back.
 func (r *Repository) InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error {
-	return db.InTx(ctx, r.db, func(ctx context.Context) error {
+	return r.inLockedTx(ctx, lockTimeout, fn)
+}
+
+// inLockedTx is InLockedTx, each lock waited for timeout at most.
+func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx context.Context) error) error {
+	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
 		tx := db.Conn(ctx, r.db)
 		// While the change waits for the lock, the activity writes wait
-		// behind it: the wait is bounded, as that of the worker.
-		if err := tx.Exec(`SET LOCAL lock_timeout = '30s'`).Error; err != nil {
+		// behind it: the wait is bounded, as that of the worker (SET LOCAL,
+		// as a parameter).
+		if err := tx.Exec(`SELECT set_config('lock_timeout', ?, true)`, timeout).Error; err != nil {
 			return fmt.Errorf("bound lock wait: %w", err)
 		}
 		if err := db.LockWeeks(tx); err != nil {
@@ -542,6 +559,11 @@ func (r *Repository) InLockedTx(ctx context.Context, fn func(ctx context.Context
 		}
 		return fn(ctx)
 	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
+		return apperr.New(apperr.CodeBusy, err)
+	}
+	return err
 }
 
 var _ correctionStore = (*Repository)(nil)

@@ -54,6 +54,12 @@ func serve(t *testing.T, svc *Service, token, target string) (*httptest.Response
 // API, as JSON, written to logs.
 func serveLogged(t *testing.T, svc *Service, token, method, target, body string, logs io.Writer) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
+	return serveWith(t, NewHandler(svc, nil), token, method, target, body, logs)
+}
+
+// serveWith is serveLogged on handler h.
+func serveWith(t *testing.T, h *Handler, token, method, target, body string, logs io.Writer) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	spec, err := api.GetSpec()
@@ -69,7 +75,7 @@ func serveLogged(t *testing.T, svc *Service, token, method, target, body string,
 		auth.Authenticate(acceptingVerifier{}, logger),
 		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return "11111111-1111-4111-8111-111111111111", nil }, logger),
 	))
-	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(adminOnly{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
+	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(adminOnly{Handler: h}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),

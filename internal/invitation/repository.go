@@ -110,6 +110,17 @@ func (r *Repository) Link(ctx context.Context, tokenHash []byte, userID string, 
 	return ids[0], nil
 }
 
+// Reschedule sets the expiry of every invitation to challengeID not
+// revoked, in the transaction of ctx, if any.
+func (r *Repository) Reschedule(ctx context.Context, challengeID string, expiresAt time.Time) error {
+	err := db.Conn(ctx, r.db).Exec(`UPDATE invitations SET expires_at = ? WHERE challenge_id = ? AND revoked_at IS NULL`,
+		expiresAt, challengeID).Error
+	if err != nil {
+		return fmt.Errorf("update invitations: %w", err)
+	}
+	return nil
+}
+
 // EraseUser deletes the invitations userID created, with the links of
 // everybody to them, and the links of userID to the invitations of others.
 // The people who joined through them stay participants. It runs in the

@@ -639,6 +639,88 @@ func (r *Repository) UpdateText(ctx context.Context, id string, changes TextChan
 	return nil
 }
 
+// UpdateSettings writes the settings of challenge id that decide returns,
+// under the lock of withLockedMembership, in the transaction of ctx (an
+// admin change): decide gets the challenge, its membership left aside, and
+// its categories, read after the lock, and refuses with an error, nothing
+// being written then. The columns are written, then the categories: those
+// kept get their new settings, those removed are deleted with their
+// eliminations and frozen results (whose keys reference them; the recompute
+// that follows the change erases and records them again), the new ones are
+// inserted. A deleted challenge gives errChallengeNotFound.
+func (r *Repository) UpdateSettings(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, []Category) (Challenge, error)) error {
+	// withLockedMembership for its lock on the challenge row, as every
+	// write on a challenge; the membership of the admin is of no use here.
+	err := r.withLockedMembership(ctx, id, actorID, now, func(tx *gorm.DB, c Challenge, _ Membership) error {
+		var cats []Category
+		if err := tx.Where("challenge_id = ?", id).Order("position").Find(&cats).Error; err != nil {
+			return fmt.Errorf("read categories: %w", err)
+		}
+		next, err := decide(c, cats)
+		if err != nil {
+			return err
+		}
+		res := tx.Model(&Challenge{}).Where("id = ? AND deleted_at IS NULL", id).Updates(map[string]any{
+			"title":              next.Title,
+			"description":        next.Description,
+			"visibility":         next.Visibility,
+			"members_can_invite": next.MembersCanInvite,
+			"timezone":           next.Timezone,
+			"reference_sport":    next.ReferenceSport,
+			"starts_at":          next.StartsAt,
+			"ends_at":            next.EndsAt,
+		})
+		if res.Error != nil {
+			return fmt.Errorf("update challenge: %w", res.Error)
+		}
+		// The lock makes it impossible: a silent success would hide a bug.
+		if res.RowsAffected == 0 {
+			return errors.New("update challenge: not found under the lock")
+		}
+		return replaceCategories(tx, id, cats, next.Categories)
+	})
+	if err != nil {
+		return fmt.Errorf("update settings: %w", err)
+	}
+	return nil
+}
+
+// replaceCategories turns the categories old of challenge id into next, by
+// type (one category of each type at most).
+func replaceCategories(tx *gorm.DB, id string, old, next []Category) error {
+	kept := make(map[string]string, len(old))
+	for _, cat := range old {
+		kept[cat.Type] = cat.ID
+	}
+	for _, cat := range next {
+		catID, ok := kept[cat.Type]
+		delete(kept, cat.Type)
+		if ok {
+			if err := tx.Model(&Category{}).Where("id = ?", catID).Update("params", cat.Params).Error; err != nil {
+				return fmt.Errorf("update category %s: %w", cat.Type, err)
+			}
+			continue
+		}
+		cat.ChallengeID = id
+		if err := tx.Create(&cat).Error; err != nil {
+			return fmt.Errorf("insert category %s: %w", cat.Type, err)
+		}
+	}
+	// What remains is removed, after what references it.
+	for _, catID := range kept {
+		for _, query := range []string{
+			"DELETE FROM elimination WHERE category_id = ?",
+			"DELETE FROM result_snapshot WHERE category_id = ?",
+			"DELETE FROM categories WHERE id = ?",
+		} {
+			if err := tx.Exec(query, catID).Error; err != nil {
+				return fmt.Errorf("remove category: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 // eraseSnapshotEntriesQuery removes the entries of @user from the frozen
 // results of the challenges they joined, keeping the order of the others.
 // The ranks are not rewritten: they are computed again when served.

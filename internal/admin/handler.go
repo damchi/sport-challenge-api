@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/damchi/sport-challenge-api/internal/api"
+	"github.com/damchi/sport-challenge-api/internal/challenge"
+	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
@@ -16,12 +18,102 @@ import (
 
 // Handler implements the /admin operations of the API contract.
 type Handler struct {
-	service *Service
+	service  *Service
+	settings settingsUpdater
 }
 
-// NewHandler returns a Handler on service.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+// settingsUpdater changes the settings of a challenge as an admin
+// (ChallengeCorrections).
+type settingsUpdater interface {
+	UpdateSettings(ctx context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges, reason string, dryRun bool) ([]ChallengePreview, error)
+}
+
+// NewHandler returns a Handler on service for the reads, settings for the
+// changes of the settings of a challenge.
+func NewHandler(service *Service, settings settingsUpdater) *Handler {
+	return &Handler{service: service, settings: settings}
+}
+
+// UpdateAdminChallenge changes the settings of a challenge, or previews
+// the change with dry_run.
+func (h *Handler) UpdateAdminChallenge(ctx context.Context, req api.UpdateAdminChallengeRequestObject) (api.UpdateAdminChallengeResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	// Without a body, the request is refused as one without its reason,
+	// once the permission is checked (ChallengeCorrections).
+	b := req.Body
+	if b == nil {
+		b = &api.AdminChallengeUpdate{}
+	}
+	changes := challenge.SettingsChanges{
+		Title: b.Title, Description: b.Description, MembersCanInvite: b.MembersCanInvite,
+		Timezone: b.Timezone, Weeks: b.Weeks, ReferenceSport: b.ReferenceSport,
+	}
+	if b.Visibility != nil {
+		v := string(*b.Visibility)
+		changes.Visibility = &v
+	}
+	if b.StartDate != nil {
+		d := b.StartDate.String()
+		changes.StartDate = &d
+	}
+	if b.Categories != nil {
+		choice := challenge.CategoryChoiceOf(*b.Categories)
+		changes.Categories = &choice
+	}
+	if b.DistanceFactors != nil {
+		changes.DistanceFactors = *b.DistanceFactors
+	}
+	dryRun := b.DryRun != nil && *b.DryRun
+	previews, err := h.settings.UpdateSettings(ctx, actor, req.ChallengeId.String(), changes, b.Reason, dryRun)
+	if err != nil {
+		return nil, err
+	}
+	out, err := toCorrection(previews, dryRun)
+	if err != nil {
+		return nil, err
+	}
+	return api.UpdateAdminChallenge200JSONResponse(out), nil
+}
+
+// toCorrection turns the previews of an admin change into their contract
+// form.
+func toCorrection(previews []ChallengePreview, dryRun bool) (api.AdminCorrection, error) {
+	out := api.AdminCorrection{DryRun: dryRun, Challenges: make([]api.AdminChallengePreview, len(previews))}
+	for i, p := range previews {
+		id, err := uuid.Parse(p.ChallengeID)
+		if err != nil {
+			return api.AdminCorrection{}, fmt.Errorf("challenge id: %w", err)
+		}
+		before, err := leaderboard.Contract(p.Before)
+		if err != nil {
+			return api.AdminCorrection{}, err
+		}
+		after, err := leaderboard.Contract(p.After)
+		if err != nil {
+			return api.AdminCorrection{}, err
+		}
+		changes := make([]api.AdminEliminationChange, len(p.Eliminations))
+		for j, e := range p.Eliminations {
+			user, err := toUserRef(e.User)
+			if err != nil {
+				return api.AdminCorrection{}, err
+			}
+			changes[j] = api.AdminEliminationChange{User: user, Before: toJudgement(e.Before), After: toJudgement(e.After)}
+		}
+		out.Challenges[i] = api.AdminChallengePreview{ChallengeId: id, Before: before, After: after, Eliminations: changes}
+	}
+	return out, nil
+}
+
+// toJudgement turns an elimination into its contract form, nil for none.
+func toJudgement(e *EliminationRow) *api.AdminEliminationJudgement {
+	if e == nil {
+		return nil
+	}
+	return &api.AdminEliminationJudgement{WeekNumber: e.WeekNumber, DistanceMeters: e.DistanceMeters, RequiredMeters: e.RequiredMeters}
 }
 
 // GetAdminStats answers the figures of the dashboard.

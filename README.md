@@ -235,6 +235,7 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
 | Défi supprimé | Le restaurer, à tout moment ; supprimer un défi (✅) |
 | Comptes | Modifier pseudo, prénom et nom ; bloquer et débloquer ; supprimer (même effet que `DELETE /me`, suppression chez Auth0 comprise, et même refus `last_creator` tant que le compte est le dernier créateur d'un défi à venir ou en cours : l'admin nomme d'abord un autre créateur ou supprime le défi) (✅) |
 
+- ✅ **Réglages d'un défi** (`PATCH /admin/challenges/{id}`, décisions du 2026-11-23, SC-API-161) : tous les champs de la création, validés par les mêmes règles, sauf le premier jour, qui peut être dans le passé (au plus un an d'avance, comme à la création) ; un champ absent garde sa valeur ; `categories` remplace les catégories au choix (celles qu'il omet sont retirées, le temps cumulé reste). Un nouveau sport de référence repart des coefficients suggérés ramenés à lui ; sinon les coefficients du défi restent ; `distance_factors` remplace ensuite ceux qu'il nomme. Un nouveau premier jour ou fuseau recale l'expiration des liens d'invitation non révoqués sur la nouvelle fin de semaine 1 (un lien expiré peut redevenir valide).
 - ✅ Une activité corrigée par l'admin l'est **partout** : tous les défis où elle compte (§2.5) sont recalculés, et l'aperçu les liste.
 - 🟡 Une activité ajoutée par l'admin pour un utilisateur a la source `admin` (à côté de `manual`), pour la distinguer d'une saisie.
 
@@ -671,7 +672,8 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 - exception : le détail des activités d'un participant, demandé par quelqu'un qui voit le challenge sans y participer (non-participant d'un challenge public, invité), répond 404 `not_found` : pour lui, cette liste n'existe pas (✅) ;
 - entrée invalide (format, bornes, dates, champ inconnu) → 400 `validation_failed`, avec les champs fautifs dans `params.fields` ;
 - entrée valide mais action contraire à une règle métier → 422 avec un code stable (`profile_incomplete`, `registration_closed`, `challenge_ended`, `field_not_editable`, `cannot_exclude_creator`…) ;
-- conflit avec une autre donnée (pseudo déjà pris) → 409.
+- conflit avec une autre donnée (pseudo déjà pris) → 409 ;
+- modification admin qui a attendu plus de 30 s l'un de ses verrous (écritures en cours, verrou des semaines ou du défi) → 503 `busy`, rien n'est écrit ; l'app propose de réessayer (✅ 2026-11-23, SC-API-161).
 
 **Protections** : l'identifiant de l'acteur vient toujours du contexte (jamais d'un paramètre) ; le contrôle et l'écriture se font dans la même transaction quand une course est possible (rejoindre à la limite de la semaine 1, suppression du challenge pendant qu'un participant le rejoint) ; chaque règle a un test « interdit » ; l'agent `security-reviewer` vérifie ce point à chaque revue.
 

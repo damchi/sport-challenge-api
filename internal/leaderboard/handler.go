@@ -52,6 +52,23 @@ func (h *Handler) GetLeaderboard(ctx context.Context, req api.GetLeaderboardRequ
 	return api.GetLeaderboard200JSONResponse(out), nil
 }
 
+// Contract turns the whole rankings of a challenge (Service.Get) into their
+// contract form, as GetLeaderboard answers them without limit: no podium,
+// no line of the reader, no next page.
+func Contract(b Leaderboard) (api.Leaderboard, error) {
+	out := api.Leaderboard{ComputedAt: b.ComputedAt.UTC(), Categories: make([]api.CategoryRanking, 0, len(b.Categories))}
+	for _, c := range b.Categories {
+		entries, err := toEntries(c.Entries)
+		if err != nil {
+			return api.Leaderboard{}, err
+		}
+		out.Categories = append(out.Categories, api.CategoryRanking{
+			Type: api.CategoryRankingType(c.Type), RankedCount: c.RankedCount, Entries: entries,
+		})
+	}
+	return out, nil
+}
+
 // pageRequest reads the part of the leaderboard asked for. A cursor needs
 // the limit and the category it was given for; one that does not decode, or
 // decodes to no position, answers 400 validation_failed on cursor.

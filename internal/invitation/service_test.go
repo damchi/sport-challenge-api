@@ -64,6 +64,9 @@ type fakeRepository struct {
 	// linked records the link made: user and instant.
 	linkedUser string
 	linkedAt   time.Time
+	// rescheduled and rescheduledAt record the last Reschedule.
+	rescheduled   string
+	rescheduledAt time.Time
 }
 
 func (f *fakeRepository) Create(_ context.Context, inv Invitation) (Invitation, error) {
@@ -77,6 +80,32 @@ func (f *fakeRepository) Create(_ context.Context, inv Invitation) (Invitation, 
 
 // EraseUser is covered by the integration tests.
 func (f *fakeRepository) EraseUser(context.Context, string) error { return nil }
+
+// Reschedule records what it is asked; f.err fails it. Its SQL is covered
+// by the integration tests.
+func (f *fakeRepository) Reschedule(_ context.Context, challengeID string, at time.Time) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.rescheduled, f.rescheduledAt = challengeID, at
+	return nil
+}
+
+func TestServiceReschedule(t *testing.T) {
+	at := time.Date(2026, 3, 16, 4, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{}
+	svc := NewService(nil, repo, clock.NewFake(at))
+	if err := svc.Reschedule(t.Context(), "c1", at); err != nil {
+		t.Fatal(err)
+	}
+	if repo.rescheduled != "c1" || !repo.rescheduledAt.Equal(at) {
+		t.Fatalf("rescheduled %q at %v, want c1 at %v", repo.rescheduled, repo.rescheduledAt, at)
+	}
+	boom := errors.New("boom")
+	if err := NewService(nil, &fakeRepository{err: boom}, clock.NewFake(at)).Reschedule(t.Context(), "c1", at); !errors.Is(err, boom) {
+		t.Fatalf("Reschedule() = %v, want the error of the repository", err)
+	}
+}
 
 func (f *fakeRepository) Link(_ context.Context, tokenHash []byte, userID string, at time.Time) (string, error) {
 	if f.err != nil {

@@ -76,7 +76,10 @@ const (
 	// CodeRateLimited refuses a request beyond the rate limit of its IP
 	// address or of its user.
 	CodeRateLimited Code = "rate_limited"
-	CodeInternal    Code = "internal_error"
+	// CodeBusy refuses an admin change that waited too long for the writes
+	// in progress: nothing was written, it can be tried again.
+	CodeBusy     Code = "busy"
+	CodeInternal Code = "internal_error"
 )
 
 type definition struct {
@@ -142,6 +145,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusBadRequest, "Ranking changed since the cursor"}, true
 	case CodeRateLimited:
 		return definition{http.StatusTooManyRequests, "Too many requests"}, true
+	case CodeBusy:
+		return definition{http.StatusServiceUnavailable, "Busy, try again"}, true
 	case CodeInternal:
 		return definition{http.StatusInternalServerError, "Internal server error"}, true
 	}

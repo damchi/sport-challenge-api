@@ -38,6 +38,7 @@ func TestNew(t *testing.T) {
 		{CodeParticipationAbandoned, http.StatusUnprocessableEntity},
 		{CodeValidationFailed, http.StatusBadRequest},
 		{CodeCursorInvalid, http.StatusBadRequest},
+		{CodeBusy, http.StatusServiceUnavailable},
 		{CodeInternal, http.StatusInternalServerError},
 	}
 	for _, tt := range tests {

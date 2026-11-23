@@ -30,6 +30,9 @@ type repository interface {
 	// changes nothing.
 	Link(ctx context.Context, tokenHash []byte, userID string, now time.Time) (string, error)
 	EraseUser(ctx context.Context, userID string) error
+	// Reschedule makes every invitation to challengeID not revoked expire
+	// at expiresAt.
+	Reschedule(ctx context.Context, challengeID string, expiresAt time.Time) error
 }
 
 // Challenge is what an invitation shows of its challenge: a limited
@@ -75,6 +78,19 @@ func NewService(challenges Challenges, repo repository, c clock.Clock) *Service 
 func (s *Service) EraseUser(ctx context.Context, userID string) error {
 	if err := s.repo.EraseUser(ctx, userID); err != nil {
 		return fmt.Errorf("erase user: %w", err)
+	}
+	return nil
+}
+
+// Reschedule makes every invitation link to challenge challengeID not
+// revoked expire at expiresAt, the new end of its week 1 after an admin
+// moved its first day or its time zone (README §2.12): a link expired may
+// become valid again. It runs in the transaction of the admin change (ctx
+// carries it). It checks no actor: never expose it on a route, only
+// admin.ChallengeCorrections calls it, once the admin is checked.
+func (s *Service) Reschedule(ctx context.Context, challengeID string, expiresAt time.Time) error {
+	if err := s.repo.Reschedule(ctx, challengeID, expiresAt); err != nil {
+		return fmt.Errorf("reschedule invitations: %w", err)
 	}
 	return nil
 }

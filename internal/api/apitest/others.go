@@ -152,6 +152,10 @@ func (unimplemented) GetAdminChallenge(context.Context, api.GetAdminChallengeReq
 	return nil, errNotImplemented
 }
 
+func (unimplemented) UpdateAdminChallenge(context.Context, api.UpdateAdminChallengeRequestObject) (api.UpdateAdminChallengeResponseObject, error) {
+	return nil, errNotImplemented
+}
+
 func (unimplemented) ListAdminUsers(context.Context, api.ListAdminUsersRequestObject) (api.ListAdminUsersResponseObject, error) {
 	return nil, errNotImplemented
 }
