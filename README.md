@@ -24,32 +24,32 @@ Une personne crée un ou plusieurs challenges sportifs, choisit une durée, la v
 - ✅ Là où un changement d'heure saute minuit (Chili, Égypte, Liban…), le jour commence au **premier instant qui existe** ce jour-là (par exemple 01:00) : jamais la veille. La même règle vaut pour chaque début de semaine.
 - ✅ **Catégories à la carte** (décision du 2026-11-20, SC-API-131) : un challenge a **toujours** la catégorie temps cumulé ; le créateur ajoute, s'il le veut, la distance cumulée, l'élimination et la catégorie Points, dans n'importe quelle combinaison (§2.3). Un challenge peut n'avoir que le temps cumulé.
 - ✅ **Sport de référence** (SC-API-131) : le créateur choisit, à la création, le sport de référence du challenge parmi les sports du catalogue dont la distance est obligatoire (course, vélo, natation, aviron…) ; **course par défaut**. Les distances de la distance cumulée et du critère de distance des Points y sont ramenées (§2.4), et l'élimination porte sur lui (§2.3).
-- ✅ Catégories, sport de référence et paramètres (coefficients, incrément X, réglages de la catégorie Points) sont **figés à la création**.
+- ✅ Catégories, sport de référence et paramètres (coefficients, incrément X, réglages de la catégorie Points) sont **figés à la création** pour les utilisateurs, créateurs compris ; seul un admin peut les changer (§2.12).
 - ✅ **Plusieurs créateurs** possibles pour un même challenge.
 - ✅ Visibilité :
   - **Public** : accès libre, listé sur la page d'accueil de l'app.
   - **Privé** : sur invitation d'un créateur ou d'un participant.
 - ✅ Le créateur choisit si les participants peuvent aussi inviter du monde (une personne seulement invitée, qui n'a pas rejoint, ne peut pas inviter).
 - ✅ **Fuseau horaire** : début et fin sont définis selon le fuseau du lieu de lancement du challenge (ex. Montréal). Les semaines sont découpées dans ce même fuseau.
-- ✅ Après le début, on peut modifier le **titre** et la **description**, mais **pas les catégories**.
+- ✅ Après le début, on peut modifier le **titre** et la **description**, mais **pas les catégories** (sauf un admin, §2.12).
 - ✅ Personne ne « quitte » vraiment un challenge : l'action « quitter » (ou la suppression de son compte, pour les challenges à venir ou en cours) équivaut à un **abandon**. Les créateurs peuvent **supprimer le challenge**.
 - ✅ Un challenge est **supprimable à tout moment** par n'importe quel créateur, même en cours et avec des participants, après une confirmation qui avertit que tout disparaît pour tous.
-- ✅ Suppression **logique** immédiate : le challenge disparaît pour tous (`deleted_at`), ses lignes restent en base. La purge définitive suit la politique de conservation des données (❓, §8).
+- ✅ Suppression **logique** immédiate : le challenge disparaît pour tous (`deleted_at`), ses lignes restent en base. Il est **restaurable par un admin** à tout moment et n'est **jamais purgé** (✅ 2026-11-23, §2.12).
 
 ### 2.2 Participation
 
 - ✅ On peut rejoindre un challenge **jusqu'à la fin de sa première semaine**.
 - ✅ Un participant est **classé dans toutes les catégories** du challenge (pas d'inscription par catégorie).
-- ✅ Abandonner (« quitter ») un challenge = **éliminé de toutes les catégories**, définitivement.
+- ✅ Abandonner (« quitter ») un challenge = **éliminé de toutes les catégories**, définitivement (seul un admin peut réintégrer un participant, §2.12).
 - ✅ Un participant qui abandonne apparaît comme « a abandonné » et sort du podium.
 - ✅ Un compte supprimé est traité comme un abandon dans les challenges à venir ou en cours, et il est **retiré partout** dans tous ses challenges, terminés compris : la personne ne veut plus que ses données soient vues, elle ne peut plus rien gagner et n'est plus comptée. Il n'apparaît plus dans les classements, ni dans la liste ni le nombre des participants, et ses activités ne sont plus visibles (404 `not_found`, comme pour quelqu'un qui n'a jamais rejoint, y compris pour l'exclure ; l'ajouter comme créateur répond `not_active_participant`). Dans un challenge terminé, les autres participants remontent dans les résultats figés (les ex aequo restent ex aequo : 1, 1, 3). ✅ Ses données sont **effacées** de la base, dans la transaction de la suppression : activités, participations, éliminations, rôles de créateur, liens d'invitation et ses entrées dans les résultats figés (les rangs, eux, restent recalculés à la lecture et ne sont jamais réécrits). Seuls les challenges qu'il a créés restent, rattachés au compte anonymisé (voir §6). Un compte déjà supprimé quand le worker fige les résultats n'y est pas inscrit.
 - ✅ **Dernier créateur** : la suppression d'un compte est **refusée** (`last_creator`, avec la liste des challenges) tant qu'il est le dernier créateur, ayant encore un compte, d'un challenge à venir ou en cours. La personne désigne d'abord un autre créateur (« ajouter un créateur »), ou, s'il n'y a personne à désigner, supprime le challenge elle-même. Un challenge terminé ne bloque rien. Un co-créateur qui a abandonné garde ses droits de créateur (§5.7) et compte donc comme autre créateur. Les liens d'invitation d'un compte supprimé sont **effacés** : une personne qui avait ouvert le lien sans rejoindre perd l'accès au challenge privé ; celles qui ont déjà rejoint restent participantes.
 - ✅ Les activités faites avant l'inscription, mais dans la fenêtre du challenge, comptent.
-- ✅ **Catégorie Points et suppression d'un compte** (SC-API-131) : les points n'étant jamais stockés (§2.3), un compte supprimé avant le gel des résultats (✅ décision du 2026-11-20 : le gel est le passage du worker qui les fige, au plus tôt à 7 h le premier jour après le challenge, §2.6 ; une suppression faite pendant ce passage le fait reclasser le challenge sans le compte) est retiré de **tous** les mini-classements hebdomadaires, semaines verrouillées comprises : les suivants remontent et reçoivent les points de la place gagnée (personne ne perd de points). Après le gel, comme dans les autres catégories, seuls les rangs se recalculent : les points figés ne bougent plus.
+- ✅ **Catégorie Points et suppression d'un compte** (SC-API-131) : les points n'étant jamais stockés (§2.3), un compte supprimé avant le gel des résultats (✅ décision du 2026-11-20 : le gel est le passage du worker qui les fige, au plus tôt à 7 h le premier jour après le challenge, §2.6 ; une suppression faite pendant ce passage le fait reclasser le challenge sans le compte) est retiré de **tous** les mini-classements hebdomadaires, semaines verrouillées comprises : les suivants remontent et reçoivent les points de la place gagnée (personne ne perd de points). Après le gel, comme dans les autres catégories, seuls les rangs se recalculent : les points figés ne bougent plus, sauf correction par un admin, qui les refige (§2.12).
 
 ### 2.3 Catégories et podiums
 
-Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles que le créateur a choisies (§2.1). **Chaque catégorie a son propre podium**, donc plusieurs gagnants par challenge. Les catégories sont figées à la création et affichées dans l'ordre du tableau.
+Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles que le créateur a choisies (§2.1). **Chaque catégorie a son propre podium**, donc plusieurs gagnants par challenge. Les catégories sont figées à la création (seul un admin peut les changer, §2.12) et affichées dans l'ordre du tableau.
 
 | # | Catégorie | Présence | Activités acceptées | Classement |
 |---|---|---|---|---|
@@ -71,9 +71,9 @@ Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles
 - ✅ Viennent ensuite les éliminés : le dernier éliminé est classé devant, et en cas d'égalité sur la semaine d'élimination, la distance cumulée départage.
 - ✅ La distance cumulée d'un éliminé s'arrête à la **fin de sa semaine d'élimination** (cette semaine comprise) : ses courses suivantes ne comptent plus, son rang ne bouge plus.
 - ✅ **Verrouillage d'une semaine** (décision du 2026-11-20, SC-API-121) : une semaine se verrouille à **7 h, heure locale du challenge, le premier jour de la semaine suivante** (le jour de la fin de la semaine, `week_ends_at` étant le minuit qui l'ouvre), et non à l'instant de sa fin : environ 7 heures plus tard, 6 ou 8 si l'heure change cette nuit-là. La dernière semaine a la même fenêtre : jusqu'à 7 h le premier jour après le challenge (le jour de `ends_at`). Là où un changement d'heure saute ou répète 7 h, c'est le **premier instant qui existe** (comme pour le début d'un jour, §2.1).
-  - Jusqu'au verrouillage, une activité datée de la semaine (toutes, pas seulement celles à cheval sur sa fin) peut être **ajoutée, modifiée et supprimée** ; ensuite plus rien ne change (`week_locked`), saisie manuelle comprise. C'est l'horloge qui fait foi, pas le passage du worker.
+  - Jusqu'au verrouillage, une activité datée de la semaine (toutes, pas seulement celles à cheval sur sa fin) peut être **ajoutée, modifiée et supprimée** ; ensuite plus rien ne change (`week_locked`), saisie manuelle comprise, sauf correction par un admin (§2.12). C'est l'horloge qui fait foi, pas le passage du worker.
   - Les bornes des semaines ne bougent pas : une activité compte **entièrement pour la semaine de son début**. Une course du dimanche 23:30 au lundi 00:30 compte pour la semaine qui finit ce dimanche, et se saisit jusqu'au lundi 7 h ; une activité commencée après la fin de la semaine compte pour la suivante.
-- ✅ L'élimination d'une semaine est jugée **à son verrouillage** (fuseau du challenge), jamais avant : le délai de grâce va jusqu'à 7 h, heure locale, le premier jour de la semaine suivante. Jugée ensuite, elle ne change plus.
+- ✅ L'élimination d'une semaine est jugée **à son verrouillage** (fuseau du challenge), jamais avant : le délai de grâce va jusqu'à 7 h, heure locale, le premier jour de la semaine suivante. Jugée ensuite, elle ne change plus, sauf recalcul après une correction par un admin (§2.12).
 - ✅ Entre la fin de la semaine s et son verrouillage, le classement et « Mes défis » montrent la **semaine s+1** (celle de l'horloge) : personne n'est encore éliminé pour la semaine s, et le minimum de la semaine s+1 est **provisoire** (distance actuelle de la semaine s + X) ; il peut encore monter jusqu'à 7 h. Le statut live de la semaine s+1 se calcule avec ce minimum provisoire.
 - ✅ Le statut live affiche « objectif atteint » dès que la distance de la semaine atteint le minimum ; sinon « à risque » quand il reste **24 h ou moins** avant la fin de la semaine, et « en cours » avant. Aucun statut en semaine 1 (pas de minimum). Le seuil de 24 h est un paramètre de configuration.
 - ✅ La liste « Mes défis » montre, pour chaque challenge en cours où la personne participe encore, sa semaine (numéro, fin, et dans l'élimination la distance, le minimum et le statut live ci-dessus ; dans la catégorie Points, ses points provisoires) et son **rang dans chacune des catégories du challenge**, sous la forme « rang sur nombre de classés » (ex aequo compris : 1, 1, 3 ; les abandons et les comptes supprimés ne sont pas comptés). Les valeurs sont celles du classement au même instant. Rien pour un challenge à venir ou terminé, ni pour qui a abandonné.
@@ -87,7 +87,7 @@ Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles
 - ✅ Ex aequo dans un mini-classement : même rang et mêmes points (1, 1, 3), y compris à la limite du top (trois ex aequo au 5ᵉ rang reçoivent chacun les points du 5ᵉ). Une valeur nulle (aucune séance qui compte) ne marque pas.
 - ✅ Les points d'une semaine sont **acquis à son verrouillage** (7 h, heure locale, le premier jour de la semaine suivante), semaine 1 comprise. Avant, ils sont **provisoires** : le classement les montre à part (« 43 pts + 12 provisoires »), et le rang se calcule sur les points acquis seuls. Entre la fin d'une semaine et son verrouillage, ses points restent provisoires.
 - ✅ Le gagnant a le plus de points acquis à la fin ; égalité : ex aequo (1, 1, 3). Un participant qui abandonne (ou qui est exclu) **reste** dans les mini-classements des semaines verrouillées avant son départ : les points de ces semaines ne bougent pas, ni les siens ni ceux des autres. Il sort des mini-classements des semaines verrouillées ensuite, et apparaît « a abandonné », sans rang ni total, comme dans les autres catégories (décision du 2026-11-20). Seule la suppression d'un compte, qui efface ses activités, redistribue les points (§2.2).
-- ✅ Les points ne sont **jamais stockés** : ils se recalculent à la lecture depuis les activités, puis se figent avec les autres catégories quand le worker fige les résultats, après le verrouillage de la dernière semaine (§2.6). Les points acquis ne baissent jamais ; ils ne montent après coup que si un compte est supprimé avant le gel (§2.2).
+- ✅ Les points ne sont **jamais stockés** : ils se recalculent à la lecture depuis les activités, puis se figent avec les autres catégories quand le worker fige les résultats, après le verrouillage de la dernière semaine (§2.6). Les points acquis ne baissent jamais ; ils ne montent après coup que si un compte est supprimé avant le gel (§2.2). Seule exception : une correction par un admin recalcule le challenge, et ses points acquis peuvent alors changer dans les deux sens (§2.12).
 
 ### 2.4 Équivalences de distance (distance cumulée et critère de distance des Points)
 
@@ -106,7 +106,7 @@ Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles
 - ✅ **Autre référence** (décision du 2026-11-20, SC-API-131) : le coefficient suggéré d'un sport est `min(1, coefficient du sport / coefficient de la référence)`, arrondi à deux décimales (la moitié vers le haut) et jamais sous 0,1. Les activités **plus lentes que la référence** comptent donc **sans coefficient** (1 pour 1), comme la marche par rapport à la course ; aucune suggestion n'est majorée. Exemples : référence vélo → vélo ×1, course ×1, aviron ×1 ; référence aviron → vélo ×0,6, course ×1.
 - ✅ Ce sont des **suggestions** : le **créateur choisit les coefficients de son challenge** à la création (pré-remplis par ces suggestions), entre **0,1 et 2**. Le sport de référence vaut toujours ×1 et son coefficient ne s'envoie pas à la création (refusé même à 1).
 - ✅ Les coefficients existent dès que la distance cumulée **ou** le critère de distance de la catégorie Points est choisi ; sinon il n'y en a pas, et la création les refuse.
-- ✅ Les coefficients sont **figés à la création du challenge** : ni une modification ultérieure du catalogue ni les créateurs ne les changent pour un challenge en cours.
+- ✅ Les coefficients sont **figés à la création du challenge** : ni une modification ultérieure du catalogue ni les créateurs ne les changent pour un challenge en cours (seul un admin le peut, §2.12).
 - ✅ La distance équivalente est **sommée exactement**, puis **arrondie au mètre** (demi-mètre vers le haut) une seule fois, sur le total de chaque participant : deux totaux à moins d'un mètre l'un de l'autre peuvent être ex aequo.
 - ✅ Un sport à distance **ajouté au catalogue après la création** d'un challenge n'a pas de coefficient figé dans ce challenge : ses activités comptent pour le temps cumulé, mais ni pour la distance cumulée ni pour le critère de distance des Points.
 - Conséquence assumée : la marche compte pleinement, donc un marcheur peut battre un coureur en distance pure ; de même, dans un challenge vélo, 10 km courus valent 10 km de vélo.
@@ -116,7 +116,7 @@ Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles
 - ✅ **V1 : saisie manuelle uniquement.** Les synchronisations Strava, Garmin, Polar et Coros arrivent après.
 - ✅ **Impossible d'importer une activité après la fin** du challenge.
 - ✅ Une activité compte selon sa date de début, dans la fenêtre du challenge, entièrement pour la semaine de son début (même si elle finit dans la suivante).
-- ✅ Un participant peut ajouter, modifier ou supprimer ses propres activités d'une semaine jusqu'à son **verrouillage, à 7 h le premier jour de la semaine suivante** (heure locale du challenge) ; ensuite plus rien ne change (voir §2.3). Une activité à cheval sur la fin d'une semaine se saisit donc une fois finie, dans cette fenêtre.
+- ✅ Un participant peut ajouter, modifier ou supprimer ses propres activités d'une semaine jusqu'à son **verrouillage, à 7 h le premier jour de la semaine suivante** (heure locale du challenge) ; ensuite plus rien ne change (voir §2.3), sauf correction par un admin (§2.12). Une activité à cheval sur la fin d'une semaine se saisit donc une fois finie, dans cette fenêtre.
 - ✅ Toutes les activités ont une **durée** ; la distance n'est demandée que pour les sports qui en produisent (pas le yoga, par exemple).
 - ✅ La **vitesse (ou l'allure) n'est jamais saisie** : elle est calculée automatiquement à partir de la durée et de la distance.
 - ✅ **Dénivelé positif (D+)** (décisions du 2026-11-23, SC-API-149) : **facultatif**, en mètres entiers, de 0 à **20 000 m** (borne technique contre les erreurs de saisie). Il ne se saisit que pour les sports où il a un sens : course, marche, randonnée, vélo, roller, ski de fond et « autre » (le catalogue le dit sport par sport, `elevation_allowed`), et **seulement si l'activité a une distance** ; il est refusé pour la natation, l'aviron et les sports sans distance (`elevation_not_allowed`). **Affichage seul** : il n'entre dans aucune catégorie (temps, distance, élimination, Points) ni dans les badges (§2.7). Une modification remplace tous les champs saisis : un D+ omis est retiré, et une modification qui retire la distance doit retirer le D+ aussi. Le verrouillage des semaines s'applique comme aux autres champs.
@@ -135,7 +135,7 @@ Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles
 - ✅ Aucun handicap ni catégorie de niveau : tout le monde est traité à la même enseigne.
 - ✅ **V1 : mise à jour du classement au rafraîchissement** de l'écran (pas de temps réel instantané).
 - ✅ Égalités : classement **ex aequo** (1, 1, 3), sans départage arbitraire.
-- ✅ Résultats **figés** au verrouillage de la dernière semaine (7 h le premier jour après le challenge (le jour de `ends_at`)). Le challenge est « terminé » dès sa date de fin ; entre la fin et 7 h, le classement servi est calculé depuis les activités (la dernière semaine n'est pas encore jugée), puis les résultats figés le remplacent. Seule exception : un compte supprimé en est retiré et les autres remontent (§2.2).
+- ✅ Résultats **figés** au verrouillage de la dernière semaine (7 h le premier jour après le challenge (le jour de `ends_at`)). Le challenge est « terminé » dès sa date de fin ; entre la fin et 7 h, le classement servi est calculé depuis les activités (la dernière semaine n'est pas encore jugée), puis les résultats figés le remplacent. Exceptions : un compte supprimé en est retiré et les autres remontent (§2.2) ; une correction admin les rouvre et les refige par un recalcul (§2.12).
 - ✅ Le classement est toujours recalculé à partir des activités brutes.
 
 ### 2.7 Badges
@@ -154,7 +154,7 @@ Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles
 - ✅ Pseudo et avatar. Le pseudo est **facultatif** (décision du 2026-11-20, SC-API-118) ; quand il est saisi, il est **unique sans tenir compte de la casse**, de 3 à 20 caractères (lettres, chiffres, `_`, `.`, `-`).
 - ✅ Les lettres du pseudo sont **ASCII** (`a-z`, `A-Z`, sans accent) : l'unicité sans tenir compte de la casse est la même partout, et deux pseudos ne peuvent pas se ressembler à l'œil en étant différents.
 - ✅ **Prénom et nom** : saisis par l'utilisateur dans son profil, chacun de 1 à 50 caractères : des lettres de tout alphabet (accents compris), en mots séparés par une espace, `-`, `'` ou `’`, chaque mot commençant par une lettre, sans espace au début ni à la fin. Les autres utilisateurs voient le pseudo (s'il est saisi), le prénom et le nom (participants, classements ; pour un challenge public, tout utilisateur connecté). Décision du propriétaire du produit du 2026-11-19 (SC-API-116).
-- ✅ **E-mail** : il vient du fournisseur d'authentification (claim ajoutée à l'access token par une Action Auth0, `docs/auth0-setup.md`), tenu à jour à chaque requête s'il change ; il n'est pas modifiable dans le profil et n'est visible que de son titulaire (`GET /me`), jamais des autres utilisateurs (SC-API-116).
+- ✅ **E-mail** : il vient du fournisseur d'authentification (claim ajoutée à l'access token par une Action Auth0, `docs/auth0-setup.md`), tenu à jour à chaque requête s'il change ; il n'est pas modifiable dans le profil et n'est visible que de son titulaire (`GET /me`) et des admins (fiche utilisateur, §2.12), jamais des autres utilisateurs (SC-API-116 ; admins : décision du 2026-11-23).
 - ✅ Le profil est **complet** dès que le prénom et le nom sont saisis, avec ou sans pseudo (SC-API-118 ; un profil créé avant SC-API-116 n'a que le pseudo et reste incomplet jusqu'à la saisie des noms ; comme la saisie d'une activité exige aussi un profil complet, ADR 0001, l'app doit demander les noms dès la connexion). Le prénom et le nom ne peuvent plus être retirés, seulement changés ; le pseudo, facultatif, peut être retiré (`PATCH /me` avec `pseudo: null`). **Créer ou rejoindre un challenge exige un profil complet** (erreur `profile_incomplete`).
 - ✅ En V1, l'avatar affiché est formé des initiales du pseudo s'il y en a un, sinon des initiales du prénom et du nom (choix d'affichage des apps) ; l'envoi d'une image vient en V1.1.
 - ✅ **Chiffres du profil** (`GET /me/activities/summary`, SC-API-148) : le nombre d'activités et leur **durée totale** portent sur toutes les activités de l'utilisateur, supprimées exclues, qu'elles comptent dans un challenge ou non. Le **nombre de défis** compte les challenges que l'utilisateur a **rejoints**, quel que soit leur statut (à venir, en cours, terminés), **abandonnés compris** (exclusion comprise) ; pas ceux qu'il a seulement créés sans y participer, ni les challenges supprimés. Décision du propriétaire du produit du 2026-11-23.
@@ -166,9 +166,9 @@ Un challenge a **de 1 à 4 catégories** : le temps cumulé, toujours, et celles
 - ✅ Pas de système de contestation pour l'instant.
 - ✅ Les créateurs peuvent ajouter un créateur et exclure un participant.
 - ✅ Un participant exclu par un créateur apparaît comme un abandon (« a abandonné »), sans mention particulière ; il est éliminé de toutes les catégories, définitivement.
-- ✅ Seul un participant actif peut devenir créateur (tout créateur est donc participant) ; ajouter quelqu'un qui est déjà créateur ne change rien (même après la fin) ; nommer un nouveau créateur n'est plus possible une fois le challenge terminé.
-- ✅ Un créateur ne peut pas être exclu (les créateurs sont à égalité ; un créateur peut toujours abandonner lui-même). Une exclusion n'est plus possible une fois le challenge terminé, et exclure quelqu'un qui a déjà abandonné ne change rien.
-- ✅ Pas de système de contestation en V1 : les participants se font confiance.
+- ✅ Seul un participant actif peut devenir créateur (tout créateur est donc participant) ; ajouter quelqu'un qui est déjà créateur ne change rien (même après la fin) ; nommer un nouveau créateur n'est plus possible une fois le challenge terminé (sauf pour un admin, §2.12).
+- ✅ Un créateur ne peut pas être exclu par un autre créateur (les créateurs sont à égalité ; un créateur peut toujours abandonner lui-même) ; seul un admin le peut (§2.12). Une exclusion n'est plus possible une fois le challenge terminé, et exclure quelqu'un qui a déjà abandonné ne change rien.
+- ✅ Pas de système de contestation en V1 : les participants se font confiance. Les corrections qu'aucun utilisateur ne peut faire (semaine verrouillée, réglage figé, inscription close, résultats figés) passent par un admin (§2.12).
 - ✅ **Pas de plafond de volume par utilisateur** (SC-API-083) : ni sur le nombre de challenges créés, ni sur les invitations, ni sur les activités par jour. La seule protection contre les abus est la **limite de débit** (par adresse IP, et par utilisateur sur les écritures, §5.7), tenue en mémoire par instance. À revoir si des abus apparaissent, notamment des challenges publics en masse sur la page d'accueil.
 
 ### 2.10 Modèle économique
@@ -186,6 +186,76 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-151) :
   3. **Les catégories**, chacune avec son **podium** (§2.3) : le **temps cumulé**, toujours, tous sports confondus ; au choix du créateur, la **distance cumulée** (distances ramenées au sport de référence, §2.4), l'**élimination** (la distance du sport de référence doit atteindre chaque semaine celle de la semaine précédente plus X km ; pas d'élimination en semaine 1) et les **Points** (mini-classements hebdomadaires, points au top 5 ou au top 10). Chaque participant est classé dans toutes les catégories du défi (§2.2).
   4. **La participation** (§2.2, §2.6) : on rejoint un défi jusqu'à la fin de sa première semaine ; quitter un défi, c'est abandonner toutes ses catégories, définitivement ; les égalités sont des ex aequo (1, 1, 3) ; il n'y a ni handicap ni catégorie de niveau.
 - ✅ Les fonctionnalités prévues après la V1 (notamment la synchronisation Strava, Garmin, Polar et Coros et les badges, §7) **n'y figurent pas**, même comme « bientôt ».
+
+### 2.12 Administration
+
+Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas de système de contestation (§2.9) et, pour les utilisateurs, les verrous du produit sont absolus : semaines verrouillées, réglages figés à la création, inscriptions closes après la semaine 1, résultats figés. L'administration permet de corriger un défi après coup et de voir l'état de l'app (comptes, défis, worker) sans passer par la base.
+
+**Qui est admin**
+
+- ✅ Un compte qui a le **rôle Auth0 « admin »**, porteur de la permission `admin`, attribué à la main par le propriétaire du produit dans la console Auth0 (RBAC activé et « Add Permissions in the Access Token » sur l'API Auth0). L'API lit la permission dans la claim `permissions` de l'access token ; rien n'est stocké en base. Retirer le rôle prend effet à l'expiration de l'access token en cours.
+- ✅ Une Action post-login Auth0 exige la **double authentification** de tout compte qui a le rôle.
+- ✅ Un seul admin pour l'instant ; le modèle en accepte plusieurs.
+- ✅ Un admin est par ailleurs un utilisateur comme les autres : il crée, rejoint et concourt.
+- ✅ Pas de connexion à la place d'un utilisateur, même en lecture seule.
+
+**Ce que l'admin voit**
+
+- ✅ **Tous les défis**, privés et supprimés compris, avec tout ce que voit un créateur, plus les liens d'invitation (actifs, expirés, révoqués), les semaines verrouillées, les éliminations, l'état des résultats figés et les corrections admin.
+- ✅ Sur les routes existantes (détail, classement, participants, activités d'un défi), l'admin a la **lecture d'un créateur**, sur tous les défis non supprimés : l'app réutilise ses pages. Pour lui, un défi privé non supprimé n'est jamais en 404. Ces routes ne lui donnent **aucun** droit d'écriture : rejoindre, modifier ou exclure y suivent les règles normales ; ses modifications passent par les routes `/admin/*`.
+- ✅ **Tous les utilisateurs**, e-mail compris : état (actif, bloqué, supprimé, suppression Auth0 en attente), date d'inscription, dernière activité, défis, activités.
+- ✅ Un **tableau de bord** : comptes (total, nouveaux sur 7 jours, actifs sur 7 jours), défis par statut et supprimés, activités de la semaine, suppressions Auth0 en attente, dernier passage et dernier échec de chaque tâche du worker, version de l'API.
+- ✅ Le **journal** des actions admin.
+
+**Ce que l'admin peut modifier**
+
+✅ L'admin passe outre les verrous **de temps** (semaines verrouillées, inscriptions closes, défi terminé, résultats figés) et **de rôle** (créateur, participant). Il ne passe jamais outre la **validation des données** : bornes et formats restent ceux des utilisateurs (2 à 52 semaines, coefficients de 0,1 à 2, incrément X, pseudo, prénom, nom, durée et distance d'une activité…).
+
+| Bloqué pour un utilisateur | Ce que l'admin peut faire |
+|---|---|
+| Catégories, sport de référence, coefficients, incrément X, réglages de la catégorie Points | Les modifier, ajouter ou retirer une catégorie (le temps cumulé reste obligatoire) (✅) |
+| Durée, premier jour, fuseau | Les changer, défi en cours ou terminé compris (✅) |
+| Visibilité, « les participants peuvent inviter » | Les changer (✅) |
+| Titre, description | Les changer, comme un créateur (✅) |
+| Inscriptions closes après la semaine 1 | Ajouter n'importe quel utilisateur au profil complet comme participant, à tout moment (✅) |
+| Abandon et exclusion définitifs | Réintégrer un participant (✅) |
+| Rôles de créateur | Nommer un créateur (même après la fin), retirer un rôle de créateur, exclure un créateur ; un défi garde toujours au moins un créateur (✅) |
+| Semaines verrouillées | Ajouter, modifier ou supprimer l'activité de n'importe quel utilisateur, dans n'importe quelle semaine (✅) |
+| Éliminations | Annuler ou forcer l'élimination d'un participant à une semaine donnée (🟡) |
+| Résultats figés | Ils sont rouverts et refigés par le recalcul (✅) |
+| Défi supprimé | Le restaurer, à tout moment ; supprimer un défi (✅) |
+| Comptes | Modifier pseudo, prénom et nom ; bloquer et débloquer ; supprimer (même effet que `DELETE /me`, suppression chez Auth0 comprise) (✅) |
+
+- ✅ Une activité corrigée par l'admin l'est **partout** : tous les défis où elle compte (§2.5) sont recalculés, et l'aperçu les liste.
+- 🟡 Une activité ajoutée par l'admin pour un utilisateur a la source `admin` (à côté de `manual`), pour la distinguer d'une saisie.
+
+**Recalcul et aperçu**
+
+- ✅ Toute modification admin qui touche au passé d'un défi (réglages, participants, activités, éliminations, restauration) **recalcule** le défi : ses éliminations et ses résultats figés sont effacés, toutes ses semaines déjà verrouillées sont rejouées dans l'ordre, puis les résultats sont refigés si le défi est terminé (au plus tôt à 7 h le premier jour après sa fin, comme le worker).
+- ✅ Le recalcul réutilise le code du worker (`close-weeks`, `finalize-challenges`), prend le même verrou et se fait dans la transaction de la modification : un recalcul donne le même résultat qu'un passage du worker sur les mêmes données.
+- ✅ Un défi que la modification rend de nouveau en cours (durée allongée, premier jour déplacé) perd ses résultats figés et redevient en cours.
+- ✅ **Aperçu** : une action qui déclenche un recalcul accepte `dry_run`. La transaction est alors annulée, et la réponse donne, pour chaque défi touché, le classement avant et après et les éliminations qui changent.
+
+**Traces et transparence**
+
+- ✅ **Motif obligatoire** sur toute modification admin (3 à 500 caractères). Le journal (`admin_actions`) garde l'admin, l'instant, l'action, la cible (défi, participant, activité, compte), l'ancienne et la nouvelle valeur, et le motif. Il n'est visible que des admins.
+- ✅ Pas de journal des consultations.
+- ✅ Un défi corrigé affiche **« Corrigé par l'administrateur le <date> »** (date de la dernière correction) à tous ceux qui le voient, sans le motif ni l'auteur.
+- 🟡 Seules les actions qui touchent un défi le marquent ; une action sur un compte (profil, blocage) ne marque aucun défi, sauf une activité modifiée, qui marque tous les défis où elle compte.
+
+**Compte bloqué**
+
+- ✅ L'admin peut **bloquer** un compte sans le supprimer (`users.blocked_at`). Toute requête d'un compte bloqué répond **403 `account_blocked`**, vérifié par `CurrentUser` comme `account_deleted`. L'app affiche une page « Compte bloqué ». Un admin ne peut pas se bloquer lui-même.
+- 🟡 Le blocage ne touche pas aux défis : le compte reste classé et ses activités comptent. Pour le sortir d'un défi, l'admin l'exclut.
+- ✅ Débloquer rend l'accès ; rien d'autre ne change.
+
+**Défis supprimés**
+
+- ✅ La suppression reste logique (`deleted_at`) et **aucune purge** n'est faite : un défi supprimé reste en base, et l'admin peut le restaurer à tout moment.
+- ✅ Restaurer recalcule le défi : le worker ignore les défis supprimés, donc les semaines verrouillées pendant la suppression n'ont pas été jugées. Les liens d'invitation non expirés redeviennent valides. Les comptes supprimés entre-temps ne reviennent pas.
+- ✅ Conséquence assumée : la durée de conservation des défis supprimés est illimitée (§6).
+
+**Hors périmètre pour l'instant** : liste des activités suspectes et seuils de vitesse, journal des consultations des fiches utilisateur, notifications aux participants d'un défi corrigé.
 
 ---
 
@@ -458,7 +528,7 @@ flowchart TD
 | Module | Responsabilité |
 |---|---|
 | `user` | Crée la ligne locale au premier login, gère pseudo, prénom, nom, e-mail (copié du jeton), avatar, langue |
-| `challenge` | Création, modification limitée (titre, description), fuseau, durée, visibilité, règle d'invitation, co-créateurs |
+| `challenge` | Création, modification limitée (titre, description ; tous les réglages pour un admin, §2.12), fuseau, durée, visibilité, règle d'invitation, co-créateurs |
 | `invitation` | Liens et invitations pour les challenges privés, selon la règle « les participants peuvent inviter » |
 | `sport` | Catalogue des sports et coefficients de distance, figés par challenge à sa création |
 | `activity` | Saisie manuelle, validation (durée obligatoire, distance selon le sport, vitesse calculée et jamais saisie), marquage « manuelle » ; une activité hors de toute fenêtre est enregistrée et ne compte nulle part (ADR 0001) |
@@ -472,7 +542,7 @@ flowchart TD
 
 | Entité | Champs clés |
 |---|---|
-| `users` | id, identifiant du fournisseur d'auth, pseudo, prénom, nom, e-mail, avatar, langue |
+| `users` | id, identifiant du fournisseur d'auth, pseudo, prénom, nom, e-mail, avatar, langue, date de blocage par un admin (`blocked_at`, §2.12) ; jamais le rôle admin, lu dans l'access token |
 | `challenges` | id, titre, description, visibilité, participants peuvent inviter (`members_can_invite`), fuseau, sport de référence (`reference_sport`, course par défaut), début et fin (UTC), créé par, suppression logique (`deleted_at`) ; le statut (à venir, en cours, terminé) se déduit des dates |
 | `challenge_creators` | challenge, utilisateur |
 | `categories` | challenge, type (temps cumulé, distance cumulée, élimination, points), position (fixe par type, de 1 à 4), paramètres figés (`params` : coefficients, sport et incrément X de l'élimination, critères, barème et durée minimale des Points) ; le nom est traduit par le frontend |
@@ -484,7 +554,9 @@ flowchart TD
 | `elimination` | participant, catégorie, semaine d'élimination, distance courue et minimum exigé cette semaine-là (trace du jugement, jamais lue pour classer) |
 | `badge_definition` | challenge, nom, description, règle (JSON structuré), créateur, date de création |
 | `badge_award` | badge, utilisateur, date d'obtention, activité déclencheuse (si applicable) ; unique (badge, utilisateur) |
-| `result_snapshot` | challenge, catégorie, classement figé au verrouillage de la dernière semaine |
+| `result_snapshot` | challenge, catégorie, classement figé au verrouillage de la dernière semaine (effacé puis refigé par un recalcul admin, §2.12) |
+| `admin_actions` | admin, instant, action, type et identifiant de la cible (défi, participant, activité, compte), défis touchés, ancienne et nouvelle valeur (`jsonb`), motif (3 à 500 caractères) ; lisible des seuls admins (§2.12) |
+| `worker_runs` | tâche du worker, début, fin, issue, code d'erreur (sans donnée personnelle) ; alimente le tableau de bord admin |
 
 Index à prévoir : `activity (utilisateur, date de début)`, `participant (challenge)`, `category (challenge)`.
 
@@ -494,14 +566,14 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 2. **Saisie d'une activité** (point d'entrée unique) : validation (aucune semaine verrouillée dans les challenges où l'activité compte : une semaine se verrouille à 7 h le premier jour de la semaine suivante, ADR 0001) → stockage avec source « manuelle » → aucun recalcul stocké.
 3. **Lecture du classement** (au rafraîchissement) : chargement des participants et, en une requête, des **totaux** des activités de la fenêtre (par participant et par semaine pour le sport de la catégorie à élimination, par participant et par sport pour les autres) → un scorer par catégorie → classement ex aequo renvoyé au client. Le calcul se fait toujours depuis les activités brutes, sommées par la base, jamais depuis des totaux stockés : les scorers ne faisant que des sommes, le résultat est identique (un test d'intégration le vérifie). Pour un challenge qui a une catégorie Points (à partir de SC-API-136), la base regroupe toutes ses activités par participant, **semaine** et sport, et donne en plus, pour chaque groupe, la plus longue séance (durée et distance) et le nombre de séances d'au moins la durée minimale : le scorer n'a besoin de rien d'autre (la distance équivalente d'une séance est sa distance fois le coefficient de son sport, donc la plus longue d'un sport est sa plus longue distance), et le volume lu reste de l'ordre d'une ligne par participant, semaine et sport. Les activités des participants qui ont abandonné y sont lues aussi (elles gardent leur place dans les semaines verrouillées avant leur départ, §2.3), jamais celles des comptes supprimés ; le benchmark est refait avec une catégorie Points. ✅ Ni plafond de participants ni pagination du classement pour l'instant (SC-API-082). Mesure (benchmark `BenchmarkActivities5000`, PostgreSQL local) pour 5 000 participants, 12 semaines, 5 activités par semaine (300 000 activités) : 70 000 lignes lues au lieu de 300 000, ~125 ms au lieu de ~945 ms et 45 Mo alloués au lieu de 219 Mo par lecture. Refaite avec une catégorie Points (SC-API-136, le 2026-11-20, autre machine, mêmes données ; 3 sports par semaine) : activités brutes ~1,8 s et 219 Mo, totaux sans catégorie Points ~225 ms (inchangé : les colonnes des Points ne sont lues que si un challenge de la requête en a une), groupes d'un challenge à points 180 000 lignes (une par participant, semaine et sport), ~660 ms et 277 Mo par lecture : trois fois moins de temps que les activités brutes, mais un peu plus de mémoire (plus de colonnes par ligne).
 4. **Clôture hebdomadaire** : Cloud Scheduler lance le worker → pour chaque challenge actif dont une semaine est verrouillée (7 h le premier jour de la semaine suivante) → éliminations (catégorie à élimination) enregistrées → badges « semaines de suite » évalués.
-5. **Fin de challenge** : à l'instant de fin → statut « terminé » ; au verrouillage de la dernière semaine (7 h le premier jour après le challenge (le jour de `ends_at`)) → `result_snapshot` enregistré, avec la clôture (`week_closure`) et les éliminations (`elimination`) de la dernière semaine, comme pour les autres semaines. Ensuite plus aucune activité datée de sa fenêtre ne peut être ajoutée (sa dernière semaine est verrouillée).
+5. **Fin de challenge** : à l'instant de fin → statut « terminé » ; au verrouillage de la dernière semaine (7 h le premier jour après le challenge (le jour de `ends_at`)) → `result_snapshot` enregistré, avec la clôture (`week_closure`) et les éliminations (`elimination`) de la dernière semaine, comme pour les autres semaines. Ensuite plus aucune activité datée de sa fenêtre ne peut être ajoutée (sa dernière semaine est verrouillée), sauf par un admin, ce qui recalcule le challenge (§2.12).
 6. **Abandon d'un participant** : statut « abandonné » (volontairement, ou après l'exclusion par un créateur), éliminé de toutes les catégories, apparaît comme « a abandonné ».
 7. **Badges** : après l'enregistrement d'une activité, évaluation des badges du challenge pour son auteur ; attribution immédiate et idempotente (unique par badge et utilisateur). Les conditions « plusieurs semaines de suite » sont évaluées au verrouillage de chaque semaine par le worker.
 
 ### 5.6 API
 
 - ✅ REST sous `/api/v1`, spécification OpenAPI (génération du client TypeScript).
-- Ressources principales : `me`, `challenges` (le détail d'un challenge contient ses catégories), `challenges/{id}/participants`, `challenges/{id}/leaderboard`, `challenges/{id}/invitations`, `invitations`, `activities`, `sports` ; en V1.1 : `badges`, `uploads` (URL signées).
+- Ressources principales : `me`, `challenges` (le détail d'un challenge contient ses catégories), `challenges/{id}/participants`, `challenges/{id}/leaderboard`, `challenges/{id}/invitations`, `invitations`, `activities`, `sports`, `admin` (routes `/admin/*`, §2.12) ; en V1.1 : `badges`, `uploads` (URL signées).
 - 🟡 Les erreurs renvoient un **code stable** (traduit côté client en français ou en anglais), pas un texte.
 - 🟡 Les créations d'activité acceptent une **clé d'idempotence** (utile pour le hors-ligne et les futures synchronisations).
 - 🟡 Pagination par curseur sur les listes.
@@ -519,7 +591,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | 5 | `CORS` | Origines explicites (web uniquement, `CORS_ALLOWED_ORIGINS`), jamais `*` ; répond aux pré-requêtes `OPTIONS` sans jeton ; pas de cookie, donc pas d'`Allow-Credentials` |
 | 6 | `RateLimitIP` | Limite de débit par adresse IP, avant tout travail coûteux ; répond 429 au-delà |
 | 7 | `Authenticate` | Lit le jeton `Bearer`, le vérifie (signature par JWKS, émetteur, audience, expiration), place les informations du jeton dans le contexte |
-| 8 | `CurrentUser` | Retrouve l'utilisateur local à partir de l'identifiant du fournisseur (`sub`), le crée au premier login, place son identifiant dans le contexte |
+| 8 | `CurrentUser` | Retrouve l'utilisateur local à partir de l'identifiant du fournisseur (`sub`), le crée au premier login, place son identifiant dans le contexte ; refuse un compte supprimé (401 `account_deleted`) ou bloqué (403 `account_blocked`, §2.12) |
 | 9 | `RateLimitUser` | Limite de débit par utilisateur, sur les requêtes d'écriture seulement (toute méthode sauf `GET`, `HEAD` et `OPTIONS`) |
 | 10 | `RequestValidator` | Par route du contrat, juste avant le handler : vérifie la requête contre `api/openapi.yaml` (400 `validation_failed`) |
 
@@ -534,8 +606,9 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 - Le reste de l'application ne connaît que l'identifiant de l'utilisateur local : changer de fournisseur ne touche ni les modules métier ni la base (hors la correspondance `sub` → utilisateur).
 
 **Autorisation** (pas dans un middleware)
-- Chaque service vérifie le rôle : créateur, participant ou public. Un utilisateur ne peut jamais agir sur une ressource d'un autre en changeant un identifiant.
-- ✅ Un challenge privé n'est lisible que par ses créateurs, participants et invités ; un participant qui a abandonné (ou a été exclu) le voit encore, avec le détail des activités, sans pouvoir agir. Un **créateur** qui abandonne garde tous ses droits de créateur (modifier, inviter, exclure, ajouter un créateur, supprimer), mais ne concourt plus : ses activités n'y comptent plus. Une ressource privée inconnue renvoie 404 plutôt que 403 pour ne pas révéler son existence.
+- Chaque service vérifie le rôle : créateur, participant, public ou admin. Un utilisateur ne peut jamais agir sur une ressource d'un autre en changeant un identifiant.
+- ✅ **Admin** (§2.12) : la permission `admin` vient de la claim `permissions` de l'access token ; `Authenticate` la place dans le contexte avec les autres informations du jeton, et elle se vérifie dans les **politiques des services** (`policy.go`), **jamais dans un middleware**. Les modifications admin sont des cas d'usage admin de chaque service, qui reprennent la validation et laissent de côté les verrous de temps et de rôle ; jamais un `if admin` semé dans les règles existantes. Une route `/admin/*` appelée sans la permission répond 404 `not_found`, pour ne pas révéler son existence.
+- ✅ Un challenge privé n'est lisible que par ses créateurs, participants et invités, et par les admins (§2.12) ; un participant qui a abandonné (ou a été exclu) le voit encore, avec le détail des activités, sans pouvoir agir. Un **créateur** qui abandonne garde tous ses droits de créateur (modifier, inviter, exclure, ajouter un créateur, supprimer), mais ne concourt plus : ses activités n'y comptent plus. Une ressource privée inconnue renvoie 404 plutôt que 403 pour ne pas révéler son existence.
 
 **Comment l'autorisation est vérifiée** : chaque cas d'usage du service reçoit explicitement **qui agit** (`actorID`), charge la ressource, puis appelle une fonction de politique pure (`policy.go`) avant toute écriture. Le handler ne peut pas contourner le service, et le repository n'est jamais appelé directement par un handler. Les listes filtrent dans la requête SQL (jamais « tout charger puis retirer »).
 
@@ -544,13 +617,13 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Action | Qui peut |
 |---|---|
 | Voir un challenge public et son classement | tout utilisateur connecté (✅) |
-| Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅). Une invitation est un **lien réutilisable** jusqu'à la fin de la semaine 1 : toute personne connectée qui l'ouvre devient invitée, tant que l'invitation reste valide ; connaître le jeton sans l'avoir ouvert ne donne rien (✅). Le jeton voyage dans le **corps** de `POST /invitations/open` et `POST /invitations/accept`, jamais dans l'URL : les journaux de requêtes de la plateforme enregistrent les URL complètes, et ouvrir un lien est une écriture, qui ne doit pas se faire par un `GET` (un préchargement suffirait) (✅, SC-API-086) |
+| Voir un challenge privé et son classement | participants (y compris ceux qui ont abandonné), invités et créateurs (✅), et les admins (✅ 2026-11-23, §2.12). Une invitation est un **lien réutilisable** jusqu'à la fin de la semaine 1 : toute personne connectée qui l'ouvre devient invitée, tant que l'invitation reste valide ; connaître le jeton sans l'avoir ouvert ne donne rien (✅). Le jeton voyage dans le **corps** de `POST /invitations/open` et `POST /invitations/accept`, jamais dans l'URL : les journaux de requêtes de la plateforme enregistrent les URL complètes, et ouvrir un lien est une écriture, qui ne doit pas se faire par un `GET` (un préchargement suffirait) (✅, SC-API-086) |
 | Rejoindre un challenge public | tout utilisateur connecté, jusqu'à la fin de la semaine 1 (✅) |
 | Rejoindre un challenge privé | sur invitation valide, jusqu'à la fin de la semaine 1 (✅) ; une invitation n'est valide que tant que son auteur est encore créateur ou participant actif, et que son compte n'est pas supprimé. Exclure un participant (ou qu'il abandonne) n'exclut pas les personnes qu'il a invitées : celles qui ont déjà rejoint restent participantes ; seul son lien est annulé, pour les personnes invitées qui n'ont pas encore rejoint (✅) |
 | Inviter | créateurs ; participants seulement si le créateur l'a autorisé à la création (✅) |
-| Voir l'e-mail d'un utilisateur | lui seul, par `GET /me` ; les autres voient le pseudo (s'il est saisi), le prénom et le nom (✅, SC-API-116) |
+| Voir l'e-mail d'un utilisateur | lui, par `GET /me`, et les admins (fiche utilisateur) ; les autres voient le pseudo (s'il est saisi), le prénom et le nom (✅, SC-API-116 ; admins : 2026-11-23) |
 | Modifier titre et description | créateurs (✅) |
-| Modifier les catégories | personne, après la création (✅) |
+| Modifier les catégories | personne, après la création, sauf un admin (✅, §2.12) |
 | Ajouter un créateur | créateurs (✅) |
 | Exclure un participant | créateurs (✅) |
 | Créer un badge | créateurs (✅) |
@@ -561,10 +634,12 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | Supprimer le challenge | créateurs, à tout moment (✅) |
 | Voir le détail des activités (date, sport, durée, distance) d'un participant | les participants du même challenge (y compris ceux qui ont abandonné) et les créateurs (✅) ; un non-participant d'un challenge public ne voit que le classement (✅). Le participant visé peut avoir abandonné ou été exclu : ses activités de la fenêtre du challenge restent visibles jusqu'à la fin, **y compris celles saisies après son départ**, qui n'y comptent plus (✅). Jamais pour un compte supprimé : ses activités sont effacées de la base (404 `not_found`, ✅ SC-API-113, SC-API-117) |
 | Voir les activités de tous les participants d'un challenge (fil, avec leur auteur) | les mêmes : participants (y compris ceux qui ont abandonné) et créateurs ; même 404 sinon (✅ 2026-11-21, SC-API-143). Les activités d'un participant qui a abandonné ou a été exclu restent dans le fil, sans compter dans le challenge ; jamais celles d'un compte supprimé |
+| **Admin** (permission `admin` de l'access token) | lecture d'un créateur sur tous les challenges non supprimés par les routes existantes, sans aucun droit d'écriture par elles ; par les routes `/admin/*` : tous les challenges (supprimés compris), tous les comptes (e-mail compris), tableau de bord, journal, et les modifications du §2.12, chacune avec un motif (✅ 2026-11-23) |
 
 **Codes de réponse** :
 - ressource inexistante ou privée inaccessible → 404 (`challenge_not_found`…) ;
 - ressource visible mais action interdite → 403 `forbidden` ;
+- compte bloqué par un admin → 403 `account_blocked`, sur toute requête (§2.12) ;
 - exception : le détail des activités d'un participant, demandé par quelqu'un qui voit le challenge sans y participer (non-participant d'un challenge public, invité), répond 404 `not_found` : pour lui, cette liste n'existe pas (✅) ;
 - entrée invalide (format, bornes, dates, champ inconnu) → 400 `validation_failed`, avec les champs fautifs dans `params.fields` ;
 - entrée valide mais action contraire à une règle métier → 422 avec un code stable (`profile_incomplete`, `registration_closed`, `challenge_ended`, `field_not_editable`, `cannot_exclude_creator`…) ;
@@ -608,8 +683,9 @@ La V2 (synchronisations) a peu d'impact sur la V1 si ces choix, presque gratuits
 - **LCAP (Canada)** pour les courriels promotionnels.
 - **RGPD** si des utilisateurs européens s'ajoutent.
 - ✅ **Suppression de compte** : anonymisation, traitée comme un abandon dans tous les challenges à venir ou en cours, et **effacement** de toutes les lignes du compte dans tous ses challenges, terminés compris : activités, participations, éliminations, rôles de créateur, liens d'invitation, entrées des résultats figés (§2.2) ; seule la ligne de l'utilisateur, anonymisée, est gardée pour les challenges qu'il a créés, qui restent ; refusée tant que le compte est le dernier créateur d'un challenge à venir ou en cours (§2.2) ; l'utilisateur est aussi **supprimé chez Auth0** (API de gestion) pour que l'effacement soit réel : la suppression à faire est enregistrée dans la même transaction que celle du compte, puis retirée une fois l'appel à Auth0 réussi ; un échec ou un arrêt de l'instance entre les deux la laisse en attente, et `retry-auth0-deletions` la rejoue (SC-API-119).
+- ✅ **Challenges supprimés** : jamais purgés, ils restent en base et un admin peut les restaurer (§2.12) ; leur durée de conservation est donc **illimitée**, à mentionner dans la politique de confidentialité.
 - ✅ Les activités détaillées d'un participant sont visibles par les autres participants du challenge : l'app l'indique **avant** de rejoindre, et la politique de confidentialité le mentionne. Quitter un challenge (ou en être exclu) ne les cache pas : les activités datées de sa fenêtre restent visibles jusqu'à sa fin, même celles d'après le départ.
-- ✅ Le **prénom et le nom** d'un participant sont visibles des autres utilisateurs (participants et classements ; pour un challenge public, de tout utilisateur connecté) ; son **e-mail** n'est visible que de lui (§2.8). La politique de confidentialité le mentionne.
+- ✅ Le **prénom et le nom** d'un participant sont visibles des autres utilisateurs (participants et classements ; pour un challenge public, de tout utilisateur connecté) ; son **e-mail** n'est visible que de lui et des admins de l'app (§2.8, §2.12). La politique de confidentialité le mentionne.
 - 🟡 Ne stocker que les **résumés d'activité** (distance, durée, type, date), pas les traces GPS.
 - Tenir un **inventaire des sous-traitants** (Auth, notifications, analytics, fournisseurs sportifs) avec la région de chacun.
 - ✅ **Cible** : héberger à Montréal (`northamerica-northeast1`) les données de production : base, sauvegardes, journaux et secrets. Elle n'est pas encore atteinte partout : l'état réel, avec ses exceptions datées (journaux d'audit de GCP, Error Reporting, sauvegardes et journaux antérieurs en attente d'expiration, emplacement non vérifié des journaux de transactions), est dans `docs/deploiement.md`.
@@ -658,5 +734,5 @@ Garmin et Coros (demandes de partenariat à lancer tôt, les délais sont longs)
 - ❓ Agrégateur ou connexions directes pour les synchronisations (à trancher avant la V2).
 - ✅ Package d'erreurs maison (Faunadex) : examiné, non repris. `platform/apperr` suit le contrat du §5.8 ; ses messages FR/EN pourront alimenter les fichiers de traduction du frontend. Le `translator` (`go-i18n`, fichiers `.toml`) pourra servir plus tard aux textes émis par le serveur (courriels, notifications).
 - ❓ Pseudos qui se ressemblent (`marie.92`, `marie_92`, `marie-92`) et pseudos réservés (`admin`, `support`…) : faut-il les refuser ? Aujourd'hui seule la casse est ignorée pour l'unicité.
-- ❓ Purge définitive des challenges supprimés : après quel délai, et par quelle tâche du worker ?
+- ✅ Purge définitive des challenges supprimés : **aucune** (décision du 2026-11-23). Un challenge supprimé reste en base et un admin peut le restaurer à tout moment (§2.12) ; la conservation est donc illimitée (§6).
 - ❓ Confirmer les points marqués 🟡.

@@ -66,4 +66,4 @@ Un participant est classé dans **toutes** les catégories du challenge. Un part
 
 - Ne stocke jamais un classement comme source de vérité : recalcul depuis les activités brutes. Seul `result_snapshot` fige les résultats, au verrouillage de la dernière semaine.
 - Les tâches de clôture tournent toutes les heures et sont **idempotentes** : relancer ne doit rien changer si le travail est fait.
-- Une semaine verrouillée l'est pour de bon : l'élimination qui en découle ne change plus ; au verrouillage de la dernière semaine, plus rien ne bouge.
+- Une semaine verrouillée l'est pour de bon : l'élimination qui en découle ne change plus ; au verrouillage de la dernière semaine, plus rien ne bouge. Seule exception : une correction par un admin efface éliminations et résultats figés, puis rejoue toutes les semaines verrouillées avec le code du worker (README §2.12).
