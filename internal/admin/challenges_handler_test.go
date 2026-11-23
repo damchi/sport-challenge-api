@@ -17,6 +17,7 @@ const (
 	annID       = "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f"
 	bobID       = "7f3e2a1b-4c5d-4e6f-8a9b-0c1d2e3f4a5b"
 	inviteID    = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+	actionID    = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f"
 )
 
 // sameJSON fails unless got and want marshal to the same JSON.
@@ -143,6 +144,11 @@ func TestGetAdminChallenge(t *testing.T) {
 		Eliminations:    []EliminationRow{{User: UserRef{ID: bobID, Pseudo: ptr("Bob")}, WeekNumber: 2, DistanceMeters: 1000, RequiredMeters: 6000}},
 		ResultsFrozenAt: &frozen,
 		Invitations:     []InvitationRow{{ID: inviteID, InvitedBy: ann, CreatedAt: detailStart, ExpiresAt: statsAt}},
+		RecentActions: []Action{{
+			ID: actionID, Admin: ann, CreatedAt: frozen, Action: "challenge.update", TargetType: TargetChallenge,
+			TargetID: challengeID, ChallengeIDs: []string{challengeID},
+			OldValue: []byte(`{"weeks": 2}`), NewValue: []byte(`{"weeks": 3}`), Reason: "Oubli",
+		}},
 	}}
 	svc := NewService(repo, clock.NewFake(statsAt), buildinfo.Info{})
 
@@ -176,13 +182,18 @@ func TestGetAdminChallenge(t *testing.T) {
 		}},
 		"members_can_invite": true,
 		"participant_count":  2,
-		"reference_sport":    "run",
-		"results_frozen_at":  "2026-11-23T12:06:00Z",
-		"starts_at":          "2026-11-09T05:00:00Z",
-		"status":             "finished",
-		"timezone":           "America/Toronto",
-		"title":              "Défi",
-		"visibility":         "private",
+		"recent_actions": []any{map[string]any{
+			"action": "challenge.update", "admin": annJSON, "challenge_ids": []any{challengeID},
+			"created_at": "2026-11-23T12:06:00Z", "id": actionID, "new_value": map[string]any{"weeks": 3},
+			"old_value": map[string]any{"weeks": 2}, "reason": "Oubli", "target_id": challengeID, "target_type": "challenge",
+		}},
+		"reference_sport":   "run",
+		"results_frozen_at": "2026-11-23T12:06:00Z",
+		"starts_at":         "2026-11-09T05:00:00Z",
+		"status":            "finished",
+		"timezone":          "America/Toronto",
+		"title":             "Défi",
+		"visibility":        "private",
 		"weeks": []any{
 			map[string]any{"closed_at": "2026-11-16T12:05:00Z", "ends_at": "2026-11-16T05:00:00Z", "locked": true, "locks_at": "2026-11-16T12:00:00Z", "number": 1, "starts_at": "2026-11-09T05:00:00Z"},
 			map[string]any{"closed_at": nil, "ends_at": "2026-11-23T05:00:00Z", "locked": true, "locks_at": "2026-11-23T12:00:00Z", "number": 2, "starts_at": "2026-11-16T05:00:00Z"},

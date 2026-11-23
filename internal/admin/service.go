@@ -27,6 +27,7 @@ type repository interface {
 	User(ctx context.Context, id string) (UserRow, error)
 	ListUserChallenges(ctx context.Context, id string, q PageQuery) ([]UserChallengeRow, error)
 	ListUserActivities(ctx context.Context, id string, q ActivityQuery) ([]ActivityRow, error)
+	ListActions(ctx context.Context, q ActionQuery) ([]Action, error)
 }
 
 // Service holds the admin reads.
@@ -128,9 +129,9 @@ func (s *Service) Challenges(ctx context.Context, actor auth.Actor, q ChallengeQ
 }
 
 // Challenge returns what an admin sees of challenge id, deleted or not:
-// its status, weeks and invitation links at now. Admin only (RequireAdmin),
-// checked before anything is read; 404 challenge_not_found when there is
-// no such challenge.
+// its status, weeks and invitation links at now, and its last admin
+// changes. Admin only (RequireAdmin), checked before anything is read; 404
+// challenge_not_found when there is no such challenge.
 func (s *Service) Challenge(ctx context.Context, actor auth.Actor, id string) (ChallengeDetail, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return ChallengeDetail{}, err
@@ -172,6 +173,7 @@ func (s *Service) Challenge(ctx context.Context, actor auth.Actor, id string) (C
 		Eliminations:    data.Eliminations,
 		ResultsFrozenAt: data.ResultsFrozenAt,
 		Invitations:     invitations,
+		RecentActions:   data.RecentActions,
 	}, nil
 }
 
@@ -353,4 +355,33 @@ func userError(what string, err error) error {
 		return apperr.New(apperr.CodeUserNotFound, err)
 	}
 	return fmt.Errorf("%s: %w", what, err)
+}
+
+// Actions returns a page of at most q.Limit (at least 1) actions of the
+// journal of q, q.After set here from cursor ("" for the first page), most
+// recent first. Admin only (RequireAdmin), checked before anything is read,
+// the cursor included.
+func (s *Service) Actions(ctx context.Context, actor auth.Actor, q ActionQuery, cursor string) (ActionPage, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return ActionPage{}, err
+	}
+	if cursor != "" {
+		after, err := decodePosition(cursor)
+		if err != nil {
+			return ActionPage{}, err
+		}
+		q.After = &after
+	}
+	limit := pageLimit(q.Limit)
+	q.Limit = limit + 1
+	rows, err := s.repo.ListActions(ctx, q)
+	if err != nil {
+		return ActionPage{}, fmt.Errorf("list admin actions: %w", err)
+	}
+	items, last, more := cut(rows, limit)
+	page := ActionPage{Items: items}
+	if more {
+		page.Next = &Position{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	return page, nil
 }

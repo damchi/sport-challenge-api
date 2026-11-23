@@ -39,6 +39,10 @@ type fakeRepo struct {
 	userChallengesErr error
 	activitiesErr     error
 
+	actions     []Action
+	actionsErr  error
+	actionQuery ActionQuery
+
 	calls         int
 	now, since    time.Time
 	query         ChallengeQuery
@@ -100,6 +104,12 @@ func (f *fakeRepo) Figures(_ context.Context, now, since time.Time) (Figures, er
 func (f *fakeRepo) LastWorkerRuns(context.Context) ([]TaskRun, error) {
 	f.calls++
 	return f.runs, f.runsErr
+}
+
+func (f *fakeRepo) ListActions(_ context.Context, q ActionQuery) ([]Action, error) {
+	f.calls++
+	f.actionQuery = q
+	return f.actions, f.actionsErr
 }
 
 func ptr[T any](v T) *T { return &v }

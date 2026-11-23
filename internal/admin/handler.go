@@ -175,6 +175,7 @@ func (h *Handler) GetAdminChallenge(ctx context.Context, req api.GetAdminChallen
 		Eliminations:     make([]api.AdminElimination, len(d.Eliminations)),
 		ResultsFrozenAt:  utc(d.ResultsFrozenAt),
 		Invitations:      make([]api.AdminInvitation, len(d.Invitations)),
+		RecentActions:    make([]api.AdminAction, len(d.RecentActions)),
 	}
 	for i, cat := range d.Categories {
 		// categories.params holds the object of the contract's
@@ -210,6 +211,11 @@ func (h *Handler) GetAdminChallenge(ctx context.Context, req api.GetAdminChallen
 		out.Invitations[i] = api.AdminInvitation{
 			Id: invID, InvitedBy: by, CreatedAt: inv.CreatedAt.UTC(), ExpiresAt: inv.ExpiresAt.UTC(),
 			RevokedAt: utc(inv.RevokedAt), Status: api.AdminInvitationStatus(inv.Status),
+		}
+	}
+	for i, a := range d.RecentActions {
+		if out.RecentActions[i], err = toAdminAction(a); err != nil {
+			return nil, err
 		}
 	}
 	return api.GetAdminChallenge200JSONResponse(out), nil
@@ -433,4 +439,93 @@ func nextCursor[P any](next *P) (*string, error) {
 		return nil, err
 	}
 	return &cursor, nil
+}
+
+// ListAdminActions answers a page of the journal of the admin changes.
+func (h *Handler) ListAdminActions(ctx context.Context, req api.ListAdminActionsRequestObject) (api.ListAdminActionsResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	p := req.Params
+	q := ActionQuery{Limit: limitOf(p.Limit)}
+	if p.TargetType != nil {
+		q.TargetType = string(*p.TargetType)
+	}
+	if p.TargetId != nil {
+		q.TargetID = p.TargetId.String()
+	}
+	if p.AdminId != nil {
+		q.AdminID = p.AdminId.String()
+	}
+	if p.ChallengeId != nil {
+		q.ChallengeID = p.ChallengeId.String()
+	}
+	page, err := h.service.Actions(ctx, actor, q, cursorOf(p.Cursor))
+	if err != nil {
+		return nil, err
+	}
+	out := api.AdminActionPage{Items: make([]api.AdminAction, len(page.Items))}
+	for i, a := range page.Items {
+		if out.Items[i], err = toAdminAction(a); err != nil {
+			return nil, err
+		}
+	}
+	if out.NextCursor, err = nextCursor(page.Next); err != nil {
+		return nil, err
+	}
+	return api.ListAdminActions200JSONResponse(out), nil
+}
+
+func toAdminAction(a Action) (api.AdminAction, error) {
+	id, err := uuid.Parse(a.ID)
+	if err != nil {
+		return api.AdminAction{}, fmt.Errorf("admin action id: %w", err)
+	}
+	admin, err := toUserRef(a.Admin)
+	if err != nil {
+		return api.AdminAction{}, err
+	}
+	target, err := uuid.Parse(a.TargetID)
+	if err != nil {
+		return api.AdminAction{}, fmt.Errorf("admin action target id: %w", err)
+	}
+	challenges := make([]uuid.UUID, len(a.ChallengeIDs))
+	for i, c := range a.ChallengeIDs {
+		if challenges[i], err = uuid.Parse(c); err != nil {
+			return api.AdminAction{}, fmt.Errorf("admin action challenge id: %w", err)
+		}
+	}
+	oldValue, err := jsonMap(a.OldValue)
+	if err != nil {
+		return api.AdminAction{}, fmt.Errorf("admin action old value: %w", err)
+	}
+	newValue, err := jsonMap(a.NewValue)
+	if err != nil {
+		return api.AdminAction{}, fmt.Errorf("admin action new value: %w", err)
+	}
+	return api.AdminAction{
+		Id:           id,
+		Admin:        admin,
+		CreatedAt:    a.CreatedAt.UTC(),
+		Action:       a.Action,
+		TargetType:   api.AdminActionTargetType(a.TargetType),
+		TargetId:     target,
+		ChallengeIds: challenges,
+		OldValue:     oldValue,
+		NewValue:     newValue,
+		Reason:       a.Reason,
+	}, nil
+}
+
+// jsonMap decodes a JSON object of the journal, nil for none.
+func jsonMap(v []byte) (*map[string]any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(v, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

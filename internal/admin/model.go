@@ -95,8 +95,8 @@ type ChallengeQuery struct {
 }
 
 // Position is the key of the order of a list most recently created
-// first (challenges, accounts, challenges of an account), encoded in its
-// cursor.
+// first (challenges, accounts, challenges of an account, actions of the
+// journal), encoded in its cursor.
 type Position struct {
 	CreatedAt time.Time `json:"created_at"`
 	ID        string    `json:"id"`
@@ -192,6 +192,9 @@ type ChallengeData struct {
 	Eliminations    []EliminationRow
 	ResultsFrozenAt *time.Time
 	Invitations     []InvitationRow
+	// RecentActions are the last recentActions admin changes that touch
+	// the challenge, most recent first.
+	RecentActions []Action
 }
 
 // The states of an invitation link (invitationStatus).
@@ -247,6 +250,7 @@ type ChallengeDetail struct {
 	Eliminations    []EliminationRow
 	ResultsFrozenAt *time.Time
 	Invitations     []Invitation
+	RecentActions   []Action
 }
 
 // The states of an account (UserRow.State).
@@ -356,4 +360,43 @@ type ActivityRow struct {
 type ActivityPage struct {
 	Items []ActivityRow
 	Next  *ActivityPosition
+}
+
+// recentActions is the number of admin changes of the detail of a
+// challenge (the contract's maxItems).
+const recentActions = 10
+
+// ActionQuery selects a page of the journal; each filter "" keeps every
+// action, and they add up.
+type ActionQuery struct {
+	TargetType string
+	TargetID   string
+	AdminID    string
+	// ChallengeID keeps the actions that touch the challenge, whatever
+	// their target.
+	ChallengeID string
+	Limit       int
+	// After is the position of the last action of the previous page.
+	After *Position
+}
+
+// Action is an admin change, as the journal keeps it. OldValue and NewValue
+// are JSON objects, nil for none.
+type Action struct {
+	ID           string
+	Admin        UserRef
+	CreatedAt    time.Time
+	Action       string
+	TargetType   string
+	TargetID     string
+	ChallengeIDs []string
+	OldValue     []byte
+	NewValue     []byte
+	Reason       string
+}
+
+// ActionPage is a page of the journal; Next is nil on the last page.
+type ActionPage struct {
+	Items []Action
+	Next  *Position
 }

@@ -53,6 +53,13 @@ func snapshotRow(category, challenge, categoryType string) string {
 	return `INSERT INTO result_snapshot (category_id, challenge_id, category_type, payload, created_at) VALUES ('` + category + `', '` + challenge + `', '` + categoryType + `', '{"entries": []}', '2026-12-15Z');`
 }
 
+// adminActionRow is the insertion of an admin action of the fixture user on
+// the fixture challenge, with SQL expressions for its action, target type,
+// challenges, values (old and new alike) and reason.
+func adminActionRow(action, targetType, challenges, value, reason string) string {
+	return `INSERT INTO admin_actions (admin_id, created_at, action, target_type, target_id, challenge_ids, old_value, new_value, reason) VALUES ('` + userID + `', '2026-12-02Z', ` + action + `, ` + targetType + `, '` + challengeID + `', ` + challenges + `, ` + value + `, ` + value + `, ` + reason + `);`
+}
+
 // invitationRow is the insertion of invitation id of the fixture challenge,
 // created at its start, with SQL expressions for its token hash, its expiry
 // and its revocation.
@@ -195,6 +202,20 @@ func TestConstraints(t *testing.T) {
 		{name: "recipient linked twice", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(userID) + recipientRow(userID), constraint: "invitation_recipients_pkey"},
 		{name: "unknown recipient", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(deadID), constraint: "invitation_recipients_user_id_fkey"},
 		{name: "deleting an invitation with recipients", sql: invitationRow(invitationID, `sha256('t1'::bytea)`, "'2026-12-08 05:00Z'", "NULL") + recipientRow(userID) + `DELETE FROM invitations WHERE id = '` + invitationID + `'`, constraint: "invitation_recipients_invitation_id_fkey"},
+
+		// admin_actions (000019)
+		{name: "admin action", sql: adminActionRow("'challenge.update'", "'challenge'", "ARRAY['"+challengeID+"']::uuid[]", `'{"weeks": 2}'`, "'abc'")},
+		{name: "admin action without values nor challenge", sql: `INSERT INTO admin_actions (admin_id, created_at, action, target_type, target_id, reason) VALUES ('` + userID + `', '2026-12-02Z', 'user.block', 'user', '` + userID + `', 'abc')`},
+		{name: "admin action by an unknown admin", sql: `INSERT INTO admin_actions (admin_id, created_at, action, target_type, target_id, reason) VALUES ('` + deadID + `', '2026-12-02Z', 'user.block', 'user', '` + userID + `', 'abc')`, constraint: "admin_actions_admin_id_fkey"},
+		{name: "admin action of free text", sql: adminActionRow("'Changed the weeks'", "'challenge'", "'{}'", "NULL", "'abc'"), constraint: "admin_actions_action_check"},
+		{name: "admin action of 65 characters", sql: adminActionRow("repeat('a', 65)", "'challenge'", "'{}'", "NULL", "'abc'"), constraint: "admin_actions_action_check"},
+		{name: "admin action on an unknown target type", sql: adminActionRow("'team.update'", "'team'", "'{}'", "NULL", "'abc'"), constraint: "admin_actions_target_type_check"},
+		{name: "admin action touching a null challenge", sql: adminActionRow("'challenge.update'", "'challenge'", "ARRAY[NULL]::uuid[]", "NULL", "'abc'"), constraint: "admin_actions_challenge_ids_check"},
+		{name: "admin action new value not an object", sql: adminActionRow("'challenge.update'", "'challenge'", "'{}'", "'[2]'", "'abc'"), constraint: "admin_actions_new_value_check"},
+		{name: "admin action old value not an object", sql: `INSERT INTO admin_actions (admin_id, created_at, action, target_type, target_id, old_value, reason) VALUES ('` + userID + `', '2026-12-02Z', 'challenge.update', 'challenge', '` + challengeID + `', '"2"', 'abc')`, constraint: "admin_actions_old_value_check"},
+		{name: "reason of 2 characters", sql: adminActionRow("'challenge.update'", "'challenge'", "'{}'", "NULL", "'ab'"), constraint: "admin_actions_reason_check"},
+		{name: "reason of 500 characters", sql: adminActionRow("'challenge.update'", "'challenge'", "'{}'", "NULL", "repeat('é', 500)")},
+		{name: "reason of 501 characters", sql: adminActionRow("'challenge.update'", "'challenge'", "'{}'", "NULL", "repeat('é', 501)"), constraint: "admin_actions_reason_check"},
 
 		// No cascade: a challenge is only soft-deleted, and the rows of a deleted
 		// account are erased by the code, never by the database.
