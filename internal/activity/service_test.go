@@ -32,14 +32,15 @@ type fakeRepository struct {
 	listing []Activity
 	listed  *ListQuery
 	// days serve DayTotals (zeros when nil), bounds records its bounds;
-	// sports serve SportCounts; weeks serve Weeks, weekQuery records its
-	// query and weeksErr fails it.
-	days      []Totals
-	bounds    []time.Time
-	sports    []SportCount
-	weeks     []WeekTotals
-	weekQuery *WeekQuery
-	weeksErr  error
+	// sports and sportsDuration serve SportCounts; weeks serve Weeks,
+	// weekQuery records its query and weeksErr fails it.
+	days           []Totals
+	bounds         []time.Time
+	sports         []SportCount
+	sportsDuration int
+	weeks          []WeekTotals
+	weekQuery      *WeekQuery
+	weeksErr       error
 }
 
 func (f *fakeRepository) DayTotals(_ context.Context, _ string, bounds []time.Time) ([]Totals, error) {
@@ -53,8 +54,8 @@ func (f *fakeRepository) DayTotals(_ context.Context, _ string, bounds []time.Ti
 	return f.days, nil
 }
 
-func (f *fakeRepository) SportCounts(context.Context, string) ([]SportCount, error) {
-	return f.sports, f.err
+func (f *fakeRepository) SportCounts(context.Context, string) ([]SportCount, int, error) {
+	return f.sports, f.sportsDuration, f.err
 }
 
 func (f *fakeRepository) Weeks(_ context.Context, q WeekQuery) ([]WeekTotals, error) {

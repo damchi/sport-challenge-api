@@ -245,7 +245,8 @@ paths:
       description: |
         Totals of the activities of the authenticated user, deleted ones left
         out, whether they count in a challenge or not: those of the current
-        week, day by day, and the number of activities of each sport. A week
+        week, day by day, the number of activities of each sport, their total
+        duration, and the number of challenges joined. A week
         runs from Monday 00:00 to the next Monday 00:00 in `tz` (the first
         instant of the day where a time change skips midnight), so it can last
         167 or 169 hours; it is not the week of a challenge.
@@ -2637,11 +2638,19 @@ components:
           minimum: 1
     ActivitySummary:
       type: object
-      required: [current_week, sports, total]
+      required: [current_week, sports, total, total_duration_seconds, challenge_count]
       additionalProperties: false
       properties:
         current_week:
           $ref: "#/components/schemas/CurrentActivityWeek"
+        challenge_count:
+          type: integer
+          minimum: 0
+          description: |
+            Number of challenges I joined, whatever their status (upcoming,
+            ongoing, finished), those I abandoned or was excluded from
+            included; not those I only created without taking part, nor the
+            deleted ones.
         sports:
           type: array
           description: The sports of my activities, most frequent first (then by code).
@@ -2651,6 +2660,10 @@ components:
           type: integer
           minimum: 0
           description: Number of my activities, the sum of the counts of `sports`.
+        total_duration_seconds:
+          type: integer
+          minimum: 0
+          description: Sum of the durations of the activities counted in `total`; 0 without any.
     ChallengeActivity:
       type: object
       description: |

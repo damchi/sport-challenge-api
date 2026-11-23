@@ -19,7 +19,7 @@ type repository interface {
 	Delete(ctx context.Context, actorID, id string, at time.Time, decide func(ctx context.Context, current Activity) error) error
 	List(ctx context.Context, q ListQuery) ([]Activity, error)
 	DayTotals(ctx context.Context, userID string, bounds []time.Time) ([]Totals, error)
-	SportCounts(ctx context.Context, userID string) ([]SportCount, error)
+	SportCounts(ctx context.Context, userID string) ([]SportCount, int, error)
 	Weeks(ctx context.Context, q WeekQuery) ([]WeekTotals, error)
 	EraseUser(ctx context.Context, userID string) error
 }
@@ -242,8 +242,10 @@ func (s *Service) Mine(ctx context.Context, actorID string, filter Filter, limit
 
 // MySummary sums the activities of actorID, deleted ones left out, whether
 // they count in a challenge or not: the week of the clock's now in the IANA
-// zone tz (localWeek), day by day, and the number of activities of each
-// sport. An unknown zone gives 400 validation_failed on tz.
+// zone tz (localWeek), day by day, the number of activities of each sport
+// and their total duration; and counts the challenges actorID joined,
+// whatever their status, abandoned ones included and deleted ones left out
+// (README §2.8). An unknown zone gives 400 validation_failed on tz.
 func (s *Service) MySummary(ctx context.Context, actorID, tz string) (Summary, error) {
 	loc, err := loadZone(tz)
 	if err != nil {
@@ -257,13 +259,19 @@ func (s *Service) MySummary(ctx context.Context, actorID, tz string) (Summary, e
 	if len(days) != 7 {
 		return Summary{}, fmt.Errorf("read day totals: %d days, want 7", len(days))
 	}
-	sports, err := s.repo.SportCounts(ctx, actorID)
+	sports, duration, err := s.repo.SportCounts(ctx, actorID)
 	if err != nil {
 		return Summary{}, fmt.Errorf("read sport counts: %w", err)
 	}
+	ps, err := s.participations.Participations(ctx, actorID)
+	if err != nil {
+		return Summary{}, fmt.Errorf("read participations: %w", err)
+	}
 	out := Summary{
-		CurrentWeek: CurrentWeek{Week: Week{StartsAt: w.Start(), EndsAt: w.End()}, Days: make([]Day, 0, len(days))},
-		Sports:      sports,
+		CurrentWeek:          CurrentWeek{Week: Week{StartsAt: w.Start(), EndsAt: w.End()}, Days: make([]Day, 0, len(days))},
+		Sports:               sports,
+		TotalDurationSeconds: duration,
+		ChallengeCount:       len(ps),
 	}
 	for i, d := range days {
 		out.CurrentWeek.Days = append(out.CurrentWeek.Days, Day{Date: w.Day(i), Sessions: d.Sessions, DurationSeconds: d.DurationSeconds})

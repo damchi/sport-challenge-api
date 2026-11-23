@@ -75,6 +75,9 @@ func TestMySummary(t *testing.T) {
 	if !reflect.DeepEqual(sum.Sports, wantSports) || sum.Total != 6 {
 		t.Fatalf("sports %+v, total %d, want %+v and 6: the others grouped, deleted ones left out", sum.Sports, sum.Total, wantSports)
 	}
+	if sum.TotalDurationSeconds != 15_300 {
+		t.Fatalf("total duration %d, want 15300: the 6 activities counted, the deleted one and the other user's left out", sum.TotalDurationSeconds)
+	}
 
 	// In Tokyo, recordNow (01:00 Friday June 12) is in the same week, but
 	// the Monday evening run of Toronto falls on Tuesday, and the Sunday

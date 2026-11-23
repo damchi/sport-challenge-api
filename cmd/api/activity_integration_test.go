@@ -565,3 +565,50 @@ func TestListMyActivities(t *testing.T) {
 		t.Fatalf("second page %+v, want the run of week 1, locked, and no next page", page)
 	}
 }
+
+// TestMySummaryTotals reads the figures of the profile through the modules
+// wired as run does: the total duration of the activities, deleted ones left
+// out, and the number of challenges joined, whatever their status,
+// abandoned ones included (README §2.8).
+func TestMySummaryTotals(t *testing.T) {
+	r := newRecording(t)
+	sum, err := r.activities.MySummary(t.Context(), r.user, "America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Total != 0 || sum.TotalDurationSeconds != 0 || sum.ChallengeCount != 0 {
+		t.Fatalf("summary %+v, want zeros without any activity or challenge", sum)
+	}
+
+	r.challenge([3]int{2026, 7, 6}, 2, "active", false)    // upcoming
+	r.challenge([3]int{2026, 6, 1}, 3, "active", false)    // ongoing
+	r.challenge([3]int{2026, 4, 6}, 2, "active", false)    // finished
+	r.challenge([3]int{2026, 6, 1}, 3, "abandoned", false) // abandoned
+	r.challenge([3]int{2026, 6, 1}, 3, "", false)          // created without taking part
+	r.challenge([3]int{2026, 6, 1}, 3, "active", true)     // deleted
+	if _, err := r.record(toronto(t, 2026, 6, 10, 7)); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := r.record(toronto(t, 2026, 6, 9, 7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.activities.Delete(t.Context(), r.user, deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.pool.Exec(t.Context(), `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds)
+		VALUES ($1, 'yoga', $2, 3600)`, r.user, toronto(t, 2026, 1, 5, 7)); err != nil { // in no challenge
+		t.Fatal(err)
+	}
+
+	sum, err = r.activities.MySummary(t.Context(), r.user, "America/Toronto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Total != 2 || sum.TotalDurationSeconds != 5100 {
+		t.Fatalf("total %d lasting %ds, want 2 activities lasting 5100s, the deleted one left out", sum.Total, sum.TotalDurationSeconds)
+	}
+	if sum.ChallengeCount != 4 {
+		t.Fatalf("challenge count %d, want 4: upcoming, ongoing, finished and abandoned; not the one only created, nor the deleted one", sum.ChallengeCount)
+	}
+}

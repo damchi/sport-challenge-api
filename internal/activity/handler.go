@@ -128,8 +128,10 @@ func (h *Handler) GetMyActivitySummary(ctx context.Context, req api.GetMyActivit
 			DistanceMeters:  w.DistanceMeters,
 			Days:            make([]api.ActivityDay, 0, len(w.Days)),
 		},
-		Sports: make([]api.SportCount, 0, len(sum.Sports)),
-		Total:  sum.Total,
+		Sports:               make([]api.SportCount, 0, len(sum.Sports)),
+		Total:                sum.Total,
+		TotalDurationSeconds: sum.TotalDurationSeconds,
+		ChallengeCount:       sum.ChallengeCount,
 	}
 	for _, d := range w.Days {
 		out.CurrentWeek.Days = append(out.CurrentWeek.Days, api.ActivityDay{
