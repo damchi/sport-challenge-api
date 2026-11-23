@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/damchi/sport-challenge-api/internal/activity"
+	"github.com/damchi/sport-challenge-api/internal/admin"
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/health"
@@ -142,6 +143,7 @@ func run() error {
 		activityHandler:    activity.NewHandler(activities),
 		leaderboardHandler: leaderboard.NewHandler(leaderboards),
 		invitationHandler:  invitation.NewHandler(invitations, challengeHandler),
+		adminHandler:       admin.NewHandler(admin.NewService(admin.NewRepository(gdb), clk, build)),
 	}
 	opts := routerOptions{
 		allowedOrigins: cfg.CORSAllowedOrigins,
@@ -487,6 +489,7 @@ type server struct {
 	activityHandler
 	leaderboardHandler
 	invitationHandler
+	adminHandler
 }
 
 // These aliases name the embedded handlers: embedding the *Handler of each
@@ -500,6 +503,7 @@ type (
 
 	leaderboardHandler = *leaderboard.Handler
 	invitationHandler  = *invitation.Handler
+	adminHandler       = *admin.Handler
 )
 
 // checkTrustedProxies refuses to start a deployed API without trusted

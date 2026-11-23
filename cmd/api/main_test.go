@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/damchi/sport-challenge-api/internal/activity"
+	"github.com/damchi/sport-challenge-api/internal/admin"
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/health"
@@ -101,7 +102,9 @@ func (f pingerFunc) Ping(ctx context.Context) error { return f(ctx) }
 const webOrigin = "https://app.example.com"
 
 // testHandlers are the handlers of the tests of the router. No request in
-// these tests reaches a business handler: their services stay nil.
+// these tests reaches a business handler: their services stay nil, except
+// that of module admin, whose policy refuses a non-admin before its storage
+// (nil too) is reached.
 func testHandlers() server {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	return server{
@@ -110,6 +113,7 @@ func testHandlers() server {
 		sportHandler:     sport.NewHandler(nil),
 		challengeHandler: challenge.NewHandler(nil),
 		activityHandler:  activity.NewHandler(nil),
+		adminHandler:     admin.NewHandler(admin.NewService(nil, clock.Real{}, buildinfo.Get())),
 	}
 }
 
@@ -209,6 +213,37 @@ func TestEveryRouteIsProtectedByDefault(t *testing.T) {
 		if !slices.ContainsFunc(r.Routes(), func(ri gin.RouteInfo) bool { return ri.Method+" "+ri.Path == name }) {
 			t.Errorf("public route %s is not registered", name)
 		}
+	}
+}
+
+// TestEveryAdminRouteIsHiddenWithoutThePermission walks the registered
+// /admin routes: called with a valid access token without the admin
+// permission, each one must answer 404 not_found, as an unknown path does
+// (README §5.7), and never reach a handler that reads anything. The request
+// carries no body nor parameter: an admin route whose contract refused it
+// (400) before the policy ran would reveal that it exists.
+func TestEveryAdminRouteIsHiddenWithoutThePermission(t *testing.T) {
+	r := newTestRouter(t, acceptingVerifier{}, func(context.Context, auth.Claims) (string, error) {
+		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
+	})
+
+	var checked int
+	for _, route := range r.Routes() {
+		if !strings.HasPrefix(route.Path, "/api/v1/admin/") {
+			continue
+		}
+		checked++
+		t.Run(route.Method+" "+route.Path, func(t *testing.T) {
+			path := pathParam.ReplaceAllString(route.Path, "${1}0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f")
+			req := httptest.NewRequest(route.Method, path, nil)
+			req.Header.Set("Authorization", "Bearer some.access.token")
+			if status, code := serve(t, r, req); status != http.StatusNotFound || code != "not_found" {
+				t.Fatalf("got %d %q without the admin permission, want 404 not_found", status, code)
+			}
+		})
+	}
+	if checked == 0 {
+		t.Fatal("no admin route checked")
 	}
 }
 

@@ -36,6 +36,11 @@ tags:
     description: Activities of the user, entered once and counted in every challenge where they belong.
   - name: invitations
     description: Invitation links to a challenge, reusable until the end of week 1.
+  - name: admin
+    description: |
+      Administration of the app (README §2.12), for the accounts with the
+      `admin` permission of their access token. Without it, every `/admin`
+      route answers 404 `not_found`, as if it did not exist.
 paths:
   /health:
     get:
@@ -1366,6 +1371,31 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/admin/stats:
+    get:
+      operationId: getAdminStats
+      summary: Read the figures of the admin dashboard
+      description: |
+        Admin only (404 `not_found` otherwise). Figures of the whole app at
+        `computed_at`, read on each request, never stored. "The last 7 days"
+        are the 7 × 24 hours before `computed_at`. Deleted accounts count in
+        none of the account figures.
+      tags: [admin]
+      responses:
+        "200":
+          description: The figures.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -1440,6 +1470,14 @@ components:
         No such activity, a deleted one, or one of another user
         (`activity_not_found`): the same answer in every case. Also the
         answer of a creation whose `Idempotency-Key` gave a deleted activity.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    AdminNotFound:
+      description: |
+        The account has no `admin` permission in its access token
+        (`not_found`): an `/admin` route answers as if it did not exist.
       content:
         application/json:
           schema:
@@ -1531,6 +1569,122 @@ components:
         - not_found
         - validation_failed
         - internal_error
+    AdminStats:
+      type: object
+      required: [computed_at, accounts, challenges, activities_last_7_days, pending_auth0_deletions, worker_tasks, build]
+      additionalProperties: false
+      properties:
+        computed_at:
+          type: string
+          format: date-time
+          description: The instant the figures were read at (UTC).
+        accounts:
+          $ref: "#/components/schemas/AdminAccountCounts"
+        challenges:
+          $ref: "#/components/schemas/AdminChallengeCounts"
+        activities_last_7_days:
+          type: integer
+          minimum: 0
+          description: Activities recorded in the last 7 days, whatever their date; deleted ones and those of deleted accounts excluded.
+        pending_auth0_deletions:
+          type: integer
+          minimum: 0
+          description: |
+            Deleted accounts whose deletion at Auth0 failed and is still to be
+            replayed by the worker (`retry-auth0-deletions`).
+        worker_tasks:
+          type: array
+          description: Every task of the worker, in the order of the enum of `task`, run or not.
+          items:
+            $ref: "#/components/schemas/AdminWorkerTask"
+        build:
+          $ref: "#/components/schemas/AdminBuild"
+    AdminAccountCounts:
+      type: object
+      required: [total, new_last_7_days, active_last_7_days]
+      additionalProperties: false
+      properties:
+        total:
+          type: integer
+          minimum: 0
+          description: Accounts not deleted, profile complete or not.
+        new_last_7_days:
+          type: integer
+          minimum: 0
+          description: Accounts not deleted, created in the last 7 days.
+        active_last_7_days:
+          type: integer
+          minimum: 0
+          description: Accounts not deleted that recorded at least one activity in the last 7 days.
+    AdminChallengeCounts:
+      type: object
+      required: [upcoming, ongoing, finished, deleted]
+      additionalProperties: false
+      description: |
+        Every challenge, private ones included. The statuses are those at
+        `computed_at` and count the challenges not deleted; `deleted` counts
+        the deleted ones, whatever their status.
+      properties:
+        upcoming:
+          type: integer
+          minimum: 0
+        ongoing:
+          type: integer
+          minimum: 0
+        finished:
+          type: integer
+          minimum: 0
+        deleted:
+          type: integer
+          minimum: 0
+    AdminWorkerTask:
+      type: object
+      required: [task]
+      additionalProperties: false
+      properties:
+        task:
+          type: string
+          enum: [close-weeks, finalize-challenges, retry-auth0-deletions]
+        last_run:
+          $ref: "#/components/schemas/AdminWorkerRun"
+        last_failure:
+          $ref: "#/components/schemas/AdminWorkerRun"
+    AdminWorkerRun:
+      type: object
+      required: [started_at]
+      additionalProperties: false
+      description: |
+        A run of a worker task. `last_run` is absent when the task never
+        ran, `last_failure` when it never failed (of the runs kept: the 500
+        most recent, and the last failure however old).
+      properties:
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          description: Absent while the run goes on, or when it was stopped before it could end (time limit of the job).
+        outcome:
+          type: string
+          enum: [succeeded, failed]
+          description: Absent when `ended_at` is.
+        error_code:
+          type: string
+          description: Stable code of the failure, for a failed run only; never a message.
+          example: internal_error
+    AdminBuild:
+      type: object
+      required: [version, commit]
+      additionalProperties: false
+      description: The build of the API that answers, as `GET /health` gives it.
+      properties:
+        version:
+          type: string
+          example: v1.2.3
+        commit:
+          type: string
+          example: 0123456789abcdef0123456789abcdef01234567
     Health:
       type: object
       required: [status, version, commit]
