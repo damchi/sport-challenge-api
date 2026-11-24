@@ -180,6 +180,18 @@ func (unimplemented) RemoveAdminCreator(context.Context, api.RemoveAdminCreatorR
 	return nil, errNotImplemented
 }
 
+func (unimplemented) CreateAdminActivity(context.Context, api.CreateAdminActivityRequestObject) (api.CreateAdminActivityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) UpdateAdminActivity(context.Context, api.UpdateAdminActivityRequestObject) (api.UpdateAdminActivityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) DeleteAdminActivity(context.Context, api.DeleteAdminActivityRequestObject) (api.DeleteAdminActivityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
 func (unimplemented) ListAdminUsers(context.Context, api.ListAdminUsersRequestObject) (api.ListAdminUsersResponseObject, error) {
 	return nil, errNotImplemented
 }

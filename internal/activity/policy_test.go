@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 )
 
 func TestCanChange(t *testing.T) {
@@ -266,4 +268,60 @@ func challengeIDs(contributions []Contribution) []string {
 func leftAt(c Participation, at time.Time) Participation {
 	c.Active, c.AbandonedAt = false, &at
 	return c
+}
+
+func TestTouched(t *testing.T) {
+	// Monday 2026-06-01, 3 weeks: week 1 locks on Monday 2026-06-08 at 7 am.
+	june := participation(t, [3]int{2026, 6, 1}, 3)
+	june.ChallengeID = "june"
+	// Monday 2026-07-06, 2 weeks.
+	july := participation(t, [3]int{2026, 7, 6}, 2)
+	july.ChallengeID = "july"
+	inWeek1 := toronto(t, 2026, 6, 3, 12)
+	inWeek2 := toronto(t, 2026, 6, 10, 12)
+	inJuly := toronto(t, 2026, 7, 8, 12)
+	outside := toronto(t, 2026, 9, 1, 12)
+
+	// Left after week 1 locked: kept in it by the points category.
+	leftLate := leftAt(june, toronto(t, 2026, 6, 9, 12))
+	// Left before week 1 locked: the activity counts nowhere there.
+	leftEarly := leftAt(june, toronto(t, 2026, 6, 5, 12))
+	// Left at the very instant week 1 locked: still judged in it.
+	leftAtLock := leftAt(june, toronto(t, 2026, 6, 8, 7))
+	noZone := leftLate
+	noZone.Location = nil
+
+	tests := []struct {
+		name       string
+		challenges []Participation
+		starts     []time.Time
+		want       []string
+	}{
+		{name: "counts in the challenge", challenges: []Participation{june, july}, starts: []time.Time{inWeek1}, want: []string{"june"}},
+		{name: "counts nowhere", challenges: []Participation{june, july}, starts: []time.Time{outside}},
+		{name: "no challenge", starts: []time.Time{inWeek1}},
+		{name: "moved from a challenge to another: both", challenges: []Participation{june, july}, starts: []time.Time{inWeek1, inJuly}, want: []string{"june", "july"}},
+		{name: "moved within a challenge: once", challenges: []Participation{june, july}, starts: []time.Time{inWeek1, inWeek2}, want: []string{"june"}},
+		{name: "moved out of every challenge", challenges: []Participation{june, july}, starts: []time.Time{inJuly, outside}, want: []string{"july"}},
+		{name: "left once its week was locked: kept for the points", challenges: []Participation{leftLate}, starts: []time.Time{inWeek1}, want: []string{"june"}},
+		{name: "left at the instant its week locked: kept", challenges: []Participation{leftAtLock}, starts: []time.Time{inWeek1}, want: []string{"june"}},
+		{name: "left before its week was locked", challenges: []Participation{leftLate}, starts: []time.Time{inWeek2}},
+		{name: "left before any lock", challenges: []Participation{leftEarly}, starts: []time.Time{inWeek1}},
+		{name: "left, the zone unknown: touched rather than missed", challenges: []Participation{noZone}, starts: []time.Time{inWeek2}, want: []string{"june"}},
+		{name: "in the order of the challenges", challenges: []Participation{july, june}, starts: []time.Time{inWeek1, inJuly}, want: []string{"july", "june"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Touched(tt.challenges, tt.starts...); !slices.Equal(got, tt.want) {
+				t.Fatalf("Touched = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAdminRefusal(t *testing.T) {
+	if err := AdminRefusal(true); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	checkError(t, AdminRefusal(false), apperr.CodeNotFound, nil)
 }

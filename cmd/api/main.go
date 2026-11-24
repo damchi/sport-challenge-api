@@ -143,6 +143,7 @@ func run() error {
 	corrections := admin.NewCorrections(adminRepo, admin.NewJournal(adminRepo, clk), recompute, leaderboards)
 	challengeCorrections := admin.NewChallengeCorrections(corrections, challenges, invitations)
 	memberCorrections := admin.NewMemberCorrections(corrections, challenges)
+	activityCorrections := admin.NewActivityCorrections(corrections, activities)
 	handlers := server{
 		Handler:            health.NewHandler(pool, logger, build),
 		userHandler:        user.NewHandler(users),
@@ -151,7 +152,7 @@ func run() error {
 		activityHandler:    activity.NewHandler(activities),
 		leaderboardHandler: leaderboard.NewHandler(leaderboards),
 		invitationHandler:  invitation.NewHandler(invitations, challengeHandler),
-		adminHandler:       admin.NewHandler(admin.NewService(adminRepo, clk, build), challengeCorrections, memberCorrections),
+		adminHandler:       admin.NewHandler(admin.NewService(adminRepo, clk, build), challengeCorrections, memberCorrections, activityCorrections),
 	}
 	opts := routerOptions{
 		allowedOrigins: cfg.CORSAllowedOrigins,
