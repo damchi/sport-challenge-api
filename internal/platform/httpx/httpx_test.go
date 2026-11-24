@@ -208,31 +208,66 @@ func TestUnknownRouteAnswersNotFound(t *testing.T) {
 	}
 }
 
-func TestInvalidParamHandler(t *testing.T) {
-	r := gin.New()
-	r.GET("/", func(c *gin.Context) {
-		InvalidParamHandler(discard())(c, errors.New("invalid value someone@example.com for id"), http.StatusBadRequest)
-	})
-	rec := serve(r, httptest.NewRequest(http.MethodGet, "/", nil))
+// hidingGate refuses every request with 404 not_found, as a route hidden
+// from the actor does.
+func hidingGate(*gin.Context) error { return apperr.New(apperr.CodeNotFound, nil) }
 
-	if rec.Code != http.StatusBadRequest || decodeError(t, rec).Code != "validation_failed" {
-		t.Fatalf("got %d %s, want 400 validation_failed", rec.Code, rec.Body)
+// passingGate refuses nothing.
+func passingGate(*gin.Context) error { return nil }
+
+func TestInvalidParamHandler(t *testing.T) {
+	tests := []struct {
+		name       string
+		gate       Gate
+		wantStatus int
+		wantCode   apperr.Code
+	}{
+		{name: "no gate", wantStatus: http.StatusBadRequest, wantCode: apperr.CodeValidationFailed},
+		{name: "gate lets through", gate: passingGate, wantStatus: http.StatusBadRequest, wantCode: apperr.CodeValidationFailed},
+		{name: "gate refuses", gate: hidingGate, wantStatus: http.StatusNotFound, wantCode: apperr.CodeNotFound},
 	}
-	if strings.Contains(rec.Body.String(), "someone@example.com") {
-		t.Fatalf("response leaks the binding error: %s", rec.Body)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := gin.New()
+			r.GET("/", func(c *gin.Context) {
+				InvalidParamHandler(discard(), tt.gate)(c, errors.New("invalid value someone@example.com for id"), http.StatusBadRequest)
+			})
+			rec := serve(r, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			if rec.Code != tt.wantStatus || decodeError(t, rec).Code != tt.wantCode {
+				t.Fatalf("got %d %s, want %d %s", rec.Code, rec.Body, tt.wantStatus, tt.wantCode)
+			}
+			if strings.Contains(rec.Body.String(), "someone@example.com") {
+				t.Fatalf("response leaks the binding error: %s", rec.Body)
+			}
+		})
 	}
 }
 
 func TestBadRequestHandler(t *testing.T) {
-	r := gin.New()
-	r.GET("/", func(c *gin.Context) { BadRequestHandler(discard())(c, errors.New("json: cannot unmarshal")) })
-	rec := serve(r, httptest.NewRequest(http.MethodGet, "/", nil))
-
-	if rec.Code != http.StatusBadRequest || decodeError(t, rec).Code != "validation_failed" {
-		t.Fatalf("got %d %s, want 400 validation_failed", rec.Code, rec.Body)
+	tests := []struct {
+		name       string
+		gate       Gate
+		wantStatus int
+		wantCode   apperr.Code
+	}{
+		{name: "no gate", wantStatus: http.StatusBadRequest, wantCode: apperr.CodeValidationFailed},
+		{name: "gate lets through", gate: passingGate, wantStatus: http.StatusBadRequest, wantCode: apperr.CodeValidationFailed},
+		{name: "gate refuses", gate: hidingGate, wantStatus: http.StatusNotFound, wantCode: apperr.CodeNotFound},
 	}
-	if strings.Contains(rec.Body.String(), "unmarshal") {
-		t.Fatalf("response leaks the decoding error: %s", rec.Body)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := gin.New()
+			r.GET("/", func(c *gin.Context) { BadRequestHandler(discard(), tt.gate)(c, errors.New("json: cannot unmarshal")) })
+			rec := serve(r, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			if rec.Code != tt.wantStatus || decodeError(t, rec).Code != tt.wantCode {
+				t.Fatalf("got %d %s, want %d %s", rec.Code, rec.Body, tt.wantStatus, tt.wantCode)
+			}
+			if strings.Contains(rec.Body.String(), "unmarshal") {
+				t.Fatalf("response leaks the decoding error: %s", rec.Body)
+			}
+		})
 	}
 }
 

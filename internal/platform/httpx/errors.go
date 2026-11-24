@@ -62,19 +62,40 @@ func ErrorHandler(logger *slog.Logger) func(*gin.Context, error) {
 	}
 }
 
+// Gate is a refusal that comes before the validation of a request: when it
+// returns an error for the request, the request answers that error instead
+// of its validation error, and nothing about what was invalid is sent back.
+// It only shapes the answer to an invalid request: a valid one is never
+// stopped by it. A nil Gate refuses nothing.
+type Gate func(c *gin.Context) error
+
+// respondInvalid answers invalid, the error of a request refused before its
+// handler, unless gate refuses the request first.
+func respondInvalid(c *gin.Context, logger *slog.Logger, gate Gate, invalid error) {
+	if gate != nil {
+		if refused := gate(c); refused != nil {
+			RespondError(c, logger, refused)
+			return
+		}
+	}
+	RespondError(c, logger, invalid)
+}
+
 // InvalidParamHandler answers validation_failed when the generated router
-// rejects a path, query or header parameter. The binding error, which may
-// echo the client's value, is not sent back.
-func InvalidParamHandler(logger *slog.Logger) func(*gin.Context, error, int) {
+// rejects a path, query or header parameter, unless gate refuses the request
+// first. The binding error, which may echo the client's value, is not sent
+// back.
+func InvalidParamHandler(logger *slog.Logger, gate Gate) func(*gin.Context, error, int) {
 	return func(c *gin.Context, err error, _ int) {
-		RespondError(c, logger, apperr.New(apperr.CodeValidationFailed, err))
+		respondInvalid(c, logger, gate, apperr.New(apperr.CodeValidationFailed, err))
 	}
 }
 
 // BadRequestHandler answers validation_failed when a request body cannot be
-// decoded. The decoding error is not echoed back.
-func BadRequestHandler(logger *slog.Logger) func(*gin.Context, error) {
+// decoded, unless gate refuses the request first. The decoding error is not
+// echoed back.
+func BadRequestHandler(logger *slog.Logger, gate Gate) func(*gin.Context, error) {
 	return func(c *gin.Context, err error) {
-		RespondError(c, logger, apperr.New(apperr.CodeValidationFailed, err))
+		respondInvalid(c, logger, gate, apperr.New(apperr.CodeValidationFailed, err))
 	}
 }

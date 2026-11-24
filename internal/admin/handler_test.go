@@ -66,7 +66,7 @@ func serveWith(t *testing.T, h *Handler, token, method, target, body string, log
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate, err := httpx.RequestValidator(spec, logger)
+	validate, err := httpx.RequestValidator(spec, logger, HideInvalidRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +76,11 @@ func serveWith(t *testing.T, h *Handler, token, method, target, body string, log
 		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return "11111111-1111-4111-8111-111111111111", nil }, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(adminOnly{Handler: h}, nil, api.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, HideInvalidRequest),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
 	}), api.GinServerOptions{
-		ErrorHandler: httpx.InvalidParamHandler(logger),
+		ErrorHandler: httpx.InvalidParamHandler(logger, HideInvalidRequest),
 		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
 
@@ -172,5 +172,49 @@ func TestWorkerTasksMatchTheContract(t *testing.T) {
 		if !api.AdminWorkerTaskTask(task).Valid() || string(contract[i]) != task {
 			t.Errorf("workerTasks[%d] = %q, contract has %q", i, task, contract[i])
 		}
+	}
+}
+
+// TestInvalidAdminRequestIsHiddenWithoutThePermission: a malformed request to
+// an /admin route (body, path parameter, query parameter) answers 404
+// not_found without the admin permission, like a valid one, and names no
+// field; an admin keeps 400 validation_failed with the fields (README §5.7).
+func TestInvalidAdminRequestIsHiddenWithoutThePermission(t *testing.T) {
+	requests := []struct {
+		name, method, target, body, fields string
+	}{
+		{name: "empty body", method: http.MethodPatch, target: "/api/v1/admin/challenges/" + challengeID, body: `{}`, fields: "reason"},
+		{name: "unknown field", method: http.MethodPost, target: "/api/v1/admin/users/search", body: `{"x": 1}`},
+		{name: "path id not a UUID", method: http.MethodGet, target: "/api/v1/admin/challenges/not-a-uuid"},
+		{name: "query out of bounds", method: http.MethodGet, target: "/api/v1/admin/users?limit=0", fields: "limit"},
+	}
+	for _, rq := range requests {
+		t.Run(rq.name, func(t *testing.T) {
+			for _, tt := range []struct {
+				token      string
+				wantStatus int
+				wantCode   string
+			}{
+				{token: "some.access.token", wantStatus: http.StatusNotFound, wantCode: "not_found"},
+				{token: adminToken, wantStatus: http.StatusBadRequest, wantCode: "validation_failed"},
+			} {
+				repo := &fakeRepo{}
+				rec, got := serveWith(t, NewHandler(NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}), nil), tt.token, rq.method, rq.target, rq.body, io.Discard)
+				e, _ := got["error"].(map[string]any)
+				if rec.Code != tt.wantStatus || e["code"] != tt.wantCode {
+					t.Fatalf("%s: got %d %v, want %d %s", tt.token, rec.Code, got, tt.wantStatus, tt.wantCode)
+				}
+				params, _ := e["params"].(map[string]any)
+				if tt.wantStatus == http.StatusNotFound && params != nil {
+					t.Fatalf("%s: a hidden route sends params back: %v", tt.token, got)
+				}
+				if tt.wantStatus == http.StatusBadRequest && rq.fields != "" && params["fields"] != rq.fields {
+					t.Fatalf("%s: fields = %v, want %q", tt.token, params["fields"], rq.fields)
+				}
+				if repo.calls != 0 {
+					t.Fatalf("%s: repository called %d times for an invalid request", tt.token, repo.calls)
+				}
+			}
+		})
 	}
 }

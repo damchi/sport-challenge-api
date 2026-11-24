@@ -78,7 +78,7 @@ func serveLogged(t *testing.T, h *Handler, logs io.Writer, method, target, body 
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate, err := httpx.RequestValidator(spec, logger)
+	validate, err := httpx.RequestValidator(spec, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +88,11 @@ func serveLogged(t *testing.T, h *Handler, logs io.Writer, method, target, body 
 		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return actor, nil }, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(invitationsOnly{Handler: h}, nil, api.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, nil),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
 	}), api.GinServerOptions{
-		ErrorHandler: httpx.InvalidParamHandler(logger),
+		ErrorHandler: httpx.InvalidParamHandler(logger, nil),
 		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
 

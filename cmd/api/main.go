@@ -543,13 +543,15 @@ type routerOptions struct {
 // CurrentUser, RateLimitUser) on every route except the public list below.
 // Protect is added before the routes, so it applies to all of them, including
 // the ones added later. Each request is then checked against the contract
-// before its handler runs.
+// before its handler runs; an invalid request to an /admin route without the
+// admin permission answers 404 not_found, as a valid one does
+// (admin.HideInvalidRequest).
 func newRouter(logger *slog.Logger, opts routerOptions, handler api.StrictServerInterface, verifier auth.TokenVerifier, resolve auth.UserIDResolver) (*gin.Engine, error) {
 	spec, err := api.GetSpec()
 	if err != nil {
 		return nil, fmt.Errorf("load embedded contract: %w", err)
 	}
-	validate, err := httpx.RequestValidator(spec, logger)
+	validate, err := httpx.RequestValidator(spec, logger, admin.HideInvalidRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -578,12 +580,12 @@ func newRouter(logger *slog.Logger, opts routerOptions, handler api.StrictServer
 	// The generated defaults send err.Error() to the client: every error
 	// handler is replaced by one that answers in the API error format.
 	strict := api.NewStrictHandlerWithOptions(handler, nil, api.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, admin.HideInvalidRequest),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
 	})
 	api.RegisterHandlersWithOptions(router, strict, api.GinServerOptions{
-		ErrorHandler: httpx.InvalidParamHandler(logger),
+		ErrorHandler: httpx.InvalidParamHandler(logger, admin.HideInvalidRequest),
 		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
 	return router, nil
