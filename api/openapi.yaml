@@ -3402,7 +3402,9 @@ components:
             The weeks whose outcome the change moves, by number:
             `judged_again`, a locked week whose eliminations or acquired
             points change; `recomputed`, a week not locked whose provisional
-            points or provisional elimination minimum change. A week where
+            points or provisional elimination minimum change, or that loses
+            the eliminations judged while it was locked (its first day moved
+            later). A week where
             nothing changes is left out; empty for the deletion or the
             restore of a challenge.
           items:
