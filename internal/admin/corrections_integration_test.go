@@ -25,6 +25,10 @@ func (noBoards) Get(context.Context, auth.Actor, string) (leaderboard.Leaderboar
 	return leaderboard.Leaderboard{}, nil
 }
 
+func (noBoards) Weeks(context.Context, auth.Actor, string) (leaderboard.Weeks, error) {
+	return leaderboard.Weeks{}, nil
+}
+
 // state is what a change may touch: the activity, the journal and what the
 // worker recorded.
 type state struct {
@@ -83,9 +87,11 @@ func TestCorrectionsRunFromTheDatabase(t *testing.T) {
 			Scan(&s.Meters, &s.Actions, &s.Weeks); err != nil {
 			t.Fatal(err)
 		}
-		if s.Eliminations, err = r.Eliminations(t.Context(), challenge); err != nil {
+		state, err := r.State(t.Context(), challenge)
+		if err != nil {
 			t.Fatal(err)
 		}
+		s.Eliminations = state.Eliminations
 		return s
 	}
 	// Bob runs 6999 m in week 2 instead of 7000: eliminated in week 2.

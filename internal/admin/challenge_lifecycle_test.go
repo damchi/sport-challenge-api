@@ -39,7 +39,7 @@ func TestChallengeCorrectionsDeleteAndRestore(t *testing.T) {
 		{
 			name:       "delete",
 			run:        (*ChallengeCorrections).Delete,
-			wantSteps:  []string{"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "delete " + challengeID, "journal"},
+			wantSteps:  []string{"lock", "lock participants " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "delete " + challengeID, "journal", "state " + challengeID},
 			wantAction: ActionChallengeDelete,
 			wantOld:    map[string]any{"deleted_at": nil},
 			wantNew:    map[string]any{"deleted_at": deletedAt},
@@ -49,8 +49,8 @@ func TestChallengeCorrectionsDeleteAndRestore(t *testing.T) {
 			name: "restore",
 			run:  (*ChallengeCorrections).Restore,
 			wantSteps: []string{
-				"lock", "lock participants " + challengeID, "eliminations " + challengeID, "restore " + challengeID, "journal",
-				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
+				"lock", "lock participants " + challengeID, "state " + challengeID, "restore " + challengeID, "journal",
+				"recompute " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID,
 			},
 			wantAction: ActionChallengeRestore,
 			wantOld:    map[string]any{"deleted_at": deletedAt},
@@ -114,7 +114,7 @@ func TestChallengeCorrectionsDeleteAndRestoreRefusals(t *testing.T) {
 		{name: "restore, no reason", run: (*ChallengeCorrections).Restore, actor: admin, reason: "", wantCode: apperr.CodeValidationFailed},
 		{
 			name: "restore, not deleted", run: (*ChallengeCorrections).Restore, actor: admin, reason: "Doublon", err: missing, wantCode: apperr.CodeChallengeNotFound,
-			wantSteps: []string{"lock", "lock participants " + challengeID, "eliminations " + challengeID, "restore " + challengeID},
+			wantSteps: []string{"lock", "lock participants " + challengeID, "state " + challengeID, "restore " + challengeID},
 		},
 	}
 	for _, tt := range tests {
@@ -155,7 +155,7 @@ func (f *fakeLifecycle) answer(what string, actor auth.Actor, id, reason string,
 		return nil, apperr.New(apperr.CodeNotFound, nil)
 	}
 	f.asked = what + " " + id + " " + reason + map[bool]string{false: "", true: " dry run"}[dryRun]
-	return []ChallengePreview{{ChallengeID: id, Before: before, After: after}}, nil
+	return []ChallengePreview{{ChallengeID: id, Status: StatusFinished, Before: before, After: after}}, nil
 }
 
 func TestDeleteAndRestoreAdminChallenge(t *testing.T) {

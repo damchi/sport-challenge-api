@@ -232,6 +232,10 @@ func (uncategorizedBoards) Get(context.Context, auth.Actor, string) (leaderboard
 	return leaderboard.Leaderboard{Categories: []leaderboard.CategoryRanking{}}, nil
 }
 
+func (uncategorizedBoards) Weeks(context.Context, auth.Actor, string) (leaderboard.Weeks, error) {
+	return leaderboard.Weeks{}, nil
+}
+
 // TestAdminPreviewWithoutAReason: through each kind of body that takes
 // dry_run, a preview goes without a reason (README §2.12), writing no
 // journal line; a change without one is refused before anything is locked.

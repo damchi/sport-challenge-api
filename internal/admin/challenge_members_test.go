@@ -84,8 +84,8 @@ func TestMemberCorrections(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := []string{
-				"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, mc.step + " " + challengeID + " " + bobID, "journal",
-				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
+				"lock", "lock participants " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID, mc.step + " " + challengeID + " " + bobID, "journal",
+				"recompute " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID,
 			}
 			if !reflect.DeepEqual(log.steps, want) {
 				t.Fatalf("steps %v, want %v", log.steps, want)
@@ -119,7 +119,7 @@ func TestMemberCorrectionsRefusals(t *testing.T) {
 			{name: "no reason", actor: admin, reason: "  ", wantCode: apperr.CodeValidationFailed},
 			{
 				name: "change refused", actor: admin, reason: "Oubli d'inscription", err: apperr.New(apperr.CodeLastCreator, nil), wantCode: apperr.CodeLastCreator,
-				wantSteps: []string{"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, mc.step + " " + challengeID + " " + bobID},
+				wantSteps: []string{"lock", "lock participants " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID, mc.step + " " + challengeID + " " + bobID},
 			},
 		}
 		for _, tt := range tests {
@@ -184,7 +184,7 @@ func TestAdminMemberRoutes(t *testing.T) {
 		if reason == "refused" {
 			return nil, apperr.New(apperr.CodeChallengeNotFound, nil)
 		}
-		return []ChallengePreview{{ChallengeID: id}}, nil
+		return []ChallengePreview{{ChallengeID: id, Status: StatusOngoing}}, nil
 	})
 	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, members, nil, nil)
 	member := "/api/v1/admin/challenges/" + challengeID + "/participants/" + bobID

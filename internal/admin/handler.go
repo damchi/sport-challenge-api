@@ -367,7 +367,33 @@ func toCorrection(previews []ChallengePreview, dryRun bool) (api.AdminCorrection
 			}
 			changes[j] = api.AdminEliminationChange{User: user, Before: toJudgement(e.Before), After: toJudgement(e.After)}
 		}
-		out.Challenges[i] = api.AdminChallengePreview{ChallengeId: id, Before: before, After: after, Eliminations: changes}
+		weeks := make([]api.AdminWeekChange, len(p.Weeks))
+		for j, w := range p.Weeks {
+			change := api.Recomputed
+			if w.Locked {
+				change = api.JudgedAgain
+			}
+			weeks[j] = api.AdminWeekChange{WeekNumber: w.Number, Change: change}
+		}
+		points := make([]api.AdminPointsChange, len(p.Points))
+		for j, pc := range p.Points {
+			user, err := toUserRef(pc.User)
+			if err != nil {
+				return api.AdminCorrection{}, err
+			}
+			points[j] = api.AdminPointsChange{User: user, WeekNumber: pc.Week, Before: pc.Before, After: pc.After, Provisional: pc.Provisional}
+		}
+		var results *api.AdminChallengePreviewResults
+		if p.Results != "" {
+			r := api.AdminChallengePreviewResults(p.Results)
+			results = &r
+		}
+		out.Challenges[i] = api.AdminChallengePreview{
+			ChallengeId: id, Title: p.Title, Status: api.AdminChallengePreviewStatus(p.Status),
+			ReferenceSport: api.AdminReferenceSportChange{Before: p.ReferenceSport.Before, After: p.ReferenceSport.After},
+			Results:        results, Weeks: weeks, Points: points,
+			Before: before, After: after, Eliminations: changes,
+		}
 	}
 	return out, nil
 }

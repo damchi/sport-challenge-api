@@ -17,7 +17,7 @@ import (
 type correctionLog struct {
 	steps      []string
 	rolledBack bool
-	// eliminations are those read by challenge, before then after.
+	// eliminations are those State reads by challenge, before then after.
 	eliminations map[string][][]EliminationRow
 	recomputeErr error
 	lockErr      error
@@ -39,20 +39,25 @@ func (l *correctionLog) LockParticipants(_ context.Context, ids []string) error 
 	return l.lockErr
 }
 
-func (l *correctionLog) Eliminations(_ context.Context, id string) ([]EliminationRow, error) {
-	l.add("eliminations " + id)
+func (l *correctionLog) State(_ context.Context, id string) (ChallengeState, error) {
+	l.add("state " + id)
 	reads := l.eliminations[id]
 	if len(reads) == 0 {
-		return nil, nil
+		return ChallengeState{}, nil
 	}
 	out := reads[0]
 	l.eliminations[id] = reads[1:]
-	return out, nil
+	return ChallengeState{Eliminations: out}, nil
 }
 
 func (l *correctionLog) Recompute(_ context.Context, id string) error {
 	l.add("recompute " + id)
 	return l.recomputeErr
+}
+
+func (l *correctionLog) Weeks(_ context.Context, _ auth.Actor, id string) (leaderboard.Weeks, error) {
+	l.add("weeks " + id)
+	return leaderboard.Weeks{}, nil
 }
 
 func (l *correctionLog) Get(_ context.Context, actor auth.Actor, id string) (leaderboard.Leaderboard, error) {
@@ -119,10 +124,10 @@ func TestCorrectionsRun(t *testing.T) {
 			}
 			want := []string{
 				"lock", "touched", "lock participants " + challengeID + "," + inviteID,
-				"rank " + challengeID, "eliminations " + challengeID, "rank " + inviteID, "eliminations " + inviteID,
+				"rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "rank " + inviteID, "weeks " + inviteID, "state " + inviteID,
 				"apply", "journal",
-				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
-				"recompute " + inviteID, "rank " + inviteID, "eliminations " + inviteID,
+				"recompute " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID,
+				"recompute " + inviteID, "rank " + inviteID, "weeks " + inviteID, "state " + inviteID,
 			}
 			if !reflect.DeepEqual(log.steps, want) {
 				t.Fatalf("steps =\n%v\nwant\n%v", log.steps, want)
@@ -182,10 +187,10 @@ func TestCorrectionsRunPreviewsWithoutAReason(t *testing.T) {
 	}
 	want := []string{
 		"lock", "touched", "lock participants " + challengeID + "," + inviteID,
-		"rank " + challengeID, "eliminations " + challengeID, "rank " + inviteID, "eliminations " + inviteID,
+		"rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "rank " + inviteID, "weeks " + inviteID, "state " + inviteID,
 		"apply",
-		"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
-		"recompute " + inviteID, "rank " + inviteID, "eliminations " + inviteID,
+		"recompute " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID,
+		"recompute " + inviteID, "rank " + inviteID, "weeks " + inviteID, "state " + inviteID,
 	}
 	if !reflect.DeepEqual(log.steps, want) {
 		t.Fatalf("steps =\n%v\nwant\n%v", log.steps, want)

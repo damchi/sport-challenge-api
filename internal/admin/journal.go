@@ -80,6 +80,9 @@ type Journal struct {
 	clock clock.Clock
 }
 
+// now is the instant of the clock the journal dates its lines by.
+func (j *Journal) now() time.Time { return j.clock.Now() }
+
 // NewJournal returns a Journal writing to store.
 func NewJournal(store journalStore, clk clock.Clock) *Journal {
 	return &Journal{store: store, clock: clk}

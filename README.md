@@ -266,6 +266,12 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
 - ✅ Le recalcul réutilise le code du worker (`close-weeks`, `finalize-challenges`), prend le même verrou et se fait dans la transaction de la modification : un recalcul donne le même résultat qu'un passage du worker sur les mêmes données.
 - ✅ Un défi que la modification rend de nouveau en cours (durée allongée, premier jour déplacé) perd ses résultats figés et redevient en cours.
 - ✅ **Aperçu** : une action qui déclenche un recalcul accepte `dry_run`. La transaction est alors annulée, et la réponse donne, pour chaque défi touché, le classement avant et après et les éliminations qui changent. Le motif y est facultatif (voir « Motif obligatoire » ci-dessous).
+- ✅ L'aperçu (et la réponse d'une modification) dit aussi, pour chaque défi touché, ce que le client ne recalcule pas (décisions du 2026-11-24, SC-API-177) :
+  - son titre et son statut après la modification, et son sport de référence avant et après (un changement de réglages peut le changer ; le nom de l'élimination et la distance équivalente en dépendent) ;
+  - ses résultats figés : **refigés** (figés avant, rouverts puis refigés), **rouverts** (figés avant, le défi redevient en cours) ou 🟡 **figés** (par la modification : durée raccourcie dans le passé, ou dernière semaine verrouillée avant le passage du worker) ;
+  - les semaines touchées, **par effet** : une semaine verrouillée est **rejugée** si ses éliminations ou ses points acquis changent ; une semaine non verrouillée est **recalculée** si ses points provisoires ou, pour la semaine en cours, le minimum provisoire d'élimination changent ; une semaine où rien ne change n'est pas citée ;
+  - catégorie Points : chaque participant dont les points d'une semaine changent, avec la semaine, les points avant et après, et s'ils sont provisoires (semaine non verrouillée). Les points sont recalculés depuis les activités, résultats figés ou non.
+  - La suppression d'un défi ne donne que son titre, son statut et son sport de référence (rien n'est rejugé) ; la restauration n'a ni semaines ni points à comparer (aucun classement avant).
 
 **Traces et transparence**
 

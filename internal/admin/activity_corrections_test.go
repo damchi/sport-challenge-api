@@ -89,10 +89,10 @@ func TestActivityCorrections(t *testing.T) {
 			}
 			want := []string{
 				"lock", ac.step, "lock participants " + challengeID + "," + inviteID,
-				"rank " + challengeID, "eliminations " + challengeID, "rank " + inviteID, "eliminations " + inviteID,
+				"rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "rank " + inviteID, "weeks " + inviteID, "state " + inviteID,
 				"write", "journal",
-				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
-				"recompute " + inviteID, "rank " + inviteID, "eliminations " + inviteID,
+				"recompute " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID,
+				"recompute " + inviteID, "rank " + inviteID, "weeks " + inviteID, "state " + inviteID,
 			}
 			if !reflect.DeepEqual(log.steps, want) {
 				t.Fatalf("steps %v, want %v", log.steps, want)
@@ -149,7 +149,7 @@ func TestActivityCorrectionsRefusals(t *testing.T) {
 			},
 			{
 				name: "write refused", actor: admin, reason: "Doublon", writeErr: apperr.New(apperr.CodeActivityOverlap, nil), wantCode: apperr.CodeActivityOverlap,
-				wantSteps: []string{"lock", ac.step, "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "write"},
+				wantSteps: []string{"lock", ac.step, "lock participants " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "write"},
 			},
 		}
 		for _, tt := range tests {
@@ -211,7 +211,7 @@ func TestAdminActivityRoutes(t *testing.T) {
 		if reason == "" {
 			return nil, apperr.InvalidFields(nil, "reason")
 		}
-		return []ChallengePreview{{ChallengeID: challengeID}}, nil
+		return []ChallengePreview{{ChallengeID: challengeID, Status: StatusOngoing}}, nil
 	})
 	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities, nil)
 	started := time.Date(2026, 6, 3, 11, 0, 0, 0, time.UTC)
