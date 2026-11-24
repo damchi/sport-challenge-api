@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -220,31 +221,78 @@ func TestEveryRouteIsProtectedByDefault(t *testing.T) {
 // TestEveryAdminRouteIsHiddenWithoutThePermission walks the registered
 // /admin routes: called with a valid access token without the admin
 // permission, each one must answer 404 not_found, as an unknown path does
-// (README §5.7), and never reach a handler that reads anything. The request
-// carries no body nor parameter: an admin route whose contract refused it
-// (400) before the policy ran would reveal that it exists.
+// (README §5.7), and never reach a handler that reads anything. Each route is
+// called without body nor parameter, with a body {"x": 1}, with a body over
+// the size limit, with a body that is not JSON, with a path id that is not a
+// UUID, and with a valid id and a query parameter out of its bounds (the id
+// is checked first: alone, it would hide the bound).
+// An admin route whose contract refused a request (400) before the policy ran
+// would reveal that it exists.
 func TestEveryAdminRouteIsHiddenWithoutThePermission(t *testing.T) {
 	r := newTestRouter(t, acceptingVerifier{}, func(context.Context, auth.Claims) (string, error) {
 		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
 	})
 
+	const id = "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f"
+	requests := []struct {
+		name, id, query, body, contentType string
+	}{
+		{name: "bare", id: id},
+		{name: "unknown field", id: id, body: `{"x": 1}`},
+		{name: "body too large", id: id, body: `{"x": "` + strings.Repeat("a", 65<<10) + `"}`},
+		{name: "not JSON", id: id, body: "x", contentType: "text/plain"},
+		{name: "id not a UUID", id: "not-a-uuid"},
+		{name: "query out of bounds", id: id, query: "?limit=0"},
+	}
 	var checked int
 	for _, route := range r.Routes() {
 		if !strings.HasPrefix(route.Path, "/api/v1/admin/") {
 			continue
 		}
 		checked++
-		t.Run(route.Method+" "+route.Path, func(t *testing.T) {
-			path := pathParam.ReplaceAllString(route.Path, "${1}0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f")
-			req := httptest.NewRequest(route.Method, path, nil)
-			req.Header.Set("Authorization", "Bearer some.access.token")
-			if status, code := serve(t, r, req); status != http.StatusNotFound || code != "not_found" {
-				t.Fatalf("got %d %q without the admin permission, want 404 not_found", status, code)
-			}
-		})
+		for _, rq := range requests {
+			t.Run(route.Method+" "+route.Path+" "+rq.name, func(t *testing.T) {
+				path := pathParam.ReplaceAllString(route.Path, "${1}"+rq.id) + rq.query
+				var body io.Reader
+				if rq.body != "" {
+					body = strings.NewReader(rq.body)
+				}
+				req := httptest.NewRequest(route.Method, path, body)
+				req.Header.Set("Authorization", "Bearer some.access.token")
+				if rq.body != "" {
+					req.Header.Set("Content-Type", cmp.Or(rq.contentType, "application/json"))
+				}
+				rec := httptest.NewRecorder()
+				r.ServeHTTP(rec, req)
+				var got struct {
+					Error struct {
+						Code   string            `json:"code"`
+						Params map[string]string `json:"params"`
+					} `json:"error"`
+				}
+				_ = json.Unmarshal(rec.Body.Bytes(), &got)
+				if rec.Code != http.StatusNotFound || got.Error.Code != "not_found" || got.Error.Params != nil {
+					t.Fatalf("got %d %s without the admin permission, want 404 not_found without params", rec.Code, rec.Body)
+				}
+			})
+		}
 	}
 	if checked == 0 {
 		t.Fatal("no admin route checked")
+	}
+}
+
+// TestInvalidRequestOutsideAdminRoutesStaysAValidationError: hiding the
+// /admin routes changes no other route, whose malformed request still
+// answers 400 validation_failed.
+func TestInvalidRequestOutsideAdminRoutesStaysAValidationError(t *testing.T) {
+	r := newTestRouter(t, acceptingVerifier{}, func(context.Context, auth.Claims) (string, error) {
+		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/challenges/not-a-uuid", nil)
+	req.Header.Set("Authorization", "Bearer some.access.token")
+	if status, code := serve(t, r, req); status != http.StatusBadRequest || code != "validation_failed" {
+		t.Fatalf("got %d %q, want 400 validation_failed", status, code)
 	}
 }
 

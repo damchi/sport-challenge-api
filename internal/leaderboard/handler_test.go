@@ -64,7 +64,7 @@ func getAs(t *testing.T, svc *Service, target, token string) (*httptest.Response
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate, err := httpx.RequestValidator(spec, logger)
+	validate, err := httpx.RequestValidator(spec, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,11 +74,11 @@ func getAs(t *testing.T, svc *Service, target, token string) (*httptest.Response
 		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return ann, nil }, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(leaderboardOnly{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, nil),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
 	}), api.GinServerOptions{
-		ErrorHandler: httpx.InvalidParamHandler(logger),
+		ErrorHandler: httpx.InvalidParamHandler(logger, nil),
 		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
 

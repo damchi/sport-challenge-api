@@ -1553,7 +1553,9 @@ paths:
         "404":
           description: |
             The account has no `admin` permission (`not_found`), or no such
-            challenge (`challenge_not_found`).
+            challenge (`challenge_not_found`). `not_found` also answers a malformed request (an id that is not a
+            UUID, a body or a parameter that does not match) without the
+            permission, without `params`.
           content:
             application/json:
               schema:
@@ -1584,9 +1586,8 @@ paths:
         corrected, all in one transaction. With `dry_run`, everything is
         rolled back and the answer tells what the change would do. An unknown
         or deleted challenge answers 404 `challenge_not_found`. The body is
-        optional in the contract only so that a non-admin always gets 404
-        first: without one, the missing `reason` answers 400
-        `validation_failed`.
+        optional in the contract: without one, the missing `reason` answers
+        400 `validation_failed` to an admin, 404 `not_found` to anyone else.
       tags: [admin]
       parameters:
         - name: challengeId
@@ -1615,7 +1616,9 @@ paths:
         "404":
           description: |
             The account has no `admin` permission (`not_found`), or no such
-            challenge, or a deleted one (`challenge_not_found`).
+            challenge, or a deleted one (`challenge_not_found`). `not_found` also answers a malformed request (an id that is not a
+            UUID, a body or a parameter that does not match) without the
+            permission, without `params`.
           content:
             application/json:
               schema:
@@ -1934,10 +1937,11 @@ components:
     AdminNotFound:
       description: |
         The account has no `admin` permission in its access token
-        (`not_found`): an `/admin` route answers as if it did not exist. The
-        contract validates the request first, so a malformed one (a
-        parameter out of its bounds, a path id that is not a UUID) answers
-        400 `validation_failed` whatever the permission.
+        (`not_found`): an `/admin` route answers as if it did not exist,
+        whatever the request, malformed included (a body that does not match,
+        a parameter out of its bounds, a path id that is not a UUID), and
+        without `params`. Only an admin gets the 400 `validation_failed` of a
+        malformed request, with its fields.
       content:
         application/json:
           schema:
@@ -1945,7 +1949,9 @@ components:
     AdminUserNotFound:
       description: |
         The account has no `admin` permission (`not_found`), or no such
-        account (`user_not_found`).
+        account (`user_not_found`). `not_found` also answers a malformed
+        request (an id that is not a UUID, a parameter that does not match)
+        without the permission, without `params`.
       content:
         application/json:
           schema:

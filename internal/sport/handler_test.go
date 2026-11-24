@@ -50,7 +50,7 @@ func getSports(t *testing.T, repo repository) *httptest.ResponseRecorder {
 		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil }, logger),
 	))
 	api.RegisterHandlers(r, api.NewStrictHandlerWithOptions(sportsOnly{Handler: NewHandler(NewService(repo))}, nil, api.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, nil),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
 	}))

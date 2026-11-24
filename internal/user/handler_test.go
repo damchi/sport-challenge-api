@@ -53,7 +53,7 @@ func newMeRouterWith(t *testing.T, svc *Service, verifier auth.TokenVerifier) *g
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate, err := httpx.RequestValidator(spec, logger)
+	validate, err := httpx.RequestValidator(spec, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,12 +63,12 @@ func newMeRouterWith(t *testing.T, svc *Service, verifier auth.TokenVerifier) *g
 		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return meID, nil }, logger),
 	))
 	strict := api.NewStrictHandlerWithOptions(meHandlers{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger),
+		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, nil),
 		HandlerErrorFunc:         httpx.ErrorHandler(logger),
 		ResponseErrorHandlerFunc: httpx.ErrorHandler(logger),
 	})
 	api.RegisterHandlersWithOptions(r, strict, api.GinServerOptions{
-		ErrorHandler: httpx.InvalidParamHandler(logger),
+		ErrorHandler: httpx.InvalidParamHandler(logger, nil),
 		Middlewares:  []api.MiddlewareFunc{api.MiddlewareFunc(validate)},
 	})
 	return r

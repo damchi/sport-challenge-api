@@ -1,13 +1,84 @@
 package httpx
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/gin-gonic/gin"
+
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 )
+
+// itemsContract has one operation, GET /items?limit= (1 to 10).
+const itemsContract = `
+openapi: 3.0.3
+info: {title: test, version: "1"}
+paths:
+  /items:
+    get:
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10}}
+      responses:
+        "204": {description: ok}
+`
+
+// TestRequestValidatorGate: an invalid request answers its validation error,
+// with its fields, unless the gate refuses it first; then nothing about what
+// was invalid is sent back. A valid request is never stopped by the gate.
+func TestRequestValidatorGate(t *testing.T) {
+	doc, err := openapi3.NewLoader().LoadFromData([]byte(itemsContract))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.Validate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		gate       Gate
+		target     string
+		wantStatus int
+		wantCode   apperr.Code
+		wantFields string
+	}{
+		{name: "invalid, no gate", target: "/items?limit=0", wantStatus: http.StatusBadRequest, wantCode: apperr.CodeValidationFailed, wantFields: "limit"},
+		{name: "invalid, gate lets through", gate: passingGate, target: "/items?limit=0", wantStatus: http.StatusBadRequest, wantCode: apperr.CodeValidationFailed, wantFields: "limit"},
+		{name: "invalid, gate refuses", gate: hidingGate, target: "/items?limit=0", wantStatus: http.StatusNotFound, wantCode: apperr.CodeNotFound},
+		{name: "valid, gate refuses", gate: hidingGate, target: "/items?limit=5", wantStatus: http.StatusNoContent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			validate, err := RequestValidator(doc, discard(), tt.gate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := gin.New()
+			r.GET("/items", validate, func(c *gin.Context) { c.Status(http.StatusNoContent) })
+			rec := serve(r, httptest.NewRequest(http.MethodGet, tt.target, nil))
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("got %d %s, want %d", rec.Code, rec.Body, tt.wantStatus)
+			}
+			if tt.wantCode == "" {
+				return
+			}
+			got := decodeError(t, rec)
+			if got.Code != tt.wantCode || got.Params["fields"] != tt.wantFields {
+				t.Fatalf("got %s fields %q, want %s fields %q", got.Code, got.Params["fields"], tt.wantCode, tt.wantFields)
+			}
+			if tt.wantFields == "" && strings.Contains(rec.Body.String(), "limit") {
+				t.Fatalf("response names the invalid field: %s", rec.Body)
+			}
+		})
+	}
+}
 
 // schemaError returns the schema of the value at path and the error
 // kin-openapi gives for it. A "*" segment is a free-form key of a map

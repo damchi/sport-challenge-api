@@ -28,9 +28,10 @@ const maxRequestBody = 64 << 10
 // comma-separated, in params.fields. An unknown field, a body that is not
 // JSON or one over maxRequestBody answers without params: only the client's
 // text names the problem, and the validation messages, which echo the
-// client's values, are never sent back. Authentication is not checked here:
-// Protect has already run.
-func RequestValidator(doc *openapi3.T, logger *slog.Logger) (gin.HandlerFunc, error) {
+// client's values, are never sent back. A request that gate refuses answers
+// the gate's error instead, whatever was invalid. Authentication is not
+// checked here: Protect has already run.
+func RequestValidator(doc *openapi3.T, logger *slog.Logger, gate Gate) (gin.HandlerFunc, error) {
 	router, err := legacy.NewRouter(doc)
 	if err != nil {
 		return nil, fmt.Errorf("build contract router: %w", err)
@@ -44,7 +45,9 @@ func RequestValidator(doc *openapi3.T, logger *slog.Logger) (gin.HandlerFunc, er
 		route, pathParams, err := router.FindRoute(c.Request)
 		if err != nil {
 			// Gin matched the route, so it is in the contract: a miss is ours.
-			RespondError(c, logger, apperr.New(apperr.CodeInternal, fmt.Errorf("find contract route: %w", err)))
+			// The gate still comes first: a route hidden from the actor must
+			// not answer otherwise than an unknown path.
+			respondInvalid(c, logger, gate, apperr.New(apperr.CodeInternal, fmt.Errorf("find contract route: %w", err)))
 			return
 		}
 		if c.Request.Body != nil {
@@ -57,7 +60,7 @@ func RequestValidator(doc *openapi3.T, logger *slog.Logger) (gin.HandlerFunc, er
 			Options:    opts,
 		})
 		if err != nil {
-			RespondError(c, logger, apperr.InvalidFields(err, fieldsOf(err, bodySchema(route))...))
+			respondInvalid(c, logger, gate, apperr.InvalidFields(err, fieldsOf(err, bodySchema(route))...))
 		}
 	}, nil
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"github.com/damchi/sport-challenge-api/internal/api"
@@ -15,6 +17,26 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
 )
+
+// routePrefix starts the path of every /admin route of the contract.
+// TestEveryAdminRouteIsHiddenWithoutThePermission (cmd/api) walks the routes
+// under it with malformed requests.
+const routePrefix = "/api/v1/admin/"
+
+// HideInvalidRequest is the httpx.Gate of the API: an invalid request to an
+// /admin route answers as RequireAdmin refuses its actor, 404 not_found
+// without the admin permission, before its validation error could reveal
+// that the route exists (README §5.7). An admin, and any other route, keep
+// the validation error. The decision is RequireAdmin's: only the shape of
+// the refusal of an invalid request changes.
+func HideInvalidRequest(c *gin.Context) error {
+	if !strings.HasPrefix(c.FullPath(), routePrefix) {
+		return nil
+	}
+	// No local user (never behind Protect): the zero actor, not an admin.
+	actor, _ := auth.ActorFrom(c.Request.Context())
+	return RequireAdmin(actor)
+}
 
 // Handler implements the /admin operations of the API contract.
 type Handler struct {
