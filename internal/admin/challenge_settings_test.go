@@ -73,7 +73,7 @@ func TestChallengeCorrectionsUpdateSettings(t *testing.T) {
 			name:   "week 1 kept: the links are left as they are",
 			change: challenge.SettingsChange{Old: map[string]any{"weeks": 4}, New: map[string]any{"weeks": 6}},
 			wantSteps: []string{
-				"lock", "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID, "journal",
+				"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID, "journal",
 				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
 			},
 		},
@@ -81,7 +81,7 @@ func TestChallengeCorrectionsUpdateSettings(t *testing.T) {
 			name:   "week 1 moved: the links follow, in the transaction",
 			change: challenge.SettingsChange{Old: map[string]any{"start_date": "2026-02-02"}, New: map[string]any{"start_date": "2026-01-26"}, Deadline: &deadline},
 			wantSteps: []string{
-				"lock", "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID, "reschedule " + challengeID, "journal",
+				"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID, "reschedule " + challengeID, "journal",
 				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
 			},
 		},
@@ -136,7 +136,7 @@ func TestChallengeCorrectionsUpdateSettingsRefusals(t *testing.T) {
 		{name: "no reason", actor: admin, reason: "  ", wantCode: apperr.CodeValidationFailed},
 		{
 			name: "settings refused", actor: admin, reason: "Durée mal saisie", updateErr: apperr.InvalidFields(nil, "weeks"), wantCode: apperr.CodeValidationFailed,
-			wantSteps: []string{"lock", "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID},
+			wantSteps: []string{"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID},
 		},
 	}
 	for _, tt := range tests {

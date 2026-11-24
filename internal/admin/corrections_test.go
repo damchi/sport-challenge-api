@@ -33,6 +33,11 @@ func (l *correctionLog) InLockedTx(ctx context.Context, fn func(ctx context.Cont
 	return err
 }
 
+func (l *correctionLog) LockParticipants(_ context.Context, ids []string) error {
+	l.add("lock participants " + strings.Join(ids, ","))
+	return nil
+}
+
 func (l *correctionLog) Eliminations(_ context.Context, id string) ([]EliminationRow, error) {
 	l.add("eliminations " + id)
 	reads := l.eliminations[id]
@@ -112,7 +117,7 @@ func TestCorrectionsRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := []string{
-				"lock", "touched",
+				"lock", "touched", "lock participants " + challengeID + "," + inviteID,
 				"rank " + challengeID, "eliminations " + challengeID, "rank " + inviteID, "eliminations " + inviteID,
 				"apply", "journal",
 				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,

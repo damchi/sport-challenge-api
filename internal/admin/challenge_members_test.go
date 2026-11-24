@@ -84,7 +84,7 @@ func TestMemberCorrections(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := []string{
-				"lock", "rank " + challengeID, "eliminations " + challengeID, mc.step + " " + challengeID + " " + bobID, "journal",
+				"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, mc.step + " " + challengeID + " " + bobID, "journal",
 				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
 			}
 			if !reflect.DeepEqual(log.steps, want) {
@@ -119,7 +119,7 @@ func TestMemberCorrectionsRefusals(t *testing.T) {
 			{name: "no reason", actor: admin, reason: "  ", wantCode: apperr.CodeValidationFailed},
 			{
 				name: "change refused", actor: admin, reason: "Oubli d'inscription", err: apperr.New(apperr.CodeLastCreator, nil), wantCode: apperr.CodeLastCreator,
-				wantSteps: []string{"lock", "rank " + challengeID, "eliminations " + challengeID, mc.step + " " + challengeID + " " + bobID},
+				wantSteps: []string{"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, mc.step + " " + challengeID + " " + bobID},
 			},
 		}
 		for _, tt := range tests {
