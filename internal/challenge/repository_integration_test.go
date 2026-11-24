@@ -168,7 +168,10 @@ func TestCreateStoresTheReferenceSport(t *testing.T) {
 	}{
 		{reference: "", want: "run", wantFactors: map[string]float64{"run": 1, "walk": 1, "ride": 0.3, "rowing": 0.5}},
 		{reference: "ride", want: "ride", wantFactors: map[string]float64{"run": 1, "walk": 1, "ride": 1, "rowing": 1}},
-		{reference: "rowing", want: "rowing", wantFactors: map[string]float64{"run": 1, "ride": 0.6, "rowing": 1, "xc_ski": 1}},
+		{reference: "rowing", want: "rowing", wantFactors: map[string]float64{"run": 1, "ride": 0.6, "rowing": 1, "xc_ski": 1, "hyrox": 1, "paragliding": 0.6}},
+		// SC-API-174: hyrox (×1) and paragliding (×0.3) may be the reference.
+		{reference: "hyrox", want: "hyrox", wantFactors: map[string]float64{"run": 1, "ride": 0.3, "rowing": 0.5, "hyrox": 1, "paragliding": 0.3}},
+		{reference: "paragliding", want: "paragliding", wantFactors: map[string]float64{"run": 1, "ride": 1, "rowing": 1, "hyrox": 1, "paragliding": 1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
@@ -210,11 +213,12 @@ func TestCreateStoresTheReferenceSport(t *testing.T) {
 }
 
 // TestCreateRefusesAReferenceWithoutRequiredDistance: with the catalogue of
-// the migrations, yoga (no distance), other (optional) and an unknown code.
+// the migrations, yoga and crossfit (no distance), other (optional) and an
+// unknown code.
 func TestCreateRefusesAReferenceWithoutRequiredDistance(t *testing.T) {
 	pseudo := "marie_92"
 	svc, pool, userID := setup(t, &pseudo)
-	for _, reference := range []string{"yoga", "other", "quidditch"} {
+	for _, reference := range []string{"yoga", "crossfit", "other", "quidditch"} {
 		t.Run(reference, func(t *testing.T) {
 			_, err := svc.Create(t.Context(), userID, with(func(d *Draft) { d.ReferenceSport = sportCode(reference) }))
 			var appErr *apperr.Error
