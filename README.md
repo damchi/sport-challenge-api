@@ -280,6 +280,7 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
 - 🟡 Le blocage ne touche pas aux défis : le compte reste classé et ses activités comptent. Pour le sortir d'un défi, l'admin l'exclut.
 - ✅ Débloquer rend l'accès ; rien d'autre ne change.
 - ✅ **Routes** (SC-API-165) : `PATCH /admin/users/{id}` (pseudo, prénom, nom, avec les règles de `PATCH /me` ; la langue et l'e-mail restent ceux de l'utilisateur), `POST /admin/users/{id}/block` et `/unblock`, `DELETE /admin/users/{id}` (même parcours que `DELETE /me`). Chacune avec motif et journal (cible : le compte) ; aucune ne recalcule de défi, donc aucune n'a d'aperçu (`dry_run`), et aucune ne marque un défi corrigé. Une modification de profil qui ne change rien, bloquer un compte déjà bloqué ou débloquer un compte qui ne l'est pas répond quand même et écrit sa ligne de journal (valeurs vides), comme les autres actions admin sans effet ; un compte inconnu ou supprimé répond 404 `user_not_found`.
+- ✅ Ces routes valent aussi pour le compte de l'admin : il peut modifier son profil ou supprimer son compte par elles (seul le blocage de soi est refusé). Un compte bloqué ne met plus son e-mail à jour depuis le jeton tant qu'il l'est (ses requêtes sont refusées avant). La date de blocage reste sur la ligne d'un compte supprimé ; elle n'est pas une donnée de profil et ne compte nulle part (décisions du 2026-11-24, SC-API-165).
 
 **Défis supprimés**
 
