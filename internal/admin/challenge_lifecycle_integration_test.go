@@ -52,6 +52,8 @@ func TestChallengeCorrectionsDeleteAndRestoreFromTheDatabase(t *testing.T) {
 	// Dan, under the minimum of week 2 too, deletes their account while the
 	// challenge is deleted.
 	dan := insertUser(t, pool, "email|dan", start.AddDate(0, -1, 0), false)
+	// Eve, the admin, has no role in the challenge.
+	eve := insertUser(t, pool, "email|eve", start.AddDate(0, -1, 0), false)
 	id := insertChallengeRow(t, pool, ann, challengeRow{title: "Spring", visibility: "private", startsAt: start.UTC(), weeks: 4, createdAt: start.AddDate(0, 0, -7).UTC()})
 	// Four weeks in local days: the time changes on 2026-03-08.
 	exec(t, pool, `UPDATE challenges SET ends_at = $2 WHERE id = $1`, id, start.AddDate(0, 0, 28).UTC())
@@ -114,7 +116,7 @@ func TestChallengeCorrectionsDeleteAndRestoreFromTheDatabase(t *testing.T) {
 		}
 		return s
 	}
-	actor := auth.Actor{ID: ann, Admin: true}
+	actor := auth.Actor{ID: eve, Admin: true}
 	isNotFound := func(err error) bool {
 		var appErr *apperr.Error
 		return errors.As(err, &appErr) && appErr.Code == apperr.CodeChallengeNotFound
