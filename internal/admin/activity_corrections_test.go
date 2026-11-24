@@ -252,9 +252,9 @@ func TestAdminActivityRoutes(t *testing.T) {
 				t.Fatalf("refused: got %d %v, want 404 activity_not_found", rec.Code, body)
 			}
 
-			rec, body = serveWith(t, h, adminToken, r.method, r.target, r.body+`"dry_run": false}`, io.Discard)
+			rec, body = serveWith(t, h, adminToken, r.method, r.target, r.body+`"reason": "", "dry_run": true}`, io.Discard)
 			if e, _ := body["error"].(map[string]any); rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" {
-				t.Fatalf("no reason: got %d %v, want 400 validation_failed", rec.Code, body)
+				t.Fatalf("empty reason: got %d %v, want 400 validation_failed", rec.Code, body)
 			}
 		})
 	}

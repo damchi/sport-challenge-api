@@ -61,7 +61,9 @@ type Correction struct {
 	// Apply makes the change in the transaction and returns its journal
 	// entry; its admin, challenges and reason are set by Run.
 	Apply func(ctx context.Context) (Entry, error)
-	// Reason is the reason of the change, that of its journal entry.
+	// Reason is the reason of the change, that of its journal entry. A
+	// preview may go without one (empty): it writes nothing, its journal
+	// line neither.
 	Reason string
 	// DryRun previews the change: everything is done, then rolled back.
 	DryRun bool
@@ -117,7 +119,11 @@ var errDryRun = errors.New("dry run")
 // with effects outside the database (Auth0, e-mail) leaves them out when
 // c.DryRun. Admin only (RequireAdmin), checked before anything is read; a
 // reason out of its bounds is then refused (400 validation_failed on
-// reason) before the transaction opens.
+// reason) before the transaction opens, an empty one too unless c.DryRun
+// (README §2.12: a preview goes without a reason, and writes no journal
+// line). An empty reason thus stands for none: over HTTP, one the client
+// sent is refused by the contract (AdminReason, minLength), so a caller of
+// Run is to tell the two apart itself.
 //
 // The locks are taken in this order, so that nothing waits for the change
 // in a cycle:
@@ -150,9 +156,13 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 		return nil, errors.New("correction without its challenges or its change")
 	}
 	// The reason is checked again by the journal, which the entry reaches
-	// only after the change: refused here, nothing is locked for nothing.
-	if _, err := validReason(c.Reason); err != nil {
-		return nil, err
+	// only after the change: refused here, nothing is locked for nothing. A
+	// preview without one writes no journal line: there is none to check.
+	withoutReason := c.DryRun && c.Reason == ""
+	if !withoutReason {
+		if _, err := validReason(c.Reason); err != nil {
+			return nil, err
+		}
 	}
 	var previews []ChallengePreview
 	err := s.store.InLockedTx(ctx, func(ctx context.Context) error {
@@ -185,8 +195,10 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 			return err
 		}
 		entry.AdminID, entry.ChallengeIDs, entry.Reason = actor.ID, ids, c.Reason
-		if err := s.journal.Record(ctx, entry); err != nil {
-			return err
+		if !withoutReason {
+			if err := s.journal.Record(ctx, entry); err != nil {
+				return err
+			}
 		}
 		for i, id := range ids {
 			if c.lifecycle == deletes {
