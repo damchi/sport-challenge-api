@@ -191,7 +191,7 @@ func TestChallengeCorrectionsUpdateSettingsFromTheDatabase(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// challenge_ids is what marks the challenge as corrected.
+		// challenge_ids names the challenge (journal filter, admin detail).
 		if a := actions[0]; a.Action != ActionChallengeUpdate || a.TargetID != id || !reflect.DeepEqual(a.ChallengeIDs, []string{id}) || string(a.OldValue) != `{"weeks": 2}` || string(a.NewValue) != `{"weeks": 4}` {
 			t.Fatalf("journal line %+v %s %s, want the weeks", a, a.OldValue, a.NewValue)
 		}
