@@ -20,6 +20,7 @@ type correctionLog struct {
 	// eliminations are those read by challenge, before then after.
 	eliminations map[string][][]EliminationRow
 	recomputeErr error
+	lockErr      error
 }
 
 func (l *correctionLog) add(step string) { l.steps = append(l.steps, step) }
@@ -31,6 +32,11 @@ func (l *correctionLog) InLockedTx(ctx context.Context, fn func(ctx context.Cont
 		l.rolledBack = true
 	}
 	return err
+}
+
+func (l *correctionLog) LockParticipants(_ context.Context, ids []string) error {
+	l.add("lock participants " + strings.Join(ids, ","))
+	return l.lockErr
 }
 
 func (l *correctionLog) Eliminations(_ context.Context, id string) ([]EliminationRow, error) {
@@ -112,7 +118,7 @@ func TestCorrectionsRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := []string{
-				"lock", "touched",
+				"lock", "touched", "lock participants " + challengeID + "," + inviteID,
 				"rank " + challengeID, "eliminations " + challengeID, "rank " + inviteID, "eliminations " + inviteID,
 				"apply", "journal",
 				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
@@ -196,6 +202,10 @@ func TestCorrectionsRunRollsBack(t *testing.T) {
 				c.Touched = func(context.Context) ([]string, error) { log.add("touched"); return nil, boom }
 			},
 			wantErr: func(err error) bool { return errors.Is(err, boom) }, lastStep: "touched",
+		},
+		{
+			name: "participants not locked", prepare: func(log *correctionLog, _ *Correction) { log.lockErr = boom },
+			wantErr: func(err error) bool { return errors.Is(err, boom) }, lastStep: "lock participants " + challengeID + "," + inviteID,
 		},
 		{
 			name: "a recompute that fails", prepare: func(log *correctionLog, _ *Correction) { log.recomputeErr = boom },

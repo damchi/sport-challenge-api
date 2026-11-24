@@ -27,6 +27,10 @@ type correctionStore interface {
 	// InLockedTx runs fn in a transaction, carried by the ctx it gets, that
 	// takes the week lock alone first; rolled back when fn fails.
 	InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error
+	// LockParticipants takes FOR SHARE, in the order of their ids, the
+	// accounts not deleted of the participants of the challenges ids, in
+	// the transaction ctx carries.
+	LockParticipants(ctx context.Context, ids []string) error
 	// Eliminations reads the eliminations of a challenge, earliest week
 	// first, in the transaction ctx carries.
 	Eliminations(ctx context.Context, challengeID string) ([]EliminationRow, error)
@@ -104,18 +108,40 @@ type EliminationChange struct {
 // errDryRun rolls back the transaction of a preview.
 var errDryRun = errors.New("dry run")
 
-// Run makes change c as actor, in one transaction that takes the week lock
-// alone first (so that no activity write and no run of the worker is in
-// progress, and in the order of the activity writes: the lock, then the
-// rows): it reads the rankings and eliminations of each challenge touched,
-// applies the change, writes its journal line, recomputes each challenge
-// touched, then reads them again (a deleted challenge is neither ranked
-// nor recomputed: lifecycle). With c.DryRun, the transaction is rolled
-// back: nothing is written, the journal line included, and the previews
-// tell what the change would do; a change with effects outside the
-// database (Auth0, e-mail) leaves them out when c.DryRun. Admin only (RequireAdmin), checked before
-// anything is read; a reason out of its bounds is then refused (400
-// validation_failed on reason) before the transaction opens.
+// Run makes change c as actor, in one transaction: it reads the rankings
+// and eliminations of each challenge touched, applies the change, writes its
+// journal line, recomputes each challenge touched, then reads them again (a
+// deleted challenge is neither ranked nor recomputed: lifecycle). With
+// c.DryRun, the transaction is rolled back: nothing is written, the journal
+// line included, and the previews tell what the change would do; a change
+// with effects outside the database (Auth0, e-mail) leaves them out when
+// c.DryRun. Admin only (RequireAdmin), checked before anything is read; a
+// reason out of its bounds is then refused (400 validation_failed on
+// reason) before the transaction opens.
+//
+// The locks are taken in this order, so that nothing waits for the change
+// in a cycle:
+//  1. the week lock alone (InLockedTx), so that no activity write and no
+//     run of the worker is in progress, in the order of the activity writes
+//     (the lock, then the rows);
+//  2. what c.Touched locks to read the challenges (the row of the author of
+//     an activity, FOR UPDATE);
+//  3. the accounts of the participants of the challenges touched, FOR SHARE
+//     in the order of their ids (LockParticipants): the deletion of one of
+//     them locks its row first, then erases its entries from the frozen
+//     results, which the recompute deletes and writes again; the deletion
+//     either commits before, and the account is in no ranking, or waits for
+//     the change, then erases its entries itself;
+//  4. what c.Apply locks: the row of the account it targets, FOR UPDATE
+//     (stronger than the lock of step 3, which it does not wait for), then
+//     those of the challenge;
+//  5. the recompute, which takes again the week lock and the accounts of
+//     the participants (held already), then deletes and writes the results
+//     of each challenge.
+//
+// The author of step 2 comes before the others, out of the order of the ids:
+// no cycle follows, as only one admin change runs at a time (the week lock)
+// and an account deletion holds no row of users but its own.
 func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) ([]ChallengePreview, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return nil, err
@@ -133,6 +159,11 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 		ids, err := c.Touched(ctx)
 		if err != nil {
 			return err
+		}
+		if len(ids) > 0 {
+			if err := s.store.LockParticipants(ctx, ids); err != nil {
+				return err
+			}
 		}
 		previews = make([]ChallengePreview, len(ids))
 		before := make([][]EliminationRow, len(ids))

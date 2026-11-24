@@ -88,7 +88,7 @@ func TestActivityCorrections(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := []string{
-				"lock", ac.step,
+				"lock", ac.step, "lock participants " + challengeID + "," + inviteID,
 				"rank " + challengeID, "eliminations " + challengeID, "rank " + inviteID, "eliminations " + inviteID,
 				"write", "journal",
 				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
@@ -149,7 +149,7 @@ func TestActivityCorrectionsRefusals(t *testing.T) {
 			},
 			{
 				name: "write refused", actor: admin, reason: "Doublon", writeErr: apperr.New(apperr.CodeActivityOverlap, nil), wantCode: apperr.CodeActivityOverlap,
-				wantSteps: []string{"lock", ac.step, "rank " + challengeID, "eliminations " + challengeID, "write"},
+				wantSteps: []string{"lock", ac.step, "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "write"},
 			},
 		}
 		for _, tt := range tests {

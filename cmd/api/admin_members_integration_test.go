@@ -65,13 +65,21 @@ func awaitLockWaiter(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+// updateTitle renames challenge id as actor, an admin change.
+func updateTitle(settings *admin.ChallengeCorrections, actor auth.Actor, id, title string) error {
+	_, err := settings.UpdateSettings(context.Background(), actor, id, challenge.SettingsChanges{Title: &title}, "Titre mal saisi", false)
+	return err
+}
+
 // TestAdminMemberChangeAndAccountDeletionInParallel: an admin change of a
-// member and the deletion of the same account at the same moment never
-// wait for each other in a cycle (PostgreSQL would abort one, 40P01), in
-// a finished challenge whose recompute locks the users of its
-// participants: the change locks the account first, as the deletion does.
-// Whoever locks it first goes first; the other waits, then runs or finds
-// the account deleted.
+// finished challenge (its members or its settings) and the deletion of an
+// account of the challenge at the same moment never wait for each other in
+// a cycle (PostgreSQL would abort one, 40P01), the recompute deleting the
+// frozen results the deletion erases its entries from, then locking the
+// users of the participants. The change locks the accounts of the
+// participants first, then the one it targets, before the challenge; the
+// deletion locks its account first. Whoever locks it first goes first; the
+// other waits, then runs or finds the account deleted.
 func TestAdminMemberChangeAndAccountDeletionInParallel(t *testing.T) {
 	pool := testdb.New(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -111,7 +119,9 @@ func TestAdminMemberChangeAndAccountDeletionInParallel(t *testing.T) {
 	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
 	adminRepo := admin.NewRepository(gdb)
 	recompute := &pausedRecompute{inner: closure.NewService(closure.NewRepository(gdb), leaderboard.NewRepository(gdb), clk, logger)}
-	members := admin.NewMemberCorrections(admin.NewCorrections(adminRepo, admin.NewJournal(adminRepo, clk), recompute, leaderboards), challenges)
+	corrections := admin.NewCorrections(adminRepo, admin.NewJournal(adminRepo, clk), recompute, leaderboards)
+	members := admin.NewMemberCorrections(corrections, challenges)
+	settings := admin.NewChallengeCorrections(corrections, challenges, invitations)
 
 	insertUser := func(subject string) string {
 		var id string
@@ -127,6 +137,8 @@ func TestAdminMemberChangeAndAccountDeletionInParallel(t *testing.T) {
 		}
 	}
 	alice, first, second := insertUser("alice"), insertUser("first"), insertUser("second")
+	// target is changed by the member changes below, the others deleted.
+	target, third, fourth, fifth, sixth := insertUser("target"), insertUser("third"), insertUser("fourth"), insertUser("fifth"), insertUser("sixth")
 	var id string
 	if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
 		VALUES ('Spring', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, start.AddDate(0, 0, 14), alice).Scan(&id); err != nil {
@@ -135,7 +147,7 @@ func TestAdminMemberChangeAndAccountDeletionInParallel(t *testing.T) {
 	exec(`INSERT INTO categories (challenge_id, type, position, params) VALUES ($1, 'cumulative_time', 1, '{}'),
 		($1, 'cumulative_distance', 2, '{"factors": {"run": 1}}'), ($1, 'elimination', 3, '{"sport": "run", "step_meters": 2000}')`, id)
 	exec(`INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)`, id, alice)
-	for _, u := range []string{alice, first, second} {
+	for _, u := range []string{alice, first, second, target, third, fourth, fifth, sixth} {
 		exec(`INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, id, u, start)
 		exec(`INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters) VALUES ($1, 'run', $2, 1800, 5000)`,
 			u, start.Add(30*time.Hour))
@@ -223,4 +235,85 @@ func TestAdminMemberChangeAndAccountDeletionInParallel(t *testing.T) {
 			t.Fatalf("%d participations of the deleted account left, want none", rows)
 		}
 	})
+
+	// ranked tells whether userID has entries in the frozen results.
+	ranked := func(t *testing.T, userID string) bool {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM result_snapshot WHERE challenge_id = $1
+			AND payload->'entries' @> jsonb_build_array(jsonb_build_object('user_id', $2::text))`, id, userID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n > 0
+	}
+
+	// Each kind of change runs twice, once in each order.
+	changes := []struct {
+		name string
+		run  [2]func() error
+	}{
+		{"settings", [2]func() error{
+			func() error { return updateTitle(settings, adminActor, id, "Printemps") },
+			func() error { return updateTitle(settings, adminActor, id, "Spring") },
+		}},
+		{"member", [2]func() error{
+			func() error {
+				_, err := members.ExcludeParticipant(context.Background(), adminActor, id, target, "Tricherie", false)
+				return err
+			},
+			func() error {
+				_, err := members.ReinstateParticipant(context.Background(), adminActor, id, target, "Erreur", false)
+				return err
+			},
+		}},
+	}
+	for i, change := range changes {
+		t.Run("the deletion of another participant locks first: the "+change.name+" change waits for it", func(t *testing.T) {
+			other := []string{third, fifth}[i]
+			// The results were frozen by the change of the second account.
+			if !ranked(t, other) {
+				t.Fatal("the account is not in the frozen results")
+			}
+			locked := make(chan struct{})
+			beforeErasure = func() {
+				close(locked)
+				awaitLockWaiter(t, pool)
+			}
+			t.Cleanup(func() { beforeErasure = nil })
+			out := run(t, func() error {
+				<-locked
+				return change.run[0]()
+			}, func() error {
+				return users.Delete(context.Background(), other)
+			})
+			if out.change != nil || out.deletion != nil || !deleted(t, other) {
+				t.Fatalf("change %v, deletion %v: want both done", out.change, out.deletion)
+			}
+			// Deleted before the recompute: not frozen again.
+			if ranked(t, other) || !ranked(t, alice) {
+				t.Fatal("want the deleted account out of the frozen results, the others in")
+			}
+		})
+
+		t.Run("the "+change.name+" change locks first: the deletion of another participant waits for it", func(t *testing.T) {
+			other := []string{fourth, sixth}[i]
+			locked := make(chan struct{})
+			recompute.before = func() {
+				close(locked)
+				awaitLockWaiter(t, pool)
+			}
+			t.Cleanup(func() { recompute.before = nil })
+			out := run(t, change.run[1], func() error {
+				<-locked
+				return users.Delete(context.Background(), other)
+			})
+			if out.change != nil || out.deletion != nil || !deleted(t, other) {
+				t.Fatalf("change %v, deletion %v: want both done", out.change, out.deletion)
+			}
+			// Deleted after the recompute: its entries erased by the deletion.
+			if ranked(t, other) || !ranked(t, alice) {
+				t.Fatal("want the deleted account out of the frozen results, the others in")
+			}
+		})
+	}
 }

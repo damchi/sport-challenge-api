@@ -32,11 +32,12 @@ func noChange() MemberChange {
 // The admin use cases below change the members of a challenge as actor, an
 // admin (AdminRefusal, 404 not_found otherwise), at any time (README
 // §2.12). Each one runs in the transaction ctx carries (admin.Corrections,
-// which took the week lock first) and judges nothing: the caller records
-// the change and recomputes the challenge in the same transaction. Each
-// one first locks the row of the account it touches (LockAccount), before
-// the challenge, in the order of an account deletion. A missing or deleted
-// challenge answers 404 challenge_not_found.
+// which took the week lock, then the accounts of the participants, first)
+// and judges nothing: the caller records the change and recomputes the
+// challenge in the same transaction. Each one first locks the row of the
+// account it touches (LockAccount), before the challenge, in the order of
+// an account deletion. A missing or deleted challenge answers 404
+// challenge_not_found.
 
 // AdminAddParticipant makes userID an active participant of challenge id,
 // registration closed or challenge finished (AdminAddParticipantRefusal):

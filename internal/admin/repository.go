@@ -551,6 +551,31 @@ func (r *Repository) Eliminations(ctx context.Context, id string) ([]Elimination
 	return readEliminations(db.Conn(ctx, r.db), id)
 }
 
+// lockParticipantsQuery takes FOR SHARE, in the order of their ids, the
+// accounts not deleted of the participants of the challenges @ids, those
+// who left included (they are ranked too). The recompute locks them in
+// the same order (closure).
+const lockParticipantsQuery = `SELECT id FROM users
+WHERE anonymized_at IS NULL AND id IN (SELECT user_id FROM participants WHERE challenge_id IN @ids)
+ORDER BY id FOR SHARE`
+
+// LockParticipants takes FOR SHARE the accounts of the participants of the
+// challenges ids (lockParticipantsQuery), in the transaction ctx carries
+// (db.InTx), until it ends: none of them can be deleted meanwhile. An
+// account deleted before is not among them: its participations are erased.
+func (r *Repository) LockParticipants(ctx context.Context, ids []string) error {
+	tx, ok := db.Tx(ctx)
+	if !ok {
+		return errors.New("lock participants: no transaction")
+	}
+	// The rows are read only for their locks, taken as they are fetched.
+	var locked []string
+	if err := tx.Raw(lockParticipantsQuery, map[string]any{"ids": ids}).Scan(&locked).Error; err != nil {
+		return fmt.Errorf("lock participants: %w", err)
+	}
+	return nil
+}
+
 // lockTimeout bounds the wait of an admin change for each lock, in the
 // syntax of lock_timeout.
 const lockTimeout = "30s"

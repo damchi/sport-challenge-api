@@ -539,14 +539,18 @@ func (r *Repository) addCreatorLocked(ctx context.Context, id, actorID, targetID
 }
 
 // LockAccount takes the row of user id FOR UPDATE, in the transaction of
-// ctx (an admin change), until it ends; outside of one it is refused. An
-// admin change of the members of a challenge takes it right after the week
-// lock, before any challenge: in the order of an account deletion (the user
-// row, then its challenges and participations), so that the change and the
-// deletion of the same account never wait for each other in a cycle, and
-// the recompute that follows (FOR SHARE on the users of the participants)
-// finds it held already. An anonymized or unknown user gives
-// errAccountDeleted.
+// ctx (an admin change), until it ends; outside of one it is refused. The
+// locks of an admin change of the members of a challenge come in this order
+// (admin.Corrections.Run): the week lock alone, the accounts of the
+// participants FOR SHARE in the order of their ids (so that the deletion of
+// another participant, which locks its account first, then erases its
+// entries from the frozen results, never waits for the change in a cycle),
+// then this one, stronger, before any challenge, in the order of an account
+// deletion (the user row, then its challenges and participations), so that
+// the change and the deletion of the same account never wait for each other
+// in a cycle either; the recompute that follows (FOR SHARE on the users of
+// the participants) finds them held already. An anonymized or unknown user
+// gives errAccountDeleted.
 func (r *Repository) LockAccount(ctx context.Context, id string) error {
 	tx, ok := db.Tx(ctx)
 	if !ok {
