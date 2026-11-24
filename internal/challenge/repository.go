@@ -538,6 +538,92 @@ func (r *Repository) addCreatorLocked(ctx context.Context, id, actorID, targetID
 	})
 }
 
+// LockAccount takes the row of user id FOR UPDATE, in the transaction of
+// ctx (an admin change), until it ends; outside of one it is refused. An
+// admin change of the members of a challenge takes it right after the week
+// lock, before any challenge: in the order of an account deletion (the user
+// row, then its challenges and participations), so that the change and the
+// deletion of the same account never wait for each other in a cycle, and
+// the recompute that follows (FOR SHARE on the users of the participants)
+// finds it held already. An anonymized or unknown user gives
+// errAccountDeleted.
+func (r *Repository) LockAccount(ctx context.Context, id string) error {
+	tx, ok := db.Tx(ctx)
+	if !ok {
+		return errors.New("lock account: no transaction")
+	}
+	var anonymized []bool
+	if err := tx.Raw("SELECT anonymized_at IS NOT NULL FROM users WHERE id = ? FOR UPDATE", id).Scan(&anonymized).Error; err != nil {
+		return fmt.Errorf("lock account: %w", err)
+	}
+	if len(anonymized) == 0 || anonymized[0] {
+		return errAccountDeleted
+	}
+	return nil
+}
+
+// Reinstate makes the participation of userID in challenge id active again
+// (an admin change), under the lock of withLockedMembership, in the
+// transaction of ctx. decide gets the challenge and the membership of
+// userID, read after the lock, and refuses with an error, or answers that
+// nothing is to write.
+func (r *Repository) Reinstate(ctx context.Context, id, userID string, now time.Time, decide func(Challenge, Membership) (noop bool, err error)) error {
+	err := r.withLockedMembership(ctx, id, userID, now, func(tx *gorm.DB, c Challenge, m Membership) error {
+		noop, err := decide(c, m)
+		if err != nil || noop {
+			return err
+		}
+		res := tx.Model(&participant{}).
+			Where("challenge_id = ? AND user_id = ? AND status = ?", id, userID, ParticipantAbandoned).
+			Updates(map[string]any{"status": ParticipantActive, "abandoned_at": nil})
+		if res.Error != nil {
+			return fmt.Errorf("update participant: %w", res.Error)
+		}
+		// The lock makes it impossible: a silent success would hide a bug.
+		if res.RowsAffected == 0 {
+			return errors.New("update participant: no abandoned participation")
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("reinstate participant: %w", err)
+	}
+	return nil
+}
+
+// RemoveCreator removes the creator role of userID in challenge id (an
+// admin change), under the lock of withLockedMembership, in the transaction
+// of ctx: an addition or a removal of another creator waits for it, then
+// counts again. decide gets the challenge, the membership of userID and
+// the number of the other creators with an account, read after the lock,
+// and refuses with an error, or answers that nothing is to write.
+func (r *Repository) RemoveCreator(ctx context.Context, id, userID string, now time.Time, decide func(c Challenge, m Membership, otherCreators int) (noop bool, err error)) error {
+	err := r.withLockedMembership(ctx, id, userID, now, func(tx *gorm.DB, c Challenge, m Membership) error {
+		var others int
+		if err := tx.Raw(`SELECT count(*) FROM challenge_creators o JOIN users u ON u.id = o.user_id
+			WHERE o.challenge_id = ? AND o.user_id <> ? AND u.anonymized_at IS NULL`, id, userID).Scan(&others).Error; err != nil {
+			return fmt.Errorf("count creators: %w", err)
+		}
+		noop, err := decide(c, m, others)
+		if err != nil || noop {
+			return err
+		}
+		res := tx.Exec("DELETE FROM challenge_creators WHERE challenge_id = ? AND user_id = ?", id, userID)
+		if res.Error != nil {
+			return fmt.Errorf("delete creator: %w", res.Error)
+		}
+		// The lock makes it impossible: a silent success would hide a bug.
+		if res.RowsAffected == 0 {
+			return errors.New("delete creator: not a creator under the lock")
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("remove creator: %w", err)
+	}
+	return nil
+}
+
 // Delete soft-deletes challenge id on behalf of actorID: deleted_at is set on
 // the challenge row itself, under the lock of withLockedMembership, so a
 // join, an abandon or any other write on the challenge either happens before

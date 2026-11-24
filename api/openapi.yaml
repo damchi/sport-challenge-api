@@ -1629,6 +1629,299 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/Busy"
+  /api/v1/admin/challenges/{challengeId}/participants:
+    post:
+      operationId: addAdminParticipant
+      summary: Add any account to a challenge, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Makes an account an active
+        participant of a challenge at any time, registration closed or
+        challenge finished (README §2.12): the account needs a complete
+        profile (422 `profile_incomplete`), as to join. An active participant,
+        a creator included, answers 409 `already_participant`; one who
+        abandoned or was excluded, a creator included, answers 422
+        `participation_abandoned` (reinstate them instead). An unknown or deleted account answers 404 `user_not_found`.
+        The challenge is then judged again as the worker would, the change
+        recorded in the journal with its `reason` and the challenge marked as
+        corrected, all in one transaction; with `dry_run`, everything is
+        rolled back and the answer tells what the change would do. An unknown
+        or deleted challenge answers 404 `challenge_not_found`.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminParticipantAdd"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            The account has no `admin` permission (`not_found`), no such
+            challenge, or a deleted one (`challenge_not_found`), or no such
+            account, or a deleted one (`user_not_found`). `not_found` also
+            answers a malformed request (an id that is not a UUID, a body or
+            a parameter that does not match) without the permission, without
+            `params`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: The account already takes part (`already_participant`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            The account abandoned or was excluded (`participation_abandoned`),
+            or its profile is incomplete (`profile_incomplete`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+  /api/v1/admin/challenges/{challengeId}/participants/{userId}:
+    delete:
+      operationId: excludeAdminParticipant
+      summary: Exclude any participant, a creator included, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Excludes a participant at any
+        time, a creator included (README §2.12): eliminated from every
+        category, shown as abandoned. A creator keeps the creator role, as
+        one who abandons does; the admin removes it apart
+        (`DELETE …/creators/{userId}`). A participant already out answers 200
+        and changes nothing but the journal and the judgement. Someone who
+        never joined, or a deleted account, answers 404 `not_found`. Judged
+        again, journal, mark and `dry_run` as for `POST …/participants`. The
+        body carries the reason: a client that cannot send one with
+        `DELETE` cannot call this route.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCorrectionReason"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminParticipantNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+  /api/v1/admin/challenges/{challengeId}/participants/{userId}/reinstate:
+    post:
+      operationId: reinstateAdminParticipant
+      summary: Reinstate a participant who abandoned or was excluded, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Cancels an abandon or an
+        exclusion, at any time (README §2.12): the participant is active
+        again, ranked in every category, the weeks locked meanwhile judged
+        again. An active participant answers 200 and changes nothing but the
+        journal and the judgement. Someone who never joined, or a deleted
+        account, answers 404 `not_found`. Judged again, journal, mark and
+        `dry_run` as for `POST …/participants`.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCorrectionReason"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminParticipantNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+  /api/v1/admin/challenges/{challengeId}/creators/{userId}:
+    put:
+      operationId: addAdminCreator
+      summary: Make a participant a creator, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Makes a participant, active
+        or not, a creator at any time, the challenge finished included
+        (README §2.12). Someone who never joined, or a deleted account,
+        answers 422 `not_active_participant`: every creator is a participant,
+        the admin adds them first. A creator already answers 200 and changes
+        nothing but the journal and the judgement. Judged again, journal,
+        mark and `dry_run` as for `POST …/participants`.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCorrectionReason"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminChallengeNotFound"
+        "422":
+          description: The account is not a participant (`not_active_participant`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+    delete:
+      operationId: removeAdminCreator
+      summary: Remove the creator role of an account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Removes the creator role, at
+        any time (README §2.12); the participation stays as it is. A challenge
+        always keeps a creator: removing the last one answers 422
+        `last_creator` (`params.challenges`: the challenge). A participant who
+        is not a creator answers 200 and changes nothing but the journal and
+        the judgement. Someone who never joined, or a deleted account,
+        answers 404 `not_found`. Judged again, journal, mark and `dry_run` as
+        for `POST …/participants`.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCorrectionReason"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminParticipantNotFound"
+        "422":
+          description: The account is the last creator of the challenge (`last_creator`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
   /api/v1/admin/users:
     get:
       operationId: listAdminUsers
@@ -1952,6 +2245,28 @@ components:
         account (`user_not_found`). `not_found` also answers a malformed
         request (an id that is not a UUID, a parameter that does not match)
         without the permission, without `params`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    AdminChallengeNotFound:
+      description: |
+        The account has no `admin` permission (`not_found`), or no such
+        challenge, or a deleted one (`challenge_not_found`). `not_found` also
+        answers a malformed request (an id that is not a UUID, a body or a
+        parameter that does not match) without the permission, without
+        `params`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    AdminParticipantNotFound:
+      description: |
+        The account has no `admin` permission, or the account never joined
+        the challenge, or was deleted (`not_found`), or no such challenge, or
+        a deleted one (`challenge_not_found`). `not_found` also answers a
+        malformed request (an id that is not a UUID, a body or a parameter
+        that does not match) without the permission, without `params`.
       content:
         application/json:
           schema:
@@ -2451,6 +2766,37 @@ components:
             maximum: 2
           example:
             ride: 0.25
+    AdminCorrectionReason:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      description: An admin change that carries nothing but its reason.
+      properties:
+        reason:
+          $ref: "#/components/schemas/AdminReason"
+        dry_run:
+          type: boolean
+          description: Preview the change, writing nothing. `false` when absent.
+    AdminParticipantAdd:
+      type: object
+      required: [reason, user_id]
+      additionalProperties: false
+      properties:
+        reason:
+          $ref: "#/components/schemas/AdminReason"
+        dry_run:
+          type: boolean
+          description: Preview the change, writing nothing. `false` when absent.
+        user_id:
+          type: string
+          format: uuid
+          description: The account to add.
+    AdminReason:
+      type: string
+      description: |
+        Why the admin makes the change, kept in the journal: 3 to 500
+        characters once surrounding spaces are removed, 3 of them visible; no
+        control character but line breaks and tabs.
     AdminCorrection:
       type: object
       required: [dry_run, challenges]
@@ -2783,7 +3129,7 @@ components:
           format: date-time
         action:
           type: string
-          description: Stable code of the change (`challenge.update`...), translated by the client.
+          description: Stable code of the change (`challenge.update`, `participant.add`...), translated by the client.
         target_type:
           $ref: "#/components/schemas/AdminActionTargetType"
         target_id:

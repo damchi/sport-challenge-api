@@ -160,6 +160,26 @@ func (unimplemented) UpdateAdminChallenge(context.Context, api.UpdateAdminChalle
 	return nil, errNotImplemented
 }
 
+func (unimplemented) AddAdminParticipant(context.Context, api.AddAdminParticipantRequestObject) (api.AddAdminParticipantResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) ExcludeAdminParticipant(context.Context, api.ExcludeAdminParticipantRequestObject) (api.ExcludeAdminParticipantResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) ReinstateAdminParticipant(context.Context, api.ReinstateAdminParticipantRequestObject) (api.ReinstateAdminParticipantResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) AddAdminCreator(context.Context, api.AddAdminCreatorRequestObject) (api.AddAdminCreatorResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) RemoveAdminCreator(context.Context, api.RemoveAdminCreatorRequestObject) (api.RemoveAdminCreatorResponseObject, error) {
+	return nil, errNotImplemented
+}
+
 func (unimplemented) ListAdminUsers(context.Context, api.ListAdminUsersRequestObject) (api.ListAdminUsersResponseObject, error) {
 	return nil, errNotImplemented
 }

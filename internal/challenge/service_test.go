@@ -70,6 +70,52 @@ type fakeRepository struct {
 	// settings is what UpdateSettings wrote, from f.challenge and its
 	// categories.
 	settings *Challenge
+	// lockErr fails LockAccount, locked records the account it locked.
+	lockErr error
+	locked  string
+	// otherCreators serves RemoveCreator; reinstated and creatorRemoved
+	// record what Reinstate and RemoveCreator wrote.
+	otherCreators  int
+	reinstated     bool
+	creatorRemoved bool
+}
+
+func (f *fakeRepository) LockAccount(_ context.Context, id string) error {
+	if f.lockErr != nil {
+		return fmt.Errorf("lock account: %w", f.lockErr)
+	}
+	f.locked = id
+	return nil
+}
+
+func (f *fakeRepository) Reinstate(_ context.Context, _, _ string, _ time.Time, decide func(Challenge, Membership) (bool, error)) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.challenge == nil {
+		return fmt.Errorf("reinstate participant: %w", errChallengeNotFound)
+	}
+	noop, err := decide(*f.challenge, f.membership)
+	if err != nil {
+		return fmt.Errorf("reinstate participant: %w", err)
+	}
+	f.reinstated = !noop
+	return nil
+}
+
+func (f *fakeRepository) RemoveCreator(_ context.Context, _, _ string, _ time.Time, decide func(Challenge, Membership, int) (bool, error)) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.challenge == nil {
+		return fmt.Errorf("remove creator: %w", errChallengeNotFound)
+	}
+	noop, err := decide(*f.challenge, f.membership, f.otherCreators)
+	if err != nil {
+		return fmt.Errorf("remove creator: %w", err)
+	}
+	f.creatorRemoved = !noop
+	return nil
 }
 
 func (f *fakeRepository) Counts(_ context.Context, q ListQuery) (Counts, error) {

@@ -405,6 +405,112 @@ func AddCreatorRefusal(actor, target Membership, visibility string, now, endsAt 
 	}
 }
 
+// The admin rules below judge the target of an admin change of the members
+// of a challenge (README §2.12), once AdminRefusal let the actor in: they
+// leave aside every time lock (registration closed, challenge finished) and
+// every role lock (a creator excluded), never the data (a profile
+// complete, a challenge with a creator). A deleted account is none, as on
+// the routes of the creators.
+
+// AdminAddParticipantRefusal is the rule for an admin to make target an
+// active participant: an unknown or deleted account answers 404
+// user_not_found; someone already in, 409 already_participant (a creator
+// is a participant); someone who abandoned or was excluded, 422
+// participation_abandoned (the admin reinstates them instead); an
+// incomplete profile, 422 profile_incomplete, as to join.
+func AdminAddParticipantRefusal(target Membership, profileComplete bool) error {
+	switch {
+	case target.AccountDeleted:
+		return apperr.New(apperr.CodeUserNotFound, nil)
+	case target.Participant == ParticipantActive:
+		return apperr.New(apperr.CodeAlreadyParticipant, nil)
+	case target.Participant == ParticipantAbandoned:
+		return apperr.New(apperr.CodeParticipationAbandoned, nil)
+	case target.Creator:
+		return apperr.New(apperr.CodeAlreadyParticipant, nil)
+	case !profileComplete:
+		return apperr.New(apperr.CodeProfileIncomplete, nil)
+	default:
+		return nil
+	}
+}
+
+// AdminReinstateRefusal is the rule for an admin to cancel the abandon or
+// the exclusion of target: someone who never joined, or a deleted
+// account, has nothing to cancel (404 not_found); an active participant
+// changes nothing (noop).
+func AdminReinstateRefusal(target Membership) (noop bool, err error) {
+	if target.AccountDeleted {
+		return false, apperr.New(apperr.CodeNotFound, nil)
+	}
+	switch target.Participant {
+	case ParticipantAbandoned:
+		return false, nil
+	case ParticipantActive:
+		return true, nil
+	default:
+		return false, apperr.New(apperr.CodeNotFound, nil)
+	}
+}
+
+// AdminExcludeRefusal is the rule for an admin to exclude target, a
+// creator included (who keeps the creator role, as one who abandons):
+// someone who never joined, or a deleted account, has nothing to lose (404
+// not_found); someone already out changes nothing (noop).
+func AdminExcludeRefusal(target Membership) (noop bool, err error) {
+	if target.AccountDeleted {
+		return false, apperr.New(apperr.CodeNotFound, nil)
+	}
+	switch target.Participant {
+	case ParticipantActive:
+		return false, nil
+	case ParticipantAbandoned:
+		return true, nil
+	default:
+		return false, apperr.New(apperr.CodeNotFound, nil)
+	}
+}
+
+// AdminAddCreatorRefusal is the rule for an admin to make target a
+// creator: any participant, active or not (a creator who abandoned keeps
+// the role); someone who never joined, or a deleted account, is none (422
+// not_active_participant: every creator is a participant, the admin adds
+// them first); a creator already changes nothing (noop).
+func AdminAddCreatorRefusal(target Membership) (noop bool, err error) {
+	switch {
+	case target.AccountDeleted:
+		return false, apperr.New(apperr.CodeNotActiveParticipant, nil)
+	case target.Creator:
+		return true, nil
+	case target.Participant == ParticipantActive, target.Participant == ParticipantAbandoned:
+		return false, nil
+	default:
+		return false, apperr.New(apperr.CodeNotActiveParticipant, nil)
+	}
+}
+
+// AdminRemoveCreatorRefusal is the rule for an admin to remove the creator
+// role of target in challenge challengeID, otherCreators being the number
+// of its other creators with an account: someone who never joined, or a
+// deleted account, answers 404 not_found; a participant who is no creator
+// changes nothing (noop); a challenge always keeps a creator (422
+// last_creator, the challenge in params, as for an account deletion).
+func AdminRemoveCreatorRefusal(target Membership, otherCreators int, challengeID string) (noop bool, err error) {
+	switch {
+	case target.AccountDeleted:
+		return false, apperr.New(apperr.CodeNotFound, nil)
+	case target.Creator:
+		if otherCreators == 0 {
+			return false, DeletionRefusal([]string{challengeID})
+		}
+		return false, nil
+	case target.Participant == ParticipantActive, target.Participant == ParticipantAbandoned:
+		return true, nil
+	default:
+		return false, apperr.New(apperr.CodeNotFound, nil)
+	}
+}
+
 // CanDelete reports whether role may delete a challenge (README §5.7): any
 // creator, at any time, even after abandoning.
 func CanDelete(role Role) bool {

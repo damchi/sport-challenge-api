@@ -164,7 +164,7 @@ func TestUpdateAdminChallenge(t *testing.T) {
 			Eliminations: []EliminationChange{{User: bob, Before: &EliminationRow{User: bob, WeekNumber: 2, DistanceMeters: 6999, RequiredMeters: 7000}}},
 		}}, nil
 	})
-	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), settings)
+	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), settings, nil)
 	body := `{"reason": "Durée mal saisie", "dry_run": true, "weeks": 6, "start_date": "2026-01-26", "visibility": "public",
 		"categories": {"elimination": {"step_meters": 1500}, "points": {"criteria": ["session_count"], "podium": 10}},
 		"distance_factors": {"ride": 0.5}}`
@@ -203,7 +203,7 @@ func TestUpdateAdminChallenge(t *testing.T) {
 		busy := settingsUpdaterFunc(func(context.Context, auth.Actor, string, challenge.SettingsChanges, string, bool) ([]ChallengePreview, error) {
 			return nil, apperr.New(apperr.CodeBusy, errors.New("lock timeout"))
 		})
-		h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), busy)
+		h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), busy, nil)
 		rec, got := serveWith(t, h, adminToken, http.MethodPatch, "/api/v1/admin/challenges/"+challengeID, `{"reason": "Durée mal saisie"}`, io.Discard)
 		if e, _ := got["error"].(map[string]any); rec.Code != http.StatusServiceUnavailable || e["code"] != "busy" {
 			t.Fatalf("got %d %v, want 503 busy", rec.Code, got)
