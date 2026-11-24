@@ -61,14 +61,35 @@ type Correction struct {
 	Reason string
 	// DryRun previews the change: everything is done, then rolled back.
 	DryRun bool
+	// lifecycle tells whether the change deletes or restores the challenges
+	// it touches, a deleted challenge having no rankings.
+	lifecycle lifecycle
 }
 
+// lifecycle is what a correction does to the deletion of the challenges it
+// touches. Its zero value leaves them as they are: each one is ranked
+// before and after the change, and recomputed.
+type lifecycle int
+
+const (
+	// deletes deletes them: each one is ranked before the change only, and
+	// not recomputed (the worker judges no deleted challenge), its
+	// eliminations and frozen results kept for a restore.
+	deletes lifecycle = iota + 1
+	// restores restores them: each one is ranked after the change only,
+	// once recomputed, its eliminations compared with those kept at the
+	// deletion.
+	restores
+)
+
 // ChallengePreview is what a change does to a challenge: its rankings
-// before and after, and the eliminations that change.
+// before and after, and the eliminations that change. Before is nil when the
+// change restores the challenge, After when it deletes it: a deleted
+// challenge has no rankings.
 type ChallengePreview struct {
 	ChallengeID  string
-	Before       leaderboard.Leaderboard
-	After        leaderboard.Leaderboard
+	Before       *leaderboard.Leaderboard
+	After        *leaderboard.Leaderboard
 	Eliminations []EliminationChange
 }
 
@@ -88,7 +109,8 @@ var errDryRun = errors.New("dry run")
 // progress, and in the order of the activity writes: the lock, then the
 // rows): it reads the rankings and eliminations of each challenge touched,
 // applies the change, writes its journal line, recomputes each challenge
-// touched, then reads them again. With c.DryRun, the transaction is rolled
+// touched, then reads them again (a deleted challenge is neither ranked
+// nor recomputed: lifecycle). With c.DryRun, the transaction is rolled
 // back: nothing is written, the journal line included, and the previews
 // tell what the change would do; a change with effects outside the
 // database (Auth0, e-mail) leaves them out when c.DryRun. Admin only (RequireAdmin), checked before
@@ -116,8 +138,12 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 		before := make([][]EliminationRow, len(ids))
 		for i, id := range ids {
 			previews[i].ChallengeID = id
-			if previews[i].Before, err = s.boards.Get(ctx, actor, id); err != nil {
-				return fmt.Errorf("rank challenge %s before the change: %w", id, err)
+			if c.lifecycle != restores {
+				board, err := s.boards.Get(ctx, actor, id)
+				if err != nil {
+					return fmt.Errorf("rank challenge %s before the change: %w", id, err)
+				}
+				previews[i].Before = &board
 			}
 			if before[i], err = s.store.Eliminations(ctx, id); err != nil {
 				return err
@@ -132,12 +158,17 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 			return err
 		}
 		for i, id := range ids {
+			if c.lifecycle == deletes {
+				continue
+			}
 			if err := s.recompute.Recompute(ctx, id); err != nil {
 				return fmt.Errorf("recompute challenge %s: %w", id, err)
 			}
-			if previews[i].After, err = s.boards.Get(ctx, actor, id); err != nil {
+			board, err := s.boards.Get(ctx, actor, id)
+			if err != nil {
 				return fmt.Errorf("rank challenge %s after the change: %w", id, err)
 			}
+			previews[i].After = &board
 			after, err := s.store.Eliminations(ctx, id)
 			if err != nil {
 				return err

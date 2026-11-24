@@ -1629,6 +1629,113 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/Busy"
+    delete:
+      operationId: deleteAdminChallenge
+      summary: Delete any challenge, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Deletes the challenge as one
+        of its creators would, at any time (README §2.1, §2.12): from then on
+        it is not found for everyone but the admins, its invitation links
+        answer `invitation_invalid`, and the worker judges none of its weeks. It
+        is not judged again: its eliminations and frozen results stay as they
+        are, for a restore. The change is recorded in the journal with its
+        `reason` and the challenge marked as corrected, in one transaction; with `dry_run`, it is rolled back. The
+        answer gives the rankings `before` the deletion, `after` being null.
+        An unknown or deleted challenge answers 404 `challenge_not_found`.
+        The body carries the reason: a client that cannot send one with
+        `DELETE` cannot call this route.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCorrectionReason"
+      responses:
+        "200":
+          description: What the deletion did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminChallengeNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+  /api/v1/admin/challenges/{challengeId}/restore:
+    post:
+      operationId: restoreAdminChallenge
+      summary: Restore a deleted challenge, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Restores a deleted challenge,
+        at any time (README §2.12): it is found again as before its deletion,
+        and its invitation links neither revoked nor expired are valid again.
+        The accounts deleted meanwhile do not come back. The challenge is
+        then judged again as the worker would (the weeks locked while it was
+        deleted included), the change recorded in the journal with its
+        `reason` and the challenge marked as corrected, all in one
+        transaction; with `dry_run`, everything is rolled back. The answer
+        gives the rankings `after` the restore, `before` being null, and the
+        eliminations that change against those kept at the deletion. An
+        unknown challenge, or one that is not deleted, answers 404
+        `challenge_not_found`.
+      tags: [admin]
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCorrectionReason"
+      responses:
+        "200":
+          description: What the restore did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            The account has no `admin` permission (`not_found`), or no such
+            challenge, or one that is not deleted (`challenge_not_found`).
+            `not_found` also answers a malformed request (an id that is not a
+            UUID, a body or a parameter that does not match) without the
+            permission, without `params`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
   /api/v1/admin/challenges/{challengeId}/participants:
     post:
       operationId: addAdminParticipant
@@ -3026,11 +3133,19 @@ components:
           type: string
           format: uuid
         before:
-          description: The rankings before the change, whole (no `limit`).
+          description: |
+            The rankings before the change, whole (no `limit`); null for the
+            restore of a deleted challenge, which has none.
+          type: object
+          nullable: true
           allOf:
             - $ref: "#/components/schemas/Leaderboard"
         after:
-          description: The rankings after the change and the new judgement, whole.
+          description: |
+            The rankings after the change and the new judgement, whole; null
+            for the deletion of a challenge.
+          type: object
+          nullable: true
           allOf:
             - $ref: "#/components/schemas/Leaderboard"
         eliminations:

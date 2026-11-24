@@ -34,6 +34,9 @@ type repository interface {
 	Exclude(ctx context.Context, id, actorID, targetID string, now time.Time, decide func(c Challenge, actor, target Membership) (bool, time.Time, error)) error
 	AddCreator(ctx context.Context, id, actorID, targetID string, now time.Time, decide func(c Challenge, actor, target Membership) (bool, error)) error
 	Delete(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error
+	// Restore serves the admin restore of a deleted challenge, in the
+	// transaction ctx carries.
+	Restore(ctx context.Context, id string) (time.Time, error)
 	// LockAccount, Reinstate and RemoveCreator serve the admin changes of
 	// the members, in the transaction ctx carries.
 	LockAccount(ctx context.Context, id string) error

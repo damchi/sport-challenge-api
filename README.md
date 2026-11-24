@@ -284,6 +284,9 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
 
 - ✅ La suppression reste logique (`deleted_at`) et **aucune purge** n'est faite : un défi supprimé reste en base, et l'admin peut le restaurer à tout moment.
 - ✅ Restaurer recalcule le défi : le worker ignore les défis supprimés, donc les semaines verrouillées pendant la suppression n'ont pas été jugées. Les liens d'invitation non expirés redeviennent valides. Les comptes supprimés entre-temps ne reviennent pas.
+- ✅ **Supprimer et restaurer** (`DELETE /admin/challenges/{id}` et `POST /admin/challenges/{id}/restore`, décisions du 2026-11-24, SC-API-164), chacun avec motif, aperçu et journal (cible : le défi, l'instant de la suppression en ancienne ou nouvelle valeur) :
+  - la suppression a le même effet que celle d'un créateur, quel que soit le rôle de l'admin ; elle ne recalcule rien (éliminations et résultats figés restent tels quels jusqu'à une restauration), et sa ligne de journal marque le défi corrigé comme toute action qui le touche (sans effet visible tant qu'il reste supprimé) ; l'aperçu donne le classement avant, sans classement après ; un défi déjà supprimé répond 404 `challenge_not_found` ;
+  - la restauration recalcule le défi et le marque corrigé ; l'aperçu donne le classement après, sans classement avant (un défi supprimé n'en a pas), et les éliminations qui changent par rapport à celles gardées à la suppression ; un défi qui n'est pas supprimé répond 404 `challenge_not_found`.
 - ✅ Conséquence assumée : la durée de conservation des défis supprimés est illimitée (§6).
 
 **Hors périmètre pour l'instant** : liste des activités suspectes et seuils de vitesse, journal des consultations des fiches utilisateur, notifications aux participants d'un défi corrigé.

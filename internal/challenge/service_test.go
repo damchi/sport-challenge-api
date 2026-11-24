@@ -42,6 +42,8 @@ type fakeRepository struct {
 	target       Membership
 	creatorAdded bool
 	deletedAt    time.Time
+	// restored tells whether Restore cleared the deletion of challenge.
+	restored bool
 	// participants serve Participants; participantsAsked records the call.
 	participants      []Participant
 	participantsAsked *participantsCall
@@ -316,6 +318,18 @@ func (f *fakeRepository) Delete(_ context.Context, _, _ string, _ time.Time, dec
 	}
 	f.deletedAt = at
 	return nil
+}
+
+// Restore restores challenge when deleted (its DeletedAt set).
+func (f *fakeRepository) Restore(context.Context, string) (time.Time, error) {
+	if f.err != nil {
+		return time.Time{}, f.err
+	}
+	if f.challenge == nil || f.challenge.DeletedAt == nil {
+		return time.Time{}, fmt.Errorf("restore challenge: %w", errChallengeNotFound)
+	}
+	f.restored = true
+	return *f.challenge.DeletedAt, nil
 }
 
 func (f *fakeRepository) Categories(context.Context, string) ([]Category, error) {

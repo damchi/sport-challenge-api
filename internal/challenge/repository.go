@@ -653,6 +653,30 @@ func (r *Repository) Delete(ctx context.Context, id, actorID string, now time.Ti
 	return nil
 }
 
+// Restore clears the deletion of challenge id (an admin change), under the
+// lock of its row, in the transaction of ctx, and returns the instant it
+// was deleted at, in UTC; a missing challenge, or one that is not deleted, gives
+// errChallengeNotFound.
+func (r *Repository) Restore(ctx context.Context, id string) (time.Time, error) {
+	var deletedAt []time.Time
+	err := db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+		if err := tx.Raw("SELECT deleted_at FROM challenges WHERE id = ? AND deleted_at IS NOT NULL FOR UPDATE", id).Scan(&deletedAt).Error; err != nil {
+			return fmt.Errorf("lock challenge: %w", err)
+		}
+		if len(deletedAt) == 0 {
+			return errChallengeNotFound
+		}
+		if err := tx.Exec("UPDATE challenges SET deleted_at = NULL WHERE id = ?", id).Error; err != nil {
+			return fmt.Errorf("update challenge: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("restore challenge: %w", err)
+	}
+	return deletedAt[0].UTC(), nil
+}
+
 // abandonParticipation turns the active participation of userID in
 // challenge id into an abandon at the given instant: by the user's choice,
 // or by an exclusion, both shown alike.
