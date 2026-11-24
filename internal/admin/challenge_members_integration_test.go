@@ -197,7 +197,10 @@ func TestMemberCorrectionsFromTheDatabase(t *testing.T) {
 		if !errors.Is(err, apperr.New(apperr.CodeLastCreator, nil)) || !read(ann).Creator || actions() != n {
 			t.Fatalf("last creator removed: %v, want last_creator, nothing written", err)
 		}
-		if _, err := corrections.AddCreator(t.Context(), admin, id, bob, "Nouveau créateur", false); err != nil {
+		// An admin who is no member of the challenge, whose membership is
+		// read and left aside.
+		outsider := auth.Actor{ID: insertUser(t, pool, "email|eve", created, false), Admin: true}
+		if _, err := corrections.AddCreator(t.Context(), outsider, id, bob, "Nouveau créateur", false); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := corrections.RemoveCreator(t.Context(), admin, id, ann, "Tricherie", false); err != nil {
