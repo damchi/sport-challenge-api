@@ -3169,18 +3169,16 @@ components:
           description: The minimum they had to reach.
     AdminChallengeUpdate:
       type: object
-      required: [reason]
       additionalProperties: false
       description: |
         The fields to change, as at creation (`ChallengeCreate`); a field
         left out keeps its value, `null` is refused.
       properties:
         reason:
-          type: string
-          description: |
-            Why the admin makes the change, kept in the journal: 3 to 500
-            characters once surrounding spaces are removed, 3 of them
-            visible; no control character but line breaks and tabs.
+          allOf:
+            - $ref: "#/components/schemas/AdminReason"
+          description: Required, except with `dry_run` (a preview writes nothing); checked whenever present.
+          x-go-type-skip-optional-pointer: true
         dry_run:
           type: boolean
           description: Preview the change, writing nothing. `false` when absent.
@@ -3240,12 +3238,14 @@ components:
             ride: 0.25
     AdminCorrectionReason:
       type: object
-      required: [reason]
       additionalProperties: false
       description: An admin change that carries nothing but its reason.
       properties:
         reason:
-          $ref: "#/components/schemas/AdminReason"
+          allOf:
+            - $ref: "#/components/schemas/AdminReason"
+          description: Required, except with `dry_run` (a preview writes nothing); checked whenever present.
+          x-go-type-skip-optional-pointer: true
         dry_run:
           type: boolean
           description: Preview the change, writing nothing. `false` when absent.
@@ -3287,11 +3287,14 @@ components:
           $ref: "#/components/schemas/PersonName"
     AdminParticipantAdd:
       type: object
-      required: [reason, user_id]
+      required: [user_id]
       additionalProperties: false
       properties:
         reason:
-          $ref: "#/components/schemas/AdminReason"
+          allOf:
+            - $ref: "#/components/schemas/AdminReason"
+          description: Required, except with `dry_run` (a preview writes nothing); checked whenever present.
+          x-go-type-skip-optional-pointer: true
         dry_run:
           type: boolean
           description: Preview the change, writing nothing. `false` when absent.
@@ -3301,14 +3304,17 @@ components:
           description: The account to add.
     AdminActivityWrite:
       type: object
-      required: [reason, sport_code, started_at, duration_seconds]
+      required: [sport_code, started_at, duration_seconds]
       additionalProperties: false
       description: |
         An activity written by an admin: the fields of `ActivityCreate`, with
         their bounds and rules, and the reason of the change.
       properties:
         reason:
-          $ref: "#/components/schemas/AdminReason"
+          allOf:
+            - $ref: "#/components/schemas/AdminReason"
+          description: Required, except with `dry_run` (a preview writes nothing); checked whenever present.
+          x-go-type-skip-optional-pointer: true
         dry_run:
           type: boolean
           description: Preview the change, writing nothing. `false` when absent.
@@ -3340,6 +3346,7 @@ components:
           description: As in `ActivityCreate`.
     AdminReason:
       type: string
+      minLength: 1
       description: |
         Why the admin makes the change, kept in the journal: 3 to 500
         characters once surrounding spaces are removed, 3 of them visible; no

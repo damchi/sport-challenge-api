@@ -149,15 +149,49 @@ func TestCorrectionsRun(t *testing.T) {
 }
 
 func TestCorrectionsRunRefusesABadReasonBeforeTheTransaction(t *testing.T) {
-	for _, reason := range []string{"ab", strings.Repeat("a", 501)} {
+	tests := []struct {
+		reason string
+		dryRun bool
+	}{
+		{"ab", false},
+		{"ab", true},
+		{strings.Repeat("a", 501), false},
+		{strings.Repeat("a", 501), true},
+		// Only a preview goes without a reason; blanks are one, too short.
+		{"", false},
+		{"   ", true},
+	}
+	for _, tt := range tests {
 		log := &correctionLog{}
 		s, _ := newCorrections(log)
-		if _, err := s.Run(t.Context(), admin, correction(log, reason, false)); fieldsOf(err) != "reason" {
-			t.Fatalf("got %v, want validation_failed on reason", err)
+		if _, err := s.Run(t.Context(), admin, correction(log, tt.reason, tt.dryRun)); fieldsOf(err) != "reason" {
+			t.Fatalf("reason %q, dry run %v: got %v, want validation_failed on reason", tt.reason, tt.dryRun, err)
 		}
 		if len(log.steps) != 0 {
 			t.Fatalf("steps %v, want nothing locked nor applied", log.steps)
 		}
+	}
+}
+
+func TestCorrectionsRunPreviewsWithoutAReason(t *testing.T) {
+	log := &correctionLog{}
+	s, journal := newCorrections(log)
+	previews, err := s.Run(t.Context(), admin, correction(log, "", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"lock", "touched", "lock participants " + challengeID + "," + inviteID,
+		"rank " + challengeID, "eliminations " + challengeID, "rank " + inviteID, "eliminations " + inviteID,
+		"apply",
+		"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
+		"recompute " + inviteID, "rank " + inviteID, "eliminations " + inviteID,
+	}
+	if !reflect.DeepEqual(log.steps, want) {
+		t.Fatalf("steps =\n%v\nwant\n%v", log.steps, want)
+	}
+	if !log.rolledBack || len(journal.records) != 0 || len(previews) != 2 || previews[0].After == nil {
+		t.Fatalf("rolled back %v, journal %v, previews %+v: want a preview, rolled back, no journal line", log.rolledBack, journal.records, previews)
 	}
 }
 

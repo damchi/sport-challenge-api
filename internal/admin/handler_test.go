@@ -13,8 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/api/apitest"
+	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
@@ -186,7 +188,8 @@ func TestInvalidAdminRequestIsHiddenWithoutThePermission(t *testing.T) {
 	requests := []struct {
 		name, method, target, body, fields string
 	}{
-		{name: "empty body", method: http.MethodPatch, target: "/api/v1/admin/challenges/" + challengeID, body: `{}`, fields: "reason"},
+		{name: "empty reason", method: http.MethodPatch, target: "/api/v1/admin/challenges/" + challengeID, body: `{"reason": ""}`, fields: "reason"},
+		{name: "null reason", method: http.MethodPatch, target: "/api/v1/admin/challenges/" + challengeID, body: `{"reason": null, "dry_run": true}`, fields: "reason"},
 		{name: "unknown field", method: http.MethodPost, target: "/api/v1/admin/users/search", body: `{"x": 1}`},
 		{name: "path id not a UUID", method: http.MethodGet, target: "/api/v1/admin/challenges/not-a-uuid"},
 		{name: "query out of bounds", method: http.MethodGet, target: "/api/v1/admin/users?limit=0", fields: "limit"},
@@ -216,6 +219,74 @@ func TestInvalidAdminRequestIsHiddenWithoutThePermission(t *testing.T) {
 				}
 				if repo.calls != 0 {
 					t.Fatalf("%s: repository called %d times for an invalid request", tt.token, repo.calls)
+				}
+			}
+		})
+	}
+}
+
+// uncategorizedBoards ranks every challenge in no category.
+type uncategorizedBoards struct{}
+
+func (uncategorizedBoards) Get(context.Context, auth.Actor, string) (leaderboard.Leaderboard, error) {
+	return leaderboard.Leaderboard{Categories: []leaderboard.CategoryRanking{}}, nil
+}
+
+// TestAdminPreviewWithoutAReason: through each kind of body that takes
+// dry_run, a preview goes without a reason (README §2.12), writing no
+// journal line; a change without one is refused before anything is locked.
+func TestAdminPreviewWithoutAReason(t *testing.T) {
+	// Each body is open, its fields followed by a comma: dry_run ends it.
+	routes := []struct {
+		name, method, target, body string
+	}{
+		{name: "settings", method: http.MethodPatch, target: "/api/v1/admin/challenges/" + challengeID, body: `{"title": "Printemps", `},
+		{name: "challenge deletion", method: http.MethodDelete, target: "/api/v1/admin/challenges/" + challengeID, body: `{`},
+		{name: "participant", method: http.MethodPost, target: "/api/v1/admin/challenges/" + challengeID + "/participants", body: `{"user_id": "` + bobID + `", `},
+		{
+			name: "activity", method: http.MethodPost, target: "/api/v1/admin/users/" + bobID + "/activities",
+			body: `{"sport_code": "run", "started_at": "2026-06-03T11:00:00Z", "duration_seconds": 1500, `,
+		},
+	}
+	for _, r := range routes {
+		t.Run(r.name, func(t *testing.T) {
+			for _, tt := range []struct {
+				name, dryRun string
+				wantStatus   int
+			}{
+				{name: "preview", dryRun: `"dry_run": true}`, wantStatus: http.StatusOK},
+				{name: "change", dryRun: `"dry_run": false}`, wantStatus: http.StatusBadRequest},
+				{name: "change, dry_run absent", wantStatus: http.StatusBadRequest},
+			} {
+				body := r.body + tt.dryRun
+				if tt.dryRun == "" {
+					body = strings.TrimSuffix(r.body, ", ") + "}"
+				}
+				log := &correctionLog{}
+				journal := &journalLog{log: log}
+				corrections := NewCorrections(log, NewJournal(journal, clock.NewFake(statsAt)), log, uncategorizedBoards{})
+				settings := &fakeSettings{log: log}
+				h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}),
+					NewChallengeCorrections(corrections, settings, settings),
+					NewMemberCorrections(corrections, &fakeMembers{log: log}),
+					NewActivityCorrections(corrections, &fakeActivities{log: log, touched: []string{challengeID}, change: activity.AdminChange{ActivityID: actionID}}),
+					nil)
+				rec, got := serveWith(t, h, adminToken, r.method, r.target, body, io.Discard)
+				if rec.Code != tt.wantStatus {
+					t.Fatalf("%s: got %d %v, want %d", tt.name, rec.Code, got, tt.wantStatus)
+				}
+				if len(journal.records) != 0 {
+					t.Fatalf("%s: journal %v, want no line", tt.name, journal.records)
+				}
+				if tt.wantStatus == http.StatusOK && (got["dry_run"] != true || !log.rolledBack) {
+					t.Fatalf("%s: body %v, rolled back %v: want a preview, rolled back", tt.name, got, log.rolledBack)
+				}
+				if tt.wantStatus == http.StatusBadRequest {
+					e, _ := got["error"].(map[string]any)
+					params, _ := e["params"].(map[string]any)
+					if e["code"] != "validation_failed" || params["fields"] != "reason" || len(log.steps) != 0 {
+						t.Fatalf("%s: got %v, steps %v: want validation_failed on reason, nothing locked", tt.name, got, log.steps)
+					}
 				}
 			}
 		})
