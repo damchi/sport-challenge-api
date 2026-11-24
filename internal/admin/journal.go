@@ -63,9 +63,15 @@ type ActionRecord struct {
 	Reason       string
 }
 
+// profileFields are the journal fields that hold the profile of an
+// account, erased with it (Journal.EraseUser): the pseudo, the names and the
+// e-mail.
+var profileFields = []string{"pseudo", "first_name", "last_name", "email"}
+
 // journalStore writes the journal.
 type journalStore interface {
 	InsertAction(ctx context.Context, a ActionRecord) error
+	EraseUserValues(ctx context.Context, userID string) error
 }
 
 // Journal records the admin changes (admin_actions).
@@ -145,4 +151,13 @@ func jsonObject(v map[string]any) ([]byte, error) {
 		return nil, nil
 	}
 	return json.Marshal(v)
+}
+
+// EraseUser erases the profile values (profileFields) of the journal lines
+// that target account userID, as an account or as a participant (README
+// §2.12): a user.Eraser, run in the transaction of the deletion of the
+// account (ctx carries it), whoever deletes it. The action, the instant,
+// the target and the reason stay.
+func (j *Journal) EraseUser(ctx context.Context, userID string) error {
+	return j.store.EraseUserValues(ctx, userID)
 }

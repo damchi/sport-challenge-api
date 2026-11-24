@@ -52,7 +52,8 @@ func ActorFrom(ctx context.Context) (Actor, bool) {
 
 // CurrentUser runs after Authenticate: it turns the token's subject into the
 // local user and puts its identifier in the request context. A deleted
-// account answers 401 account_deleted; any other failure is a 500, logged by
+// account answers 401 account_deleted, a blocked one 403 account_blocked
+// (both decided by the resolver); any other failure is a 500, logged by
 // httpx.RespondError. Claims missing from the context (Authenticate not run)
 // answer 401 unauthenticated: the route is never served anonymously.
 func CurrentUser(resolve UserIDResolver, logger *slog.Logger) gin.HandlerFunc {

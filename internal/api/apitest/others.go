@@ -223,3 +223,19 @@ func (unimplemented) SearchAdminUsers(context.Context, api.SearchAdminUsersReque
 func (unimplemented) ListAdminActions(context.Context, api.ListAdminActionsRequestObject) (api.ListAdminActionsResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+func (unimplemented) UpdateAdminUser(context.Context, api.UpdateAdminUserRequestObject) (api.UpdateAdminUserResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) DeleteAdminUser(context.Context, api.DeleteAdminUserRequestObject) (api.DeleteAdminUserResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) BlockAdminUser(context.Context, api.BlockAdminUserRequestObject) (api.BlockAdminUserResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) UnblockAdminUser(context.Context, api.UnblockAdminUserRequestObject) (api.UnblockAdminUserResponseObject, error) {
+	return nil, errNotImplemented
+}

@@ -34,6 +34,9 @@ type Figures struct {
 	AccountsTotal  int64
 	AccountsNew    int64
 	AccountsActive int64
+	// AccountsBlocked counts the accounts an admin blocked, in AccountsTotal
+	// too.
+	AccountsBlocked int64
 	// The statuses count the challenges not deleted, Deleted the others.
 	Upcoming, Ongoing, Finished, Deleted int64
 	// Activities recorded in the window, deleted ones and those of deleted
@@ -256,6 +259,7 @@ type ChallengeDetail struct {
 // The states of an account (UserRow.State).
 const (
 	UserActive               = "active"
+	UserBlocked              = "blocked"
 	UserAuth0DeletionPending = "auth0_deletion_pending"
 	UserDeleted              = "deleted"
 )

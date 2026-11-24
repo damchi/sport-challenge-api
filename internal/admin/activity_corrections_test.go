@@ -213,7 +213,7 @@ func TestAdminActivityRoutes(t *testing.T) {
 		}
 		return []ChallengePreview{{ChallengeID: challengeID}}, nil
 	})
-	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities)
+	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities, nil)
 	started := time.Date(2026, 6, 3, 11, 0, 0, 0, time.UTC)
 	distance := 5000
 	run := activity.Draft{SportCode: "run", StartedAt: started, DurationSeconds: 1500, DistanceMeters: &distance}
