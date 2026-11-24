@@ -26,6 +26,24 @@ type fakeSettings struct {
 	changes      challenge.SettingsChanges
 	rescheduled  *time.Time
 	rescheduleOf string
+	// deletedAt is the instant AdminDelete and AdminRestore answer.
+	deletedAt time.Time
+}
+
+func (f *fakeSettings) AdminDelete(_ context.Context, actor auth.Actor, id string) (time.Time, error) {
+	f.log.add("delete " + id)
+	if !actor.Admin {
+		return time.Time{}, errors.New("deleted for a non-admin")
+	}
+	return f.deletedAt, f.err
+}
+
+func (f *fakeSettings) AdminRestore(_ context.Context, actor auth.Actor, id string) (time.Time, error) {
+	f.log.add("restore " + id)
+	if !actor.Admin {
+		return time.Time{}, errors.New("restored for a non-admin")
+	}
+	return f.deletedAt, f.err
 }
 
 func (f *fakeSettings) AdminUpdate(_ context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges) (challenge.SettingsChange, error) {
@@ -142,11 +160,19 @@ func TestChallengeCorrectionsUpdateSettingsRefusals(t *testing.T) {
 	}
 }
 
-// settingsUpdaterFunc is a settingsUpdater.
+// settingsUpdaterFunc is a challengeUpdater that changes the settings only.
 type settingsUpdaterFunc func(ctx context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges, reason string, dryRun bool) ([]ChallengePreview, error)
 
 func (f settingsUpdaterFunc) UpdateSettings(ctx context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges, reason string, dryRun bool) ([]ChallengePreview, error) {
 	return f(ctx, actor, id, changes, reason, dryRun)
+}
+
+func (settingsUpdaterFunc) Delete(context.Context, auth.Actor, string, string, bool) ([]ChallengePreview, error) {
+	return nil, errors.New("delete not planned in this test")
+}
+
+func (settingsUpdaterFunc) Restore(context.Context, auth.Actor, string, string, bool) ([]ChallengePreview, error) {
+	return nil, errors.New("restore not planned in this test")
 }
 
 func TestUpdateAdminChallenge(t *testing.T) {

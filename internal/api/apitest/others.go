@@ -188,6 +188,14 @@ func (unimplemented) UpdateAdminActivity(context.Context, api.UpdateAdminActivit
 	return nil, errNotImplemented
 }
 
+func (unimplemented) DeleteAdminChallenge(context.Context, api.DeleteAdminChallengeRequestObject) (api.DeleteAdminChallengeResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+func (unimplemented) RestoreAdminChallenge(context.Context, api.RestoreAdminChallengeRequestObject) (api.RestoreAdminChallengeResponseObject, error) {
+	return nil, errNotImplemented
+}
+
 func (unimplemented) DeleteAdminActivity(context.Context, api.DeleteAdminActivityRequestObject) (api.DeleteAdminActivityResponseObject, error) {
 	return nil, errNotImplemented
 }

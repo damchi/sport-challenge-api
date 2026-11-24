@@ -42,15 +42,17 @@ func HideInvalidRequest(c *gin.Context) error {
 // Handler implements the /admin operations of the API contract.
 type Handler struct {
 	service    *Service
-	settings   settingsUpdater
+	settings   challengeUpdater
 	members    memberUpdater
 	activities activityUpdater
 }
 
-// settingsUpdater changes the settings of a challenge as an admin
-// (ChallengeCorrections).
-type settingsUpdater interface {
+// challengeUpdater changes a challenge itself as an admin: its settings,
+// its deletion and its restore (ChallengeCorrections).
+type challengeUpdater interface {
 	UpdateSettings(ctx context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges, reason string, dryRun bool) ([]ChallengePreview, error)
+	Delete(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error)
+	Restore(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error)
 }
 
 // memberUpdater changes the members of a challenge as an admin
@@ -72,9 +74,9 @@ type activityUpdater interface {
 }
 
 // NewHandler returns a Handler on service for the reads, settings for the
-// changes of the settings of a challenge, members for those of its
+// changes of a challenge itself (settings, deletion, restore), members for those of its
 // members, activities for those of an activity.
-func NewHandler(service *Service, settings settingsUpdater, members memberUpdater, activities activityUpdater) *Handler {
+func NewHandler(service *Service, settings challengeUpdater, members memberUpdater, activities activityUpdater) *Handler {
 	return &Handler{service: service, settings: settings, members: members, activities: activities}
 }
 
@@ -125,10 +127,7 @@ func (h *Handler) DeleteAdminActivity(ctx context.Context, req api.DeleteAdminAc
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	b := req.Body
-	if b == nil {
-		b = &api.AdminCorrectionReason{}
-	}
+	b := reasonBody(req.Body)
 	previews, err := h.activities.Delete(ctx, actor, req.ActivityId.String(), b.Reason, isDryRun(b.DryRun))
 	if err != nil {
 		return nil, err
@@ -138,6 +137,16 @@ func (h *Handler) DeleteAdminActivity(ctx context.Context, req api.DeleteAdminAc
 		return nil, err
 	}
 	return api.DeleteAdminActivity200JSONResponse(out), nil
+}
+
+// reasonBody is b, or an empty body for none: the request is then refused
+// as one without its reason, once the permission is checked
+// (Corrections.Run).
+func reasonBody(b *api.AdminCorrectionReason) *api.AdminCorrectionReason {
+	if b == nil {
+		return &api.AdminCorrectionReason{}
+	}
+	return b
 }
 
 // activityBody is b, or an empty body for none.
@@ -231,10 +240,8 @@ func memberCorrection(ctx context.Context, change func(ctx context.Context, acto
 	if !ok {
 		return api.AdminCorrection{}, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	if body == nil {
-		body = &api.AdminCorrectionReason{}
-	}
-	dryRun := body.DryRun != nil && *body.DryRun
+	body = reasonBody(body)
+	dryRun := isDryRun(body.DryRun)
 	previews, err := change(ctx, actor, challengeID.String(), userID.String(), body.Reason, dryRun)
 	if err != nil {
 		return api.AdminCorrection{}, err
@@ -286,6 +293,44 @@ func (h *Handler) UpdateAdminChallenge(ctx context.Context, req api.UpdateAdminC
 	return api.UpdateAdminChallenge200JSONResponse(out), nil
 }
 
+// DeleteAdminChallenge deletes a challenge, or previews the deletion with
+// dry_run.
+func (h *Handler) DeleteAdminChallenge(ctx context.Context, req api.DeleteAdminChallengeRequestObject) (api.DeleteAdminChallengeResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	b := reasonBody(req.Body)
+	previews, err := h.settings.Delete(ctx, actor, req.ChallengeId.String(), b.Reason, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	out, err := toCorrection(previews, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	return api.DeleteAdminChallenge200JSONResponse(out), nil
+}
+
+// RestoreAdminChallenge restores a deleted challenge, or previews the
+// restore with dry_run.
+func (h *Handler) RestoreAdminChallenge(ctx context.Context, req api.RestoreAdminChallengeRequestObject) (api.RestoreAdminChallengeResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	b := reasonBody(req.Body)
+	previews, err := h.settings.Restore(ctx, actor, req.ChallengeId.String(), b.Reason, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	out, err := toCorrection(previews, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	return api.RestoreAdminChallenge200JSONResponse(out), nil
+}
+
 // toCorrection turns the previews of an admin change into their contract
 // form.
 func toCorrection(previews []ChallengePreview, dryRun bool) (api.AdminCorrection, error) {
@@ -295,11 +340,11 @@ func toCorrection(previews []ChallengePreview, dryRun bool) (api.AdminCorrection
 		if err != nil {
 			return api.AdminCorrection{}, fmt.Errorf("challenge id: %w", err)
 		}
-		before, err := leaderboard.Contract(p.Before)
+		before, err := toBoard(p.Before)
 		if err != nil {
 			return api.AdminCorrection{}, err
 		}
-		after, err := leaderboard.Contract(p.After)
+		after, err := toBoard(p.After)
 		if err != nil {
 			return api.AdminCorrection{}, err
 		}
@@ -314,6 +359,18 @@ func toCorrection(previews []ChallengePreview, dryRun bool) (api.AdminCorrection
 		out.Challenges[i] = api.AdminChallengePreview{ChallengeId: id, Before: before, After: after, Eliminations: changes}
 	}
 	return out, nil
+}
+
+// toBoard turns rankings into their contract form, nil for none.
+func toBoard(b *leaderboard.Leaderboard) (*api.Leaderboard, error) {
+	if b == nil {
+		return nil, nil
+	}
+	out, err := leaderboard.Contract(*b)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // toJudgement turns an elimination into its contract form, nil for none.
