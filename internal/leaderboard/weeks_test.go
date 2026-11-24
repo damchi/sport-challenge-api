@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
@@ -95,5 +96,21 @@ func TestWeeksWithoutPointsReadsNoActivity(t *testing.T) {
 	svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(at(10, 12)), 24*time.Hour)
 	if _, err := svc.Weeks(t.Context(), auth.Actor{ID: "actor"}, "c1"); err != nil || repo.calls != 0 {
 		t.Fatalf("Weeks() error %v after %d reads, want none", err, repo.calls)
+	}
+}
+
+// TestWeeksIsHiddenFromWhoCannotReadTheChallenge: the rule is the challenge
+// module's, asked for the actor first; refused, nothing else is read.
+func TestWeeksIsHiddenFromWhoCannotReadTheChallenge(t *testing.T) {
+	_, _, at := pointsChallenge(t)
+	challenges := &fakeChallenges{err: apperr.New(apperr.CodeNotFound, nil)}
+	repo := &fakeRepo{}
+	svc := NewService(challenges, pseudos, repo, clock.NewFake(at(10, 12)), 24*time.Hour)
+	_, err := svc.Weeks(t.Context(), auth.Actor{ID: "stranger"}, "c1")
+	if !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) || repo.calls != 0 {
+		t.Fatalf("Weeks() error %v after %d reads, want not_found and nothing read", err, repo.calls)
+	}
+	if challenges.actor.ID != "stranger" || challenges.asked != "c1" {
+		t.Fatalf("asked for %+v on %q, want the actor on the challenge", challenges.actor, challenges.asked)
 	}
 }
