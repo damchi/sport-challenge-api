@@ -743,3 +743,85 @@ func TestReadsActivities(t *testing.T) {
 		}
 	}
 }
+
+// TestAdminMemberRefusals: the admin rules on the members of a challenge
+// leave every time and role lock aside, never the data (README §2.12).
+func TestAdminMemberRefusals(t *testing.T) {
+	deleted := Membership{Participant: ParticipantActive, AccountDeleted: true}
+	deletedCreator := Membership{Creator: true, Participant: ParticipantActive, AccountDeleted: true}
+	type rule func(target Membership) (noop bool, err error)
+	add := func(complete bool) rule {
+		return func(target Membership) (bool, error) { return false, AdminAddParticipantRefusal(target, complete) }
+	}
+	removeCreator := func(others int) rule {
+		return func(target Membership) (bool, error) { return AdminRemoveCreatorRefusal(target, others, "c1") }
+	}
+	tests := []struct {
+		name     string
+		rule     rule
+		target   Membership
+		wantNoop bool
+		want     apperr.Code // empty: allowed
+	}{
+		{name: "add: someone outside, registration closed or not", rule: add(true), target: outsider},
+		{name: "add: someone invited", rule: add(true), target: invited},
+		{name: "add: an incomplete profile", rule: add(false), target: outsider, want: apperr.CodeProfileIncomplete},
+		{name: "add: an active participant", rule: add(true), target: active, want: apperr.CodeAlreadyParticipant},
+		{name: "add: a creator", rule: add(true), target: creatorActive, want: apperr.CodeAlreadyParticipant},
+		{name: "add: someone who abandoned: reinstate", rule: add(true), target: abandoned, want: apperr.CodeParticipationAbandoned},
+		{name: "add: a creator who abandoned: reinstate", rule: add(true), target: creatorAbandoned, want: apperr.CodeParticipationAbandoned},
+		{name: "add: a deleted account", rule: add(true), target: Membership{AccountDeleted: true}, want: apperr.CodeUserNotFound},
+
+		{name: "reinstate: someone who abandoned", rule: AdminReinstateRefusal, target: abandoned},
+		{name: "reinstate: a creator who abandoned", rule: AdminReinstateRefusal, target: creatorAbandoned},
+		{name: "reinstate: an active participant: nothing to do", rule: AdminReinstateRefusal, target: active, wantNoop: true},
+		{name: "reinstate: someone who never joined", rule: AdminReinstateRefusal, target: invited, want: apperr.CodeNotFound},
+		{name: "reinstate: a deleted account", rule: AdminReinstateRefusal, target: deleted, want: apperr.CodeNotFound},
+
+		{name: "exclude: an active participant", rule: AdminExcludeRefusal, target: active},
+		{name: "exclude: a creator", rule: AdminExcludeRefusal, target: creatorActive},
+		{name: "exclude: someone already out: nothing to do", rule: AdminExcludeRefusal, target: creatorAbandoned, wantNoop: true},
+		{name: "exclude: someone who never joined", rule: AdminExcludeRefusal, target: outsider, want: apperr.CodeNotFound},
+		{name: "exclude: a deleted account", rule: AdminExcludeRefusal, target: deleted, want: apperr.CodeNotFound},
+
+		{name: "name a creator: an active participant", rule: AdminAddCreatorRefusal, target: active},
+		{name: "name a creator: someone who abandoned", rule: AdminAddCreatorRefusal, target: abandoned},
+		{name: "name a creator: a creator already: nothing to do", rule: AdminAddCreatorRefusal, target: creatorAbandoned, wantNoop: true},
+		{name: "name a creator: someone who never joined", rule: AdminAddCreatorRefusal, target: invited, want: apperr.CodeNotActiveParticipant},
+		{name: "name a creator: a deleted creator", rule: AdminAddCreatorRefusal, target: deletedCreator, want: apperr.CodeNotActiveParticipant},
+
+		{name: "remove a creator: another one stays", rule: removeCreator(1), target: creatorActive},
+		{name: "remove a creator who abandoned: another one stays", rule: removeCreator(1), target: creatorAbandoned},
+		{name: "remove the last creator", rule: removeCreator(0), target: creatorActive, want: apperr.CodeLastCreator},
+		{name: "remove a creator: a participant who is none: nothing to do", rule: removeCreator(0), target: abandoned, wantNoop: true},
+		{name: "remove a creator: someone who never joined", rule: removeCreator(1), target: outsider, want: apperr.CodeNotFound},
+		{name: "remove a creator: a deleted creator", rule: removeCreator(1), target: deletedCreator, want: apperr.CodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			noop, err := tt.rule(tt.target)
+			if noop != tt.wantNoop {
+				t.Fatalf("noop = %v, want %v", noop, tt.wantNoop)
+			}
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("rule = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("rule = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestAdminRemoveCreatorRefusalNamesTheChallenge: the last creator is
+// refused with the challenge in params, as for an account deletion.
+func TestAdminRemoveCreatorRefusalNamesTheChallenge(t *testing.T) {
+	_, err := AdminRemoveCreatorRefusal(creatorActive, 0, "c1")
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Params[apperr.ChallengesParam] != "c1" {
+		t.Fatalf("AdminRemoveCreatorRefusal() = %v, want last_creator naming c1", err)
+	}
+}

@@ -54,7 +54,7 @@ func serve(t *testing.T, svc *Service, token, target string) (*httptest.Response
 // API, as JSON, written to logs.
 func serveLogged(t *testing.T, svc *Service, token, method, target, body string, logs io.Writer) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
-	return serveWith(t, NewHandler(svc, nil), token, method, target, body, logs)
+	return serveWith(t, NewHandler(svc, nil, nil), token, method, target, body, logs)
 }
 
 // serveWith is serveLogged on handler h.
@@ -199,7 +199,7 @@ func TestInvalidAdminRequestIsHiddenWithoutThePermission(t *testing.T) {
 				{token: adminToken, wantStatus: http.StatusBadRequest, wantCode: "validation_failed"},
 			} {
 				repo := &fakeRepo{}
-				rec, got := serveWith(t, NewHandler(NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}), nil), tt.token, rq.method, rq.target, rq.body, io.Discard)
+				rec, got := serveWith(t, NewHandler(NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil), tt.token, rq.method, rq.target, rq.body, io.Discard)
 				e, _ := got["error"].(map[string]any)
 				if rec.Code != tt.wantStatus || e["code"] != tt.wantCode {
 					t.Fatalf("%s: got %d %v, want %d %s", tt.token, rec.Code, got, tt.wantStatus, tt.wantCode)

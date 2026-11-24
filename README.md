@@ -247,6 +247,15 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
   - un changement de fuseau seul garde le même jour local de départ : l'instant de début, la fenêtre et donc les activités qui comptent se déplacent ;
   - une modification qui ne change rien recalcule quand même le défi, écrit sa ligne de journal (valeurs vides) et marque le défi corrigé ;
   - un défi supprimé ne se modifie pas (404 `challenge_not_found`) : l'admin le restaure d'abord.
+- ✅ **Participants et créateurs d'un défi** (`/admin/challenges/{id}/participants` et `/creators/{userId}`, SC-API-162), à tout moment, défi terminé compris, chacun avec motif, aperçu, recalcul, journal (cible : le compte, comme participant) et marque de correction :
+  - **ajouter** un participant : tout compte au profil complet (`profile_incomplete` sinon) ; un participant actif (créateur compris) répond `already_participant`, un compte qui a abandonné ou a été exclu, créateur compris, `participation_abandoned` (l'admin le réintègre), un compte inconnu ou supprimé `user_not_found` ;
+  - **réintégrer** : l'abandon ou l'exclusion est annulé, la participation redevient active et les semaines déjà verrouillées sont rejugées avec elle ;
+  - **exclure** un participant, créateur compris ; ✅ un créateur exclu **garde** son rôle, comme un créateur qui abandonne (§5.7) : l'admin le retire à part (décision du 2026-11-24) ;
+  - **nommer un créateur** : ✅ tout participant, actif ou ayant abandonné (décision du 2026-11-24) ; quelqu'un qui n'a jamais rejoint, ou un compte supprimé, répond `not_active_participant` : l'admin l'ajoute d'abord ;
+  - **retirer un rôle de créateur** : la participation reste telle quelle ; le dernier créateur ne se retire pas (`last_creator`) ;
+  - une action qui ne change rien (réintégrer un participant actif, exclure quelqu'un déjà sorti, nommer un créateur, retirer le rôle d'un non-créateur) répond quand même, recalcule le défi et écrit sa ligne de journal (valeurs vides), comme une modification de réglages sans effet ; quelqu'un qui n'a jamais rejoint, ou un compte supprimé, répond `not_found` (réintégrer, exclure, retirer un rôle) ;
+  - un défi supprimé ne se modifie pas (404 `challenge_not_found`) : l'admin le restaure d'abord ;
+  - chaque action verrouille d'abord la ligne du compte touché, juste après le verrou des semaines, dans l'ordre d'une suppression de compte : une correction et la suppression du même compte au même moment passent l'une après l'autre, jamais en interblocage.
 - ✅ Une activité corrigée par l'admin l'est **partout** : tous les défis où elle compte (§2.5) sont recalculés, et l'aperçu les liste.
 - 🟡 Une activité ajoutée par l'admin pour un utilisateur a la source `admin` (à côté de `manual`), pour la distinguer d'une saisie.
 

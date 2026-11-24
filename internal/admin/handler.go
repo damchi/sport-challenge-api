@@ -42,6 +42,7 @@ func HideInvalidRequest(c *gin.Context) error {
 type Handler struct {
 	service  *Service
 	settings settingsUpdater
+	members  memberUpdater
 }
 
 // settingsUpdater changes the settings of a challenge as an admin
@@ -50,10 +51,97 @@ type settingsUpdater interface {
 	UpdateSettings(ctx context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges, reason string, dryRun bool) ([]ChallengePreview, error)
 }
 
+// memberUpdater changes the members of a challenge as an admin
+// (MemberCorrections).
+type memberUpdater interface {
+	AddParticipant(ctx context.Context, actor auth.Actor, id, userID, reason string, dryRun bool) ([]ChallengePreview, error)
+	ReinstateParticipant(ctx context.Context, actor auth.Actor, id, userID, reason string, dryRun bool) ([]ChallengePreview, error)
+	ExcludeParticipant(ctx context.Context, actor auth.Actor, id, userID, reason string, dryRun bool) ([]ChallengePreview, error)
+	AddCreator(ctx context.Context, actor auth.Actor, id, userID, reason string, dryRun bool) ([]ChallengePreview, error)
+	RemoveCreator(ctx context.Context, actor auth.Actor, id, userID, reason string, dryRun bool) ([]ChallengePreview, error)
+}
+
 // NewHandler returns a Handler on service for the reads, settings for the
-// changes of the settings of a challenge.
-func NewHandler(service *Service, settings settingsUpdater) *Handler {
-	return &Handler{service: service, settings: settings}
+// changes of the settings of a challenge, members for those of its members.
+func NewHandler(service *Service, settings settingsUpdater, members memberUpdater) *Handler {
+	return &Handler{service: service, settings: settings, members: members}
+}
+
+// AddAdminParticipant makes any account a participant of a challenge, or
+// previews it with dry_run.
+func (h *Handler) AddAdminParticipant(ctx context.Context, req api.AddAdminParticipantRequestObject) (api.AddAdminParticipantResponseObject, error) {
+	// The contract requires the body: an empty one is refused there.
+	b := req.Body
+	if b == nil {
+		b = &api.AdminParticipantAdd{}
+	}
+	out, err := memberCorrection(ctx, h.members.AddParticipant, req.ChallengeId, b.UserId, &api.AdminCorrectionReason{Reason: b.Reason, DryRun: b.DryRun})
+	if err != nil {
+		return nil, err
+	}
+	return api.AddAdminParticipant200JSONResponse(out), nil
+}
+
+// ReinstateAdminParticipant cancels an abandon or an exclusion, or previews
+// it with dry_run.
+func (h *Handler) ReinstateAdminParticipant(ctx context.Context, req api.ReinstateAdminParticipantRequestObject) (api.ReinstateAdminParticipantResponseObject, error) {
+	out, err := memberCorrection(ctx, h.members.ReinstateParticipant, req.ChallengeId, req.UserId, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return api.ReinstateAdminParticipant200JSONResponse(out), nil
+}
+
+// ExcludeAdminParticipant excludes any participant, a creator included, or
+// previews it with dry_run.
+func (h *Handler) ExcludeAdminParticipant(ctx context.Context, req api.ExcludeAdminParticipantRequestObject) (api.ExcludeAdminParticipantResponseObject, error) {
+	out, err := memberCorrection(ctx, h.members.ExcludeParticipant, req.ChallengeId, req.UserId, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return api.ExcludeAdminParticipant200JSONResponse(out), nil
+}
+
+// AddAdminCreator makes a participant a creator, or previews it with
+// dry_run.
+func (h *Handler) AddAdminCreator(ctx context.Context, req api.AddAdminCreatorRequestObject) (api.AddAdminCreatorResponseObject, error) {
+	out, err := memberCorrection(ctx, h.members.AddCreator, req.ChallengeId, req.UserId, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return api.AddAdminCreator200JSONResponse(out), nil
+}
+
+// RemoveAdminCreator removes a creator role, or previews it with dry_run.
+func (h *Handler) RemoveAdminCreator(ctx context.Context, req api.RemoveAdminCreatorRequestObject) (api.RemoveAdminCreatorResponseObject, error) {
+	out, err := memberCorrection(ctx, h.members.RemoveCreator, req.ChallengeId, req.UserId, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return api.RemoveAdminCreator200JSONResponse(out), nil
+}
+
+// memberCorrection runs change, one of the methods of memberUpdater, on
+// userID in challengeID as the actor of ctx, with the reason and dry_run of
+// body, and gives its previews in their contract form. Without a body, the
+// request is refused as one without its reason, once the permission is
+// checked (Corrections.Run).
+func memberCorrection(ctx context.Context, change func(ctx context.Context, actor auth.Actor, id, userID, reason string, dryRun bool) ([]ChallengePreview, error),
+	challengeID, userID uuid.UUID, body *api.AdminCorrectionReason,
+) (api.AdminCorrection, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return api.AdminCorrection{}, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	if body == nil {
+		body = &api.AdminCorrectionReason{}
+	}
+	dryRun := body.DryRun != nil && *body.DryRun
+	previews, err := change(ctx, actor, challengeID.String(), userID.String(), body.Reason, dryRun)
+	if err != nil {
+		return api.AdminCorrection{}, err
+	}
+	return toCorrection(previews, dryRun)
 }
 
 // UpdateAdminChallenge changes the settings of a challenge, or previews
