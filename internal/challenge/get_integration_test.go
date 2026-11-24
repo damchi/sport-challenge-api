@@ -1336,3 +1336,64 @@ func TestGetWeekCount(t *testing.T) {
 		t.Fatalf("17 days: week %d of %d, want week 3 of 3", d.CurrentWeek, d.WeekCount)
 	}
 }
+
+// TestGetAdminCorrectedAt: the detail gives the instant of the last admin
+// change whose challenge_ids hold the challenge, null before any; a change
+// of another challenge, or of an account alone, does not mark it.
+func TestGetAdminCorrectedAt(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, creatorID := setup(t, &pseudo)
+	c, err := svc.Create(t.Context(), creatorID, with(func(d *Draft) { d.Visibility = VisibilityPublic }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := svc.Create(t.Context(), creatorID, with(func(*Draft) {}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminID := insertTestUser(t, pool, "email|admin")
+	outsiderID := insertTestUser(t, pool, "email|outsider")
+	record := func(at time.Time, targetType string, challengeIDs ...string) {
+		t.Helper()
+		if challengeIDs == nil {
+			challengeIDs = []string{}
+		}
+		_, err := pool.Exec(t.Context(), `INSERT INTO admin_actions
+			(admin_id, created_at, action, target_type, target_id, challenge_ids, reason)
+			VALUES ($1, $2, 'test.action', $3, $1, $4, 'a secret reason')`, adminID, at, targetType, challengeIDs)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	corrected := func(readerID string) *time.Time {
+		t.Helper()
+		d, err := svc.Get(t.Context(), auth.Actor{ID: readerID}, c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.AdminCorrectedAt
+	}
+
+	if at := corrected(creatorID); at != nil {
+		t.Fatalf("no action: admin corrected at %v, want none", at)
+	}
+	// Another challenge, an account alone: still not corrected.
+	record(now.Add(-3*time.Hour), "challenge", other.ID)
+	record(now.Add(-2*time.Hour), "user")
+	if at := corrected(creatorID); at != nil {
+		t.Fatalf("other changes only: admin corrected at %v, want none", at)
+	}
+
+	// Several actions, one of them an activity counting in both challenges:
+	// the last one counts, a later change of an account alone does not.
+	first := now.Add(-time.Hour).Truncate(time.Microsecond)
+	last := now.Add(-30 * time.Minute).Truncate(time.Microsecond)
+	record(first, "challenge", c.ID)
+	record(last, "activity", other.ID, c.ID)
+	record(now, "user")
+	for name, reader := range map[string]string{"creator": creatorID, "outsider": outsiderID} {
+		if at := corrected(reader); at == nil || !at.Equal(last) {
+			t.Fatalf("%s: admin corrected at %v, want %s", name, at, last)
+		}
+	}
+}

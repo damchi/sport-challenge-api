@@ -721,6 +721,20 @@ func (r *Repository) Categories(ctx context.Context, id string) ([]Category, err
 	return cats, nil
 }
 
+// LastAdminCorrection returns the instant of the last admin change that
+// touches challenge id (admin_actions.challenge_ids, the journal of the admin
+// module), nil when none does, in the transaction of ctx, if any (as Get).
+// Only the instant is read: never the reason nor the admin.
+func (r *Repository) LastAdminCorrection(ctx context.Context, id string) (*time.Time, error) {
+	var row struct{ At *time.Time }
+	err := db.Conn(ctx, r.db).Raw(`SELECT max(created_at) AS at FROM admin_actions
+		WHERE challenge_ids @> ARRAY[?]::uuid[]`, id).Scan(&row).Error
+	if err != nil {
+		return nil, fmt.Errorf("read last admin correction: %w", err)
+	}
+	return row.At, nil
+}
+
 // UpdateText writes the changed title and description of challenge id
 // (an empty description is stored as none). A deleted challenge is never
 // written and gives errChallengeNotFound.

@@ -69,6 +69,11 @@ type fakeRepository struct {
 	categoriesOf    map[string][]Category
 	categoriesAsked []string
 	categoriesErr   error
+	// corrected serves LastAdminCorrection, correctionAsked records whether
+	// it was read, correctionErr fails it.
+	corrected       *time.Time
+	correctionAsked bool
+	correctionErr   error
 	// settings is what UpdateSettings wrote, from f.challenge and its
 	// categories.
 	settings *Challenge
@@ -338,6 +343,11 @@ func (f *fakeRepository) Categories(context.Context, string) ([]Category, error)
 	}
 	f.categoriesRead = true
 	return f.challenge.Categories, nil
+}
+
+func (f *fakeRepository) LastAdminCorrection(context.Context, string) (*time.Time, error) {
+	f.correctionAsked = true
+	return f.corrected, f.correctionErr
 }
 
 func (f *fakeRepository) List(_ context.Context, q ListQuery) ([]Summary, error) {
@@ -1080,6 +1090,54 @@ func TestServiceGetAdminMissing(t *testing.T) {
 	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), auth.Actor{ID: actor, Admin: true}, "11111111-1111-1111-1111-111111111111")
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("error = %v, want challenge_not_found", err)
+	}
+}
+
+// TestServiceGetAdminCorrection: the detail carries the instant of the last
+// admin change that touches the challenge, none when no admin changed it.
+func TestServiceGetAdminCorrection(t *testing.T) {
+	at := time.Date(2026, 3, 4, 18, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		corrected *time.Time
+	}{
+		{name: "never corrected"},
+		{name: "corrected", corrected: &at},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: stored(VisibilityPublic), corrected: tt.corrected}
+			d, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), auth.Actor{ID: actor}, "11111111-1111-1111-1111-111111111111")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (d.AdminCorrectedAt == nil) != (tt.corrected == nil) || (d.AdminCorrectedAt != nil && !d.AdminCorrectedAt.Equal(*tt.corrected)) {
+				t.Fatalf("admin corrected at %v, want %v", d.AdminCorrectedAt, tt.corrected)
+			}
+		})
+	}
+}
+
+// TestServiceGetAdminCorrectionHidden: a private challenge the actor may not
+// see answers 404 before the journal is read.
+func TestServiceGetAdminCorrectionHidden(t *testing.T) {
+	repo := &fakeRepository{challenge: stored(VisibilityPrivate)}
+	_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), auth.Actor{ID: actor}, "11111111-1111-1111-1111-111111111111")
+	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
+		t.Fatalf("error = %v, want challenge_not_found", err)
+	}
+	if repo.correctionAsked {
+		t.Fatal("the journal was read for a challenge the actor may not see")
+	}
+}
+
+func TestServiceGetAdminCorrectionFailure(t *testing.T) {
+	storage := errors.New("connection refused")
+	repo := &fakeRepository{challenge: stored(VisibilityPublic), correctionErr: storage}
+	_, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).Get(t.Context(), auth.Actor{ID: actor}, "11111111-1111-1111-1111-111111111111")
+	var appErr *apperr.Error
+	if !errors.Is(err, storage) || errors.As(err, &appErr) {
+		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
 	}
 }
 
