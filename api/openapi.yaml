@@ -1586,8 +1586,8 @@ paths:
         The challenge is then judged again as the worker would (its
         eliminations and frozen results erased, its locked weeks judged again,
         its results frozen again once its last week is locked), the change
-        recorded in the journal with its `reason` and the challenge marked as
-        corrected, all in one transaction. With `dry_run`, everything is
+        recorded in the journal with its `reason`, naming the challenge, all in
+        one transaction. With `dry_run`, everything is
         rolled back and the answer tells what the change would do. An unknown
         or deleted challenge answers 404 `challenge_not_found`. The body is
         optional in the contract: without one, the missing `reason` answers
@@ -1643,7 +1643,7 @@ paths:
         answer `invitation_invalid`, and the worker judges none of its weeks. It
         is not judged again: its eliminations and frozen results stay as they
         are, for a restore. The change is recorded in the journal with its
-        `reason` and the challenge marked as corrected, in one transaction; with `dry_run`, it is rolled back. The
+        `reason`, naming the challenge, in one transaction; with `dry_run`, it is rolled back. The
         answer gives the rankings `before` the deletion, `after` being null.
         An unknown or deleted challenge answers 404 `challenge_not_found`.
         The body carries the reason: a client that cannot send one with
@@ -1692,7 +1692,7 @@ paths:
         The accounts deleted meanwhile do not come back. The challenge is
         then judged again as the worker would (the weeks locked while it was
         deleted included), the change recorded in the journal with its
-        `reason` and the challenge marked as corrected, all in one
+        `reason`, naming the challenge, all in one
         transaction; with `dry_run`, everything is rolled back. The answer
         gives the rankings `after` the restore, `before` being null, and the
         eliminations that change against those kept at the deletion. An
@@ -1753,8 +1753,8 @@ paths:
         abandoned or was excluded, a creator included, answers 422
         `participation_abandoned` (reinstate them instead). An unknown or deleted account answers 404 `user_not_found`.
         The challenge is then judged again as the worker would, the change
-        recorded in the journal with its `reason` and the challenge marked as
-        corrected, all in one transaction; with `dry_run`, everything is
+        recorded in the journal with its `reason`, naming the challenge, all in
+        one transaction; with `dry_run`, everything is
         rolled back and the answer tells what the change would do. An unknown
         or deleted challenge answers 404 `challenge_not_found`.
       tags: [admin]
@@ -1826,7 +1826,7 @@ paths:
         (`DELETE …/creators/{userId}`). A participant already out answers 200
         and changes nothing but the journal and the judgement. Someone who
         never joined, or a deleted account, answers 404 `not_found`. Judged
-        again, journal, mark and `dry_run` as for `POST …/participants`. The
+        again, journal and `dry_run` as for `POST …/participants`. The
         body carries the reason: a client that cannot send one with
         `DELETE` cannot call this route.
       tags: [admin]
@@ -1878,7 +1878,7 @@ paths:
         again, ranked in every category, the weeks locked meanwhile judged
         again. An active participant answers 200 and changes nothing but the
         journal and the judgement. Someone who never joined, or a deleted
-        account, answers 404 `not_found`. Judged again, journal, mark and
+        account, answers 404 `not_found`. Judged again, journal and
         `dry_run` as for `POST …/participants`.
       tags: [admin]
       parameters:
@@ -1929,8 +1929,8 @@ paths:
         (README §2.12). Someone who never joined, or a deleted account,
         answers 422 `not_active_participant`: every creator is a participant,
         the admin adds them first. A creator already answers 200 and changes
-        nothing but the journal and the judgement. Judged again, journal,
-        mark and `dry_run` as for `POST …/participants`.
+        nothing but the journal and the judgement. Judged again, journal
+        and `dry_run` as for `POST …/participants`.
       tags: [admin]
       parameters:
         - name: challengeId
@@ -1986,7 +1986,7 @@ paths:
         `last_creator` (`params.challenges`: the challenge). A participant who
         is not a creator answers 200 and changes nothing but the journal and
         the judgement. Someone who never joined, or a deleted account,
-        answers 404 `not_found`. Judged again, journal, mark and `dry_run` as
+        answers 404 `not_found`. Judged again, journal and `dry_run` as
         for `POST …/participants`.
       tags: [admin]
       parameters:
@@ -2136,8 +2136,8 @@ paths:
         null` removes the pseudo, a pseudo already taken, regardless of case,
         answers 409. The language and the e-mail stay the user's. The change
         is recorded in the journal with its `reason` (the fields that
-        change, before and after), in one transaction; it marks no
-        challenge as corrected. The answer is the account after the change.
+        change, before and after), in one transaction; its journal
+        line names no challenge. The answer is the account after the change.
         An unknown or deleted account answers 404 `user_not_found`.
       tags: [admin]
       parameters:
@@ -2391,7 +2391,7 @@ paths:
         holding `started_at`, or a challenge the account left once that week
         was locked, whose points category and elimination still judge them) is then judged again as
         the worker would, the change recorded in the journal with its
-        `reason` and those challenges marked as corrected, all in one
+        `reason`, naming those challenges, all in one
         transaction; with `dry_run`, everything is rolled back and the answer
         tells what the change would do. The answer lists those challenges,
         none for an activity that counts nowhere.
@@ -2454,7 +2454,7 @@ paths:
         source stays. A missing or deleted activity, or that of a deleted
         account, answers 404 `activity_not_found`. Every challenge where it
         counts before the change, and after it (a new `started_at` may move
-        it from a challenge to another), is judged again; journal, mark and
+        it from a challenge to another), is judged again; journal and
         `dry_run` as for `POST /admin/users/{userId}/activities`.
       tags: [admin]
       requestBody:
@@ -2501,7 +2501,7 @@ paths:
         week, locked ones and those of a finished challenge included (README
         §2.12): it stops counting at once. A missing or deleted activity, or
         that of a deleted account, answers 404 `activity_not_found`. Every
-        challenge where it counted is judged again; journal, mark and
+        challenge where it counted is judged again; journal and
         `dry_run` as for `POST /admin/users/{userId}/activities`. The body
         carries the reason: a client that cannot send one with `DELETE`
         cannot call this route.
