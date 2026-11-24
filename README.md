@@ -256,8 +256,9 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
   - une action qui ne change rien (réintégrer un participant actif, exclure quelqu'un déjà sorti, nommer un créateur, retirer le rôle d'un non-créateur) répond quand même, recalcule le défi et écrit sa ligne de journal (valeurs vides), comme une modification de réglages sans effet ; quelqu'un qui n'a jamais rejoint, ou un compte supprimé, répond `not_found` (réintégrer, exclure, retirer un rôle) ;
   - un défi supprimé ne se modifie pas (404 `challenge_not_found`) : l'admin le restaure d'abord ;
   - chaque action verrouille d'abord la ligne du compte touché, juste après le verrou des semaines, dans l'ordre d'une suppression de compte : une correction et la suppression du même compte au même moment passent l'une après l'autre, jamais en interblocage.
-- ✅ Une activité corrigée par l'admin l'est **partout** : tous les défis où elle compte (§2.5) sont recalculés, et l'aperçu les liste.
-- 🟡 Une activité ajoutée par l'admin pour un utilisateur a la source `admin` (à côté de `manual`), pour la distinguer d'une saisie.
+- ✅ Une activité corrigée par l'admin l'est **partout** : tous les défis où elle compte (§2.5) sont recalculés, et l'aperçu les liste. ✅ Ce sont les défis où elle compte **avant et après** la modification (une date changée peut la faire passer d'un défi à l'autre), y compris ceux que l'auteur a quittés après le verrouillage de sa semaine, où la catégorie Points et l'élimination le jugent encore (§2.3) ; tous sont marqués corrigés (décisions du 2026-11-24, SC-API-163).
+- ✅ L'admin ajoute, modifie et supprime l'activité de n'importe quel compte, dans n'importe quelle semaine, défi terminé compris, avec les validations d'une saisie (profil complet pour un ajout, bornes, sport, distance, D+, chevauchement) ; une activité absente, supprimée ou d'un compte supprimé répond `activity_not_found`, un compte absent ou supprimé `user_not_found` (SC-API-163).
+- ✅ Une activité ajoutée par l'admin garde la source `manual`, comme une saisie : seul le journal la distingue, pas de source `admin` (décision du 2026-11-24).
 
 **Recalcul et aperçu**
 
@@ -271,7 +272,7 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
 - ✅ **Motif obligatoire** sur toute modification admin (3 à 500 caractères). Le journal (`admin_actions`) garde l'admin, l'instant, l'action, la cible (défi, participant, activité, compte), l'ancienne et la nouvelle valeur, et le motif. Il n'est visible que des admins. ✅ À la suppression d'un compte, les valeurs de profil (pseudo, prénom, nom, e-mail) de ses lignes du journal sont effacées, dans la même transaction ; l'action, l'instant, la cible (identifiant) et le motif restent (décision du 2026-11-23).
 - ✅ Pas de journal des consultations.
 - ✅ Un défi corrigé affiche **« Corrigé par l'administrateur le <date> »** (date de la dernière correction) à tous ceux qui le voient, sans le motif ni l'auteur.
-- 🟡 Seules les actions qui touchent un défi le marquent ; une action sur un compte (profil, blocage) ne marque aucun défi, sauf une activité modifiée, qui marque tous les défis où elle compte.
+- 🟡 Seules les actions qui touchent un défi le marquent ; une action sur un compte (profil, blocage) ne marque aucun défi. ✅ Une activité ajoutée, modifiée ou supprimée par l'admin marque tous les défis où elle compte, avant et après (SC-API-163).
 
 **Compte bloqué**
 

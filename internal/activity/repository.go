@@ -174,6 +174,40 @@ func (r *Repository) EraseUser(ctx context.Context, userID string) error {
 	return nil
 }
 
+// Get returns activity id, deleted ones left out (errActivityNotFound), in
+// the transaction of ctx, of any author (an admin change).
+func (r *Repository) Get(ctx context.Context, id string) (Activity, error) {
+	var rows []Activity
+	err := db.Conn(ctx, r.db).Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, idempotency_key
+		FROM activities WHERE id = ? AND deleted_at IS NULL`, id).Scan(&rows).Error
+	if err != nil {
+		return Activity{}, fmt.Errorf("read activity %s: %w", id, err)
+	}
+	if len(rows) == 0 {
+		return Activity{}, errActivityNotFound
+	}
+	return rows[0], nil
+}
+
+// LockAccount takes the row of user id FOR UPDATE, in the transaction of
+// ctx (an admin change), until it ends: the account cannot be deleted, nor
+// join or leave a challenge, meanwhile. An anonymized or unknown user gives
+// errAccountDeleted.
+func (r *Repository) LockAccount(ctx context.Context, id string) error {
+	tx, ok := db.Tx(ctx)
+	if !ok {
+		return errors.New("lock account: no transaction")
+	}
+	var anonymized []bool
+	if err := tx.Raw("SELECT anonymized_at IS NOT NULL FROM users WHERE id = ? FOR UPDATE", id).Scan(&anonymized).Error; err != nil {
+		return fmt.Errorf("lock account: %w", err)
+	}
+	if len(anonymized) == 0 || anonymized[0] {
+		return errAccountDeleted
+	}
+	return nil
+}
+
 // change runs decide then write on activity id, locked, in one transaction
 // (Update, Delete), the week lock taken shared first as in Record. Only an
 // activity of actorID is read, so that the row of someone else is never

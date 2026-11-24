@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
@@ -40,9 +41,10 @@ func HideInvalidRequest(c *gin.Context) error {
 
 // Handler implements the /admin operations of the API contract.
 type Handler struct {
-	service  *Service
-	settings settingsUpdater
-	members  memberUpdater
+	service    *Service
+	settings   settingsUpdater
+	members    memberUpdater
+	activities activityUpdater
 }
 
 // settingsUpdater changes the settings of a challenge as an admin
@@ -61,10 +63,106 @@ type memberUpdater interface {
 	RemoveCreator(ctx context.Context, actor auth.Actor, id, userID, reason string, dryRun bool) ([]ChallengePreview, error)
 }
 
+// activityUpdater changes the activity of anyone as an admin
+// (ActivityCorrections).
+type activityUpdater interface {
+	Record(ctx context.Context, actor auth.Actor, userID string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error)
+	Update(ctx context.Context, actor auth.Actor, id string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error)
+	Delete(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error)
+}
+
 // NewHandler returns a Handler on service for the reads, settings for the
-// changes of the settings of a challenge, members for those of its members.
-func NewHandler(service *Service, settings settingsUpdater, members memberUpdater) *Handler {
-	return &Handler{service: service, settings: settings, members: members}
+// changes of the settings of a challenge, members for those of its
+// members, activities for those of an activity.
+func NewHandler(service *Service, settings settingsUpdater, members memberUpdater, activities activityUpdater) *Handler {
+	return &Handler{service: service, settings: settings, members: members, activities: activities}
+}
+
+// CreateAdminActivity records an activity for any account, in any week, or
+// previews it with dry_run.
+func (h *Handler) CreateAdminActivity(ctx context.Context, req api.CreateAdminActivityRequestObject) (api.CreateAdminActivityResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	// The contract requires the body: an empty one is refused there, and
+	// here as one without its reason, once the permission is checked.
+	b := activityBody(req.Body)
+	previews, err := h.activities.Record(ctx, actor, req.UserId.String(), activityDraft(b), b.Reason, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	out, err := toCorrection(previews, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	return api.CreateAdminActivity200JSONResponse(out), nil
+}
+
+// UpdateAdminActivity replaces the activity of any account, in any week, or
+// previews it with dry_run.
+func (h *Handler) UpdateAdminActivity(ctx context.Context, req api.UpdateAdminActivityRequestObject) (api.UpdateAdminActivityResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	b := activityBody(req.Body)
+	previews, err := h.activities.Update(ctx, actor, req.ActivityId.String(), activityDraft(b), b.Reason, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	out, err := toCorrection(previews, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	return api.UpdateAdminActivity200JSONResponse(out), nil
+}
+
+// DeleteAdminActivity deletes the activity of any account, in any week, or
+// previews it with dry_run.
+func (h *Handler) DeleteAdminActivity(ctx context.Context, req api.DeleteAdminActivityRequestObject) (api.DeleteAdminActivityResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	b := req.Body
+	if b == nil {
+		b = &api.AdminCorrectionReason{}
+	}
+	previews, err := h.activities.Delete(ctx, actor, req.ActivityId.String(), b.Reason, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	out, err := toCorrection(previews, isDryRun(b.DryRun))
+	if err != nil {
+		return nil, err
+	}
+	return api.DeleteAdminActivity200JSONResponse(out), nil
+}
+
+// activityBody is b, or an empty body for none.
+func activityBody(b *api.AdminActivityWrite) *api.AdminActivityWrite {
+	if b == nil {
+		return &api.AdminActivityWrite{}
+	}
+	return b
+}
+
+// activityDraft is the activity b carries, as an entry.
+func activityDraft(b *api.AdminActivityWrite) activity.Draft {
+	return activity.Draft{
+		SportCode:           b.SportCode,
+		SportLabel:          b.SportLabel,
+		StartedAt:           b.StartedAt,
+		DurationSeconds:     b.DurationSeconds,
+		DistanceMeters:      b.DistanceMeters,
+		ElevationGainMeters: b.ElevationGainMeters,
+	}
+}
+
+// isDryRun tells whether dry_run asks a preview, false when absent.
+func isDryRun(dryRun *bool) bool {
+	return dryRun != nil && *dryRun
 }
 
 // AddAdminParticipant makes any account a participant of a challenge, or

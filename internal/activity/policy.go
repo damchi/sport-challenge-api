@@ -3,6 +3,7 @@ package activity
 import (
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
@@ -11,6 +12,16 @@ import (
 // activity is always recorded for the actor.
 func CanChange(actorID, authorID string) bool {
 	return actorID != "" && actorID == authorID
+}
+
+// AdminRefusal lets an actor with the admin permission of their access
+// token record, change or delete the activity of anyone, in any week
+// (README §2.12); anyone else gets 404 not_found, as on every admin route.
+func AdminRefusal(admin bool) error {
+	if !admin {
+		return apperr.New(apperr.CodeNotFound, nil)
+	}
+	return nil
 }
 
 // Participation is a challenge of the author of an activity, as the lock
@@ -97,6 +108,40 @@ func IsLocked(now, startedAt time.Time, challenges []Participation) bool {
 		}
 	}
 	return false
+}
+
+// Touched returns the ids of the challenges, in the order of challenges,
+// whose rankings an activity of their author started at one of starts is
+// part of: those where it counts (Contributions), and those the author left
+// once its week was locked, where the points category and the elimination
+// still judge them (README §2.3). An admin change of the activity, its start moving from the first
+// of starts to the second maybe, recomputes each of them (README §2.12). A
+// challenge left whose weeks cannot be cut is touched rather than missed.
+func Touched(challenges []Participation, starts ...time.Time) []string {
+	var out []string
+	for _, c := range challenges {
+		for _, at := range starts {
+			if counts(c, at) || keptAfterLeaving(c, at) {
+				out = append(out, c.ChallengeID)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// keptAfterLeaving reports whether the author left c once the week of an
+// activity started at startedAt was locked: the points category and the
+// elimination still judge them in that week (README §2.3).
+func keptAfterLeaving(c Participation, startedAt time.Time) bool {
+	w := window(c)
+	if c.Active || c.AbandonedAt == nil || !w.Contains(startedAt) {
+		return false
+	}
+	if c.Location == nil {
+		return true
+	}
+	return !c.AbandonedAt.Before(w.WeekLocksAt(w.WeekOf(startedAt)))
 }
 
 // counts reports whether an activity started at startedAt counts in c.

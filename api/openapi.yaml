@@ -2076,6 +2076,162 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createAdminActivity
+      summary: Record an activity for any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Records an activity for the
+        account, in any week, locked ones and those of a finished challenge
+        included (README §2.12), with the validations of `POST /activities`:
+        the account needs a complete profile (`profile_incomplete`), the
+        activity never overlaps another of the account (`activity_overlap`),
+        and its end is never in the future. Its source is `manual`, as an
+        entry by the account; the journal tells them apart. An unknown or
+        deleted account answers 404 `user_not_found`. Every challenge where
+        the activity counts (the account an active participant, its window
+        holding `started_at`, or a challenge the account left once that week
+        was locked, whose points category and elimination still judge them) is then judged again as
+        the worker would, the change recorded in the journal with its
+        `reason` and those challenges marked as corrected, all in one
+        transaction; with `dry_run`, everything is rolled back and the answer
+        tells what the change would do. The answer lists those challenges,
+        none for an activity that counts nowhere.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActivityWrite"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminUserNotFound"
+        "422":
+          description: |
+            The profile of the account is incomplete (`profile_incomplete`),
+            the sport needs a distance (`distance_required`) or takes none
+            (`distance_not_allowed`), an elevation gain is sent for a sport
+            or an activity that takes none (`elevation_not_allowed`), or the
+            activity would overlap another of the account
+            (`activity_overlap`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+  /api/v1/admin/activities/{activityId}:
+    parameters:
+      - name: activityId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateAdminActivity
+      summary: Replace the activity of any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Replaces the activity, in any
+        week, locked ones and those of a finished challenge included (README
+        §2.12), with the validations of `PATCH /activities/{activityId}`: the
+        body replaces every field entered, a field left out is cleared. The
+        source stays. A missing or deleted activity, or that of a deleted
+        account, answers 404 `activity_not_found`. Every challenge where it
+        counts before the change, and after it (a new `started_at` may move
+        it from a challenge to another), is judged again; journal, mark and
+        `dry_run` as for `POST /admin/users/{userId}/activities`.
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActivityWrite"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminActivityNotFound"
+        "422":
+          description: |
+            The sport needs a distance (`distance_required`) or takes none
+            (`distance_not_allowed`), an elevation gain is sent for a sport
+            or an activity that takes none (`elevation_not_allowed`), or the
+            activity would overlap another of the account
+            (`activity_overlap`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+    delete:
+      operationId: deleteAdminActivity
+      summary: Delete the activity of any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Deletes the activity, in any
+        week, locked ones and those of a finished challenge included (README
+        §2.12): it stops counting at once. A missing or deleted activity, or
+        that of a deleted account, answers 404 `activity_not_found`. Every
+        challenge where it counted is judged again; journal, mark and
+        `dry_run` as for `POST /admin/users/{userId}/activities`. The body
+        carries the reason: a client that cannot send one with `DELETE`
+        cannot call this route.
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCorrectionReason"
+      responses:
+        "200":
+          description: What the change did, or would do with `dry_run`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCorrection"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminActivityNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
   /api/v1/admin/actions:
     get:
       operationId: listAdminActions
@@ -2256,6 +2412,17 @@ components:
         answers a malformed request (an id that is not a UUID, a body or a
         parameter that does not match) without the permission, without
         `params`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    AdminActivityNotFound:
+      description: |
+        The account has no `admin` permission (`not_found`), or no such
+        activity, a deleted one, or that of a deleted account
+        (`activity_not_found`). `not_found` also answers a malformed request
+        (an id that is not a UUID, a body or a parameter that does not
+        match) without the permission, without `params`.
       content:
         application/json:
           schema:
@@ -2791,6 +2958,45 @@ components:
           type: string
           format: uuid
           description: The account to add.
+    AdminActivityWrite:
+      type: object
+      required: [reason, sport_code, started_at, duration_seconds]
+      additionalProperties: false
+      description: |
+        An activity written by an admin: the fields of `ActivityCreate`, with
+        their bounds and rules, and the reason of the change.
+      properties:
+        reason:
+          $ref: "#/components/schemas/AdminReason"
+        dry_run:
+          type: boolean
+          description: Preview the change, writing nothing. `false` when absent.
+        sport_code:
+          type: string
+          description: As in `ActivityCreate`.
+          pattern: "^[a-z][a-z0-9_]{0,31}$"
+        sport_label:
+          type: string
+          maxLength: 200
+          description: As in `ActivityCreate`.
+        started_at:
+          type: string
+          format: date-time
+          description: As in `ActivityCreate`.
+        duration_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+        distance_meters:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          description: As in `ActivityCreate`.
+        elevation_gain_meters:
+          type: integer
+          minimum: 0
+          maximum: 20000
+          description: As in `ActivityCreate`.
     AdminReason:
       type: string
       description: |

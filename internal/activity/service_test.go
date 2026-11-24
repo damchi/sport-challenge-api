@@ -42,6 +42,23 @@ type fakeRepository struct {
 	weeks          []WeekTotals
 	weekQuery      *WeekQuery
 	weeksErr       error
+	// locked records the accounts LockAccount locked; lockErr fails it.
+	locked  []string
+	lockErr error
+}
+
+// Get gives the activity of stored, of any author.
+func (f *fakeRepository) Get(_ context.Context, id string) (Activity, error) {
+	current, ok := f.stored[id]
+	if !ok {
+		return Activity{}, errActivityNotFound
+	}
+	return current, nil
+}
+
+func (f *fakeRepository) LockAccount(_ context.Context, id string) error {
+	f.locked = append(f.locked, id)
+	return f.lockErr
 }
 
 func (f *fakeRepository) DayTotals(_ context.Context, _ string, bounds []time.Time) ([]Totals, error) {

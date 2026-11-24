@@ -23,6 +23,10 @@ type repository interface {
 	SportCounts(ctx context.Context, userID string) ([]SportCount, int, error)
 	Weeks(ctx context.Context, q WeekQuery) ([]WeekTotals, error)
 	EraseUser(ctx context.Context, userID string) error
+	// Get and LockAccount serve the admin changes, in the transaction of
+	// ctx.
+	Get(ctx context.Context, id string) (Activity, error)
+	LockAccount(ctx context.Context, userID string) error
 }
 
 // Profiles tells whether a user's profile is complete, and gives the public
