@@ -286,6 +286,8 @@ func TestTouched(t *testing.T) {
 	leftLate := leftAt(june, toronto(t, 2026, 6, 9, 12))
 	// Left before week 1 locked: the activity counts nowhere there.
 	leftEarly := leftAt(june, toronto(t, 2026, 6, 5, 12))
+	// Left at the very instant week 1 locked: still judged in it.
+	leftAtLock := leftAt(june, toronto(t, 2026, 6, 8, 7))
 	noZone := leftLate
 	noZone.Location = nil
 
@@ -302,6 +304,7 @@ func TestTouched(t *testing.T) {
 		{name: "moved within a challenge: once", challenges: []Participation{june, july}, starts: []time.Time{inWeek1, inWeek2}, want: []string{"june"}},
 		{name: "moved out of every challenge", challenges: []Participation{june, july}, starts: []time.Time{inJuly, outside}, want: []string{"july"}},
 		{name: "left once its week was locked: kept for the points", challenges: []Participation{leftLate}, starts: []time.Time{inWeek1}, want: []string{"june"}},
+		{name: "left at the instant its week locked: kept", challenges: []Participation{leftAtLock}, starts: []time.Time{inWeek1}, want: []string{"june"}},
 		{name: "left before its week was locked", challenges: []Participation{leftLate}, starts: []time.Time{inWeek2}},
 		{name: "left before any lock", challenges: []Participation{leftEarly}, starts: []time.Time{inWeek1}},
 		{name: "left, the zone unknown: touched rather than missed", challenges: []Participation{noZone}, starts: []time.Time{inWeek2}, want: []string{"june"}},
