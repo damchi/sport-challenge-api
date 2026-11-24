@@ -33,7 +33,7 @@ type AccountChanges interface {
 // AccountCorrections are the admin changes of an account (README §2.12):
 // each one and its journal line (the account as target, no challenge), in
 // one transaction (Corrections.Run). None judges a challenge again, so none
-// is previewed (no dry run) and none marks a challenge as corrected; the
+// is previewed (no dry run) and none names a challenge in the journal; the
 // deletion has the effect of DELETE /me, which judges nothing either.
 type AccountCorrections struct {
 	corrections *Corrections

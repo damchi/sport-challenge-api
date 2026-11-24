@@ -2236,7 +2236,7 @@ paths:
         ranked and its activities count. An account already blocked stays
         blocked since the first time; the call still answers and is
         recorded. The change is recorded in the journal with its `reason`,
-        in one transaction; it marks no challenge as corrected. An admin
+        in one transaction; its journal line names no challenge. An admin
         cannot block their own account (403 `forbidden`). The answer is the
         account after the change. An unknown or deleted account answers 404
         `user_not_found`.
@@ -2283,7 +2283,7 @@ paths:
         §2.12): its requests are served again; nothing else changes. An
         account that is not blocked stays so; the call still answers and is
         recorded. The change is recorded in the journal with its `reason`,
-        in one transaction; it marks no challenge as corrected. The answer is
+        in one transaction; its journal line names no challenge. The answer is
         the account after the change. An unknown or deleted account answers
         404 `user_not_found`.
       tags: [admin]
