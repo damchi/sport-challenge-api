@@ -403,3 +403,64 @@ func run(t *testing.T, pool *pgxpool.Pool, files []string, reverse bool) {
 		}
 	}
 }
+
+// TestAddSportsDownKeepsTheSportsInUse rolls 000020 back: a sport of an
+// activity (deleted or not), the reference of a challenge or a factor frozen
+// in a category stays, with its values; once unused, all three go, and the
+// up seeds them again.
+func TestAddSportsDownKeepsTheSportsInUse(t *testing.T) {
+	pool := testdb.New(t) // every up applied
+	if _, err := pool.Exec(t.Context(), fixture+otherChallengeFixture+`
+		UPDATE challenges SET reference_sport = 'paragliding' WHERE id = '`+otherChallengeID+`';
+		INSERT INTO categories (id, challenge_id, type, position, params) VALUES ('`+categoryID+`', '`+challengeID+`', 'cumulative_distance', 2, '{"factors": {"run": 1, "hyrox": 1}}');
+		INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, source, deleted_at)
+		VALUES ('`+userID+`', 'crossfit', '2026-12-02Z', 3600, 'manual', '2026-12-03Z');`); err != nil {
+		t.Fatal(err)
+	}
+	rows := func() []string {
+		t.Helper()
+		r, err := pool.Query(t.Context(), `SELECT code || ' ' || distance_mode || ' ' || coalesce(suggested_factor::text, '-') || ' ' || elevation_allowed::text
+			FROM sports WHERE code IN ('crossfit', 'hyrox', 'paragliding') ORDER BY code`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		var got []string
+		for r.Next() {
+			var row string
+			if err := r.Scan(&row); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, row)
+		}
+		if err := r.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	seeded := []string{"crossfit none - false", "hyrox required 1.00 false", "paragliding required 0.30 false"}
+
+	down := []string{"000020_add_crossfit_hyrox_paragliding.down.sql"}
+	up := []string{"000020_add_crossfit_hyrox_paragliding.up.sql"}
+	run(t, pool, down, false)
+	if got := rows(); !slices.Equal(got, seeded) {
+		t.Fatalf("sports after down = %v, want every one in use kept: %v", got, seeded)
+	}
+	run(t, pool, up, false)
+	if got := rows(); !slices.Equal(got, seeded) {
+		t.Fatalf("sports after up again = %v, want %v", got, seeded)
+	}
+
+	if _, err := pool.Exec(t.Context(), `DELETE FROM activities; DELETE FROM categories;
+		UPDATE challenges SET reference_sport = 'run';`); err != nil {
+		t.Fatal(err)
+	}
+	run(t, pool, down, false)
+	if got := rows(); len(got) != 0 {
+		t.Fatalf("sports after down = %v, want the unused ones removed", got)
+	}
+	run(t, pool, up, false)
+	if got := rows(); !slices.Equal(got, seeded) {
+		t.Fatalf("sports after up = %v, want %v", got, seeded)
+	}
+}

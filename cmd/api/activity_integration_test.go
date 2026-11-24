@@ -685,3 +685,50 @@ func TestElevationGain(t *testing.T) {
 		t.Fatalf("%d rows, want the hike alone", r.count())
 	}
 }
+
+// TestRecordTheSportsOfSCAPI174 records with the sports added by migration
+// 000020, as the catalogue seeds them: hyrox and paragliding require a
+// distance, crossfit refuses one, and none of them takes an elevation gain.
+// The challenge froze its factors before they joined the catalogue: they
+// bring it their duration, not their distance (README §2.4).
+func TestRecordTheSportsOfSCAPI174(t *testing.T) {
+	r := newRecording(t)
+	c := r.challenge([3]int{2026, 6, 1}, 3, "active", false)
+	r.distanceCategory(c, "Spring", `{"run": 1, "ride": 0.3}`)
+	m := func(v int) *int { return &v }
+	at := func(h int) time.Time { return toronto(t, 2026, 6, 9, h) }
+	tests := []struct {
+		name  string
+		draft activity.Draft
+		want  apperr.Code // "" when recorded
+	}{
+		{name: "hyrox", draft: activity.Draft{SportCode: "hyrox", StartedAt: at(6), DurationSeconds: 3600, DistanceMeters: m(8000)}},
+		{name: "paragliding", draft: activity.Draft{SportCode: "paragliding", StartedAt: at(8), DurationSeconds: 3600, DistanceMeters: m(25000)}},
+		{name: "crossfit", draft: activity.Draft{SportCode: "crossfit", StartedAt: at(10), DurationSeconds: 3600}},
+		{name: "hyrox without distance", draft: activity.Draft{SportCode: "hyrox", StartedAt: at(12), DurationSeconds: 3600}, want: apperr.CodeDistanceRequired},
+		{name: "paragliding without distance", draft: activity.Draft{SportCode: "paragliding", StartedAt: at(12), DurationSeconds: 3600}, want: apperr.CodeDistanceRequired},
+		{name: "crossfit with a distance", draft: activity.Draft{SportCode: "crossfit", StartedAt: at(12), DurationSeconds: 3600, DistanceMeters: m(1000)}, want: apperr.CodeDistanceNotAllowed},
+		{name: "hyrox with an elevation gain", draft: activity.Draft{SportCode: "hyrox", StartedAt: at(12), DurationSeconds: 3600, DistanceMeters: m(8000), ElevationGainMeters: m(10)}, want: apperr.CodeElevationNotAllowed},
+		{name: "paragliding with an elevation gain", draft: activity.Draft{SportCode: "paragliding", StartedAt: at(12), DurationSeconds: 3600, DistanceMeters: m(25000), ElevationGainMeters: m(900)}, want: apperr.CodeElevationNotAllowed},
+		{name: "crossfit with an elevation gain", draft: activity.Draft{SportCode: "crossfit", StartedAt: at(12), DurationSeconds: 3600, ElevationGainMeters: m(10)}, want: apperr.CodeElevationNotAllowed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := r.activities.Record(t.Context(), r.user, nil, tt.draft)
+			if tt.want == "" {
+				want := []activity.Contribution{{ChallengeID: c, ChallengeTitle: "Spring", DurationSeconds: 3600}}
+				if err != nil || got.SportCode != tt.draft.SportCode || !reflect.DeepEqual(got.Contributions, want) {
+					t.Fatalf("Record() = %+v, %v, want it stored, counting its duration only", got, err)
+				}
+				return
+			}
+			var appErr *apperr.Error
+			if !errors.As(err, &appErr) || appErr.Code != tt.want {
+				t.Fatalf("Record() error = %v, want %s", err, tt.want)
+			}
+		})
+	}
+	if r.count() != 3 {
+		t.Fatalf("%d rows, want the three recorded", r.count())
+	}
+}
