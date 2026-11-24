@@ -358,10 +358,6 @@ func toDetail(d Detail) (api.ChallengeDetail, error) {
 		week, ends := d.CurrentWeek, d.WeekEndsAt.UTC()
 		out.CurrentWeek, out.WeekEndsAt = &week, &ends
 	}
-	if d.AdminCorrectedAt != nil {
-		at := d.AdminCorrectedAt.UTC()
-		out.AdminCorrectedAt = &at
-	}
 	return out, nil
 }
 

@@ -4612,7 +4612,7 @@ components:
             and once every started week is locked.
     ChallengeDetail:
       type: object
-      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, participant_count, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at, week_count, weeks, admin_corrected_at]
+      required: [id, title, description, visibility, members_can_invite, timezone, reference_sport, starts_at, ends_at, categories, participant_count, my_role, my_status, status, can_join, registration_deadline, current_week, week_ends_at, week_count, weeks]
       additionalProperties: false
       properties:
         id:
@@ -4697,16 +4697,6 @@ components:
             week ends at `week_ends_at`.
           items:
             $ref: "#/components/schemas/ChallengeWeek"
-        admin_corrected_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: |
-            When an admin last changed something that touches the challenge
-            (settings, members, an activity that counts in it, deletion,
-            restore), shown as "corrected by the administrator"; null when no
-            admin ever did. Neither the reason nor the admin is given. A change
-            of an account alone (profile, blocking) marks no challenge.
     ChallengeWeek:
       type: object
       required: [number, starts_at, ends_at]

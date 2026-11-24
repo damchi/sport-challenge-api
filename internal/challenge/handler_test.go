@@ -691,36 +691,6 @@ func TestGetChallenge(t *testing.T) {
 	}
 }
 
-// TestGetChallengeAdminCorrectedAt: the instant of the last admin correction,
-// in UTC, or null when no admin corrected the challenge; never more.
-func TestGetChallengeAdminCorrectedAt(t *testing.T) {
-	toronto, err := time.LoadLocation("America/Toronto")
-	if err != nil {
-		t.Fatal(err)
-	}
-	at := time.Date(2026, 3, 4, 13, 30, 0, 0, toronto)
-	tests := []struct {
-		name      string
-		corrected *time.Time
-		want      any
-	}{
-		{name: "never corrected", want: nil},
-		{name: "corrected", corrected: &at, want: "2026-03-04T18:30:00Z"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := &fakeRepository{challenge: stored(VisibilityPublic), corrected: tt.corrected}
-			rec, out := serve(t, NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)), http.MethodGet, "/api/v1/challenges/11111111-1111-1111-1111-111111111111", "")
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
-			}
-			if v, ok := out["admin_corrected_at"]; !ok || v != tt.want {
-				t.Fatalf("admin_corrected_at = %v (present %v), want %v", v, ok, tt.want)
-			}
-		})
-	}
-}
-
 func TestGetChallengeNotFoundIsTheSameAnswer(t *testing.T) {
 	type answer struct {
 		status  int

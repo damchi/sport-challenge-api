@@ -291,9 +291,6 @@ type Detail struct {
 	WeekCount int
 	// Weeks are the WeekCount weeks of the window, in order.
 	Weeks []Week
-	// AdminCorrectedAt is when an admin last changed something that touches
-	// the challenge, nil when none did (README §2.12).
-	AdminCorrectedAt *time.Time
 }
 
 // Week is one week of a challenge, [StartsAt, EndsAt) in UTC.

@@ -24,7 +24,6 @@ type repository interface {
 	// invitations at now (Membership.Invited).
 	Get(ctx context.Context, id, actorID string, now time.Time) (Challenge, Membership, error)
 	Categories(ctx context.Context, id string) ([]Category, error)
-	LastAdminCorrection(ctx context.Context, id string) (*time.Time, error)
 	CategoriesOf(ctx context.Context, ids []string) (map[string][]Category, error)
 	UpdateText(ctx context.Context, id string, changes TextChanges) error
 	// UpdateSettings writes the challenge decide returns, columns and
@@ -373,10 +372,6 @@ func (s *Service) Get(ctx context.Context, actor auth.Actor, id string) (Detail,
 	if c.Categories, err = s.repo.Categories(ctx, c.ID); err != nil {
 		return Detail{}, fmt.Errorf("get challenge: %w", err)
 	}
-	corrected, err := s.repo.LastAdminCorrection(ctx, c.ID)
-	if err != nil {
-		return Detail{}, fmt.Errorf("get challenge: %w", err)
-	}
 	loc, err := location(c.Timezone)
 	if err != nil {
 		return Detail{}, fmt.Errorf("challenge time zone %q: %w", c.Timezone, err)
@@ -402,7 +397,6 @@ func (s *Service) Get(ctx context.Context, actor auth.Actor, id string) (Detail,
 		WeekEndsAt:           weekEnd,
 		WeekCount:            count,
 		Weeks:                weeks,
-		AdminCorrectedAt:     corrected,
 	}, nil
 }
 
