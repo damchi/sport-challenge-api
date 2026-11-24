@@ -777,7 +777,7 @@ func TestFinalizeAnAccountDeletedSinceTheRanking(t *testing.T) {
 		t.Fatalf("result = %+v, err = %v, want 1 challenge", got, err)
 	}
 	want := payload{Entries: []payloadEntry{{UserID: b, Rank: 1, Value: 10}, {UserID: c, Rank: 2, Value: 8}}}
-	if snaps := s.snapshots(id); len(snaps) != 1 || !reflect.DeepEqual(snaps[0].Payload, want) {
+	if snaps := s.snapshots(id); len(snaps) != 1 || !reflect.DeepEqual(withoutWeeks(t, snaps[0].Payload, 4), want) {
 		t.Fatalf("snapshots %+v, want b first with 10 points, c with 8: %+v", snaps, want)
 	}
 }
@@ -834,7 +834,7 @@ func TestChallengeWithPoints(t *testing.T) {
 	want := payload{Entries: []payloadEntry{
 		{UserID: b, Rank: 1, Value: 36}, {UserID: c, Rank: 2, Value: 22}, {UserID: a, Rank: 3, Value: 18}, {UserID: quitter, Abandoned: true},
 	}}
-	if len(snaps) != 2 || snaps[1].Type != "points" || !reflect.DeepEqual(snaps[1].Payload, want) {
+	if len(snaps) != 2 || snaps[1].Type != "points" || !reflect.DeepEqual(withoutWeeks(t, snaps[1].Payload, 4), want) {
 		t.Fatalf("snapshots %+v, want the points %+v", snaps, want)
 	}
 
@@ -844,6 +844,7 @@ func TestChallengeWithPoints(t *testing.T) {
 			{Type: leaderboard.CategoryCumulativeTime},
 			{Type: leaderboard.CategoryPoints, Criteria: []string{scoring.CriterionLongestDuration, scoring.CriterionSessionCount}, Podium: 5, MinSessionSeconds: 1200},
 		},
+		ReadsActivities: true,
 	}
 	points := func(repo interface {
 		ParticipantsOf(context.Context, []string) (map[string][]scoring.Participant, error)
@@ -873,6 +874,34 @@ func TestChallengeWithPoints(t *testing.T) {
 		if e.Provisional != nil {
 			t.Fatalf("frozen entry %+v has provisional points", e)
 		}
+	}
+
+	// The breakdown frozen is the one computed: same weeks, same points.
+	breakdown := func(repo interface {
+		ParticipantsOf(context.Context, []string) (map[string][]scoring.Participant, error)
+		ActivitiesOf(context.Context, []leaderboard.Scope) (map[string][]scoring.Activity, error)
+		Snapshots(context.Context, string) (map[string]json.RawMessage, time.Time, error)
+		SnapshotsOf(context.Context, []string) (map[string]map[string]json.RawMessage, error)
+		DeletedAccounts(context.Context, []string) (map[string]bool, error)
+	}, user string,
+	) leaderboard.Breakdown {
+		t.Helper()
+		svc := leaderboard.NewService(staticChallenge{ch}, noProfiles{}, repo, clock.NewFake(lock.Add(time.Hour)), time.Hour)
+		got, err := svc.Breakdown(t.Context(), auth.Actor{ID: a}, id, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got.Frozen, got.ComputedAt = false, time.Time{}
+		return got
+	}
+	for _, user := range []string{a, b, c, quitter} {
+		frozen, computed := breakdown(leaderboard.NewRepository(gdb), user), breakdown(withoutSnapshots{leaderboard.NewRepository(gdb)}, user)
+		if !reflect.DeepEqual(frozen, computed) {
+			t.Fatalf("%s: frozen breakdown %+v, want what is computed %+v", user, frozen, computed)
+		}
+	}
+	if got := breakdown(leaderboard.NewRepository(gdb), quitter); len(got.Weeks) != 2 || !got.Abandoned {
+		t.Fatalf("quitter %+v, want weeks 1 and 2 only", got)
 	}
 
 	s.exec("UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1", b)

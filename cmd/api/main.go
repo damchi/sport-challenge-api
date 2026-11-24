@@ -388,7 +388,9 @@ func (l leaderboardChallenges) Challenge(ctx context.Context, actor auth.Actor, 
 	if err != nil {
 		return leaderboard.Challenge{}, err
 	}
-	return toLeaderboardChallenge(d.Challenge), nil
+	c := toLeaderboardChallenge(d.Challenge)
+	c.ReadsActivities = challenge.ReadsActivities(d.Role, actor.Admin)
+	return c, nil
 }
 
 // toLeaderboardChallenge gives a challenge, with its categories, the shape

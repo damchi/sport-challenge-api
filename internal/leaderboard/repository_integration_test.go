@@ -838,6 +838,21 @@ func TestGetPointsOfAnAccountDeletedBeforeTheFreeze(t *testing.T) {
 			t.Fatalf("activity %+v of the deleted account read", act)
 		}
 	}
+
+	// The breakdown follows: b is first of week 1, the deleted account has
+	// none.
+	got, err := svc.Breakdown(t.Context(), auth.Actor{ID: b}, challengeID, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Weeks) != 2 || got.Weeks[0].Criteria[0].Rank != 1 || got.Weeks[0].Points != 10 || got.Acquired != 10 {
+		t.Fatalf("breakdown of b %+v, want first of week 1 with 10 points", got)
+	}
+	_, err = svc.Breakdown(t.Context(), auth.Actor{ID: b}, challengeID, a)
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeNotFound {
+		t.Fatalf("breakdown of the deleted account = %v, want 404 not_found", err)
+	}
 }
 
 // TestResultsFromTheDatabase: the frozen results of several challenges are

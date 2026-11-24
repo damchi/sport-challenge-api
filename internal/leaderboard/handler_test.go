@@ -393,3 +393,55 @@ func TestGetLeaderboardPageRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestGetParticipantPoints(t *testing.T) {
+	challenges := &fakeChallenges{c: twoWeeks(t)}
+	challenges.c.Categories = append(challenges.c.Categories, Category{
+		Type: CategoryPoints, Criteria: []string{scoring.CriterionLongestDuration, scoring.CriterionSessionCount}, Podium: 5, MinSessionSeconds: 1200,
+	})
+	challenges.c.ReadsActivities = true
+	svc := handlerService(t, challenges)
+	rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/participants/"+ann+"/points", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d (%s), want 200", rec.Code, rec.Body)
+	}
+	weeks, _ := body["weeks"].([]any)
+	if body["user_id"] != ann || body["acquired_points"] != float64(20) || body["provisional_points"] != float64(20) || len(weeks) != 2 {
+		t.Fatalf("body %v, want ann, 20 acquired in week 1, 20 provisional in week 2", body)
+	}
+	week1 := weeks[0].(map[string]any)
+	criteria := week1["criteria"].([]any)
+	if week1["locked"] != true || len(criteria) != 2 || criteria[0].(map[string]any)["criterion"] != "longest_duration" {
+		t.Fatalf("week 1 %v, want locked, its two criteria in order", week1)
+	}
+
+	t.Run("a value of 0 has no rank", func(t *testing.T) {
+		_, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/participants/"+bob+"/points", true)
+		week2 := body["weeks"].([]any)[1].(map[string]any)
+		if c := week2["criteria"].([]any)[0].(map[string]any); c["rank"] != nil || c["points"] != float64(0) {
+			t.Fatalf("bob in week 2 %v, want no rank and no points", c)
+		}
+	})
+	t.Run("a non-member gets no value", func(t *testing.T) {
+		outsider := &fakeChallenges{c: challenges.c}
+		outsider.c.ReadsActivities = false
+		_, body := get(t, handlerService(t, outsider), "/api/v1/challenges/"+challengeID+"/participants/"+ann+"/points", true)
+		c := body["weeks"].([]any)[0].(map[string]any)["criteria"].([]any)[0].(map[string]any)
+		if c["value"] != nil || c["points"] != float64(10) || c["rank"] != float64(1) {
+			t.Fatalf("criterion %v, want rank 1, 10 points, no value", c)
+		}
+	})
+	t.Run("hidden challenge", func(t *testing.T) {
+		svc := handlerService(t, &fakeChallenges{err: apperr.New(apperr.CodeChallengeNotFound, nil)})
+		rec, body := get(t, svc, "/api/v1/challenges/"+challengeID+"/participants/"+ann+"/points", true)
+		if rec.Code != http.StatusNotFound || errorCode(body) != "challenge_not_found" {
+			t.Fatalf("status %d (%s), want 404 challenge_not_found", rec.Code, rec.Body)
+		}
+	})
+	t.Run("no points category", func(t *testing.T) {
+		rec, body := get(t, handlerService(t, &fakeChallenges{}), "/api/v1/challenges/"+challengeID+"/participants/"+ann+"/points", true)
+		if rec.Code != http.StatusNotFound || errorCode(body) != "not_found" {
+			t.Fatalf("status %d (%s), want 404 not_found", rec.Code, rec.Body)
+		}
+	})
+}

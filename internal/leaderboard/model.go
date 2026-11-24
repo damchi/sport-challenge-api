@@ -23,6 +23,10 @@ type Challenge struct {
 	StartsAt   time.Time
 	EndsAt     time.Time
 	Categories []Category
+	// ReadsActivities tells the reader may see the activities of the
+	// participants (rule challenge.ReadsActivities): the values behind the
+	// points of a breakdown are shown to them alone.
+	ReadsActivities bool
 }
 
 // Category is a category of a challenge, in position order.
@@ -124,4 +128,35 @@ type CategoryPage struct {
 	Entries     []Ranked
 	Me          *Ranked
 	Next        *Position
+}
+
+// Breakdown is where the points of a participant come from in the points
+// category of a challenge, computed at ComputedAt.
+type Breakdown struct {
+	UserID     string
+	ComputedAt time.Time
+	Abandoned  bool
+	// Frozen tells the breakdown is that of the frozen results.
+	Frozen bool
+	// ValuesHidden tells the reader may not see the activities of the
+	// participants: the value of each criterion is left out (zero), the
+	// ranks and points stay.
+	ValuesHidden bool
+	// Acquired is the points of the locked weeks; Provisional those of the
+	// weeks started but not locked yet, nil when there is none, for a
+	// participant who abandoned and once frozen.
+	Acquired    int
+	Provisional *int
+	Weeks       []BreakdownWeek
+}
+
+// BreakdownWeek is a week of a Breakdown: its bounds, whether it is locked,
+// its points and the line of each criterion, in the order of the category.
+type BreakdownWeek struct {
+	Number   int
+	StartsAt time.Time
+	EndsAt   time.Time
+	Locked   bool
+	Points   int
+	Criteria []scoring.CriterionPoints
 }

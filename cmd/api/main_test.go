@@ -624,3 +624,44 @@ func TestParticipationsUnknownZoneAndFailure(t *testing.T) {
 		t.Fatalf("error = %v, want %v", err, storage)
 	}
 }
+
+// detailsFunc is a details.
+type detailsFunc func(ctx context.Context, actor auth.Actor, id string) (challenge.Detail, error)
+
+func (f detailsFunc) Get(ctx context.Context, actor auth.Actor, id string) (challenge.Detail, error) {
+	return f(ctx, actor, id)
+}
+
+// TestLeaderboardChallengesTellWhoReadsTheActivities: the leaderboard
+// shows the values behind the points to the readers of the activities
+// alone (challenge.ReadsActivities), the admin permission of the token
+// included.
+func TestLeaderboardChallengesTellWhoReadsTheActivities(t *testing.T) {
+	tests := []struct {
+		name  string
+		role  challenge.Role
+		admin bool
+		want  bool
+	}{
+		{name: "creator", role: challenge.RoleCreator, want: true},
+		{name: "participant", role: challenge.RoleParticipant, want: true},
+		{name: "abandoned", role: challenge.RoleAbandoned, want: true},
+		{name: "invited", role: challenge.RoleInvited, want: false},
+		{name: "outsider of a public challenge", role: challenge.RoleOutsider, want: false},
+		{name: "admin, not a member", role: challenge.RoleOutsider, admin: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := leaderboardChallenges{challenges: detailsFunc(func(context.Context, auth.Actor, string) (challenge.Detail, error) {
+				return challenge.Detail{Challenge: challenge.Challenge{ID: "c1", Timezone: "America/Toronto"}, Role: tt.role}, nil
+			})}
+			c, err := l.Challenge(t.Context(), auth.Actor{ID: "u1", Admin: tt.admin}, "c1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.ReadsActivities != tt.want {
+				t.Fatalf("ReadsActivities = %v, want %v", c.ReadsActivities, tt.want)
+			}
+		})
+	}
+}
