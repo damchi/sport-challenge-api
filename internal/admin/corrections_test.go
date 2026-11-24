@@ -70,6 +70,11 @@ func (j *journalLog) InsertAction(_ context.Context, a ActionRecord) error {
 	return nil
 }
 
+func (j *journalLog) EraseUserValues(context.Context, string) error {
+	j.log.add("erase journal")
+	return nil
+}
+
 func newCorrections(log *correctionLog) (*Corrections, *journalLog) {
 	journal := &journalLog{log: log}
 	return NewCorrections(log, NewJournal(journal, clock.NewFake(statsAt)), log, log), journal

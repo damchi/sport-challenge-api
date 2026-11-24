@@ -18,6 +18,9 @@ const (
 	CodeInvalidToken    Code = "invalid_token"
 	CodeTokenExpired    Code = "token_expired"
 	CodeAccountDeleted  Code = "account_deleted"
+	// CodeAccountBlocked refuses every request of an account an admin
+	// blocked (README §2.12): authenticated, but not allowed in (403).
+	CodeAccountBlocked Code = "account_blocked"
 	// CodeProfileIncomplete refuses creating or joining a challenge and
 	// recording an activity until the first and last names are set: a
 	// condition to meet, not a missing right (422).
@@ -98,6 +101,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnauthorized, "Access token expired"}, true
 	case CodeAccountDeleted:
 		return definition{http.StatusUnauthorized, "Account deleted"}, true
+	case CodeAccountBlocked:
+		return definition{http.StatusForbidden, "Account blocked"}, true
 	case CodeProfileIncomplete:
 		return definition{http.StatusUnprocessableEntity, "Profile incomplete"}, true
 	case CodeForbidden:

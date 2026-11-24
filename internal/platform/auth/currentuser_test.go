@@ -51,6 +51,7 @@ func TestCurrentUser(t *testing.T) {
 		{name: "valid token", authorization: "Bearer " + goodToken, resolveID: localUserID, wantStatus: http.StatusNoContent},
 		{name: "no token", wantStatus: 401, wantCode: "unauthenticated"},
 		{name: "deleted account", authorization: "Bearer " + goodToken, resolveErr: fmt.Errorf("get or create user: %w", apperr.New(apperr.CodeAccountDeleted, nil)), wantStatus: 401, wantCode: "account_deleted"},
+		{name: "blocked account", authorization: "Bearer " + goodToken, resolveErr: fmt.Errorf("get or create user: %w", apperr.New(apperr.CodeAccountBlocked, nil)), wantStatus: 403, wantCode: "account_blocked"},
 		{name: "database failure", authorization: "Bearer " + goodToken, resolveErr: errors.New("insert user: connection refused"), wantStatus: 500, wantCode: "internal_error", wantLog: "request failed"},
 		{name: "empty identifier", authorization: "Bearer " + goodToken, wantStatus: 500, wantCode: "internal_error", wantLog: "empty identifier"},
 		{name: "client gone", authorization: "Bearer " + goodToken, resolveErr: fmt.Errorf("read user: %w", context.Canceled), clientGone: true, wantStatus: statusClientClosedRequest},

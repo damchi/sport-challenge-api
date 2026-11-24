@@ -15,11 +15,18 @@ import (
 // fakeJournalStore records what the journal wrote.
 type fakeJournalStore struct {
 	records []ActionRecord
-	err     error
+	// erased records the accounts whose profile values were erased.
+	erased []string
+	err    error
 }
 
 func (f *fakeJournalStore) InsertAction(_ context.Context, a ActionRecord) error {
 	f.records = append(f.records, a)
+	return f.err
+}
+
+func (f *fakeJournalStore) EraseUserValues(_ context.Context, userID string) error {
+	f.erased = append(f.erased, userID)
 	return f.err
 }
 
@@ -164,5 +171,17 @@ func TestInsertActionRefusesAChallengeIDThatIsNotOne(t *testing.T) {
 				t.Fatal("inserted, want an error")
 			}
 		})
+	}
+}
+
+// TestJournalEraseUser: the deletion of an account erases the profile
+// values of its journal lines through the store, in its transaction.
+func TestJournalEraseUser(t *testing.T) {
+	store := &fakeJournalStore{}
+	if err := NewJournal(store, clock.NewFake(statsAt)).EraseUser(t.Context(), bobID); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.erased) != 1 || store.erased[0] != bobID || len(store.records) != 0 {
+		t.Fatalf("erased %v, recorded %v, want bob's values erased and nothing recorded", store.erased, store.records)
 	}
 }

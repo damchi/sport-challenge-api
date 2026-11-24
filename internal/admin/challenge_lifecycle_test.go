@@ -182,7 +182,7 @@ func TestDeleteAndRestoreAdminChallenge(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lifecycle := &fakeLifecycle{}
-			h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), lifecycle, nil, nil)
+			h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), lifecycle, nil, nil, nil)
 			rec, got := serveWith(t, h, adminToken, tt.method, tt.path, tt.body, io.Discard)
 			if rec.Code != http.StatusOK || lifecycle.asked != tt.wantAsked {
 				t.Fatalf("got %d %v, asked %q, want 200 and %q", rec.Code, got, lifecycle.asked, tt.wantAsked)
@@ -201,7 +201,7 @@ func TestDeleteAndRestoreAdminChallenge(t *testing.T) {
 		})
 		t.Run(tt.name+", without the permission", func(t *testing.T) {
 			lifecycle := &fakeLifecycle{}
-			h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), lifecycle, nil, nil)
+			h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), lifecycle, nil, nil, nil)
 			rec, got := serveWith(t, h, "some.access.token", tt.method, tt.path, tt.body, io.Discard)
 			if e, _ := got["error"].(map[string]any); rec.Code != http.StatusNotFound || e["code"] != "not_found" || lifecycle.asked != "" {
 				t.Fatalf("got %d %v, asked %q, want 404 not_found and nothing asked", rec.Code, got, lifecycle.asked)

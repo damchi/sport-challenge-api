@@ -24,6 +24,9 @@ type User struct {
 	CreatedAt    time.Time `gorm:"->"`
 	UpdatedAt    time.Time `gorm:"->"`
 	AnonymizedAt *time.Time
+	// BlockedAt is when an admin blocked the account, nil while it is not:
+	// every request of a blocked account answers account_blocked.
+	BlockedAt *time.Time
 }
 
 // ProfileChanges are the profile fields to change; nil leaves a field as is.

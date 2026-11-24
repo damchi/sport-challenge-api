@@ -149,6 +149,20 @@ func TestRepositoryUser(t *testing.T) {
 		}
 	})
 
+	t.Run("blocked", func(t *testing.T) {
+		blocked := insertUser(t, pool, "email|blocked", created, false)
+		gone := insertUser(t, pool, "email|blocked-gone", created, true)
+		exec(t, pool, `UPDATE users SET blocked_at = $2 WHERE id IN ($1, $3)`, blocked, created.Add(time.Hour), gone)
+		got, err := r.User(t.Context(), blocked)
+		if err != nil || got.State != UserBlocked {
+			t.Fatalf("User() = %+v, %v, want blocked", got, err)
+		}
+		// Deleted once blocked: the deletion tells its state.
+		if got, err := r.User(t.Context(), gone); err != nil || got.State != UserDeleted {
+			t.Fatalf("User() = %+v, %v, want deleted", got, err)
+		}
+	})
+
 	t.Run("unknown", func(t *testing.T) {
 		if _, err := r.User(t.Context(), "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f"); !errors.Is(err, errUserNotFound) {
 			t.Fatalf("User() error = %v, want errUserNotFound", err)

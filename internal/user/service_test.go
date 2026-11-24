@@ -34,6 +34,26 @@ type fakeRepository struct {
 	deleteErr error
 	removed   *[]string
 	removeErr error
+	// updated, when set, is what UpdateProfile returns instead of user;
+	// lockErr fails Lock, which returns user; blocks records the
+	// SetBlockedAt calls, when set.
+	updated *User
+	lockErr error
+	blocks  *[]*time.Time
+}
+
+func (f fakeRepository) Lock(context.Context, string) (User, error) {
+	if f.lockErr != nil {
+		return User{}, f.lockErr
+	}
+	return f.user, nil
+}
+
+func (f fakeRepository) SetBlockedAt(_ context.Context, _ string, at *time.Time) error {
+	if f.blocks != nil {
+		*f.blocks = append(*f.blocks, at)
+	}
+	return nil
 }
 
 func (f fakeRepository) Delete(ctx context.Context, id string, at time.Time, abandon func(context.Context) error) (string, error) {
@@ -112,6 +132,9 @@ func (f fakeRepository) GetByID(context.Context, string) (User, error) {
 func (f fakeRepository) UpdateProfile(_ context.Context, _ string, changes ProfileChanges) (User, error) {
 	if f.changes != nil {
 		*f.changes = changes
+	}
+	if f.updated != nil {
+		return *f.updated, f.err
 	}
 	return f.user, f.err
 }

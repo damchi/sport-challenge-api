@@ -202,7 +202,8 @@ func (r *Repository) RemovePendingAuth0Deletion(ctx context.Context, subject str
 // row as stored. An unknown or anonymized user gives errUserNotFound. A
 // pseudo already used by another user, in any case, gives
 // errPseudoTaken: the unique index decides, so two concurrent requests
-// cannot both take it.
+// cannot both take it. It writes in the transaction of ctx, if any (an
+// admin change, which locked the row first).
 func (r *Repository) UpdateProfile(ctx context.Context, id string, changes ProfileChanges) (User, error) {
 	columns := map[string]any{}
 	if changes.Pseudo != nil {
@@ -223,7 +224,7 @@ func (r *Repository) UpdateProfile(ctx context.Context, id string, changes Profi
 	if len(columns) > 0 {
 		// An anonymized account is never written again, even by a PATCH
 		// racing the account deletion: it counts as not found.
-		res := r.db.WithContext(ctx).Model(&User{}).Where("id = ? AND anonymized_at IS NULL", id).Updates(columns)
+		res := db.Conn(ctx, r.db).Model(&User{}).Where("id = ? AND anonymized_at IS NULL", id).Updates(columns)
 		var pgErr *pgconn.PgError
 		switch {
 		case errors.As(res.Error, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == pseudoIndex:
@@ -235,4 +236,32 @@ func (r *Repository) UpdateProfile(ctx context.Context, id string, changes Profi
 		}
 	}
 	return r.GetByID(ctx, id)
+}
+
+// Lock takes the row of the active user id FOR UPDATE, in the transaction
+// of ctx (an admin change), until it ends, and returns it: the account
+// cannot be deleted, nor changed by its owner, meanwhile. An unknown or
+// anonymized user gives errUserNotFound.
+func (r *Repository) Lock(ctx context.Context, id string) (User, error) {
+	var u User
+	err := db.Conn(ctx, r.db).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND anonymized_at IS NULL", id).Take(&u).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return User{}, fmt.Errorf("lock user: %w", errUserNotFound)
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("lock user: %w", err)
+	}
+	return u, nil
+}
+
+// SetBlockedAt writes when user id was blocked, nil to unblock it, in the
+// transaction of ctx (an admin change, which locked the row first). An
+// anonymized account is never written again.
+func (r *Repository) SetBlockedAt(ctx context.Context, id string, at *time.Time) error {
+	err := db.Conn(ctx, r.db).Model(&User{}).Where("id = ? AND anonymized_at IS NULL", id).
+		Update("blocked_at", at).Error
+	if err != nil {
+		return fmt.Errorf("update blocked_at: %w", err)
+	}
+	return nil
 }

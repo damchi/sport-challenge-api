@@ -17,6 +17,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
+	"github.com/damchi/sport-challenge-api/internal/user"
 )
 
 // routePrefix starts the path of every /admin route of the contract.
@@ -45,6 +46,7 @@ type Handler struct {
 	settings   challengeUpdater
 	members    memberUpdater
 	activities activityUpdater
+	accounts   accountUpdater
 }
 
 // challengeUpdater changes a challenge itself as an admin: its settings,
@@ -73,11 +75,20 @@ type activityUpdater interface {
 	Delete(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error)
 }
 
+// accountUpdater changes any account as an admin (AccountCorrections).
+type accountUpdater interface {
+	UpdateProfile(ctx context.Context, actor auth.Actor, id string, changes user.ProfileChanges, reason string) error
+	Block(ctx context.Context, actor auth.Actor, id, reason string) error
+	Unblock(ctx context.Context, actor auth.Actor, id, reason string) error
+	Delete(ctx context.Context, actor auth.Actor, id, reason string) error
+}
+
 // NewHandler returns a Handler on service for the reads, settings for the
 // changes of a challenge itself (settings, deletion, restore), members for those of its
-// members, activities for those of an activity.
-func NewHandler(service *Service, settings challengeUpdater, members memberUpdater, activities activityUpdater) *Handler {
-	return &Handler{service: service, settings: settings, members: members, activities: activities}
+// members, activities for those of an activity, accounts for those of an
+// account.
+func NewHandler(service *Service, settings challengeUpdater, members memberUpdater, activities activityUpdater, accounts accountUpdater) *Handler {
+	return &Handler{service: service, settings: settings, members: members, activities: activities, accounts: accounts}
 }
 
 // CreateAdminActivity records an activity for any account, in any week, or
@@ -405,6 +416,7 @@ func (h *Handler) GetAdminStats(ctx context.Context, _ api.GetAdminStatsRequestO
 			Total:           int(s.AccountsTotal),
 			NewLast7Days:    int(s.AccountsNew),
 			ActiveLast7Days: int(s.AccountsActive),
+			Blocked:         int(s.AccountsBlocked),
 		},
 		Challenges: api.AdminChallengeCounts{
 			Upcoming: int(s.Upcoming),
@@ -663,15 +675,109 @@ func (h *Handler) GetAdminUser(ctx context.Context, req api.GetAdminUserRequestO
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	u, err := h.service.User(ctx, actor, req.UserId.String())
-	if err != nil {
-		return nil, err
-	}
-	out, err := toAdminUser(u)
+	out, err := h.adminUser(ctx, actor, req.UserId.String())
 	if err != nil {
 		return nil, err
 	}
 	return api.GetAdminUser200JSONResponse(out), nil
+}
+
+// UpdateAdminUser changes the pseudo and the names of any account, then
+// answers it.
+func (h *Handler) UpdateAdminUser(ctx context.Context, req api.UpdateAdminUserRequestObject) (api.UpdateAdminUserResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	// The contract requires the body: without one, the request is refused
+	// as one without its reason, once the permission is checked
+	// (Corrections.Run).
+	b := req.Body
+	if b == nil {
+		b = &api.AdminUserUpdate{}
+	}
+	changes := user.ProfileChanges{FirstName: b.FirstName, LastName: b.LastName}
+	if b.Pseudo.IsSpecified() {
+		if b.Pseudo.IsNull() {
+			changes.RemovePseudo = true
+		} else {
+			pseudo := b.Pseudo.MustGet()
+			changes.Pseudo = &pseudo
+		}
+	}
+	id := req.UserId.String()
+	if err := h.accounts.UpdateProfile(ctx, actor, id, changes, b.Reason); err != nil {
+		return nil, err
+	}
+	out, err := h.adminUser(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
+	return api.UpdateAdminUser200JSONResponse(out), nil
+}
+
+// BlockAdminUser blocks any account but that of the admin, then answers it.
+func (h *Handler) BlockAdminUser(ctx context.Context, req api.BlockAdminUserRequestObject) (api.BlockAdminUserResponseObject, error) {
+	out, err := h.accountChange(ctx, h.accounts.Block, req.UserId, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return api.BlockAdminUser200JSONResponse(out), nil
+}
+
+// UnblockAdminUser unblocks any account, then answers it.
+func (h *Handler) UnblockAdminUser(ctx context.Context, req api.UnblockAdminUserRequestObject) (api.UnblockAdminUserResponseObject, error) {
+	out, err := h.accountChange(ctx, h.accounts.Unblock, req.UserId, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return api.UnblockAdminUser200JSONResponse(out), nil
+}
+
+// accountChange runs change, Block or Unblock of accountUpdater, on account
+// userID as the actor of ctx, with the reason of body, and answers the
+// account after it. Without a body, the request is refused as one without
+// its reason, once the permission is checked (Corrections.Run).
+func (h *Handler) accountChange(ctx context.Context, change func(ctx context.Context, actor auth.Actor, id, reason string) error,
+	userID uuid.UUID, body *api.AdminAccountReason,
+) (api.AdminUser, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return api.AdminUser{}, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	if body == nil {
+		body = &api.AdminAccountReason{}
+	}
+	id := userID.String()
+	if err := change(ctx, actor, id, body.Reason); err != nil {
+		return api.AdminUser{}, err
+	}
+	return h.adminUser(ctx, actor, id)
+}
+
+// DeleteAdminUser deletes any account, as DELETE /me would.
+func (h *Handler) DeleteAdminUser(ctx context.Context, req api.DeleteAdminUserRequestObject) (api.DeleteAdminUserResponseObject, error) {
+	actor, ok := auth.ActorFrom(ctx)
+	if !ok {
+		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
+	}
+	b := req.Body
+	if b == nil {
+		b = &api.AdminAccountReason{}
+	}
+	if err := h.accounts.Delete(ctx, actor, req.UserId.String(), b.Reason); err != nil {
+		return nil, err
+	}
+	return api.DeleteAdminUser204Response{}, nil
+}
+
+// adminUser reads account id once changed, in its contract form.
+func (h *Handler) adminUser(ctx context.Context, actor auth.Actor, id string) (api.AdminUser, error) {
+	u, err := h.service.User(ctx, actor, id)
+	if err != nil {
+		return api.AdminUser{}, err
+	}
+	return toAdminUser(u)
 }
 
 // ListAdminUserChallenges answers a page of the challenges of an account.

@@ -33,12 +33,14 @@ func NewRepository(gdb *gorm.DB) *Repository {
 // Figures counts, in one statement (one snapshot), the accounts, the
 // challenges at now, the activities recorded since since and the pending
 // Auth0 deletions. A deleted account (anonymized_at) counts nowhere, its
-// activities neither (they are erased with it).
+// activities neither (they are erased with it); a blocked one counts as
+// any other, and among the blocked ones.
 func (r *Repository) Figures(ctx context.Context, now, since time.Time) (Figures, error) {
 	var out Figures
 	err := r.db.WithContext(ctx).Raw(`SELECT
 		(SELECT count(*) FROM users WHERE anonymized_at IS NULL) AS accounts_total,
 		(SELECT count(*) FROM users WHERE anonymized_at IS NULL AND created_at >= @since) AS accounts_new,
+		(SELECT count(*) FROM users WHERE anonymized_at IS NULL AND blocked_at IS NOT NULL) AS accounts_blocked,
 		(SELECT count(DISTINCT a.user_id) FROM activities a JOIN users u ON u.id = a.user_id
 			WHERE u.anonymized_at IS NULL AND a.deleted_at IS NULL AND a.created_at >= @since) AS accounts_active,
 		c.upcoming, c.ongoing, c.finished, c.deleted,
@@ -265,12 +267,14 @@ func (r *Repository) Challenge(ctx context.Context, id string) (ChallengeData, e
 }
 
 // userColumns reads an account of users u as an admin sees it. Its state
-// follows the deletion: active until anonymized_at, then pending while
+// follows the deletion: active (blocked while blocked_at) until
+// anonymized_at, then pending while
 // pending_auth0_deletions holds its row (removed once Auth0 deleted the
 // identity), deleted after. Its challenges are those it joined or creates,
 // deleted ones included (ListUserChallenges).
 const userColumns = `u.id, u.pseudo, u.first_name, u.last_name, u.email, u.created_at, u.anonymized_at AS deleted_at,
-	CASE WHEN u.anonymized_at IS NULL THEN 'active'
+	CASE WHEN u.anonymized_at IS NULL AND u.blocked_at IS NOT NULL THEN 'blocked'
+		WHEN u.anonymized_at IS NULL THEN 'active'
 		WHEN EXISTS (SELECT 1 FROM pending_auth0_deletions d WHERE d.user_id = u.id) THEN 'auth0_deletion_pending'
 		ELSE 'deleted' END AS state,
 	(SELECT max(a.created_at) FROM activities a WHERE a.user_id = u.id AND a.deleted_at IS NULL) AS last_activity_at,
@@ -424,6 +428,26 @@ func (r *Repository) InsertAction(ctx context.Context, a ActionRecord) error {
 	).Error
 	if err != nil {
 		return fmt.Errorf("insert admin action: %w", err)
+	}
+	return nil
+}
+
+// EraseUserValues removes the profile values (profileFields) from the old
+// and new values of the journal lines that target account userID, as an
+// account or as a participant, in the transaction ctx carries (that of the
+// deletion of the account). The action, the instant, the target and the
+// reason stay.
+func (r *Repository) EraseUserValues(ctx context.Context, userID string) error {
+	err := db.Conn(ctx, r.db).Exec(`UPDATE admin_actions
+		SET old_value = old_value - CAST(@fields AS text[]), new_value = new_value - CAST(@fields AS text[])
+		WHERE target_id = @user_id AND target_type IN (@user, @participant)`,
+		map[string]any{
+			"user_id": userID, "user": TargetUser, "participant": TargetParticipant,
+			"fields": "{" + strings.Join(profileFields, ",") + "}",
+		},
+	).Error
+	if err != nil {
+		return fmt.Errorf("erase profile values of the admin journal: %w", err)
 	}
 	return nil
 }

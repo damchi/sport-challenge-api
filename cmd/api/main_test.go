@@ -117,7 +117,8 @@ func testHandlers() server {
 		adminHandler: admin.NewHandler(admin.NewService(nil, clock.Real{}, buildinfo.Get()),
 			admin.NewChallengeCorrections(admin.NewCorrections(nil, nil, nil, nil), nil, nil),
 			admin.NewMemberCorrections(admin.NewCorrections(nil, nil, nil, nil), nil),
-			admin.NewActivityCorrections(admin.NewCorrections(nil, nil, nil, nil), nil)),
+			admin.NewActivityCorrections(admin.NewCorrections(nil, nil, nil, nil), nil),
+			admin.NewAccountCorrections(admin.NewCorrections(nil, nil, nil, nil), nil)),
 	}
 }
 

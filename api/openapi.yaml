@@ -12,6 +12,10 @@ info:
     below: a new route is protected without adding anything. Only the health
     probes opt out with `security: []`.
 
+    A blocked account (README §2.12) answers 403 `account_blocked` on every
+    protected route, whatever the route: this answer is not repeated on each
+    operation. The apps show a "blocked account" page.
+
     Every response, errors included, carries `X-Content-Type-Options: nosniff`
     and `Cache-Control: no-store` (the responses hold personal data). A route
     whose response can be kept declares its own `Cache-Control`, which
@@ -2122,6 +2126,194 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateAdminUser
+      summary: Change the profile of any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Changes the pseudo, the first
+        name and the last name of an account with the rules of `PATCH /me`
+        (README §2.8, §2.12): an absent field is left unchanged, `pseudo:
+        null` removes the pseudo, a pseudo already taken, regardless of case,
+        answers 409. The language and the e-mail stay the user's. The change
+        is recorded in the journal with its `reason` (the fields that
+        change, before and after), in one transaction; it marks no
+        challenge as corrected. The answer is the account after the change.
+        An unknown or deleted account answers 404 `user_not_found`.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserUpdate"
+      responses:
+        "200":
+          description: The account, changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminUserNotFound"
+        "409":
+          description: |
+            The pseudo is already taken, regardless of case
+            (`validation_failed`, `params.fields` = `pseudo`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+    delete:
+      operationId: deleteAdminUser
+      summary: Delete any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Deletes the account with the
+        effect of `DELETE /me` (README §2.12, §6): it abandons its challenges
+        not finished, is anonymized and every row tied to it is erased; its
+        deletion at Auth0 follows, replayed by the worker
+        (`retry-auth0-deletions`) when it fails. The profile values (pseudo,
+        first name, last name, e-mail) of the journal lines that target the
+        account are erased too. Nothing is judged again, as for `DELETE /me`.
+        The change is recorded in the journal with its `reason`, in the
+        transaction of the deletion. Refused (422 `last_creator`) while the
+        account is the last creator with an account of a challenge not
+        finished: the admin first names another creator, or deletes the
+        challenge; `params.challenges` lists their ids. An unknown or deleted
+        account answers 404 `user_not_found`. The body carries the reason: a
+        client that cannot send one with `DELETE` cannot call this route.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccountReason"
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminUserNotFound"
+        "422":
+          description: |
+            The account is the last creator of challenges not finished
+            (`last_creator`); `params.challenges` lists them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+  /api/v1/admin/users/{userId}/block:
+    post:
+      operationId: blockAdminUser
+      summary: Block any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Blocks the account (README
+        §2.12): from then on, every request of it answers 403
+        `account_blocked`. Its challenges are left as they are: it stays
+        ranked and its activities count. An account already blocked stays
+        blocked since the first time; the call still answers and is
+        recorded. The change is recorded in the journal with its `reason`,
+        in one transaction; it marks no challenge as corrected. An admin
+        cannot block their own account (403 `forbidden`). The answer is the
+        account after the change. An unknown or deleted account answers 404
+        `user_not_found`.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccountReason"
+      responses:
+        "200":
+          description: The account, blocked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The admin tried to block their own account (`forbidden`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/AdminUserNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
+  /api/v1/admin/users/{userId}/unblock:
+    post:
+      operationId: unblockAdminUser
+      summary: Unblock any account, for an admin
+      description: |
+        Admin only (404 `not_found` otherwise). Unblocks the account (README
+        §2.12): its requests are served again; nothing else changes. An
+        account that is not blocked stays so; the call still answers and is
+        recorded. The change is recorded in the journal with its `reason`,
+        in one transaction; it marks no challenge as corrected. The answer is
+        the account after the change. An unknown or deleted account answers
+        404 `user_not_found`.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccountReason"
+      responses:
+        "200":
+          description: The account, unblocked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/AdminUserNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Busy"
   /api/v1/admin/users/{userId}/challenges:
     get:
       operationId: listAdminUserChallenges
@@ -2505,9 +2697,10 @@ components:
     AdminUserNotFound:
       description: |
         The account has no `admin` permission (`not_found`), or no such
-        account (`user_not_found`). `not_found` also answers a malformed
-        request (an id that is not a UUID, a parameter that does not match)
-        without the permission, without `params`.
+        account, or a deleted one (`user_not_found`). `not_found` also
+        answers a malformed request (an id that is not a UUID, a body or a
+        parameter that does not match) without the permission, without
+        `params`.
       content:
         application/json:
           schema:
@@ -2618,6 +2811,7 @@ components:
         - invalid_token
         - token_expired
         - account_deleted
+        - account_blocked
         - profile_incomplete
         - challenge_not_found
         - activity_not_found
@@ -2675,7 +2869,7 @@ components:
           $ref: "#/components/schemas/AdminBuild"
     AdminAccountCounts:
       type: object
-      required: [total, new_last_7_days, active_last_7_days]
+      required: [total, new_last_7_days, active_last_7_days, blocked]
       additionalProperties: false
       properties:
         total:
@@ -2690,6 +2884,10 @@ components:
           type: integer
           minimum: 0
           description: Accounts not deleted that recorded at least one activity in the last 7 days.
+        blocked:
+          type: integer
+          minimum: 0
+          description: Accounts not deleted that an admin blocked, counted in `total` too.
     AdminChallengeCounts:
       type: object
       required: [upcoming, ongoing, finished, deleted]
@@ -3051,6 +3249,42 @@ components:
         dry_run:
           type: boolean
           description: Preview the change, writing nothing. `false` when absent.
+    AdminAccountReason:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      description: |
+        An admin change of an account that carries nothing but its reason. It
+        judges no challenge again, hence no `dry_run`.
+      properties:
+        reason:
+          $ref: "#/components/schemas/AdminReason"
+    AdminUserUpdate:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      description: |
+        The profile fields of `MeUpdate` an admin may change, with their
+        rules, and the reason of the change. An absent field is left
+        unchanged; `pseudo: null` removes the pseudo.
+      properties:
+        reason:
+          $ref: "#/components/schemas/AdminReason"
+        pseudo:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Pseudo"
+          description: "`null` removes the pseudo."
+          # Tells an absent pseudo (left as is) from null (removed).
+          x-go-type: nullable.Nullable[string]
+          x-go-type-skip-optional-pointer: true
+          x-go-type-import:
+            path: github.com/oapi-codegen/nullable
+        first_name:
+          $ref: "#/components/schemas/PersonName"
+        last_name:
+          $ref: "#/components/schemas/PersonName"
     AdminParticipantAdd:
       type: object
       required: [reason, user_id]
@@ -3109,7 +3343,9 @@ components:
       description: |
         Why the admin makes the change, kept in the journal: 3 to 500
         characters once surrounding spaces are removed, 3 of them visible; no
-        control character but line breaks and tabs.
+        control character but line breaks and tabs. It stays in the journal
+        once the target account is deleted, unlike its profile values: it
+        should carry no personal data.
     AdminCorrection:
       type: object
       required: [dry_run, challenges]
@@ -3283,11 +3519,12 @@ components:
             account is deleted.
         state:
           type: string
-          enum: [active, deleted, auth0_deletion_pending]
+          enum: [active, blocked, deleted, auth0_deletion_pending]
           description: |
-            `active` until the account is deleted; then
-            `auth0_deletion_pending` while the deletion of its identity at
-            Auth0 is still to be replayed by the worker, `deleted` once done.
+            `active` until the account is deleted, `blocked` instead while an
+            admin blocks it; once deleted, `auth0_deletion_pending` while the
+            deletion of its identity at Auth0 is still to be replayed by the
+            worker, `deleted` once done.
         created_at:
           type: string
           format: date-time

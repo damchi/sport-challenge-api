@@ -20,6 +20,10 @@ type repository interface {
 	UpdateEmail(ctx context.Context, id, email string) error
 	PublicNames(ctx context.Context, ids []string) (map[string]PublicName, error)
 	Delete(ctx context.Context, id string, at time.Time, abandon func(ctx context.Context) error) (string, error)
+	// Lock and SetBlockedAt serve the admin changes of an account, in the
+	// transaction ctx carries.
+	Lock(ctx context.Context, id string) (User, error)
+	SetBlockedAt(ctx context.Context, id string, at *time.Time) error
 	PendingAuth0Deletions(ctx context.Context) ([]string, error)
 	RemovePendingAuth0Deletion(ctx context.Context, subject string) error
 }
@@ -63,7 +67,8 @@ func NewService(repo repository, participations Participations, erasers []Eraser
 
 // GetOrCreateBySubject returns the local user of an auth subject, created
 // with an empty profile (no pseudo, no names) on first login. A row that is
-// already anonymized answers account_deleted. Anonymization replaces
+// already anonymized answers account_deleted, one an admin blocked
+// account_blocked (README §2.12). Anonymization replaces
 // auth_subject, so a deleted subject no longer matches that row: its
 // fingerprint, checked before any insert, answers account_deleted too, so
 // the deletion is final.
@@ -83,6 +88,9 @@ func (s *Service) GetOrCreateBySubject(ctx context.Context, subject, email strin
 	}
 	if u.AnonymizedAt != nil {
 		return User{}, apperr.New(apperr.CodeAccountDeleted, nil)
+	}
+	if u.BlockedAt != nil {
+		return User{}, apperr.New(apperr.CodeAccountBlocked, nil)
 	}
 	if email, ok := tokenEmail(email); ok && (u.Email == nil || *u.Email != email) {
 		if err := s.repo.UpdateEmail(ctx, u.ID, email); err != nil {
@@ -172,17 +180,7 @@ func (s *Service) PublicNames(ctx context.Context, ids []string) (map[string]Pub
 // call: a deletion at Auth0 that fails, or whose record cannot be removed in
 // time, stays pending for the worker to replay.
 func (s *Service) Delete(ctx context.Context, actorID string) error {
-	subject, err := s.repo.Delete(ctx, actorID, s.clock.Now(), func(ctx context.Context) error {
-		if err := s.participations.AbandonAll(ctx, actorID); err != nil {
-			return err
-		}
-		for _, e := range s.erasers {
-			if err := e.EraseUser(ctx, actorID); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	subject, err := s.erase(ctx, actorID, s.clock.Now())
 	// Deleted meanwhile by a concurrent request: the account is gone.
 	if errors.Is(err, errUserNotFound) {
 		return apperr.New(apperr.CodeAccountDeleted, err)
@@ -190,13 +188,42 @@ func (s *Service) Delete(ctx context.Context, actorID string) error {
 	if err != nil {
 		return fmt.Errorf("delete account: %w", err)
 	}
+	s.deleteIdentity(ctx, subject)
+	return nil
+}
+
+// erase anonymizes account id at the instant at, in one transaction (that
+// of ctx, if any): its deletion at Auth0 recorded as pending, its
+// challenges not finished abandoned, its rows in the other modules erased
+// (Delete). It returns its former subject, for deleteIdentity. An unknown
+// or anonymized account gives errUserNotFound.
+func (s *Service) erase(ctx context.Context, id string, at time.Time) (string, error) {
+	return s.repo.Delete(ctx, id, at, func(ctx context.Context) error {
+		if err := s.participations.AbandonAll(ctx, id); err != nil {
+			return err
+		}
+		for _, e := range s.erasers {
+			if err := e.EraseUser(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// deleteIdentity deletes subject at Auth0, once its account is erased and
+// committed, then removes its pending deletion, even if the client left;
+// the removal has its own deadline. Nothing fails: a deletion at Auth0 that
+// fails, or whose record cannot be removed in time, stays pending for the
+// worker to replay.
+func (s *Service) deleteIdentity(ctx context.Context, subject string) {
 	// The account is deleted: a client that goes away must not stop what
 	// follows, or the deletion at Auth0 would wait for the worker.
 	ctx = context.WithoutCancel(ctx)
 	// Never the subject in a log: the errors below do not carry it.
 	if err := s.identities.DeleteUser(ctx, subject); err != nil {
 		s.logger.WarnContext(ctx, "auth0 deletion failed, kept for retry", slog.String("error", err.Error()))
-		return nil
+		return
 	}
 	// Removed only after the deletion: if this fails or runs out of time,
 	// the worker replays a deletion already done, which is harmless.
@@ -205,7 +232,6 @@ func (s *Service) Delete(ctx context.Context, actorID string) error {
 	if err := s.repo.RemovePendingAuth0Deletion(removeCtx, subject); err != nil {
 		s.logger.WarnContext(ctx, "auth0 deletion done, pending record not removed", slog.String("error", err.Error()))
 	}
-	return nil
 }
 
 // RetryResult counts what a run of RetryAuth0Deletions did, for the log.

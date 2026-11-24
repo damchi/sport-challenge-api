@@ -54,7 +54,7 @@ func serve(t *testing.T, svc *Service, token, target string) (*httptest.Response
 // API, as JSON, written to logs.
 func serveLogged(t *testing.T, svc *Service, token, method, target, body string, logs io.Writer) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
-	return serveWith(t, NewHandler(svc, nil, nil, nil), token, method, target, body, logs)
+	return serveWith(t, NewHandler(svc, nil, nil, nil, nil), token, method, target, body, logs)
 }
 
 // serveWith is serveLogged on handler h.
@@ -99,6 +99,9 @@ func serveWith(t *testing.T, h *Handler, token, method, target, body string, log
 	apitest.ValidateResponse(t, newRequest(), rec)
 
 	var got map[string]any
+	if rec.Code == http.StatusNoContent {
+		return rec, got
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("body %q is not JSON: %v", rec.Body.String(), err)
 	}
@@ -121,7 +124,7 @@ func TestGetAdminStats(t *testing.T) {
 	ended := statsAt.Add(-time.Hour)
 	failed := "failed"
 	repo := &fakeRepo{
-		figures: Figures{AccountsTotal: 9, AccountsNew: 2, AccountsActive: 4, Upcoming: 1, Ongoing: 2, Finished: 3, Deleted: 1, Activities: 12, PendingAuth0Deletions: 1},
+		figures: Figures{AccountsTotal: 9, AccountsNew: 2, AccountsActive: 4, AccountsBlocked: 3, Upcoming: 1, Ongoing: 2, Finished: 3, Deleted: 1, Activities: 12, PendingAuth0Deletions: 1},
 		runs: []TaskRun{
 			{Task: "close-weeks", Run: WorkerRun{StartedAt: statsAt.Add(-time.Minute)}},
 			{Task: "close-weeks", Failure: true, Run: WorkerRun{StartedAt: statsAt.Add(-2 * time.Hour), EndedAt: &ended, Outcome: &failed, ErrorCode: ptr("internal_error")}},
@@ -135,7 +138,7 @@ func TestGetAdminStats(t *testing.T) {
 	}
 	want := map[string]any{
 		"computed_at":             "2026-11-23T15:30:00Z",
-		"accounts":                map[string]any{"total": 9.0, "new_last_7_days": 2.0, "active_last_7_days": 4.0},
+		"accounts":                map[string]any{"total": 9.0, "new_last_7_days": 2.0, "active_last_7_days": 4.0, "blocked": 3.0},
 		"challenges":              map[string]any{"upcoming": 1.0, "ongoing": 2.0, "finished": 3.0, "deleted": 1.0},
 		"activities_last_7_days":  12.0,
 		"pending_auth0_deletions": 1.0,
@@ -199,7 +202,7 @@ func TestInvalidAdminRequestIsHiddenWithoutThePermission(t *testing.T) {
 				{token: adminToken, wantStatus: http.StatusBadRequest, wantCode: "validation_failed"},
 			} {
 				repo := &fakeRepo{}
-				rec, got := serveWith(t, NewHandler(NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, nil), tt.token, rq.method, rq.target, rq.body, io.Discard)
+				rec, got := serveWith(t, NewHandler(NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, nil, nil), tt.token, rq.method, rq.target, rq.body, io.Discard)
 				e, _ := got["error"].(map[string]any)
 				if rec.Code != tt.wantStatus || e["code"] != tt.wantCode {
 					t.Fatalf("%s: got %d %v, want %d %s", tt.token, rec.Code, got, tt.wantStatus, tt.wantCode)

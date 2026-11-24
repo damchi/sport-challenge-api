@@ -121,7 +121,12 @@ func run() error {
 	abandonAll := abandonAllFunc(func(ctx context.Context, userID string) error {
 		return challenges.AbandonAll(ctx, userID)
 	})
+	// The deletion of an account erases its profile from the admin journal
+	// too, whoever deletes it.
+	adminRepo := admin.NewRepository(gdb)
+	journal := admin.NewJournal(adminRepo, clk)
 	erasers := []user.Eraser{
+		journal,
 		eraseUserFunc(func(ctx context.Context, userID string) error { return invitations.EraseUser(ctx, userID) }),
 		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
 		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
@@ -138,12 +143,12 @@ func run() error {
 	challengeHandler := challenge.NewHandler(challenges)
 	// The admin changes judge a challenge again with the code of the worker
 	// (cmd/worker), from the same data as the rankings.
-	adminRepo := admin.NewRepository(gdb)
 	recompute := closure.NewService(closure.NewRepository(gdb), leaderboard.NewRepository(gdb), clk, logger)
-	corrections := admin.NewCorrections(adminRepo, admin.NewJournal(adminRepo, clk), recompute, leaderboards)
+	corrections := admin.NewCorrections(adminRepo, journal, recompute, leaderboards)
 	challengeCorrections := admin.NewChallengeCorrections(corrections, challenges, invitations)
 	memberCorrections := admin.NewMemberCorrections(corrections, challenges)
 	activityCorrections := admin.NewActivityCorrections(corrections, activities)
+	accountCorrections := admin.NewAccountCorrections(corrections, users)
 	handlers := server{
 		Handler:            health.NewHandler(pool, logger, build),
 		userHandler:        user.NewHandler(users),
@@ -152,7 +157,7 @@ func run() error {
 		activityHandler:    activity.NewHandler(activities),
 		leaderboardHandler: leaderboard.NewHandler(leaderboards),
 		invitationHandler:  invitation.NewHandler(invitations, challengeHandler),
-		adminHandler:       admin.NewHandler(admin.NewService(adminRepo, clk, build), challengeCorrections, memberCorrections, activityCorrections),
+		adminHandler:       admin.NewHandler(admin.NewService(adminRepo, clk, build), challengeCorrections, memberCorrections, activityCorrections, accountCorrections),
 	}
 	opts := routerOptions{
 		allowedOrigins: cfg.CORSAllowedOrigins,

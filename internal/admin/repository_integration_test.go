@@ -89,6 +89,9 @@ func TestFigures(t *testing.T) {
 	cid := insertUser(t, pool, "email|cid", since.Add(-time.Second), false)
 	dan := insertUser(t, pool, "email|dan", old, false)
 	gone := insertUser(t, pool, "email|gone", now.Add(-time.Hour), true)
+	// Blocked: counted among the accounts and the blocked ones; a deleted
+	// account that was blocked counts nowhere.
+	exec(t, pool, `UPDATE users SET blocked_at = $2 WHERE id IN ($1, $3)`, dan, now.Add(-time.Hour), gone)
 
 	insertActivity(t, pool, ann, now.Add(-time.Hour), false)
 	insertActivity(t, pool, ann, now.Add(-2*time.Hour), false)
@@ -115,7 +118,7 @@ func TestFigures(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Figures{
-		AccountsTotal: 4, AccountsNew: 1, AccountsActive: 2,
+		AccountsTotal: 4, AccountsNew: 1, AccountsActive: 2, AccountsBlocked: 1,
 		Upcoming: 1, Ongoing: 1, Finished: 2, Deleted: 2,
 		// Never those of a deleted account.
 		Activities:            3,
