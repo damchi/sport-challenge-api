@@ -73,16 +73,16 @@ func TestChallengeCorrectionsUpdateSettings(t *testing.T) {
 			name:   "week 1 kept: the links are left as they are",
 			change: challenge.SettingsChange{Old: map[string]any{"weeks": 4}, New: map[string]any{"weeks": 6}},
 			wantSteps: []string{
-				"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID, "journal",
-				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
+				"lock", "lock participants " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "update " + challengeID, "journal",
+				"recompute " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID,
 			},
 		},
 		{
 			name:   "week 1 moved: the links follow, in the transaction",
 			change: challenge.SettingsChange{Old: map[string]any{"start_date": "2026-02-02"}, New: map[string]any{"start_date": "2026-01-26"}, Deadline: &deadline},
 			wantSteps: []string{
-				"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID, "reschedule " + challengeID, "journal",
-				"recompute " + challengeID, "rank " + challengeID, "eliminations " + challengeID,
+				"lock", "lock participants " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "update " + challengeID, "reschedule " + challengeID, "journal",
+				"recompute " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID,
 			},
 		},
 	}
@@ -136,7 +136,7 @@ func TestChallengeCorrectionsUpdateSettingsRefusals(t *testing.T) {
 		{name: "no reason", actor: admin, reason: "  ", wantCode: apperr.CodeValidationFailed},
 		{
 			name: "settings refused", actor: admin, reason: "Durée mal saisie", updateErr: apperr.InvalidFields(nil, "weeks"), wantCode: apperr.CodeValidationFailed,
-			wantSteps: []string{"lock", "lock participants " + challengeID, "rank " + challengeID, "eliminations " + challengeID, "update " + challengeID},
+			wantSteps: []string{"lock", "lock participants " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "update " + challengeID},
 		},
 	}
 	for _, tt := range tests {
@@ -186,6 +186,10 @@ func TestUpdateAdminChallenge(t *testing.T) {
 		gotChanges, gotReason, gotID, gotDryRun = changes, reason, id, dryRun
 		bob := UserRef{ID: bobID, Pseudo: new("bob")}
 		return []ChallengePreview{{
+			Title: "Juin", Status: StatusOngoing, ReferenceSport: SportChange{Before: "run", After: "ride"},
+			Results:      ResultsReopened,
+			Weeks:        []WeekChange{{Number: 2, Locked: true}, {Number: 3}},
+			Points:       []PointsChange{{User: bob, Week: 3, Before: 4, After: 8, Provisional: true}},
 			ChallengeID:  id,
 			Eliminations: []EliminationChange{{User: bob, Before: &EliminationRow{User: bob, WeekNumber: 2, DistanceMeters: 6999, RequiredMeters: 7000}}},
 		}}, nil
@@ -214,7 +218,17 @@ func TestUpdateAdminChallenge(t *testing.T) {
 	if got["dry_run"] != true || len(previews) != 1 {
 		t.Fatalf("body %v, want the preview of the challenge", got)
 	}
-	change := previews[0].(map[string]any)["eliminations"].([]any)[0].(map[string]any)
+	p := previews[0].(map[string]any)
+	wantWeeks := []any{map[string]any{"week_number": float64(2), "change": "judged_again"}, map[string]any{"week_number": float64(3), "change": "recomputed"}}
+	if p["title"] != "Juin" || p["status"] != "ongoing" || p["results"] != "reopened" ||
+		!reflect.DeepEqual(p["reference_sport"], map[string]any{"before": "run", "after": "ride"}) || !reflect.DeepEqual(p["weeks"], wantWeeks) {
+		t.Fatalf("preview %v, want its title, status, results, reference sport and weeks", p)
+	}
+	if pc := p["points"].([]any)[0].(map[string]any); pc["week_number"] != float64(3) || pc["before"] != float64(4) || pc["after"] != float64(8) || pc["provisional"] != true ||
+		pc["user"].(map[string]any)["id"] != bobID {
+		t.Fatalf("points change %v, want bob from 4 to 8 points in week 3, provisional", pc)
+	}
+	change := p["eliminations"].([]any)[0].(map[string]any)
 	if change["after"] != nil || change["before"].(map[string]any)["week_number"] != float64(2) {
 		t.Fatalf("elimination change %v, want bob no longer eliminated in week 2", change)
 	}

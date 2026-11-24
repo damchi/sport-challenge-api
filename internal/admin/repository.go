@@ -545,10 +545,36 @@ func readEliminations(tx *gorm.DB, id string) ([]EliminationRow, error) {
 	return out, nil
 }
 
-// Eliminations reads the eliminations of challenge id, earliest week first,
-// in the transaction ctx carries (db.InTx).
-func (r *Repository) Eliminations(ctx context.Context, id string) ([]EliminationRow, error) {
-	return readEliminations(db.Conn(ctx, r.db), id)
+// State reads the state of challenge id, deleted or not, in the
+// transaction ctx carries (db.InTx): its results are frozen when a result
+// snapshot is there. errChallengeNotFound when there is none.
+func (r *Repository) State(ctx context.Context, id string) (ChallengeState, error) {
+	tx := db.Conn(ctx, r.db)
+	// Scanned apart from the eliminations: GORM reads no slice of a row.
+	var found []struct {
+		Title          string
+		ReferenceSport string
+		StartsAt       time.Time
+		EndsAt         time.Time
+		Frozen         bool
+	}
+	if err := tx.Raw(`SELECT title, reference_sport, starts_at, ends_at,
+		EXISTS (SELECT 1 FROM result_snapshot WHERE challenge_id = c.id) AS frozen
+		FROM challenges c WHERE c.id = @id`, map[string]any{"id": id}).Scan(&found).Error; err != nil {
+		return ChallengeState{}, fmt.Errorf("read challenge state: %w", err)
+	}
+	if len(found) == 0 {
+		return ChallengeState{}, errChallengeNotFound
+	}
+	eliminations, err := readEliminations(tx, id)
+	if err != nil {
+		return ChallengeState{}, err
+	}
+	f := found[0]
+	return ChallengeState{
+		Title: f.Title, ReferenceSport: f.ReferenceSport, StartsAt: f.StartsAt, EndsAt: f.EndsAt,
+		Frozen: f.Frozen, Eliminations: eliminations,
+	}, nil
 }
 
 // lockParticipantsQuery takes FOR SHARE, in the order of their ids, the

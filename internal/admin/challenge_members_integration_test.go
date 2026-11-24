@@ -108,11 +108,11 @@ func TestMemberCorrectionsFromTheDatabase(t *testing.T) {
 	}
 	eliminations := func() []EliminationRow {
 		t.Helper()
-		rows, err := r.Eliminations(t.Context(), id)
+		state, err := r.State(t.Context(), id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return rows
+		return state.Eliminations
 	}
 	// The journal lines share the instant of the fake clock: each one is
 	// found by its action, every action made once at most.

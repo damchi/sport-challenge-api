@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -87,7 +88,8 @@ func TestAdminActivityCorrections(t *testing.T) {
 	// spring and april share their weeks; may comes after them.
 	spring := insertChallenge("Spring", toronto(t, 2026, 4, 6, 0), 2, `($1, 'cumulative_time', 1, '{}'),
 		($1, 'cumulative_distance', 2, '{"factors": {"run": 1}}'), ($1, 'elimination', 3, '{"sport": "run", "step_meters": 2000}')`)
-	april := insertChallenge("April", toronto(t, 2026, 4, 6, 0), 3, `($1, 'cumulative_time', 1, '{}')`)
+	april := insertChallenge("April", toronto(t, 2026, 4, 6, 0), 3, `($1, 'cumulative_time', 1, '{}'),
+		($1, 'points', 2, '{"criteria": ["longest_duration"], "podium": 5, "min_session_seconds": 1200}')`)
 	may := insertChallenge("May", toronto(t, 2026, 5, 4, 0), 2, `($1, 'cumulative_time', 1, '{}')`)
 
 	insertRun := func(userID string, at time.Time, meters int) string {
@@ -186,6 +188,23 @@ func TestAdminActivityCorrections(t *testing.T) {
 		}
 		if got := eliminated(spring); !slices.Equal(got, []string{ann}) || len(journal()) != before {
 			t.Fatalf("after a preview: eliminated %v, a journal line written", got)
+		}
+		// Both over and frozen: frozen again. In spring, ann is still out
+		// in week 2, with 0 km instead of 6; in april, she loses the points
+		// of week 2, where bob alone has a session.
+		annRef := admin.UserRef{ID: ann, Pseudo: new("ann"), FirstName: new("Test"), LastName: new("User")}
+		for _, p := range previews {
+			if p.Status != admin.StatusFinished || p.Results != admin.ResultsRefrozen || p.ReferenceSport != (admin.SportChange{Before: "run", After: "run"}) {
+				t.Fatalf("preview of %s: status %q, results %q, reference %+v; want finished, refrozen, run", p.Title, p.Status, p.Results, p.ReferenceSport)
+			}
+			wantWeeks := []admin.WeekChange{{Number: 2, Locked: true}}
+			var wantPoints []admin.PointsChange
+			if p.ChallengeID == april {
+				wantPoints = []admin.PointsChange{{User: annRef, Week: 2, Before: 10, After: 0}}
+			}
+			if !reflect.DeepEqual(p.Weeks, wantWeeks) || !reflect.DeepEqual(p.Points, wantPoints) {
+				t.Fatalf("preview of %s: weeks %+v, points %+v; want %+v, %+v", p.Title, p.Weeks, p.Points, wantWeeks, wantPoints)
+			}
 		}
 	})
 

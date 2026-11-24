@@ -15,14 +15,15 @@ type Recomputer interface {
 	Recompute(ctx context.Context, challengeID string) error
 }
 
-// Boards gives the rankings of a challenge as actor reads them, in the
-// transaction ctx carries (module leaderboard).
+// Boards gives the rankings of a challenge as actor reads them, and where
+// its weeks stand, in the transaction ctx carries (module leaderboard).
 type Boards interface {
 	Get(ctx context.Context, actor auth.Actor, id string) (leaderboard.Leaderboard, error)
+	Weeks(ctx context.Context, actor auth.Actor, id string) (leaderboard.Weeks, error)
 }
 
-// correctionStore runs the transaction of an admin change and reads the
-// eliminations it may change.
+// correctionStore runs the transaction of an admin change and reads what
+// its preview compares.
 type correctionStore interface {
 	// InLockedTx runs fn in a transaction, carried by the ctx it gets, that
 	// takes the week lock alone first; rolled back when fn fails.
@@ -31,9 +32,9 @@ type correctionStore interface {
 	// accounts not deleted of the participants of the challenges ids, in
 	// the transaction ctx carries.
 	LockParticipants(ctx context.Context, ids []string) error
-	// Eliminations reads the eliminations of a challenge, earliest week
-	// first, in the transaction ctx carries.
-	Eliminations(ctx context.Context, challengeID string) ([]EliminationRow, error)
+	// State reads the state of a challenge, deleted or not, in the
+	// transaction ctx carries.
+	State(ctx context.Context, challengeID string) (ChallengeState, error)
 }
 
 // Corrections runs the admin changes that touch the past of challenges:
@@ -88,15 +89,24 @@ const (
 	restores
 )
 
-// ChallengePreview is what a change does to a challenge: its rankings
-// before and after, and the eliminations that change. Before is nil when the
-// change restores the challenge, After when it deletes it: a deleted
-// challenge has no rankings.
+// ChallengePreview is what a change does to a challenge: its title, status
+// and reference sport after it (the latter before too), its rankings before
+// and after, the eliminations that change, what becomes of its frozen
+// results (Results, "" when frozen on neither side), and the weeks and the
+// points of the points category that change. Before is nil when the change
+// restores the challenge, After when it deletes it: a deleted challenge has
+// no rankings, and neither weeks nor points are compared then.
 type ChallengePreview struct {
-	ChallengeID  string
-	Before       *leaderboard.Leaderboard
-	After        *leaderboard.Leaderboard
-	Eliminations []EliminationChange
+	ChallengeID    string
+	Title          string
+	Status         string
+	ReferenceSport SportChange
+	Results        string
+	Weeks          []WeekChange
+	Points         []PointsChange
+	Before         *leaderboard.Leaderboard
+	After          *leaderboard.Leaderboard
+	Eliminations   []EliminationChange
 }
 
 // EliminationChange is a participant whose elimination the change gives,
@@ -176,18 +186,10 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 			}
 		}
 		previews = make([]ChallengePreview, len(ids))
-		before := make([][]EliminationRow, len(ids))
+		before := make([]reading, len(ids))
 		for i, id := range ids {
-			previews[i].ChallengeID = id
-			if c.lifecycle != restores {
-				board, err := s.boards.Get(ctx, actor, id)
-				if err != nil {
-					return fmt.Errorf("rank challenge %s before the change: %w", id, err)
-				}
-				previews[i].Before = &board
-			}
-			if before[i], err = s.store.Eliminations(ctx, id); err != nil {
-				return err
+			if before[i], err = s.read(ctx, actor, id, c.lifecycle != restores); err != nil {
+				return fmt.Errorf("read challenge %s before the change: %w", id, err)
 			}
 		}
 		entry, err := c.Apply(ctx)
@@ -200,23 +202,21 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 				return err
 			}
 		}
+		// The status after the change is that of the instant the journal
+		// dates it by.
+		now := s.journal.now()
 		for i, id := range ids {
-			if c.lifecycle == deletes {
-				continue
+			ranked := c.lifecycle != deletes
+			if ranked {
+				if err := s.recompute.Recompute(ctx, id); err != nil {
+					return fmt.Errorf("recompute challenge %s: %w", id, err)
+				}
 			}
-			if err := s.recompute.Recompute(ctx, id); err != nil {
-				return fmt.Errorf("recompute challenge %s: %w", id, err)
-			}
-			board, err := s.boards.Get(ctx, actor, id)
+			after, err := s.read(ctx, actor, id, ranked)
 			if err != nil {
-				return fmt.Errorf("rank challenge %s after the change: %w", id, err)
+				return fmt.Errorf("read challenge %s after the change: %w", id, err)
 			}
-			previews[i].After = &board
-			after, err := s.store.Eliminations(ctx, id)
-			if err != nil {
-				return err
-			}
-			previews[i].Eliminations = eliminationChanges(before[i], after)
+			previews[i] = preview(id, before[i], after, now, c.lifecycle)
 		}
 		if c.DryRun {
 			return errDryRun
@@ -227,6 +227,29 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 		return nil, err
 	}
 	return previews, nil
+}
+
+// read reads challenge id as actor, in the transaction ctx carries: its
+// state, then, when ranked, its rankings and its weeks.
+func (s *Corrections) read(ctx context.Context, actor auth.Actor, id string, ranked bool) (reading, error) {
+	var r reading
+	if ranked {
+		board, err := s.boards.Get(ctx, actor, id)
+		if err != nil {
+			return reading{}, fmt.Errorf("rank: %w", err)
+		}
+		weeks, err := s.boards.Weeks(ctx, actor, id)
+		if err != nil {
+			return reading{}, fmt.Errorf("weeks: %w", err)
+		}
+		r.board, r.weeks = &board, &weeks
+	}
+	state, err := s.store.State(ctx, id)
+	if err != nil {
+		return reading{}, err
+	}
+	r.state = state
+	return r, nil
 }
 
 // eliminationChanges lists, in the order of after then of before, the

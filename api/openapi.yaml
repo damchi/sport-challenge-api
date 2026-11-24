@@ -3368,13 +3368,55 @@ components:
             $ref: "#/components/schemas/AdminChallengePreview"
     AdminChallengePreview:
       type: object
-      required: [challenge_id, before, after, eliminations]
+      required: [challenge_id, title, status, reference_sport, results, weeks, points, before, after, eliminations]
       additionalProperties: false
       description: What a change does to a challenge.
       properties:
         challenge_id:
           type: string
           format: uuid
+        title:
+          type: string
+          description: The title of the challenge after the change.
+        status:
+          type: string
+          enum: [upcoming, ongoing, finished]
+          description: |
+            The status of the challenge after the change, from its dates (a
+            deleted challenge has the status of its dates too).
+        reference_sport:
+          $ref: "#/components/schemas/AdminReferenceSportChange"
+        results:
+          type: string
+          nullable: true
+          enum: [refrozen, reopened, frozen]
+          description: |
+            What the change does to the frozen results: `refrozen` (frozen,
+            reopened then frozen again), `reopened` (frozen, reopened only:
+            the challenge is ongoing again), `frozen` (frozen by the change);
+            null when frozen neither before nor after, and for the deletion
+            of a challenge, which leaves them as they are.
+        weeks:
+          type: array
+          description: |
+            The weeks whose outcome the change moves, by number:
+            `judged_again`, a locked week whose eliminations or acquired
+            points change; `recomputed`, a week not locked whose provisional
+            points or provisional elimination minimum change, or that loses
+            the eliminations judged while it was locked (its first day moved
+            later). A week where
+            nothing changes is left out; empty for the deletion or the
+            restore of a challenge.
+          items:
+            $ref: "#/components/schemas/AdminWeekChange"
+        points:
+          type: array
+          description: |
+            In the points category, each participant whose points of a week
+            change, by week then participant; empty without a points
+            category, and for the deletion or the restore of a challenge.
+          items:
+            $ref: "#/components/schemas/AdminPointsChange"
         before:
           description: |
             The rankings before the change, whole (no `limit`); null for the
@@ -3398,6 +3440,51 @@ components:
             moves to another week or distance.
           items:
             $ref: "#/components/schemas/AdminEliminationChange"
+    AdminReferenceSportChange:
+      type: object
+      required: [before, after]
+      additionalProperties: false
+      description: |
+        The reference sport before and after the change: a change of the
+        settings may move it, and the elimination and the equivalent
+        distance are named after it.
+      properties:
+        before:
+          type: string
+        after:
+          type: string
+    AdminWeekChange:
+      type: object
+      required: [week_number, change]
+      additionalProperties: false
+      properties:
+        week_number:
+          type: integer
+          minimum: 1
+        change:
+          type: string
+          enum: [judged_again, recomputed]
+    AdminPointsChange:
+      type: object
+      required: [user, week_number, before, after, provisional]
+      additionalProperties: false
+      properties:
+        user:
+          $ref: "#/components/schemas/AdminUserRef"
+        week_number:
+          type: integer
+          minimum: 1
+        before:
+          type: integer
+          minimum: 0
+          description: The points of the week before the change; 0 when not ranked in it.
+        after:
+          type: integer
+          minimum: 0
+          description: The points of the week after the change; 0 when not ranked in it.
+        provisional:
+          type: boolean
+          description: The week is not locked after the change, its points provisional.
     AdminEliminationChange:
       type: object
       required: [user, before, after]

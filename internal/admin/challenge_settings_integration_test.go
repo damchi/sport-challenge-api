@@ -125,9 +125,11 @@ func TestChallengeCorrectionsUpdateSettingsFromTheDatabase(t *testing.T) {
 			FROM challenges WHERE id = $1`, id).Scan(&s.EndsAt, &s.Snapshots, &s.Closures, &s.Actions, &s.Expiries, &s.Types); err != nil {
 			t.Fatal(err)
 		}
-		if s.Eliminations, err = r.Eliminations(t.Context(), id); err != nil {
+		state, err := r.State(t.Context(), id)
+		if err != nil {
 			t.Fatal(err)
 		}
+		s.Eliminations = state.Eliminations
 		s.EndsAt = s.EndsAt.UTC()
 		for i := range s.Expiries {
 			s.Expiries[i] = s.Expiries[i].UTC()
@@ -149,6 +151,22 @@ func TestChallengeCorrectionsUpdateSettingsFromTheDatabase(t *testing.T) {
 		}
 		if len(previews) != 1 || previews[0].ChallengeID != id || len(previews[0].Eliminations) != 0 {
 			t.Fatalf("previews %+v, want the challenge, bob still eliminated", previews)
+		}
+		if got := read(); !reflect.DeepEqual(got, before) {
+			t.Fatalf("state after a preview %+v, want %+v", got, before)
+		}
+	})
+
+	t.Run("a preview tells the reference sport, the status and the results", func(t *testing.T) {
+		ride := "ride"
+		previews, err := corrections.UpdateSettings(t.Context(), actor, id, challenge.SettingsChanges{Weeks: &four, ReferenceSport: &ride}, "Mauvais sport", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Two more weeks: in progress again, its results reopened.
+		p := previews[0]
+		if p.ReferenceSport != (SportChange{Before: "run", After: "ride"}) || p.Status != StatusOngoing || p.Results != ResultsReopened || p.Title == "" {
+			t.Fatalf("preview %+v, want run then ride, ongoing, the results reopened", p)
 		}
 		if got := read(); !reflect.DeepEqual(got, before) {
 			t.Fatalf("state after a preview %+v, want %+v", got, before)

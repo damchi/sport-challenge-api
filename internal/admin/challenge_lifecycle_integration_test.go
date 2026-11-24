@@ -111,9 +111,11 @@ func TestChallengeCorrectionsDeleteAndRestoreFromTheDatabase(t *testing.T) {
 			FROM challenges WHERE id = $1`, id).Scan(&s.Deleted, &s.Closures, &s.Actions); err != nil {
 			t.Fatal(err)
 		}
-		if s.Eliminations, err = r.Eliminations(t.Context(), id); err != nil {
+		state, err := r.State(t.Context(), id)
+		if err != nil {
 			t.Fatal(err)
 		}
+		s.Eliminations = state.Eliminations
 		return s
 	}
 	actor := auth.Actor{ID: eve, Admin: true}
