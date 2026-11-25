@@ -237,7 +237,7 @@ Décisions du propriétaire du produit du 2026-11-23 (SC-API-152). Il n'y a pas 
 | Abandon et exclusion définitifs | Réintégrer un participant (✅) |
 | Rôles de créateur | Nommer un créateur (même après la fin), retirer un rôle de créateur, exclure un créateur ; un défi garde toujours au moins un créateur (✅) |
 | Semaines verrouillées | Ajouter, modifier ou supprimer l'activité de n'importe quel utilisateur, dans n'importe quelle semaine (✅) |
-| Éliminations | Annuler ou forcer l'élimination d'un participant à une semaine donnée (🟡) |
+| Éliminations | Pas de forçage : une élimination se corrige par ses causes (activités, réglages, participants), dont la correction recalcule le défi (✅ 2026-11-24, SC-API-167 abandonné) |
 | Résultats figés | Ils sont rouverts et refigés par le recalcul (✅) |
 | Défi supprimé | Le restaurer, à tout moment ; supprimer un défi (✅) |
 | Comptes | Modifier pseudo, prénom et nom ; bloquer et débloquer ; supprimer (même effet que `DELETE /me`, suppression chez Auth0 comprise, et même refus `last_creator` tant que le compte est le dernier créateur d'un défi à venir ou en cours : l'admin nomme d'abord un autre créateur ou supprime le défi) (✅) |
