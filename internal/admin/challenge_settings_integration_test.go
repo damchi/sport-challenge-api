@@ -28,7 +28,7 @@ import (
 type briefLocks struct{ *Repository }
 
 func (b briefLocks) InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error {
-	return b.inLockedTx(ctx, "200ms", fn)
+	return b.inTx(ctx, "200ms", true, fn)
 }
 
 // settingsState is what a change of the settings may touch.

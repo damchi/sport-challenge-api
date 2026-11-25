@@ -19,7 +19,7 @@ import (
 
 // Repository reads the tables of every module for the admin reads, writes
 // the journal of the admin changes (admin_actions), its only write, and
-// opens the transaction of an admin change (InLockedTx).
+// opens the transaction of an admin change (InLockedTx, InTx).
 // Raw SQL, always parameterized.
 type Repository struct {
 	db *gorm.DB
@@ -606,12 +606,16 @@ func (r *Repository) LockParticipants(ctx context.Context, ids []string) error {
 // syntax of lock_timeout. It stays well under the deadline of a request
 // (requestTimeout, cmd/api: 25 s), which would otherwise cancel the wait
 // first. The bound is that of each lock, not of their sum: a change whose
-// waits add up to the deadline of its request answers busy too (inLockedTx).
+// waits add up to the deadline of its request answers busy too (inTx).
 const lockTimeout = "10s"
 
 // lockNotAvailable is the SQLSTATE of a lock waited for longer than
-// lock_timeout.
-const lockNotAvailable = "55P03"
+// lock_timeout, deadlockDetected that of a transaction PostgreSQL rolled
+// back to end a deadlock.
+const (
+	lockNotAvailable = "55P03"
+	deadlockDetected = "40P01"
+)
 
 // InLockedTx runs fn in a transaction, carried by the ctx it gets (db.InTx),
 // that takes the week lock alone before anything else (db.LockWeeks), in
@@ -619,13 +623,22 @@ const lockNotAvailable = "55P03"
 // rolled back when fn fails. A lock waited for longer answers 503 busy,
 // everything rolled back, as does a change the deadline of ctx (that of the
 // request) cuts, waiting for a connection or for several locks in a row:
-// nothing was written, the admin may try again.
+// nothing was written, the admin may try again. A change PostgreSQL stops on
+// a deadlock answers busy too, rolled back as well.
 func (r *Repository) InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error {
-	return r.inLockedTx(ctx, lockTimeout, fn)
+	return r.inTx(ctx, lockTimeout, true, fn)
 }
 
-// inLockedTx is InLockedTx, each lock waited for timeout at most.
-func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx context.Context) error) error {
+// InTx is InLockedTx without the week lock: the transaction of a change
+// that recomputes no challenge (an account), which holds back no activity
+// write. Its locks are waited for as long, and answer busy the same way.
+func (r *Repository) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return r.inTx(ctx, lockTimeout, false, fn)
+}
+
+// inTx is InLockedTx, or InTx without weeks, each lock waited for timeout
+// at most.
+func (r *Repository) inTx(ctx context.Context, timeout string, weeks bool, fn func(ctx context.Context) error) error {
 	// uncommitted stays true until fn is over without an error: an error
 	// met after is that of the commit.
 	uncommitted := true
@@ -637,8 +650,10 @@ func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx
 		if err := tx.Exec(`SELECT set_config('lock_timeout', ?, true)`, timeout).Error; err != nil {
 			return fmt.Errorf("bound lock wait: %w", err)
 		}
-		if err := db.LockWeeks(tx); err != nil {
-			return err
+		if weeks {
+			if err := db.LockWeeks(tx); err != nil {
+				return err
+			}
 		}
 		if err := fn(ctx); err != nil {
 			return err
@@ -647,7 +662,7 @@ func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx
 		return nil
 	})
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
+	if errors.As(err, &pgErr) && (pgErr.Code == lockNotAvailable || pgErr.Code == deadlockDetected) {
 		return apperr.New(apperr.CodeBusy, err)
 	}
 	// Only the error of the deadline itself: a refusal of fn met as the

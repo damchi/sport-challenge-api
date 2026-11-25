@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -205,5 +206,69 @@ func TestInLockedTxKeepsARefusalMetAtTheDeadline(t *testing.T) {
 	var appErr *apperr.Error
 	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeNotFound {
 		t.Fatalf("InLockedTx() = %v, want not_found", err)
+	}
+}
+
+// TestInTxAnswersBusyOnADeadlock: a change PostgreSQL stops on a deadlock
+// (two changes that lock the same rows crossed) answers busy, rolled back.
+func TestInTxAnswersBusyOnADeadlock(t *testing.T) {
+	r, pool := newRepository(t)
+	var ann, bob string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users (auth_subject) VALUES ('ann') RETURNING id`).Scan(&ann); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users (auth_subject) VALUES ('bob') RETURNING id`).Scan(&bob); err != nil {
+		t.Fatal(err)
+	}
+	// The other change holds bob, then, once the change below waits for
+	// him, asks for ann: the change waited first, so PostgreSQL finds the
+	// cycle from its side and rolls it back.
+	other, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Rollback(context.Background()) })
+	if _, err := other.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, bob); err != nil {
+		t.Fatal(err)
+	}
+	crossed := make(chan error, 1)
+	go func() {
+		// Once the change waits for bob.
+		for {
+			var waiting int
+			if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+				crossed <- err
+				return
+			}
+			if waiting > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_, err := other.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, ann)
+		crossed <- err
+	}()
+	err = r.InTx(t.Context(), func(ctx context.Context) error {
+		tx := db.Conn(ctx, r.db)
+		if err := tx.Exec(`UPDATE users SET pseudo = 'ann' WHERE id = ?`, ann).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`SELECT 1 FROM users WHERE id = ? FOR UPDATE`, bob).Error
+	})
+	var appErr *apperr.Error
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeBusy || !errors.As(err, &pgErr) || pgErr.Code != deadlockDetected {
+		t.Fatalf("InTx() = %v, want busy on a deadlock", err)
+	}
+	if err := <-crossed; err != nil {
+		t.Fatalf("the other change: %v, want it to go through once the deadlock is ended", err)
+	}
+	_ = other.Rollback(t.Context())
+	var pseudo *string
+	if err := pool.QueryRow(t.Context(), `SELECT pseudo FROM users WHERE id = $1`, ann).Scan(&pseudo); err != nil {
+		t.Fatal(err)
+	}
+	if pseudo != nil {
+		t.Fatalf("pseudo %q after a deadlock, want nothing written", *pseudo)
 	}
 }
