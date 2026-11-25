@@ -51,13 +51,7 @@ func TestAdminActivityCorrections(t *testing.T) {
 	)
 	adminRepo := admin.NewRepository(gdb)
 	adminJournal := admin.NewJournal(adminRepo, clk)
-	// The erasers of run, the journal first.
-	erasers := []user.Eraser{
-		adminJournal,
-		eraseUserFunc(func(ctx context.Context, userID string) error { return invitations.EraseUser(ctx, userID) }),
-		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
-		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
-	}
+	erasers := accountErasers(adminJournal, &invitations, &activities, &challenges)
 	users := user.NewService(user.NewRepository(gdb), lockForDeletionFunc(func(ctx context.Context, userID string) error {
 		return challenges.LockForDeletion(ctx, userID)
 	}), erasers, deletedAtAuth0{}, clk, logger)

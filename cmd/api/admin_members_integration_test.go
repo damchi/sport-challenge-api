@@ -98,17 +98,12 @@ func TestAdminMemberChangeAndAccountDeletionInParallel(t *testing.T) {
 		// once the account is locked.
 		beforeErasure func()
 	)
-	erasers := []user.Eraser{
-		eraseUserFunc(func(context.Context, string) error {
-			if beforeErasure != nil {
-				beforeErasure()
-			}
-			return nil
-		}),
-		eraseUserFunc(func(ctx context.Context, userID string) error { return invitations.EraseUser(ctx, userID) }),
-		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
-		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
-	}
+	erasers := accountErasers(eraseUserFunc(func(context.Context, string) error {
+		if beforeErasure != nil {
+			beforeErasure()
+		}
+		return nil
+	}), &invitations, &activities, &challenges)
 	users := user.NewService(user.NewRepository(gdb), lockForDeletionFunc(func(ctx context.Context, userID string) error {
 		return challenges.LockForDeletion(ctx, userID)
 	}), erasers, deletedAtAuth0{}, clk, logger)
