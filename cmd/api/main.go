@@ -123,8 +123,9 @@ func run() error {
 	deletionLock := lockForDeletionFunc(func(ctx context.Context, userID string) error {
 		return challenges.LockForDeletion(ctx, userID)
 	})
-	// The deletion of an account erases its profile from the admin journal
-	// too, whoever deletes it.
+	// The deletion of an account erases its profile and the values of its
+	// activities from the admin journal too, whoever deletes it: the journal
+	// first, as it finds the lines of the activities by them.
 	adminRepo := admin.NewRepository(gdb)
 	journal := admin.NewJournal(adminRepo, clk)
 	erasers := []user.Eraser{

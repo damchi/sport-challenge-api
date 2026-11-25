@@ -156,11 +156,13 @@ func jsonObject(v map[string]any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
-// EraseUser erases the profile values (profileFields) of the journal lines
-// that target account userID, as an account or as a participant (README
-// §2.12): a user.Eraser, run in the transaction of the deletion of the
-// account (ctx carries it), whoever deletes it. The action, the instant,
-// the target and the reason stay.
+// EraseUser erases the values account userID leaves in the journal (README
+// §2.12): the profile values (profileFields) of the lines that target it, as
+// an account or as a participant, and all the values of the lines that
+// target its activities. A user.Eraser, run in the transaction of the
+// deletion of the account (ctx carries it), whoever deletes it, before its
+// activities are deleted. The action, the instant, the target, the
+// challenges and the reason stay.
 func (j *Journal) EraseUser(ctx context.Context, userID string) error {
 	return j.store.EraseUserValues(ctx, userID)
 }

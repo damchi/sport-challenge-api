@@ -16,6 +16,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/admin"
 	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/closure"
+	"github.com/damchi/sport-challenge-api/internal/invitation"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
@@ -30,6 +31,8 @@ import (
 // finished challenges, the activities a user can no longer change; every
 // challenge where the activity counts, before or after the change, is
 // judged again and named in the journal line; a preview changes nothing.
+// Once its author's account is deleted, the lines of their activities keep
+// no value.
 func TestAdminActivityCorrections(t *testing.T) {
 	pool := testdb.New(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -41,17 +44,30 @@ func TestAdminActivityCorrections(t *testing.T) {
 	// frozen at now.
 	now := toronto(t, 2026, 5, 20, 12)
 	clk := clock.NewFake(now)
-	var challenges *challenge.Service
+	var (
+		challenges  *challenge.Service
+		activities  *activity.Service
+		invitations *invitation.Service
+	)
+	adminRepo := admin.NewRepository(gdb)
+	adminJournal := admin.NewJournal(adminRepo, clk)
+	// The erasers of run, the journal first.
+	erasers := []user.Eraser{
+		adminJournal,
+		eraseUserFunc(func(ctx context.Context, userID string) error { return invitations.EraseUser(ctx, userID) }),
+		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
+		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
+	}
 	users := user.NewService(user.NewRepository(gdb), lockForDeletionFunc(func(ctx context.Context, userID string) error {
 		return challenges.LockForDeletion(ctx, userID)
-	}), nil, deletedAtAuth0{}, clk, logger)
+	}), erasers, deletedAtAuth0{}, clk, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, challengeStandings{}, clk)
-	activities := activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, activityCatalogue{sports}, participations{challenges}, activityScopes{challenges}, clk)
+	invitations = invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
+	activities = activity.NewService(activity.NewRepository(gdb), activityProfiles{users}, activityCatalogue{sports}, participations{challenges}, activityScopes{challenges}, clk)
 	leaderboards := leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
 	worker := closure.NewService(closure.NewRepository(gdb), leaderboard.NewRepository(gdb), clk, logger)
-	adminRepo := admin.NewRepository(gdb)
-	corrections := admin.NewActivityCorrections(admin.NewCorrections(adminRepo, admin.NewJournal(adminRepo, clk), worker, leaderboards), activities)
+	corrections := admin.NewActivityCorrections(admin.NewCorrections(adminRepo, adminJournal, worker, leaderboards), activities)
 
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -299,6 +315,63 @@ func TestAdminActivityCorrections(t *testing.T) {
 		}
 		if a := line("Distance corrigée"); !slices.Equal(a.ChallengeIDs, sorted(spring, april)) {
 			t.Fatalf("journal line touches %v, want spring and april", a.ChallengeIDs)
+		}
+	})
+
+	t.Run("the account deleted: the lines of its activities keep no value", func(t *testing.T) {
+		// An activity of ann recorded, changed then deleted by the admin,
+		// in may.
+		previews, err := corrections.Record(t.Context(), adminActor, ann, run(toronto(t, 2026, 5, 5, 10), 4000), "Séance de mai", false)
+		if err != nil || len(previews) != 1 {
+			t.Fatalf("recorded in may: %d previews, %v", len(previews), err)
+		}
+		recorded := line("Séance de mai").TargetID
+		if _, err := corrections.Update(t.Context(), adminActor, recorded, run(toronto(t, 2026, 5, 5, 10), 4500), "Distance de mai", false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := corrections.Delete(t.Context(), adminActor, recorded, "Séance de mai en double", false); err != nil {
+			t.Fatal(err)
+		}
+		before := journal()
+		if err := users.Delete(t.Context(), ann); err != nil {
+			t.Fatal(err)
+		}
+		after := journal()
+		if len(after) != len(before) {
+			t.Fatalf("%d journal lines after the deletion, want the %d before", len(after), len(before))
+		}
+		erased := 0
+		for i, a := range after {
+			b := before[i]
+			ofAnn := slices.Contains([]string{
+				"Montre mal réglée", "Mauvaise date", "Séance oubliée", "Séance en double",
+				"Séance de mai", "Distance de mai", "Séance de mai en double",
+			}, b.Reason)
+			want := b
+			if ofAnn {
+				erased++
+				// No value left; a creation still has no old value, a
+				// deletion no new one.
+				if b.OldValue != nil {
+					want.OldValue = []byte(`{}`)
+				}
+				if b.NewValue != nil {
+					want.NewValue = []byte(`{}`)
+				}
+				if len(b.NewValue) <= 2 && len(b.OldValue) <= 2 {
+					t.Fatalf("line %q had no value to erase: %s %s", b.Reason, b.OldValue, b.NewValue)
+				}
+			}
+			if !reflect.DeepEqual(a, want) {
+				t.Fatalf("journal line after the deletion\n%+v %s %s\nwant\n%+v %s %s", a, a.OldValue, a.NewValue, want, want.OldValue, want.NewValue)
+			}
+		}
+		if erased != 7 {
+			t.Fatalf("%d lines of ann's activities, want 7", erased)
+		}
+		// Bob's line is untouched (checked above), and still has its values.
+		if b := line("Distance corrigée"); string(b.OldValue) != `{"distance_meters": 5000}` || string(b.NewValue) != `{"distance_meters": 5500}` {
+			t.Fatalf("line of bob %s %s, want its values", b.OldValue, b.NewValue)
 		}
 	})
 }
