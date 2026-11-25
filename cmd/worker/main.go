@@ -129,11 +129,11 @@ func run(args []string) error {
 
 // logTaskResult logs the end of a task with its counters: "task failed" at
 // ERROR when it returns an error (the counters are then partial), "task done"
-// at INFO otherwise.
+// at INFO otherwise. The error itself is not repeated: main prints it on exit
+// (and the closure logs each failed challenge where it happens).
 func logTaskResult(ctx context.Context, logger *slog.Logger, task string, err error, counters ...slog.Attr) {
 	attrs := append([]slog.Attr{slog.String("task", task)}, counters...)
 	if err != nil {
-		attrs = append(attrs, slog.String("error", err.Error()))
 		logger.LogAttrs(ctx, slog.LevelError, "task failed", attrs...)
 		return
 	}
