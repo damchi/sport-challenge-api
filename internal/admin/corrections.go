@@ -173,13 +173,14 @@ var errDryRun = errors.New("dry run")
 // them runs at a time (the week lock). A change of an account runs beside
 // them: it holds the row of its target FOR UPDATE, then its journal line
 // takes that of its admin FOR KEY SHARE (admin_actions.admin_id), out of any
-// order. Two of them crossed (two admins deleting each other), or one and a
-// correction that holds the row of its admin (an activity of that admin, step
-// 2) and waits for its target, may thus meet in a deadlock: PostgreSQL rolls
-// one back, which answers busy (InTx), as rare as the same deadlock with
-// DELETE /me, which never took the week lock. So may an account deletion
-// and a run of the worker (close-weeks), which holds the week lock shared
-// and writes the rows of participants and results the deletion writes too.
+// order. The app has a single admin, yet nothing stops two of their
+// requests at once: two of them crossed, or one and a correction that holds
+// the row of its admin (an activity of that admin, step 2) and waits for its
+// target, may thus meet in a deadlock. So may an account deletion and a run
+// of the worker (close-weeks), which holds the week lock shared and writes
+// the rows of participants and results the deletion writes too. PostgreSQL
+// rolls one back, which answers busy (InTx), as rare as the same deadlock
+// with DELETE /me, which never took the week lock.
 func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) ([]ChallengePreview, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return nil, err

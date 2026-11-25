@@ -210,7 +210,7 @@ func TestInLockedTxKeepsARefusalMetAtTheDeadline(t *testing.T) {
 }
 
 // TestInTxAnswersBusyOnADeadlock: a change PostgreSQL stops on a deadlock
-// (two account changes crossed) answers busy, rolled back.
+// (two changes that lock the same rows crossed) answers busy, rolled back.
 func TestInTxAnswersBusyOnADeadlock(t *testing.T) {
 	r, pool := newRepository(t)
 	var ann, bob string
