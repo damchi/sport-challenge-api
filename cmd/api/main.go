@@ -51,7 +51,9 @@ const poolSize = 4
 
 // requestTimeout bounds each request, waiting for a connection of the pool
 // included. It stays under the WriteTimeout of the server (30 s), so the
-// error still reaches the client.
+// error still reaches the client, and well above the wait of an admin
+// change for a lock (lockTimeout, internal/admin: 10 s), which answers busy
+// before it.
 const requestTimeout = 25 * time.Second
 
 func main() {

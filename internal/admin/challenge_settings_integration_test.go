@@ -24,7 +24,7 @@ import (
 )
 
 // briefLocks is the store of the corrections with a wait of 200 ms for each
-// lock, instead of 30 s.
+// lock, instead of 10 s.
 type briefLocks struct{ *Repository }
 
 func (b briefLocks) InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error {

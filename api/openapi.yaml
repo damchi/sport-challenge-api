@@ -2740,9 +2740,9 @@ components:
             $ref: "#/components/schemas/Error"
     Busy:
       description: |
-        The change waited too long for the activity writes and the runs of
-        the worker in progress (`busy`): nothing was written. Try again in a
-        moment.
+        The change waited more than 10 s for one of its locks, held by the
+        activity writes and the runs of the worker in progress (`busy`):
+        nothing was written. Try again in a moment.
       content:
         application/json:
           schema:

@@ -603,8 +603,13 @@ func (r *Repository) LockParticipants(ctx context.Context, ids []string) error {
 }
 
 // lockTimeout bounds the wait of an admin change for each lock, in the
-// syntax of lock_timeout.
-const lockTimeout = "30s"
+// syntax of lock_timeout. It stays well under the deadline of a request
+// (requestTimeout, cmd/api: 25 s), which would otherwise cancel the wait
+// first and answer 500 instead of busy. The bound is that of each lock, not
+// of their sum: the week lock, taken first, is the one the activity writes
+// and the worker hold; the rows locked after are held briefly, and two
+// locks waited for in full still fit under the deadline.
+const lockTimeout = "10s"
 
 // lockNotAvailable is the SQLSTATE of a lock waited for longer than
 // lock_timeout.
@@ -612,7 +617,7 @@ const lockNotAvailable = "55P03"
 
 // InLockedTx runs fn in a transaction, carried by the ctx it gets (db.InTx),
 // that takes the week lock alone before anything else (db.LockWeeks), in
-// the order of the activity writes, waiting 30 s at most for each lock;
+// the order of the activity writes, waiting 10 s at most for each lock;
 // rolled back when fn fails. A lock waited for longer answers 503 busy,
 // everything rolled back.
 func (r *Repository) InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error {
