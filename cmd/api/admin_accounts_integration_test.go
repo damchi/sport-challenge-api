@@ -232,7 +232,9 @@ func TestAdminAccountCorrections(t *testing.T) {
 
 	// The week lock is let go before DELETE /me, which is not under test
 	// here (the cleanup would only roll back at the end).
-	writer.Rollback()
+	if err := writer.Rollback().Error; err != nil {
+		t.Fatal(err)
+	}
 
 	// DELETE /me erases them too; dana's line stays as it was.
 	if err := users.Delete(t.Context(), carl); err != nil {
