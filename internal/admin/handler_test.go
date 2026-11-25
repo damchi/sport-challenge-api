@@ -126,7 +126,7 @@ func TestGetAdminStats(t *testing.T) {
 	ended := statsAt.Add(-time.Hour)
 	failed := "failed"
 	repo := &fakeRepo{
-		figures: Figures{AccountsTotal: 9, AccountsNew: 2, AccountsActive: 4, AccountsBlocked: 3, Upcoming: 1, Ongoing: 2, Finished: 3, Deleted: 1, Activities: 12, PendingAuth0Deletions: 1},
+		figures: Figures{AccountsTotal: 9, AccountsNew: 2, AccountsActive: 4, AccountsBlocked: 3, Upcoming: 1, Ongoing: 2, Finished: 3, Deleted: 1, Activities: 12, PendingAuth0Deletions: 1, BlockedAuth0Deletions: 1},
 		runs: []TaskRun{
 			{Task: "close-weeks", Run: WorkerRun{StartedAt: statsAt.Add(-time.Minute)}},
 			{Task: "close-weeks", Failure: true, Run: WorkerRun{StartedAt: statsAt.Add(-2 * time.Hour), EndedAt: &ended, Outcome: &failed, ErrorCode: ptr("internal_error")}},
@@ -144,6 +144,7 @@ func TestGetAdminStats(t *testing.T) {
 		"challenges":              map[string]any{"upcoming": 1.0, "ongoing": 2.0, "finished": 3.0, "deleted": 1.0},
 		"activities_last_7_days":  12.0,
 		"pending_auth0_deletions": 1.0,
+		"blocked_auth0_deletions": 1.0,
 		"worker_tasks": []any{
 			map[string]any{
 				"task":     "close-weeks",

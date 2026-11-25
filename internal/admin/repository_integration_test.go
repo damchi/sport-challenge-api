@@ -115,7 +115,7 @@ func TestFigures(t *testing.T) {
 	insertChallenge(t, pool, ann, now.Add(time.Hour), 2, true)      // deleted, whatever its status
 	insertChallenge(t, pool, ann, now.AddDate(0, 0, -21), 2, true)
 
-	exec(t, pool, `INSERT INTO pending_auth0_deletions (auth_subject) VALUES ('email|x'), ('email|y')`)
+	exec(t, pool, `INSERT INTO pending_auth0_deletions (auth_subject, last_error_code, blocked) VALUES ('email|x', NULL, false), ('email|y', 'auth0_status_400', true)`)
 
 	got, err := r.Figures(t.Context(), now, since)
 	if err != nil {
@@ -127,6 +127,7 @@ func TestFigures(t *testing.T) {
 		// Never those of a deleted account.
 		Activities:            3,
 		PendingAuth0Deletions: 2,
+		BlockedAuth0Deletions: 1,
 	}
 	if got != want {
 		t.Fatalf("Figures() = %+v, want %+v", got, want)

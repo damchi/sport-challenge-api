@@ -43,6 +43,9 @@ type Figures struct {
 	// accounts excluded.
 	Activities            int64
 	PendingAuth0Deletions int64
+	// BlockedAuth0Deletions counts the pending deletions Auth0 refused for
+	// good at their last replay, in PendingAuth0Deletions too.
+	BlockedAuth0Deletions int64
 }
 
 // WorkerTask is the last run and the last failure of a worker task, nil when

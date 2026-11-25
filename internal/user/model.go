@@ -40,6 +40,13 @@ type ProfileChanges struct {
 	Language     *string
 }
 
+// PendingDeletion is a deletion at Auth0 still to do. UserID is the local
+// account, empty for a deletion recorded before the link (SC-API-158).
+type PendingDeletion struct {
+	Subject string
+	UserID  string
+}
+
 // PublicName is what the other users see of a user: never the e-mail. A
 // name the user has not set yet is nil.
 type PublicName struct {

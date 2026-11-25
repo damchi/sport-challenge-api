@@ -142,6 +142,11 @@ func TestConstraints(t *testing.T) {
 		{name: "same account pending twice", sql: `INSERT INTO pending_auth0_deletions (auth_subject, user_id) VALUES ('email|1', '` + userID + `'), ('email|2', '` + userID + `')`, constraint: "pending_auth0_deletions_user_id_key"},
 		{name: "pending deletion of an unknown account", sql: `INSERT INTO pending_auth0_deletions (auth_subject, user_id) VALUES ('email|1', gen_random_uuid())`, constraint: "pending_auth0_deletions_user_id_fkey"},
 
+		// pending_auth0_deletions failures (000022)
+		{name: "pending deletion blocked by Auth0", sql: `INSERT INTO pending_auth0_deletions (auth_subject, attempts, last_error_code, blocked) VALUES ('email|1', 3, 'auth0_status_400', true)`},
+		{name: "pending deletion blocked without an error", sql: `INSERT INTO pending_auth0_deletions (auth_subject, attempts, blocked) VALUES ('email|1', 1, true)`, constraint: "pending_auth0_deletions_blocked_check"},
+		{name: "negative attempts", sql: `INSERT INTO pending_auth0_deletions (auth_subject, attempts) VALUES ('email|1', -1)`, constraint: "pending_auth0_deletions_attempts_check"},
+
 		// activities (000006)
 		{name: "valid run", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters) VALUES ('` + userID + `', 'run', '2026-12-02Z', 1800, 5000)`},
 		{name: "yoga without distance", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds) VALUES ('` + userID + `', 'yoga', '2026-12-02Z', 3600)`},

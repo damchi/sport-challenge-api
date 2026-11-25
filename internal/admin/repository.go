@@ -32,9 +32,9 @@ func NewRepository(gdb *gorm.DB) *Repository {
 
 // Figures counts, in one statement (one snapshot), the accounts, the
 // challenges at now, the activities recorded since since and the pending
-// Auth0 deletions. A deleted account (anonymized_at) counts nowhere, its
-// activities neither (they are erased with it); a blocked one counts as
-// any other, and among the blocked ones.
+// Auth0 deletions, and among them the blocked ones. A deleted account
+// (anonymized_at) counts nowhere, its activities neither (they are erased
+// with it); a blocked one counts as any other, and among the blocked ones.
 func (r *Repository) Figures(ctx context.Context, now, since time.Time) (Figures, error) {
 	var out Figures
 	err := r.db.WithContext(ctx).Raw(`SELECT
@@ -46,7 +46,8 @@ func (r *Repository) Figures(ctx context.Context, now, since time.Time) (Figures
 		c.upcoming, c.ongoing, c.finished, c.deleted,
 		(SELECT count(*) FROM activities a JOIN users u ON u.id = a.user_id
 			WHERE u.anonymized_at IS NULL AND a.deleted_at IS NULL AND a.created_at >= @since) AS activities,
-		(SELECT count(*) FROM pending_auth0_deletions) AS pending_auth0_deletions
+		(SELECT count(*) FROM pending_auth0_deletions) AS pending_auth0_deletions,
+		(SELECT count(*) FROM pending_auth0_deletions WHERE blocked) AS blocked_auth0_deletions
 		FROM (SELECT
 			count(*) FILTER (WHERE deleted_at IS NULL AND starts_at > @now) AS upcoming,
 			count(*) FILTER (WHERE deleted_at IS NULL AND starts_at <= @now AND ends_at > @now) AS ongoing,

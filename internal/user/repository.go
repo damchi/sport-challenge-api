@@ -179,15 +179,29 @@ func (r *Repository) Delete(ctx context.Context, id string, at time.Time, erase 
 	return subject, nil
 }
 
-// PendingAuth0Deletions returns the subjects whose deletion at Auth0 is
-// still to do, oldest first.
-func (r *Repository) PendingAuth0Deletions(ctx context.Context) ([]string, error) {
-	var subjects []string
-	err := r.db.WithContext(ctx).Raw("SELECT auth_subject FROM pending_auth0_deletions ORDER BY created_at, auth_subject").Scan(&subjects).Error
+// PendingAuth0Deletions returns the deletions at Auth0 still to do, oldest
+// first.
+func (r *Repository) PendingAuth0Deletions(ctx context.Context) ([]PendingDeletion, error) {
+	var pending []PendingDeletion
+	err := r.db.WithContext(ctx).Raw(`SELECT auth_subject AS subject, coalesce(user_id::text, '') AS user_id
+		FROM pending_auth0_deletions ORDER BY created_at, auth_subject`).Scan(&pending).Error
 	if err != nil {
 		return nil, fmt.Errorf("read pending auth0 deletions: %w", err)
 	}
-	return subjects, nil
+	return pending, nil
+}
+
+// RecordAuth0DeletionFailure counts a failed replay of the deletion of
+// subject, with its code, and whether Auth0 refused it for good. A record
+// already removed (by a run at the same time) is not an error.
+func (r *Repository) RecordAuth0DeletionFailure(ctx context.Context, subject, code string, blocked bool) error {
+	err := r.db.WithContext(ctx).Exec(`UPDATE pending_auth0_deletions
+		SET attempts = attempts + 1, last_error_code = ?, blocked = ?
+		WHERE auth_subject = ?`, code, blocked, subject).Error
+	if err != nil {
+		return fmt.Errorf("record auth0 deletion failure: %w", err)
+	}
+	return nil
 }
 
 // RemovePendingAuth0Deletion removes the record of a deletion done at Auth0.

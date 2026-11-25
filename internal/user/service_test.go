@@ -72,7 +72,13 @@ func (f fakeRepository) Delete(ctx context.Context, id string, at time.Time, era
 	return f.user.AuthSubject, nil
 }
 
-func (f fakeRepository) PendingAuth0Deletions(context.Context) ([]string, error) { return nil, f.err }
+func (f fakeRepository) PendingAuth0Deletions(context.Context) ([]PendingDeletion, error) {
+	return nil, f.err
+}
+
+func (f fakeRepository) RecordAuth0DeletionFailure(context.Context, string, string, bool) error {
+	return f.err
+}
 
 func (f fakeRepository) RemovePendingAuth0Deletion(_ context.Context, subject string) error {
 	if f.removeErr != nil {
@@ -578,36 +584,96 @@ func (f lockThen) LockForDeletion(context.Context, string) error {
 }
 
 // pendingRepository keeps the pending deletions in memory, as the database
-// does: removing a subject twice is not an error.
+// does: removing a subject twice is not an error. failures records the
+// failures by subject; recordErr fails their recording.
 type pendingRepository struct {
 	fakeRepository
-	subjects  []string
+	pending   []PendingDeletion
+	failures  map[string]recordedFailure
 	listErr   error
 	removeErr error
+	recordErr error
 }
 
-func (p *pendingRepository) PendingAuth0Deletions(context.Context) ([]string, error) {
-	return append([]string(nil), p.subjects...), p.listErr
+type recordedFailure struct {
+	attempts int
+	code     string
+	blocked  bool
+}
+
+// pendingOf returns the pending deletions of subjects, each of an account
+// named after its subject.
+func pendingOf(subjects ...string) []PendingDeletion {
+	out := make([]PendingDeletion, 0, len(subjects))
+	for _, s := range subjects {
+		out = append(out, PendingDeletion{Subject: s, UserID: "user-of-" + s})
+	}
+	return out
+}
+
+func (p *pendingRepository) subjects() []string {
+	out := make([]string, 0, len(p.pending))
+	for _, d := range p.pending {
+		out = append(out, d.Subject)
+	}
+	return out
+}
+
+func (p *pendingRepository) PendingAuth0Deletions(context.Context) ([]PendingDeletion, error) {
+	return append([]PendingDeletion(nil), p.pending...), p.listErr
 }
 
 func (p *pendingRepository) RemovePendingAuth0Deletion(_ context.Context, subject string) error {
 	if p.removeErr != nil {
 		return p.removeErr
 	}
-	p.subjects = slices.DeleteFunc(p.subjects, func(s string) bool { return s == subject })
+	p.pending = slices.DeleteFunc(p.pending, func(d PendingDeletion) bool { return d.Subject == subject })
 	return nil
 }
 
-// flakyIdentities fails for the subjects in failing, and records the calls.
+func (p *pendingRepository) RecordAuth0DeletionFailure(_ context.Context, subject, code string, blocked bool) error {
+	if p.recordErr != nil {
+		return p.recordErr
+	}
+	if p.failures == nil {
+		p.failures = map[string]recordedFailure{}
+	}
+	f := p.failures[subject]
+	p.failures[subject] = recordedFailure{attempts: f.attempts + 1, code: code, blocked: blocked}
+	return nil
+}
+
+// refusedError is a deletion Auth0 refused for good, as auth.DeleteError
+// with a 4xx.
+type refusedError struct{}
+
+func (refusedError) Error() string { return "auth0 delete user: status 400" }
+func (refusedError) Final() bool   { return true }
+func (refusedError) Code() string  { return "auth0_status_400" }
+
+// unavailableError is a deletion that may succeed later, as
+// auth.DeleteError with a 5xx.
+type unavailableError struct{}
+
+func (unavailableError) Error() string { return "auth0 delete user: status 503" }
+func (unavailableError) Final() bool   { return false }
+func (unavailableError) Code() string  { return "auth0_status_503" }
+
+// flakyIdentities fails for the subjects in failing (a 503), refuses those
+// in refused for good (a 400), and records the calls.
 type flakyIdentities struct {
 	failing map[string]bool
+	refused map[string]bool
 	calls   []string
 }
 
 func (f *flakyIdentities) DeleteUser(_ context.Context, subject string) error {
 	f.calls = append(f.calls, subject)
+	if f.refused[subject] {
+		return refusedError{}
+	}
 	if f.failing[subject] {
-		return errors.New("auth0 delete user: status 503")
+		return unavailableError{}
 	}
 	return nil
 }
@@ -615,27 +681,30 @@ func (f *flakyIdentities) DeleteUser(_ context.Context, subject string) error {
 func TestServiceRetryAuth0Deletions(t *testing.T) {
 	storageErr := errors.New("connection reset")
 	t.Run("success removes every pending deletion", func(t *testing.T) {
-		repo := &pendingRepository{subjects: []string{"email|1", "email|2"}}
+		repo := &pendingRepository{pending: pendingOf("email|1", "email|2")}
 		identities := &flakyIdentities{}
 		got, err := NewService(repo, nil, nil, identities, nil, discard).RetryAuth0Deletions(t.Context())
 		if err != nil || got != (RetryResult{Deleted: 2}) {
 			t.Fatalf("result = %+v, err = %v, want 2 deleted", got, err)
 		}
-		if len(repo.subjects) != 0 || !slices.Equal(identities.calls, []string{"email|1", "email|2"}) {
-			t.Fatalf("pending %v, calls %v, want none pending and both replayed", repo.subjects, identities.calls)
+		if len(repo.pending) != 0 || !slices.Equal(identities.calls, []string{"email|1", "email|2"}) {
+			t.Fatalf("pending %v, calls %v, want none pending and both replayed", repo.pending, identities.calls)
 		}
 	})
 
 	t.Run("a failure stays pending, then the next run succeeds", func(t *testing.T) {
-		repo := &pendingRepository{subjects: []string{"email|1", "email|2"}}
+		repo := &pendingRepository{pending: pendingOf("email|1", "email|2")}
 		identities := &flakyIdentities{failing: map[string]bool{"email|1": true}}
 		svc := NewService(repo, nil, nil, identities, nil, discard)
 		got, err := svc.RetryAuth0Deletions(t.Context())
 		if err == nil || got != (RetryResult{Deleted: 1, Failed: 1}) {
 			t.Fatalf("result = %+v, err = %v, want 1 deleted, 1 failed and an error", got, err)
 		}
-		if !slices.Equal(repo.subjects, []string{"email|1"}) {
-			t.Fatalf("pending %v, want only the failed one", repo.subjects)
+		if !slices.Equal(repo.subjects(), []string{"email|1"}) {
+			t.Fatalf("pending %v, want only the failed one", repo.pending)
+		}
+		if f := repo.failures["email|1"]; f != (recordedFailure{attempts: 1, code: "auth0_status_503"}) {
+			t.Fatalf("failure recorded %+v, want 1 attempt, auth0_status_503, not blocked", f)
 		}
 		// The service adds no subject to the error; that the Auth0 client
 		// keeps it out of its own errors is tested in platform/auth.
@@ -644,8 +713,83 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 		}
 		identities.failing = nil
 		got, err = svc.RetryAuth0Deletions(t.Context())
-		if err != nil || got != (RetryResult{Deleted: 1}) || len(repo.subjects) != 0 {
-			t.Fatalf("second run = %+v, err = %v, pending %v, want the last one done", got, err, repo.subjects)
+		if err != nil || got != (RetryResult{Deleted: 1}) || len(repo.pending) != 0 {
+			t.Fatalf("second run = %+v, err = %v, pending %v, want the last one done", got, err, repo.pending)
+		}
+	})
+
+	t.Run("a final refusal is blocked and does not fail the run", func(t *testing.T) {
+		repo := &pendingRepository{pending: pendingOf("email|1", "email|2")}
+		identities := &flakyIdentities{refused: map[string]bool{"email|1": true}}
+		var logs bytes.Buffer
+		svc := NewService(repo, nil, nil, identities, nil, slog.New(slog.NewJSONHandler(&logs, nil)))
+		got, err := svc.RetryAuth0Deletions(t.Context())
+		if err != nil || got != (RetryResult{Deleted: 1, Blocked: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 deleted, 1 blocked and no error", got, err)
+		}
+		if !slices.Equal(repo.subjects(), []string{"email|1"}) {
+			t.Fatalf("pending %v, want the refused one kept", repo.pending)
+		}
+		if f := repo.failures["email|1"]; f != (recordedFailure{attempts: 1, code: "auth0_status_400", blocked: true}) {
+			t.Fatalf("failure recorded %+v, want 1 attempt, auth0_status_400, blocked", f)
+		}
+		// Logged at ERROR with the local account, never the subject.
+		out := logs.String()
+		if !strings.Contains(out, `"level":"ERROR"`) || !strings.Contains(out, `"user_id":"user-of-email|1"`) || !strings.Contains(out, `"error_code":"auth0_status_400"`) {
+			t.Fatalf("logs %q, want an ERROR line with the account and the code", out)
+		}
+		if strings.Contains(strings.ReplaceAll(out, "user-of-email|1", ""), "email|") {
+			t.Fatalf("logs %q carry the subject", out)
+		}
+
+		// Still replayed: once the cause is gone, it goes through.
+		identities.refused = nil
+		got, err = svc.RetryAuth0Deletions(t.Context())
+		if err != nil || got != (RetryResult{Deleted: 1}) || len(repo.pending) != 0 {
+			t.Fatalf("second run = %+v, err = %v, pending %v, want the blocked one done", got, err, repo.pending)
+		}
+	})
+
+	t.Run("a transient failure still fails the run beside a blocked one", func(t *testing.T) {
+		repo := &pendingRepository{pending: pendingOf("email|1", "email|2")}
+		identities := &flakyIdentities{refused: map[string]bool{"email|1": true}, failing: map[string]bool{"email|2": true}}
+		got, err := NewService(repo, nil, nil, identities, nil, discard).RetryAuth0Deletions(t.Context())
+		if err == nil || got != (RetryResult{Failed: 1, Blocked: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 failed, 1 blocked and an error", got, err)
+		}
+		if strings.Contains(err.Error(), "status 400") {
+			t.Fatalf("error %q carries the final refusal", err)
+		}
+	})
+
+	t.Run("an error without a status is transient", func(t *testing.T) {
+		repo := &pendingRepository{pending: pendingOf("email|1")}
+		identities := &identitiesFunc{err: errors.New("auth0 delete user: token request: status 401")}
+		got, err := NewService(repo, nil, nil, identities, nil, discard).RetryAuth0Deletions(t.Context())
+		if err == nil || got != (RetryResult{Failed: 1}) {
+			t.Fatalf("result = %+v, err = %v, want 1 failed and an error", got, err)
+		}
+		if f := repo.failures["email|1"]; f != (recordedFailure{attempts: 1, code: "auth0_request_failed"}) {
+			t.Fatalf("failure recorded %+v, want auth0_request_failed, not blocked", f)
+		}
+	})
+
+	t.Run("a stop during the call records no failure", func(t *testing.T) {
+		repo := &pendingRepository{pending: pendingOf("email|1", "email|2")}
+		ctx, cancel := context.WithCancel(t.Context())
+		identities := &identitiesFunc{err: errors.New("auth0 delete user: context canceled"), before: cancel}
+		got, err := NewService(repo, nil, nil, identities, nil, discard).RetryAuth0Deletions(ctx)
+		if err == nil || got != (RetryResult{}) || len(repo.failures) != 0 || identities.calls != 1 {
+			t.Fatalf("result = %+v, err = %v, failures %v, calls %d, want an error, nothing counted or recorded, one call", got, err, repo.failures, identities.calls)
+		}
+	})
+
+	t.Run("a failure that cannot be recorded is an error", func(t *testing.T) {
+		repo := &pendingRepository{pending: pendingOf("email|1"), recordErr: storageErr}
+		identities := &flakyIdentities{refused: map[string]bool{"email|1": true}}
+		_, err := NewService(repo, nil, nil, identities, nil, discard).RetryAuth0Deletions(t.Context())
+		if !errors.Is(err, storageErr) {
+			t.Fatalf("err = %v, want the storage error", err)
 		}
 	})
 
@@ -659,7 +803,7 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 	})
 
 	t.Run("a record that cannot be removed is an error", func(t *testing.T) {
-		repo := &pendingRepository{subjects: []string{"email|1"}, removeErr: storageErr}
+		repo := &pendingRepository{pending: pendingOf("email|1"), removeErr: storageErr}
 		got, err := NewService(repo, nil, nil, &flakyIdentities{}, nil, discard).RetryAuth0Deletions(t.Context())
 		if !errors.Is(err, storageErr) || got != (RetryResult{Failed: 1}) {
 			t.Fatalf("result = %+v, err = %v, want 1 failed with the storage error", got, err)
@@ -674,4 +818,20 @@ func TestServiceRetryAuth0Deletions(t *testing.T) {
 			t.Fatalf("err = %v, calls %v, want the storage error and no call", err, identities.calls)
 		}
 	})
+}
+
+// identitiesFunc fails every deletion with err, after running before (if
+// set), and counts the calls.
+type identitiesFunc struct {
+	err    error
+	before func()
+	calls  int
+}
+
+func (f *identitiesFunc) DeleteUser(context.Context, string) error {
+	f.calls++
+	if f.before != nil {
+		f.before()
+	}
+	return f.err
 }
