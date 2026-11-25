@@ -2741,8 +2741,9 @@ components:
     Busy:
       description: |
         The change waited more than 10 s for one of its locks, held by the
-        activity writes and the runs of the worker in progress (`busy`):
-        nothing was written. Try again in a moment.
+        activity writes and the runs of the worker in progress, or the
+        deadline of the request (25 s) fell before it ended (`busy`): nothing
+        was written. Try again in a moment.
       content:
         application/json:
           schema:
