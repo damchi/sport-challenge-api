@@ -247,9 +247,10 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Activity, error) 
 	if len(q.UserIDs) == 0 {
 		return nil, errors.New("list activities: no user")
 	}
+	// One array parameter, however many users (db.UUIDs).
 	tx := r.db.WithContext(ctx).Table("activities").
 		Select("id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source").
-		Where("user_id IN ? AND deleted_at IS NULL", q.UserIDs)
+		Where("user_id = ANY(CAST(? AS uuid[])) AND deleted_at IS NULL", db.UUIDs(q.UserIDs))
 	if q.From != nil {
 		tx = tx.Where("started_at >= ?", *q.From)
 	}

@@ -97,9 +97,11 @@ func (r *Repository) PublicNames(ctx context.Context, ids []string) (map[string]
 		LastName  *string
 	}
 	// In the transaction of ctx, if any: an admin change holding the week
-	// lock reads the names of its preview on its own connection.
+	// lock reads the names of its preview on its own connection. One array
+	// parameter, however many users: a leaderboard reads the names of every
+	// participant (db.UUIDs).
 	err := db.Conn(ctx, r.db).Model(&User{}).Select("id, pseudo, first_name, last_name").
-		Where("id IN ? AND anonymized_at IS NULL", ids).Scan(&rows).Error
+		Where("id = ANY(CAST(? AS uuid[])) AND anonymized_at IS NULL", db.UUIDs(ids)).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("read public names: %w", err)
 	}
