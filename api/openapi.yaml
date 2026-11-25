@@ -2878,7 +2878,7 @@ components:
         - internal_error
     AdminStats:
       type: object
-      required: [computed_at, accounts, challenges, activities_last_7_days, pending_auth0_deletions, worker_tasks, build]
+      required: [computed_at, accounts, challenges, activities_last_7_days, pending_auth0_deletions, blocked_auth0_deletions, worker_tasks, build]
       additionalProperties: false
       properties:
         computed_at:
@@ -2899,6 +2899,15 @@ components:
           description: |
             Deleted accounts whose deletion at Auth0 failed and is still to be
             replayed by the worker (`retry-auth0-deletions`).
+        blocked_auth0_deletions:
+          type: integer
+          minimum: 0
+          description: |
+            Among `pending_auth0_deletions`, those Auth0 refused for good at
+            their last replay (a 4xx proper to the account, such as a malformed
+            identifier; neither 401 nor 403, which refuse every deletion and
+            still fail the task, nor 404, 408 and 429). Still replayed, they
+            no longer fail the task; they wait for someone to fix the cause.
         worker_tasks:
           type: array
           description: Every task of the worker, in the order of the enum of `task`, run or not.

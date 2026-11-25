@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -73,11 +74,16 @@ func TestDeleteUser(t *testing.T) {
 		tokenStatus  int
 		deleteStatus int
 		wantErr      bool
+		// wantDeleteErr: the error is a *DeleteError (Auth0 answered the
+		// deletion), final or not.
+		wantDeleteErr bool
+		wantFinal     bool
 	}{
 		{name: "deleted", tokenStatus: http.StatusOK, deleteStatus: http.StatusNoContent},
 		{name: "unknown at Auth0: already deleted", tokenStatus: http.StatusOK, deleteStatus: http.StatusNotFound},
-		{name: "deletion refused", tokenStatus: http.StatusOK, deleteStatus: http.StatusForbidden, wantErr: true},
-		{name: "deletion failure", tokenStatus: http.StatusOK, deleteStatus: http.StatusServiceUnavailable, wantErr: true},
+		{name: "deletion refused", tokenStatus: http.StatusOK, deleteStatus: http.StatusBadRequest, wantErr: true, wantDeleteErr: true, wantFinal: true},
+		{name: "permission taken away", tokenStatus: http.StatusOK, deleteStatus: http.StatusForbidden, wantErr: true, wantDeleteErr: true},
+		{name: "deletion failure", tokenStatus: http.StatusOK, deleteStatus: http.StatusServiceUnavailable, wantErr: true, wantDeleteErr: true},
 		{name: "token refused", tokenStatus: http.StatusUnauthorized, wantErr: true},
 	}
 	for _, tt := range tests {
@@ -91,6 +97,13 @@ func TestDeleteUser(t *testing.T) {
 			if err != nil && strings.Contains(err.Error(), testClientSecret) {
 				t.Fatalf("error leaks the client secret: %v", err)
 			}
+			var deleteErr *DeleteError
+			if errors.As(err, &deleteErr) != tt.wantDeleteErr {
+				t.Fatalf("DeleteUser() error = %v, want a DeleteError %v", err, tt.wantDeleteErr)
+			}
+			if deleteErr != nil && (deleteErr.Status != tt.deleteStatus || deleteErr.Final() != tt.wantFinal) {
+				t.Fatalf("DeleteError = %+v (final %v), want status %d, final %v", deleteErr, deleteErr.Final(), tt.deleteStatus, tt.wantFinal)
+			}
 			if tt.tokenStatus != http.StatusOK {
 				if fake.deleted != "" {
 					t.Fatal("user deleted without a token")
@@ -100,6 +113,35 @@ func TestDeleteUser(t *testing.T) {
 			// The subject is escaped in the path: "|" would otherwise be sent raw.
 			if fake.deleted != "email%7C65f0c2a1" || fake.auth != "Bearer mgmt-token" {
 				t.Fatalf("deleted %q with %q, want the escaped subject and the token", fake.deleted, fake.auth)
+			}
+		})
+	}
+}
+
+func TestDeleteErrorFinal(t *testing.T) {
+	tests := []struct {
+		status    int
+		wantFinal bool
+		wantCode  string
+	}{
+		{status: http.StatusBadRequest, wantFinal: true, wantCode: "auth0_status_400"},
+		{status: http.StatusUnprocessableEntity, wantFinal: true, wantCode: "auth0_status_422"},
+		// The token or the permission taken away: every deletion fails,
+		// the run must fail too.
+		{status: http.StatusUnauthorized, wantCode: "auth0_status_401"},
+		{status: http.StatusForbidden, wantCode: "auth0_status_403"},
+		{status: http.StatusRequestTimeout, wantCode: "auth0_status_408"},
+		{status: http.StatusTooManyRequests, wantCode: "auth0_status_429"},
+		{status: http.StatusInternalServerError, wantCode: "auth0_status_500"},
+		{status: http.StatusServiceUnavailable, wantCode: "auth0_status_503"},
+		// A 3xx (a redirect, never followed) is not a refusal: replayed.
+		{status: http.StatusTemporaryRedirect, wantCode: "auth0_status_307"},
+	}
+	for _, tt := range tests {
+		t.Run(http.StatusText(tt.status), func(t *testing.T) {
+			e := &DeleteError{Status: tt.status}
+			if e.Final() != tt.wantFinal || e.Code() != tt.wantCode {
+				t.Fatalf("status %d: final %v, code %q, want %v, %q", tt.status, e.Final(), e.Code(), tt.wantFinal, tt.wantCode)
 			}
 		})
 	}

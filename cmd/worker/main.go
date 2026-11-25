@@ -119,7 +119,7 @@ func run(args []string) error {
 			// Only the replay is used: no participations to abandon.
 			management := auth.NewAuth0Management(cfg.Auth0MgmtDomain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
 			result, err := user.NewService(user.NewRepository(gdb), nil, nil, management, clk, logger).RetryAuth0Deletions(ctx)
-			logTaskResult(ctx, logger, task, err, slog.Int("deleted", result.Deleted), slog.Int("failed", result.Failed))
+			logTaskResult(ctx, logger, task, err, slog.Int("deleted", result.Deleted), slog.Int("failed", result.Failed), slog.Int("blocked", result.Blocked))
 			return err
 		default:
 			return errUsage

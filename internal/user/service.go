@@ -24,8 +24,9 @@ type repository interface {
 	// transaction ctx carries.
 	Lock(ctx context.Context, id string) (User, error)
 	SetBlockedAt(ctx context.Context, id string, at *time.Time) error
-	PendingAuth0Deletions(ctx context.Context) ([]string, error)
+	PendingAuth0Deletions(ctx context.Context) ([]PendingDeletion, error)
 	RemovePendingAuth0Deletion(ctx context.Context, subject string) error
+	RecordAuth0DeletionFailure(ctx context.Context, subject, code string, blocked bool) error
 }
 
 // DeletionLock locks the challenges an account deletion touches and
@@ -45,6 +46,17 @@ type Eraser interface {
 type Identities interface {
 	DeleteUser(ctx context.Context, subject string) error
 }
+
+// classifiedError is a failure of Identities.DeleteUser that tells whether
+// replaying it can succeed (auth.DeleteError: Auth0 answered).
+type classifiedError interface {
+	Final() bool
+	Code() string
+}
+
+// requestFailedCode names a failed deletion Auth0 did not answer (no token,
+// network, timeout): always transient.
+const requestFailedCode = "auth0_request_failed"
 
 // pendingRemovalTimeout bounds the removal of the pending Auth0 deletion
 // after an account deletion, waiting for a connection of the pool included:
@@ -240,36 +252,65 @@ type RetryResult struct {
 	// Deleted is the number of users deleted at Auth0 and removed from the
 	// pending list.
 	Deleted int
-	// Failed is the number of deletions that failed again and stay pending.
+	// Failed is the number of deletions that failed again, for a cause that
+	// may go away (Auth0 unreachable, a 5xx, a 429), and stay pending.
 	Failed int
+	// Blocked is the number of deletions Auth0 refused for good (a 4xx
+	// proper to the user): they stay pending, replayed, but do not fail the
+	// run.
+	Blocked int
 }
 
 // RetryAuth0Deletions replays the deletions at Auth0 still pending (failed,
 // or interrupted, when the accounts were deleted), and removes each one once
 // done. It can be run again and again: a user Auth0 no longer knows counts as
-// deleted, and a deletion that fails stays pending for the next run. A failure does not stop the
-// others; the errors are joined. Never the subject in an error or a log.
+// deleted, and a deletion that fails stays pending for the next run, its
+// failure recorded (attempts, code, blocked). A failure does not stop the
+// others. A deletion Auth0 refused for good is logged at ERROR with its
+// account and blocked, but leaves the run successful: only the other
+// failures are joined in the error, so that one blocked row does not hide
+// them behind a run that always fails. Never the subject in an error or a
+// log.
 func (s *Service) RetryAuth0Deletions(ctx context.Context) (RetryResult, error) {
-	subjects, err := s.repo.PendingAuth0Deletions(ctx)
+	pending, err := s.repo.PendingAuth0Deletions(ctx)
 	if err != nil {
 		return RetryResult{}, err
 	}
 	var result RetryResult
 	var errs []error
-	for _, subject := range subjects {
+	for _, p := range pending {
 		// Stopped (SIGTERM): the rest stays pending, not counted as failed.
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)
 			break
 		}
-		if err := s.identities.DeleteUser(ctx, subject); err != nil {
+		if err := s.identities.DeleteUser(ctx, p.Subject); err != nil {
+			// Stopped during the call: an interruption, not a failure of Auth0.
+			if ctx.Err() != nil {
+				errs = append(errs, err)
+				break
+			}
+			code, final := requestFailedCode, false
+			var classified classifiedError
+			if errors.As(err, &classified) {
+				code, final = classified.Code(), classified.Final()
+			}
+			if rerr := s.repo.RecordAuth0DeletionFailure(ctx, p.Subject, code, final); rerr != nil {
+				errs = append(errs, rerr)
+			}
+			if final {
+				result.Blocked++
+				s.logger.ErrorContext(ctx, "auth0 deletion refused, blocked",
+					slog.String("user_id", p.UserID), slog.String("error_code", code))
+				continue
+			}
 			result.Failed++
 			errs = append(errs, fmt.Errorf("replay auth0 deletion: %w", err))
 			continue
 		}
 		// Removed only after the deletion: a crash in between replays it,
 		// which is harmless.
-		if err := s.repo.RemovePendingAuth0Deletion(ctx, subject); err != nil {
+		if err := s.repo.RemovePendingAuth0Deletion(ctx, p.Subject); err != nil {
 			result.Failed++
 			errs = append(errs, err)
 			continue

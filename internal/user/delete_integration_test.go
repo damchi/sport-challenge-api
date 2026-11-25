@@ -241,14 +241,18 @@ func TestPendingAuth0DeletionsReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := repo.PendingAuth0Deletions(ctx)
-	if err != nil || len(got) != 2 {
-		t.Fatalf("PendingAuth0Deletions() = %v, %v, want 2 subjects", got, err)
+	want := []PendingDeletion{{Subject: "email|first"}, {Subject: "email|second"}}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("PendingAuth0Deletions() = %v, %v, want %v", got, err, want)
 	}
 
 	identities := &flakyIdentities{failing: map[string]bool{"email|first": true}}
 	svc := NewService(repo, nil, nil, identities, nil, discard)
 	if res, err := svc.RetryAuth0Deletions(ctx); err == nil || res != (RetryResult{Deleted: 1, Failed: 1}) {
 		t.Fatalf("first run = %+v, %v, want 1 deleted, 1 failed and an error", res, err)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = 'email|first' AND attempts = 1 AND last_error_code = 'auth0_status_503' AND NOT blocked"); n != 1 {
+		t.Fatalf("%d rows with the failure recorded, want 1", n)
 	}
 	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = 'email|first'"); n != 1 {
 		t.Fatalf("%d rows for the failed one, want it still pending", n)
@@ -267,5 +271,41 @@ func TestPendingAuth0DeletionsReplay(t *testing.T) {
 	}
 	if res, err := svc.RetryAuth0Deletions(ctx); err != nil || res != (RetryResult{}) {
 		t.Fatalf("third run = %+v, %v, want nothing", res, err)
+	}
+}
+
+func TestPendingAuth0DeletionsBlocked(t *testing.T) {
+	repo, pool := newRepository(t)
+	ctx := t.Context()
+	u, err := repo.GetOrCreateBySubject(ctx, "email|refused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO pending_auth0_deletions (auth_subject, user_id) VALUES ('email|refused', $1)", u.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.PendingAuth0Deletions(ctx)
+	if err != nil || !slices.Equal(got, []PendingDeletion{{Subject: "email|refused", UserID: u.ID}}) {
+		t.Fatalf("PendingAuth0Deletions() = %v, %v, want the deletion of the account", got, err)
+	}
+
+	identities := &flakyIdentities{refused: map[string]bool{"email|refused": true}}
+	svc := NewService(repo, nil, nil, identities, nil, discard)
+	for run := 1; run <= 2; run++ {
+		if res, err := svc.RetryAuth0Deletions(ctx); err != nil || res != (RetryResult{Blocked: 1}) {
+			t.Fatalf("run %d = %+v, %v, want 1 blocked and no error", run, res, err)
+		}
+	}
+	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE auth_subject = 'email|refused' AND attempts = 2 AND last_error_code = 'auth0_status_400' AND blocked"); n != 1 {
+		t.Fatalf("%d blocked rows after 2 runs, want 1", n)
+	}
+
+	// A transient failure afterwards: no longer blocked.
+	identities.refused, identities.failing = nil, map[string]bool{"email|refused": true}
+	if _, err := svc.RetryAuth0Deletions(ctx); err == nil {
+		t.Fatal("transient failure: want an error")
+	}
+	if n := count(t, pool, "SELECT count(*) FROM pending_auth0_deletions WHERE attempts = 3 AND last_error_code = 'auth0_status_503' AND NOT blocked"); n != 1 {
+		t.Fatalf("%d rows unblocked, want 1", n)
 	}
 }

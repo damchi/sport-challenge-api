@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,9 +50,39 @@ func newManagement(baseURL, clientID, clientSecret string) *Auth0Management {
 	}
 }
 
+// DeleteError is the answer of Auth0 to a user deletion that did not
+// succeed. It never carries the subject.
+type DeleteError struct {
+	Status int
+}
+
+func (e *DeleteError) Error() string {
+	return fmt.Sprintf("auth0 delete user: status %d", e.Status)
+}
+
+// Final reports whether Auth0 refused the deletion of this user for good: a
+// 4xx other than 404 (a success), 408 and 429 (a timeout, a rate limit),
+// and 401 and 403. Replaying it as is cannot succeed (a malformed subject)
+// until someone fixes the cause. A 401 or 403 (the token or the permission
+// delete:users taken away) refuses every deletion, not this one: it stays
+// transient, so that it fails the run and raises the alert of the task.
+func (e *DeleteError) Final() bool {
+	switch e.Status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return e.Status >= 400 && e.Status < 500
+}
+
+// Code names the failure with a stable code, kept with the pending deletion.
+func (e *DeleteError) Code() string {
+	return "auth0_status_" + strconv.Itoa(e.Status)
+}
+
 // DeleteUser deletes the Auth0 user of subject (the "sub" of its tokens). A
-// user Auth0 no longer knows counts as deleted. A token is requested for
-// every call: deletions are rare, nothing is cached.
+// user Auth0 no longer knows counts as deleted; any other answer than a
+// success gives a *DeleteError. A token is requested for every call:
+// deletions are rare, nothing is cached.
 func (m *Auth0Management) DeleteUser(ctx context.Context, subject string) error {
 	token, err := m.token(ctx)
 	if err != nil {
@@ -71,7 +102,7 @@ func (m *Auth0Management) DeleteUser(ctx context.Context, subject string) error 
 	case http.StatusNoContent, http.StatusOK, http.StatusNotFound:
 		return nil
 	default:
-		return fmt.Errorf("auth0 delete user: status %d", resp.StatusCode)
+		return &DeleteError{Status: resp.StatusCode}
 	}
 }
 

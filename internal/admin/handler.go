@@ -460,6 +460,7 @@ func (h *Handler) GetAdminStats(ctx context.Context, _ api.GetAdminStatsRequestO
 		},
 		ActivitiesLast7Days:   int(s.Activities),
 		PendingAuth0Deletions: int(s.PendingAuth0Deletions),
+		BlockedAuth0Deletions: int(s.BlockedAuth0Deletions),
 		WorkerTasks:           tasks,
 		Build:                 api.AdminBuild{Version: s.Build.Version, Commit: s.Build.Commit},
 	}, nil

@@ -132,7 +132,7 @@ func TestStats(t *testing.T) {
 	failure := WorkerRun{StartedAt: statsAt.Add(-48 * time.Hour), EndedAt: &ended, Outcome: &failed, ErrorCode: ptr("internal_error")}
 	going := WorkerRun{StartedAt: statsAt.Add(-time.Minute)}
 	repo := &fakeRepo{
-		figures: Figures{AccountsTotal: 9, AccountsNew: 2, AccountsActive: 4, AccountsBlocked: 3, Upcoming: 1, Ongoing: 2, Finished: 3, Deleted: 1, Activities: 12, PendingAuth0Deletions: 1},
+		figures: Figures{AccountsTotal: 9, AccountsNew: 2, AccountsActive: 4, AccountsBlocked: 3, Upcoming: 1, Ongoing: 2, Finished: 3, Deleted: 1, Activities: 12, PendingAuth0Deletions: 1, BlockedAuth0Deletions: 1},
 		runs: []TaskRun{
 			{Task: "retry-auth0-deletions", Run: going},
 			{Task: "close-weeks", Run: run},
