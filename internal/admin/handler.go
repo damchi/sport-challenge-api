@@ -54,7 +54,7 @@ type Handler struct {
 type challengeUpdater interface {
 	UpdateSettings(ctx context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges, reason string, dryRun bool) ([]ChallengePreview, error)
 	Delete(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error)
-	Restore(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error)
+	Restore(ctx context.Context, actor auth.Actor, id string, creatorID *string, reason string, dryRun bool) ([]ChallengePreview, error)
 }
 
 // memberUpdater changes the members of a challenge as an admin
@@ -330,8 +330,16 @@ func (h *Handler) RestoreAdminChallenge(ctx context.Context, req api.RestoreAdmi
 	if !ok {
 		return nil, apperr.New(apperr.CodeUnauthenticated, nil)
 	}
-	b := reasonBody(req.Body)
-	previews, err := h.settings.Restore(ctx, actor, req.ChallengeId.String(), b.Reason, isDryRun(b.DryRun))
+	b := req.Body
+	if b == nil {
+		b = &api.RestoreAdminChallengeJSONRequestBody{}
+	}
+	var creatorID *string
+	if b.CreatorUserId != nil {
+		id := b.CreatorUserId.String()
+		creatorID = &id
+	}
+	previews, err := h.settings.Restore(ctx, actor, req.ChallengeId.String(), creatorID, b.Reason, isDryRun(b.DryRun))
 	if err != nil {
 		return nil, err
 	}

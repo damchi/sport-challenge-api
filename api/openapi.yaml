@@ -1589,7 +1589,11 @@ paths:
         recorded in the journal with its `reason`, naming the challenge, all in
         one transaction. With `dry_run`, everything is
         rolled back and the answer tells what the change would do. An unknown
-        or deleted challenge answers 404 `challenge_not_found`. The body is
+        or deleted challenge answers 404 `challenge_not_found`. A change that
+        makes a challenge without any creator who still has an account
+        upcoming or ongoing (its status read after the change) answers 422
+        `no_creator`, `dry_run` included: the admin names a creator first
+        (README §2.12); one that leaves it finished goes through. The body is
         optional in the contract: without one, the missing `reason` answers
         400 `validation_failed` to an admin, 404 `not_found` to anyone else.
       tags: [admin]
@@ -1623,6 +1627,14 @@ paths:
             challenge, or a deleted one (`challenge_not_found`). `not_found` also answers a malformed request (an id that is not a
             UUID, a body or a parameter that does not match) without the
             permission, without `params`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            The change would make a challenge without any creator upcoming or
+            ongoing (`no_creator`).
           content:
             application/json:
               schema:
@@ -1698,6 +1710,19 @@ paths:
         eliminations that change against those kept at the deletion. An
         unknown challenge, or one that is not deleted, answers 404
         `challenge_not_found`.
+
+        A challenge always keeps a creator (README §2.12): one that the
+        restore would bring back upcoming or ongoing with no creator who still
+        has an account answers 422 `no_creator`, `dry_run` included, unless
+        `creator_user_id` names one. A finished one is restored without (README
+        §2.2). The account named becomes a creator in the transaction of the
+        restore, before the challenge is judged again, whether the challenge
+        has creators left or not: a participant, active or one who abandoned
+        (who is not reinstated), or an account that never joined, which is
+        first added as an active participant, as an admin adds one (422
+        `profile_incomplete` without a complete profile). An unknown or deleted
+        account answers 404 `user_not_found`. The journal line names the
+        account and what it became, by its id alone.
       tags: [admin]
       parameters:
         - name: challengeId
@@ -1711,7 +1736,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AdminCorrectionReason"
+              $ref: "#/components/schemas/AdminChallengeRestore"
       responses:
         "200":
           description: What the restore did, or would do with `dry_run`.
@@ -1726,10 +1751,20 @@ paths:
         "404":
           description: |
             The account has no `admin` permission (`not_found`), or no such
-            challenge, or one that is not deleted (`challenge_not_found`).
+            challenge, or one that is not deleted (`challenge_not_found`), or
+            the account named is unknown or deleted (`user_not_found`).
             `not_found` also answers a malformed request (an id that is not a
             UUID, a body or a parameter that does not match) without the
             permission, without `params`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            The challenge would come back upcoming or ongoing without any
+            creator and none is named (`no_creator`), or the account named
+            never joined and its profile is incomplete (`profile_incomplete`).
           content:
             application/json:
               schema:
@@ -2827,6 +2862,7 @@ components:
         - cannot_exclude_creator
         - not_active_participant
         - last_creator
+        - no_creator
         - distance_required
         - distance_not_allowed
         - elevation_not_allowed
@@ -3286,6 +3322,29 @@ components:
           $ref: "#/components/schemas/PersonName"
         last_name:
           $ref: "#/components/schemas/PersonName"
+    AdminChallengeRestore:
+      type: object
+      additionalProperties: false
+      description: The restore of a deleted challenge, with the creator it may name.
+      properties:
+        reason:
+          allOf:
+            - $ref: "#/components/schemas/AdminReason"
+          description: Required, except with `dry_run` (a preview writes nothing); checked whenever present.
+          x-go-type-skip-optional-pointer: true
+        dry_run:
+          type: boolean
+          description: Preview the change, writing nothing. `false` when absent.
+        creator_user_id:
+          type: string
+          format: uuid
+          description: |
+            An account to make a creator in the restore: required when the
+            challenge would come back upcoming or ongoing without any creator
+            who still has an account (`no_creator` otherwise), accepted
+            otherwise (it joins the other creators). A participant, active or
+            not, or an account that never joined, then added as an active
+            participant (its profile must be complete).
     AdminParticipantAdd:
       type: object
       required: [user_id]

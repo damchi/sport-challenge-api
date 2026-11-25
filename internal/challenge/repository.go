@@ -660,15 +660,24 @@ func (r *Repository) Delete(ctx context.Context, id, actorID string, now time.Ti
 // Restore clears the deletion of challenge id (an admin change), under the
 // lock of its row, in the transaction of ctx, and returns the instant it
 // was deleted at, in UTC; a missing challenge, or one that is not deleted, gives
-// errChallengeNotFound.
-func (r *Repository) Restore(ctx context.Context, id string) (time.Time, error) {
-	var deletedAt []time.Time
+// errChallengeNotFound. decide gets the challenge (its window) and the
+// number of its creators with an account, read after the lock, and refuses
+// with an error, nothing being written then.
+func (r *Repository) Restore(ctx context.Context, id string, decide func(c Challenge, creators int) error) (time.Time, error) {
+	var rows []Challenge
 	err := db.WithTx(ctx, r.db, func(tx *gorm.DB) error {
-		if err := tx.Raw("SELECT deleted_at FROM challenges WHERE id = ? AND deleted_at IS NOT NULL FOR UPDATE", id).Scan(&deletedAt).Error; err != nil {
+		if err := tx.Raw("SELECT id, starts_at, ends_at, deleted_at FROM challenges WHERE id = ? AND deleted_at IS NOT NULL FOR UPDATE", id).Scan(&rows).Error; err != nil {
 			return fmt.Errorf("lock challenge: %w", err)
 		}
-		if len(deletedAt) == 0 {
+		if len(rows) == 0 {
 			return errChallengeNotFound
+		}
+		creators, err := countCreators(tx, id)
+		if err != nil {
+			return err
+		}
+		if err := decide(rows[0], creators); err != nil {
+			return err
 		}
 		if err := tx.Exec("UPDATE challenges SET deleted_at = NULL WHERE id = ?", id).Error; err != nil {
 			return fmt.Errorf("update challenge: %w", err)
@@ -678,7 +687,24 @@ func (r *Repository) Restore(ctx context.Context, id string) (time.Time, error) 
 	if err != nil {
 		return time.Time{}, fmt.Errorf("restore challenge: %w", err)
 	}
-	return deletedAt[0].UTC(), nil
+	return rows[0].DeletedAt.UTC(), nil
+}
+
+// countCreators counts the creators of challenge id with an account (not
+// anonymized), on tx, which holds the lock of the challenge, and takes
+// their accounts FOR SHARE, in the order of their ids, until tx ends: none
+// of them can be deleted before the change commits. In an admin change they
+// are held already (every creator is a participant, admin.Corrections.Run
+// locks the participants first): the lock costs nothing then, and does not
+// rest on that rule.
+func countCreators(tx *gorm.DB, id string) (int, error) {
+	var ids []string
+	if err := tx.Raw(`SELECT id FROM users
+		WHERE anonymized_at IS NULL AND id IN (SELECT user_id FROM challenge_creators WHERE challenge_id = ?)
+		ORDER BY id FOR SHARE`, id).Scan(&ids).Error; err != nil {
+		return 0, fmt.Errorf("count creators: %w", err)
+	}
+	return len(ids), nil
 }
 
 // abandonParticipation turns the active participation of userID in
@@ -755,14 +781,15 @@ func (r *Repository) UpdateText(ctx context.Context, id string, changes TextChan
 
 // UpdateSettings writes the settings of challenge id that decide returns,
 // under the lock of withLockedMembership, in the transaction of ctx (an
-// admin change): decide gets the challenge, its membership left aside, and
-// its categories, read after the lock, and refuses with an error, nothing
-// being written then. The columns are written, then the categories: those
-// kept get their new settings, those removed are deleted with their
-// eliminations and frozen results (whose keys reference them; the recompute
-// that follows the change erases and records them again), the new ones are
-// inserted. A deleted challenge gives errChallengeNotFound.
-func (r *Repository) UpdateSettings(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, []Category) (Challenge, error)) error {
+// admin change): decide gets the challenge, its membership left aside, its
+// categories and the number of its creators with an account, read after
+// the lock, and refuses with an error, nothing being written then. The
+// columns are written, then the categories: those kept get their new
+// settings, those removed are deleted with their eliminations and frozen
+// results (whose keys reference them; the recompute that follows the change
+// erases and records them again), the new ones are inserted. A deleted
+// challenge gives errChallengeNotFound.
+func (r *Repository) UpdateSettings(ctx context.Context, id, actorID string, now time.Time, decide func(c Challenge, cats []Category, creators int) (Challenge, error)) error {
 	// withLockedMembership for its lock on the challenge row, as every
 	// write on a challenge; the membership of the admin is of no use here.
 	err := r.withLockedMembership(ctx, id, actorID, now, func(tx *gorm.DB, c Challenge, _ Membership) error {
@@ -770,7 +797,11 @@ func (r *Repository) UpdateSettings(ctx context.Context, id, actorID string, now
 		if err := tx.Where("challenge_id = ?", id).Order("position").Find(&cats).Error; err != nil {
 			return fmt.Errorf("read categories: %w", err)
 		}
-		next, err := decide(c, cats)
+		creators, err := countCreators(tx, id)
+		if err != nil {
+			return err
+		}
+		next, err := decide(c, cats, creators)
 		if err != nil {
 			return err
 		}

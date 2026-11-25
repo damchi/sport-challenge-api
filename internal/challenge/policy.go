@@ -511,6 +511,18 @@ func AdminRemoveCreatorRefusal(target Membership, otherCreators int, challengeID
 	}
 }
 
+// AdminNoCreatorRefusal is the rule that a challenge always keeps a
+// creator (README §2.12): an admin change after which the challenge is
+// upcoming or ongoing (status, read after the change) with no creator who
+// still has an account (creators) answers 422 no_creator, the admin naming
+// one first. A finished challenge without one is allowed (README §2.2).
+func AdminNoCreatorRefusal(status string, creators int) error {
+	if creators == 0 && status != StatusFinished {
+		return apperr.New(apperr.CodeNoCreator, nil)
+	}
+	return nil
+}
+
 // CanDelete reports whether role may delete a challenge (README §5.7): any
 // creator, at any time, even after abandoning.
 func CanDelete(role Role) bool {
