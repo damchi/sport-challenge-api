@@ -569,7 +569,7 @@ func (c *ctxIdentities) DeleteUser(ctx context.Context, _ string) error {
 	return nil
 }
 
-// lockThen is a Participations whose LockForDeletion runs fn.
+// lockThen is a DeletionLock whose LockForDeletion runs fn.
 type lockThen func()
 
 func (f lockThen) LockForDeletion(context.Context, string) error {
