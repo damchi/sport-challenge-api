@@ -24,7 +24,7 @@ import (
 )
 
 // briefLocks is the store of the corrections with a wait of 200 ms for each
-// lock, instead of 30 s.
+// lock, instead of 10 s.
 type briefLocks struct{ *Repository }
 
 func (b briefLocks) InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error {
@@ -188,6 +188,44 @@ func TestChallengeCorrectionsUpdateSettingsFromTheDatabase(t *testing.T) {
 		writer.Rollback()
 		if got := read(); !reflect.DeepEqual(got, before) {
 			t.Fatalf("state after a lock timeout %+v, want %+v", got, before)
+		}
+	})
+
+	t.Run("a second lock waited for too long answers busy, nothing written", func(t *testing.T) {
+		// The week lock is free; a write in progress holds the challenge.
+		writer := gdb.Begin()
+		t.Cleanup(func() { writer.Rollback() })
+		if err := writer.Exec(`SELECT 1 FROM challenges WHERE id = ? FOR UPDATE`, id).Error; err != nil {
+			t.Fatal(err)
+		}
+		_, err := newCorrections(briefLocks{r}).UpdateSettings(t.Context(), actor, id, challenge.SettingsChanges{Weeks: &four}, "Durée mal saisie", false)
+		var appErr *apperr.Error
+		if !errors.As(err, &appErr) || appErr.Code != apperr.CodeBusy || appErr.Status != http.StatusServiceUnavailable {
+			t.Fatalf("UpdateSettings() = %v, want 503 busy", err)
+		}
+		writer.Rollback()
+		if got := read(); !reflect.DeepEqual(got, before) {
+			t.Fatalf("state after a lock timeout %+v, want %+v", got, before)
+		}
+	})
+
+	t.Run("the deadline of the request met while waiting answers busy, nothing written", func(t *testing.T) {
+		writer := gdb.Begin()
+		t.Cleanup(func() { writer.Rollback() })
+		if err := db.ShareWeekLock(writer); err != nil {
+			t.Fatal(err)
+		}
+		// The deadline falls long before the 10 s a lock is waited for.
+		ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+		defer cancel()
+		_, err := newCorrections(r).UpdateSettings(ctx, actor, id, challenge.SettingsChanges{Weeks: &four}, "Durée mal saisie", false)
+		var appErr *apperr.Error
+		if !errors.As(err, &appErr) || appErr.Code != apperr.CodeBusy || appErr.Status != http.StatusServiceUnavailable {
+			t.Fatalf("UpdateSettings() = %v, want 503 busy", err)
+		}
+		writer.Rollback()
+		if got := read(); !reflect.DeepEqual(got, before) {
+			t.Fatalf("state after a deadline %+v, want %+v", got, before)
 		}
 	})
 

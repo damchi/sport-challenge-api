@@ -707,7 +707,7 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 - entrée invalide (format, bornes, dates, champ inconnu) → 400 `validation_failed`, avec les champs fautifs dans `params.fields` (sur une route `/admin/*`, seulement pour un admin : les autres reçoivent 404 `not_found`) ;
 - entrée valide mais action contraire à une règle métier → 422 avec un code stable (`profile_incomplete`, `registration_closed`, `challenge_ended`, `field_not_editable`, `cannot_exclude_creator`…) ;
 - conflit avec une autre donnée (pseudo déjà pris) → 409 ;
-- modification admin qui a attendu plus de 30 s l'un de ses verrous (écritures en cours, verrou des semaines ou du défi) → 503 `busy`, rien n'est écrit ; l'app propose de réessayer (✅ 2026-11-23, SC-API-161).
+- modification admin qui a attendu plus de 10 s l'un de ses verrous (écritures en cours, verrou des semaines ou du défi) → 503 `busy`, rien n'est écrit ; l'app propose de réessayer (✅ 2026-11-23, SC-API-161). Cette attente reste sous l'échéance de 25 s de chaque requête, pour que `busy` réponde avant elle ; une modification admin que cette échéance coupe quand même (plusieurs verrous attendus à la suite, attente d'une connexion) répond aussi 503 `busy`, rien n'est écrit (✅ 2026-11-25, SC-API-178).
 
 **Protections** : l'identifiant de l'acteur vient toujours du contexte (jamais d'un paramètre) ; le contrôle et l'écriture se font dans la même transaction quand une course est possible (rejoindre à la limite de la semaine 1, suppression du challenge pendant qu'un participant le rejoint) ; chaque règle a un test « interdit » ; l'agent `security-reviewer` vérifie ce point à chaque revue.
 

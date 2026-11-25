@@ -3,6 +3,8 @@
 package admin
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"reflect"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
 )
@@ -185,5 +188,22 @@ func TestLastWorkerRuns(t *testing.T) {
 	}
 	if !reflect.DeepEqual(byKey, want) {
 		t.Fatalf("LastWorkerRuns() = %+v, want %+v", byKey, want)
+	}
+}
+
+// TestInLockedTxKeepsARefusalMetAtTheDeadline: only the error of the
+// deadline of the request answers busy; a refusal of the change returned
+// once the deadline has fallen keeps its code.
+func TestInLockedTxKeepsARefusalMetAtTheDeadline(t *testing.T) {
+	r, _ := newRepository(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	err := r.InLockedTx(ctx, func(ctx context.Context) error {
+		<-ctx.Done()
+		return apperr.New(apperr.CodeNotFound, nil)
+	})
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Code != apperr.CodeNotFound {
+		t.Fatalf("InLockedTx() = %v, want not_found", err)
 	}
 }

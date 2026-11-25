@@ -603,8 +603,11 @@ func (r *Repository) LockParticipants(ctx context.Context, ids []string) error {
 }
 
 // lockTimeout bounds the wait of an admin change for each lock, in the
-// syntax of lock_timeout.
-const lockTimeout = "30s"
+// syntax of lock_timeout. It stays well under the deadline of a request
+// (requestTimeout, cmd/api: 25 s), which would otherwise cancel the wait
+// first. The bound is that of each lock, not of their sum: a change whose
+// waits add up to the deadline of its request answers busy too (inLockedTx).
+const lockTimeout = "10s"
 
 // lockNotAvailable is the SQLSTATE of a lock waited for longer than
 // lock_timeout.
@@ -612,15 +615,20 @@ const lockNotAvailable = "55P03"
 
 // InLockedTx runs fn in a transaction, carried by the ctx it gets (db.InTx),
 // that takes the week lock alone before anything else (db.LockWeeks), in
-// the order of the activity writes, waiting 30 s at most for each lock;
+// the order of the activity writes, waiting 10 s at most for each lock;
 // rolled back when fn fails. A lock waited for longer answers 503 busy,
-// everything rolled back.
+// everything rolled back, as does a change the deadline of ctx (that of the
+// request) cuts, waiting for a connection or for several locks in a row:
+// nothing was written, the admin may try again.
 func (r *Repository) InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	return r.inLockedTx(ctx, lockTimeout, fn)
 }
 
 // inLockedTx is InLockedTx, each lock waited for timeout at most.
 func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx context.Context) error) error {
+	// uncommitted stays true until fn is over without an error: an error
+	// met after is that of the commit.
+	uncommitted := true
 	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
 		tx := db.Conn(ctx, r.db)
 		// While the change waits for the lock, the activity writes wait
@@ -632,10 +640,21 @@ func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx
 		if err := db.LockWeeks(tx); err != nil {
 			return err
 		}
-		return fn(ctx)
+		if err := fn(ctx); err != nil {
+			return err
+		}
+		uncommitted = false
+		return nil
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
+		return apperr.New(apperr.CodeBusy, err)
+	}
+	// Only the error of the deadline itself: a refusal of fn met as the
+	// deadline falls keeps its code. A commit the deadline cuts may have
+	// been written: it does not answer busy, which promises it was not.
+	var appErr *apperr.Error
+	if uncommitted && !errors.As(err, &appErr) && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return apperr.New(apperr.CodeBusy, err)
 	}
 	return err
