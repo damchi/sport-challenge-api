@@ -58,6 +58,7 @@ func TestStartOfDay(t *testing.T) {
 		{name: "Toronto, fall back at 02:00", zone: "America/Toronto", day: [3]int{2026, 11, 1}, local: "00:00"},
 		{name: "Havana, fall back at midnight: the first 00:00", zone: "America/Havana", day: [3]int{2027, 11, 7}, local: "00:00"},
 		{name: "Havana, fall back at midnight in 2026", zone: "America/Havana", day: [3]int{2026, 11, 1}, local: "00:00"},
+		{name: "Amman, fall back at midnight east of UTC: the first 00:00", zone: "Asia/Amman", day: [3]int{2021, 10, 29}, local: "00:00"},
 		{name: "UTC", zone: "UTC", day: [3]int{2027, 1, 1}, local: "00:00"},
 		{name: "day 31 of February is March 3", zone: "UTC", day: [3]int{2027, 2, 31}, local: "00:00"},
 	}
@@ -388,5 +389,81 @@ func TestStartOfDayOfASkippedDay(t *testing.T) {
 	got := StartOfDay(2011, 12, 30, loc)
 	if l := got.In(loc).Format("2006-01-02 15:04"); l != "2011-12-31 00:00" {
 		t.Fatalf("starts at %s local, want 2011-12-31 00:00", l)
+	}
+}
+
+// weekOfByBounds is WeekOf as the bounds of the weeks define it: the first
+// week whose end is after t.
+func weekOfByBounds(w Window, t time.Time) int {
+	if !w.Contains(t) {
+		return 0
+	}
+	for n := 1; ; n++ {
+		if _, end := w.WeekBounds(n); t.Before(end) {
+			return n
+		}
+	}
+}
+
+// TestWeekOfMatchesTheBounds: WeekOf, computed from the local dates, gives
+// the week of the bounds, hour by hour and around each bound, across time
+// changes, bounds on a skipped midnight or a day skipped as a whole, and a
+// window that starts within a day and ends before the end of its weeks.
+func TestWeekOfMatchesTheBounds(t *testing.T) {
+	cases := []struct {
+		zone string
+		day  [3]int
+		// shift moves the start and the end of the window.
+		shift [2]time.Duration
+	}{
+		// A bound on a skipped midnight: the week starts at 01:00.
+		{zone: "America/Santiago", day: [3]int{2025, 8, 31}},
+		{zone: "Africa/Cairo", day: [3]int{2024, 4, 19}},
+		{zone: "Asia/Beirut", day: [3]int{2025, 3, 23}},
+		{zone: "America/Havana", day: [3]int{2025, 3, 2}},
+		// A bound on a repeated midnight, east of UTC: the week starts at
+		// the first one.
+		{zone: "Asia/Amman", day: [3]int{2021, 10, 22}},
+		{zone: "Asia/Hebron", day: [3]int{2020, 10, 17}},
+		// A bound on 2011-12-30, skipped: the week starts on the 31st.
+		{zone: "Pacific/Apia", day: [3]int{2011, 12, 23}},
+		{zone: "America/Toronto", day: [3]int{2026, 3, 2}, shift: [2]time.Duration{5 * time.Hour, -3 * time.Hour}},
+		{zone: "America/Toronto", day: [3]int{2026, 10, 26}, shift: [2]time.Duration{50 * time.Hour, -40 * time.Hour}},
+		{zone: "America/Toronto", day: [3]int{2026, 1, 5}},
+		{zone: "America/Toronto", day: [3]int{2026, 3, 2}},
+		{zone: "Europe/Paris", day: [3]int{2026, 3, 23}},
+		{zone: "Australia/Lord_Howe", day: [3]int{2026, 3, 30}},
+		{zone: "America/Santiago", day: [3]int{2025, 8, 4}},
+		{zone: "Africa/Cairo", day: [3]int{2024, 4, 22}},
+		{zone: "Asia/Beirut", day: [3]int{2025, 3, 24}},
+		{zone: "America/Havana", day: [3]int{2025, 3, 3}},
+		{zone: "Pacific/Apia", day: [3]int{2011, 12, 26}},
+		{zone: "Pacific/Apia", day: [3]int{2011, 12, 30}},
+		{zone: "UTC", day: [3]int{2026, 2, 23}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.zone+" "+time.Date(tc.day[0], time.Month(tc.day[1]), tc.day[2], 0, 0, 0, 0, time.UTC).Format(time.DateOnly), func(t *testing.T) {
+			w := window(t, tc.zone, tc.day, 52)
+			w.Start, w.End = w.Start.Add(tc.shift[0]), w.End.Add(tc.shift[1])
+			weeks := w.Weeks()
+			check := func(at time.Time) {
+				t.Helper()
+				got, want := w.WeekOf(at), weekOfByBounds(w, at)
+				if got != want || got > weeks {
+					t.Fatalf("WeekOf(%s) = %d, want %d (of %d weeks)", at.In(w.Location), got, want, weeks)
+				}
+			}
+			for at := w.Start.Add(-2 * time.Hour); at.Before(w.End.Add(2 * time.Hour)); at = at.Add(time.Hour) {
+				check(at)
+			}
+			for n := 1; n <= weeks; n++ {
+				start, end := w.WeekBounds(n)
+				for _, bound := range []time.Time{start, end} {
+					check(bound.Add(-time.Nanosecond))
+					check(bound)
+					check(bound.Add(time.Nanosecond))
+				}
+			}
+		})
 	}
 }

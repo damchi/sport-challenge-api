@@ -51,15 +51,25 @@ func (w Window) Weeks() int {
 }
 
 // WeekOf returns the number of the week holding t, or 0 outside the window.
+// Week n starts on the local date of the start + 7 × (n-1) days
+// (WeekBounds), at the first instant of that day: an instant falls in the
+// week of its local date, counted in days from the date of the start. It is
+// computed from the dates, without cutting the weeks: the scorers call it
+// for every group of activities.
 func (w Window) WeekOf(t time.Time) int {
 	if !w.Contains(t) {
 		return 0
 	}
-	for n := 1; ; n++ {
-		if _, end := w.WeekBounds(n); t.Before(end) {
-			return n
-		}
-	}
+	return daysBetween(w.Start.In(w.Location), t.In(w.Location))/7 + 1
+}
+
+// daysBetween is the number of calendar days from the date from shows to
+// the date to shows, each in its own location.
+func daysBetween(from, to time.Time) int {
+	fy, fm, fd := from.Date()
+	ty, tm, td := to.Date()
+	d := time.Date(ty, tm, td, 0, 0, 0, 0, time.UTC).Sub(time.Date(fy, fm, fd, 0, 0, 0, 0, time.UTC))
+	return int(d / (24 * time.Hour))
 }
 
 // CurrentWeek returns the number of the week holding Now and the instant it
@@ -92,8 +102,8 @@ func (w Window) WeekLocksAt(n int) time.Time {
 // is judged when it locks (WeekLocksAt), never before. Weeks lock in order,
 // so these are weeks 1 to LockedWeeks.
 func (w Window) LockedWeeks() int {
-	locked := 0
-	for n := 1; n <= w.Weeks(); n++ {
+	locked, weeks := 0, w.Weeks()
+	for n := 1; n <= weeks; n++ {
 		if w.Now.Before(w.WeekLocksAt(n)) {
 			break
 		}
@@ -112,18 +122,13 @@ func (w Window) RegistrationDeadline() time.Time {
 // loc, in UTC. The date is normalized like time.Date (February 31 is March
 // 3). It is local midnight, except where a time change skips midnight (Chile,
 // Egypt, Lebanon...): the day then starts at the first instant that exists,
-// the end of the skipped hour (README §2.1). time.Date picks either side of
-// such a gap, sometimes 23:00 the day before. A day skipped as a whole (Apia,
+// the end of the skipped hour (README §2.1); where one repeats midnight, it
+// is the first of the two. time.Date picks either side in both cases,
+// sometimes 23:00 the day before. A day skipped as a whole (Apia,
 // 2011-12-30) gives the start of the next day that exists.
 func StartOfDay(year int, month time.Month, day int, loc *time.Location) time.Time {
 	y, m, d := time.Date(year, month, day, 12, 0, 0, 0, time.UTC).Date()
-	t := time.Date(y, m, d, 0, 0, 0, 0, loc)
-	if ty, tm, td := t.Date(); ty != y || tm != m || td != d {
-		// Midnight was skipped and t fell back on the day before: the day
-		// starts where the zone in effect at t ends, at the time change.
-		_, t = t.ZoneBounds()
-	}
-	return t.UTC()
+	return firstInstantAt(y, m, d, 0, loc)
 }
 
 // firstInstantAt returns, in UTC, the first instant that shows hour:00 on
