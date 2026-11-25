@@ -626,6 +626,9 @@ func (r *Repository) InLockedTx(ctx context.Context, fn func(ctx context.Context
 
 // inLockedTx is InLockedTx, each lock waited for timeout at most.
 func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx context.Context) error) error {
+	// uncommitted stays true until fn is over without an error: an error
+	// met after is that of the commit.
+	uncommitted := true
 	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
 		tx := db.Conn(ctx, r.db)
 		// While the change waits for the lock, the activity writes wait
@@ -637,16 +640,21 @@ func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx
 		if err := db.LockWeeks(tx); err != nil {
 			return err
 		}
-		return fn(ctx)
+		if err := fn(ctx); err != nil {
+			return err
+		}
+		uncommitted = false
+		return nil
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
 		return apperr.New(apperr.CodeBusy, err)
 	}
 	// Only the error of the deadline itself: a refusal of fn met as the
-	// deadline falls keeps its code.
+	// deadline falls keeps its code. A commit the deadline cuts may have
+	// been written: it does not answer busy, which promises it was not.
 	var appErr *apperr.Error
-	if !errors.As(err, &appErr) && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if uncommitted && !errors.As(err, &appErr) && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return apperr.New(apperr.CodeBusy, err)
 	}
 	return err
