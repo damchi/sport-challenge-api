@@ -102,7 +102,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// Each needs the other: deleting an account abandons its challenges and
+	// Each needs the other: deleting an account locks its challenges and
 	// erases its rows in the other modules, which read the profiles; the
 	// challenge list reads the standings from the leaderboard, which reads
 	// the challenges. The closures resolve the services once set.
@@ -120,8 +120,8 @@ func run() error {
 			return leaderboards.Results(ctx, actorID, cs)
 		},
 	}
-	abandonAll := abandonAllFunc(func(ctx context.Context, userID string) error {
-		return challenges.AbandonAll(ctx, userID)
+	deletionLock := lockForDeletionFunc(func(ctx context.Context, userID string) error {
+		return challenges.LockForDeletion(ctx, userID)
 	})
 	// The deletion of an account erases its profile from the admin journal
 	// too, whoever deletes it.
@@ -134,7 +134,7 @@ func run() error {
 		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
 	}
 	management := auth.NewAuth0Management(cfg.Auth0MgmtDomain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
-	users := user.NewService(user.NewRepository(gdb), abandonAll, erasers, management, clk, logger)
+	users := user.NewService(user.NewRepository(gdb), deletionLock, erasers, management, clk, logger)
 
 	gin.SetMode(gin.ReleaseMode)
 	sports := sport.NewService(sport.NewRepository(gdb))
@@ -208,10 +208,10 @@ func run() error {
 	return nil
 }
 
-// abandonAllFunc is a function as a user.Participations.
-type abandonAllFunc func(ctx context.Context, userID string) error
+// lockForDeletionFunc is a function as a user.DeletionLock.
+type lockForDeletionFunc func(ctx context.Context, userID string) error
 
-func (f abandonAllFunc) AbandonAll(ctx context.Context, userID string) error {
+func (f lockForDeletionFunc) LockForDeletion(ctx context.Context, userID string) error {
 	return f(ctx, userID)
 }
 

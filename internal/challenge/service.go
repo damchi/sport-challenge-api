@@ -44,7 +44,6 @@ type repository interface {
 	RemoveCreator(ctx context.Context, id, userID string, now time.Time, decide func(c Challenge, m Membership, otherCreators int) (bool, error)) error
 	Participants(ctx context.Context, id string, limit int, after *ParticipantPosition) ([]Participant, error)
 	ParticipantMemberships(ctx context.Context, id string) (map[string]Membership, error)
-	ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error)
 	LastCreatorChallenges(ctx context.Context, userID string, now time.Time) ([]string, error)
 	Memberships(ctx context.Context, userID string) ([]UserChallenge, error)
 	EraseUser(ctx context.Context, userID string) error
@@ -541,45 +540,26 @@ func (s *Service) Abandon(ctx context.Context, actorID, id string) (Detail, erro
 	return s.Get(ctx, auth.Actor{ID: actorID}, id)
 }
 
-// AbandonAll makes userID abandon every challenge not finished where they
-// are an active participant, for the deletion of their account
-// (DeletionAbandons): each under the lock of its challenge, like an abandon,
-// at the clock's now once locked. It first refuses (422 last_creator,
-// DeletionRefusal) while userID is the last creator with an account of a
-// challenge not finished. Called in the transaction of the account deletion
+// LockForDeletion prepares the deletion of the account of userID: it locks
+// every challenge not finished the deletion touches (LastCreatorChallenges)
+// and refuses (422 last_creator, DeletionRefusal) while userID is the last
+// creator with an account of a challenge not finished. It writes nothing:
+// EraseUser then deletes every row of the account, in the same transaction
 // (ctx carries it), so everything commits or nothing does. It checks no
 // actor: never expose it on a route, only user.Service.Delete calls it.
-func (s *Service) AbandonAll(ctx context.Context, userID string) error {
-	now := s.clock.Now()
-	last, err := s.repo.LastCreatorChallenges(ctx, userID, now)
+func (s *Service) LockForDeletion(ctx context.Context, userID string) error {
+	last, err := s.repo.LastCreatorChallenges(ctx, userID, s.clock.Now())
 	if err != nil {
-		return fmt.Errorf("abandon all: %w", err)
+		return fmt.Errorf("lock for deletion: %w", err)
 	}
-	if err := DeletionRefusal(last); err != nil {
-		return err
-	}
-	ids, err := s.repo.ActiveParticipations(ctx, userID, now)
-	if err != nil {
-		return fmt.Errorf("abandon all: %w", err)
-	}
-	for _, id := range ids {
-		err := s.repo.Abandon(ctx, id, userID, s.clock.Now(), func(c Challenge, m Membership) (bool, time.Time, error) {
-			now := s.clock.Now()
-			return !DeletionAbandons(m, now, c.EndsAt), now, nil
-		})
-		// Deleted meanwhile: nothing left to abandon there.
-		if err != nil && !errors.Is(err, errChallengeNotFound) {
-			return fmt.Errorf("abandon all: %w", err)
-		}
-	}
-	return nil
+	return DeletionRefusal(last)
 }
 
 // EraseUser deletes every row of userID in the challenges, finished ones
 // included, for the deletion of their account (README §6): participations,
 // creator roles, eliminations and entries in the frozen results. The
 // challenges they created stay. Called in the transaction of the account
-// deletion, after AbandonAll. It checks no actor: never expose it on a
+// deletion, after LockForDeletion. It checks no actor: never expose it on a
 // route, only user.Service.Delete calls it.
 func (s *Service) EraseUser(ctx context.Context, userID string) error {
 	if err := s.repo.EraseUser(ctx, userID); err != nil {

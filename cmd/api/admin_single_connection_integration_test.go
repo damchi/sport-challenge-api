@@ -51,8 +51,8 @@ func TestAdminChangesRunOnASingleConnection(t *testing.T) {
 	}
 	clk := clock.NewFake(recordNow)
 	var challenges *challenge.Service
-	users := user.NewService(user.NewRepository(gdb), abandonAllFunc(func(ctx context.Context, userID string) error {
-		return challenges.AbandonAll(ctx, userID)
+	users := user.NewService(user.NewRepository(gdb), lockForDeletionFunc(func(ctx context.Context, userID string) error {
+		return challenges.LockForDeletion(ctx, userID)
 	}), nil, deletedAtAuth0{}, clk, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, challengeStandings{}, clk)

@@ -151,8 +151,8 @@ func (s *Service) AdminUnblock(ctx context.Context, actor auth.Actor, id string)
 }
 
 // AdminDelete erases account id at the clock's now, with the effect of
-// Delete (README §2.12): its challenges not finished abandoned (422
-// last_creator while it is the last creator of one), its rows erased, its
+// Delete (README §2.12): refused (422 last_creator) while it is the last
+// creator of a challenge not finished, its rows erased, its
 // deletion at Auth0 recorded as pending. The caller calls CompleteDeletion
 // once its transaction commits, never before: the identity is deleted at
 // Auth0 only with the account.

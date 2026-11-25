@@ -221,20 +221,6 @@ func (r *Repository) Get(ctx context.Context, id, actorID string, now time.Time)
 	return readWithMembership(db.Conn(ctx, r.db), id, actorID, now)
 }
 
-// ActiveParticipations returns the challenges, not deleted and not finished
-// at now, where userID is an active participant, by id. It reads in the
-// transaction of ctx, if any (account deletion).
-func (r *Repository) ActiveParticipations(ctx context.Context, userID string, now time.Time) ([]string, error) {
-	var ids []string
-	err := db.Conn(ctx, r.db).Raw(`SELECT c.id FROM participants p JOIN challenges c ON c.id = p.challenge_id
-		WHERE p.user_id = ? AND p.status = 'active' AND c.deleted_at IS NULL AND c.ends_at > ?
-		ORDER BY c.id`, userID, now).Scan(&ids).Error
-	if err != nil {
-		return nil, fmt.Errorf("list active participations: %w", err)
-	}
-	return ids, nil
-}
-
 // LastCreatorChallenges returns the challenges, not deleted and not finished
 // at now, where userID is a creator and no other creator has an account (not
 // anonymized), by id: those the deletion of userID's account would leave
@@ -242,7 +228,7 @@ func (r *Repository) ActiveParticipations(ctx context.Context, userID string, no
 // deletion) and first locks, in one statement ordered by id, every challenge
 // not finished the deletion touches: those userID creates, so that two
 // creators deleting their accounts at once cannot both leave, and those where
-// userID is an active participant, which the deletion then abandons. Locking
+// userID is an active participant, whose rows the deletion then erases. Locking
 // both sets in one global order means two deletions never wait for each other
 // in a cycle. The creators are read after the lock, in a new statement (see
 // membershipQuery).
@@ -424,7 +410,7 @@ func (r *Repository) withLockedMembership(ctx context.Context, id, actorID strin
 func (r *Repository) Join(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error {
 	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
 		// A deletion in progress makes the join wait, then refuse; a join in
-		// progress makes the deletion wait, then abandon it.
+		// progress makes the deletion wait, then erase it.
 		if err := lockUser(db.Conn(ctx, r.db), actorID); err != nil {
 			return err
 		}

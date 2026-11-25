@@ -56,11 +56,11 @@ func (f fakeRepository) SetBlockedAt(_ context.Context, _ string, at *time.Time)
 	return nil
 }
 
-func (f fakeRepository) Delete(ctx context.Context, id string, at time.Time, abandon func(context.Context) error) (string, error) {
+func (f fakeRepository) Delete(ctx context.Context, id string, at time.Time, erase func(context.Context) error) (string, error) {
 	if f.deleteErr != nil {
 		return "", f.deleteErr
 	}
-	if err := abandon(ctx); err != nil {
+	if err := erase(ctx); err != nil {
 		return "", err
 	}
 	if f.deleted != nil {
@@ -84,27 +84,27 @@ func (f fakeRepository) RemovePendingAuth0Deletion(_ context.Context, subject st
 	return nil
 }
 
-type fakeParticipations struct {
-	abandoned string
-	err       error
+type fakeDeletionLock struct {
+	locked string
+	err    error
 }
 
-func (f *fakeParticipations) AbandonAll(_ context.Context, userID string) error {
-	f.abandoned = userID
+func (f *fakeDeletionLock) LockForDeletion(_ context.Context, userID string) error {
+	f.locked = userID
 	return f.err
 }
 
-// fakeEraser records, in calls, its name once AbandonAll ran (or "early").
+// fakeEraser records, in calls, its name once LockForDeletion ran (or "early").
 type fakeEraser struct {
-	name           string
-	participations *fakeParticipations
-	calls          *[]string
-	err            error
+	name         string
+	deletionLock *fakeDeletionLock
+	calls        *[]string
+	err          error
 }
 
 func (f fakeEraser) EraseUser(_ context.Context, userID string) error {
 	call := f.name
-	if f.participations.abandoned != userID {
+	if f.deletionLock.locked != userID {
 		call = "early"
 	}
 	*f.calls = append(*f.calls, call)
@@ -396,7 +396,7 @@ func TestServiceDelete(t *testing.T) {
 	tests := []struct {
 		name           string
 		deleteErr      error
-		abandonErr     error
+		lockErr        error
 		eraseErr       error
 		auth0Err       error
 		removeErr      error
@@ -412,8 +412,8 @@ func TestServiceDelete(t *testing.T) {
 		{name: "Auth0 fails: kept for the worker", auth0Err: auth0Err, wantAuth0: true, wantLog: "kept for retry", wantAnonymized: true},
 		// Done at Auth0 but still pending: the worker replays it, harmlessly.
 		{name: "pending record not removed", removeErr: storageErr, wantAuth0: true, wantLog: "not removed", wantAnonymized: true},
-		// The abandons fail: everything rolls back, nothing is deleted at Auth0.
-		{name: "abandon failure", abandonErr: storageErr, wantErr: storageErr},
+		// The lock fails (last creator): everything rolls back, nothing is deleted at Auth0.
+		{name: "lock failure", lockErr: storageErr, wantErr: storageErr},
 		// An erasure fails: the same, the erasers after it do not run.
 		{name: "erasure failure", eraseErr: storageErr, wantErr: storageErr},
 		{name: "deleted meanwhile", deleteErr: fmt.Errorf("delete user: %w", errUserNotFound), wantCode: apperr.CodeAccountDeleted},
@@ -426,16 +426,16 @@ func TestServiceDelete(t *testing.T) {
 				user: User{ID: "u-1", AuthSubject: "email|1"}, deleted: new(string), deletedAt: new(time.Time),
 				deleteErr: tt.deleteErr, removed: &removed, removeErr: tt.removeErr,
 			}
-			participations := &fakeParticipations{err: tt.abandonErr}
+			deletionLock := &fakeDeletionLock{err: tt.lockErr}
 			var erased []string
 			erasers := []Eraser{
-				fakeEraser{name: "first", participations: participations, calls: &erased, err: tt.eraseErr},
-				fakeEraser{name: "second", participations: participations, calls: &erased},
+				fakeEraser{name: "first", deletionLock: deletionLock, calls: &erased, err: tt.eraseErr},
+				fakeEraser{name: "second", deletionLock: deletionLock, calls: &erased},
 			}
 			identities := &fakeIdentities{err: tt.auth0Err}
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, nil))
-			err := NewService(repo, participations, erasers, identities, clock.NewFake(now), logger).Delete(t.Context(), "u-1")
+			err := NewService(repo, deletionLock, erasers, identities, clock.NewFake(now), logger).Delete(t.Context(), "u-1")
 			switch {
 			case tt.wantCode != "":
 				if !errors.Is(err, apperr.New(tt.wantCode, nil)) {
@@ -444,17 +444,17 @@ func TestServiceDelete(t *testing.T) {
 			case !errors.Is(err, tt.wantErr):
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
-			if tt.wantAnonymized && (*repo.deleted != "u-1" || participations.abandoned != "u-1") {
-				t.Fatalf("anonymized %q, abandoned %q, want both for u-1", *repo.deleted, participations.abandoned)
+			if tt.wantAnonymized && (*repo.deleted != "u-1" || deletionLock.locked != "u-1") {
+				t.Fatalf("anonymized %q, locked %q, want both for u-1", *repo.deleted, deletionLock.locked)
 			}
 			// The deletion is dated by the clock, not by the database.
 			if tt.wantAnonymized && !repo.deletedAt.Equal(now) {
 				t.Fatalf("deleted at %v, want the clock's %v", *repo.deletedAt, now)
 			}
-			// The erasers run after the abandons, in order, and stop at a failure.
+			// The erasers run after the lock, in order, and stop at a failure.
 			var wantErased []string
 			switch {
-			case tt.deleteErr != nil || tt.abandonErr != nil:
+			case tt.deleteErr != nil || tt.lockErr != nil:
 			case tt.eraseErr != nil:
 				wantErased = []string{"first"}
 			default:
@@ -485,7 +485,7 @@ func TestServiceDeleteSurvivesTheClientLeaving(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	identities := &ctxIdentities{}
 	repo := fakeRepository{user: User{ID: "u-1", AuthSubject: "email|1"}}
-	err := NewService(repo, abandonThen(cancel), nil, identities, clock.Real{}, discard).Delete(ctx, "u-1")
+	err := NewService(repo, lockThen(cancel), nil, identities, clock.Real{}, discard).Delete(ctx, "u-1")
 	if err != nil || identities.ctxErr != nil {
 		t.Fatalf("error %v, Auth0 called with a context error %v, want neither", err, identities.ctxErr)
 	}
@@ -508,9 +508,9 @@ func TestServiceDeleteBoundsThePendingRemoval(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			participations := abandonThen(func() {})
+			deletionLock := lockThen(func() {})
 			if tt.leaves {
-				participations = abandonThen(cancel)
+				deletionLock = lockThen(cancel)
 			}
 			repo := &deadlineRepository{
 				fakeRepository: fakeRepository{user: User{ID: "u-1", AuthSubject: "email|1"}},
@@ -519,7 +519,7 @@ func TestServiceDeleteBoundsThePendingRemoval(t *testing.T) {
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, nil))
 			start := time.Now()
-			err := NewService(repo, participations, nil, &ctxIdentities{}, clock.Real{}, logger).Delete(ctx, "u-1")
+			err := NewService(repo, deletionLock, nil, &ctxIdentities{}, clock.Real{}, logger).Delete(ctx, "u-1")
 			end := time.Now()
 			if err != nil {
 				t.Fatalf("error = %v, want nil: the account is deleted", err)
@@ -569,10 +569,10 @@ func (c *ctxIdentities) DeleteUser(ctx context.Context, _ string) error {
 	return nil
 }
 
-// abandonThen is a Participations whose AbandonAll runs fn.
-type abandonThen func()
+// lockThen is a Participations whose LockForDeletion runs fn.
+type lockThen func()
 
-func (f abandonThen) AbandonAll(context.Context, string) error {
+func (f lockThen) LockForDeletion(context.Context, string) error {
 	f()
 	return nil
 }

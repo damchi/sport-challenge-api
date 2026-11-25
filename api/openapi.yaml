@@ -2215,8 +2215,9 @@ paths:
       summary: Delete any account, for an admin
       description: |
         Admin only (404 `not_found` otherwise). Deletes the account with the
-        effect of `DELETE /me` (README §2.12, §6): it abandons its challenges
-        not finished, is anonymized and every row tied to it is erased; its
+        effect of `DELETE /me` (README §2.12, §6): refused (422
+        `last_creator`) while it is the last creator of a challenge not
+        finished, it is anonymized and every row tied to it is erased; its
         deletion at Auth0 follows, replayed by the worker
         (`retry-auth0-deletions`) when it fails. The profile values (pseudo,
         first name, last name, e-mail) of the journal lines that target the
