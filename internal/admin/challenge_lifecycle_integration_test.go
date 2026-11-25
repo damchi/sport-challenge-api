@@ -166,7 +166,7 @@ func TestChallengeCorrectionsDeleteAndRestoreFromTheDatabase(t *testing.T) {
 	}
 
 	t.Run("a preview of the restore changes nothing", func(t *testing.T) {
-		previews, err := correctionsAt(restoreAt).Restore(t.Context(), actor, id, "Supprimé par erreur", true)
+		previews, err := correctionsAt(restoreAt).Restore(t.Context(), actor, id, nil, "Supprimé par erreur", true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +179,7 @@ func TestChallengeCorrectionsDeleteAndRestoreFromTheDatabase(t *testing.T) {
 	})
 
 	t.Run("restored, the weeks locked meanwhile are judged, without the account deleted meanwhile, and its links valid again", func(t *testing.T) {
-		if _, err := correctionsAt(restoreAt).Restore(t.Context(), actor, id, "Supprimé par erreur", false); err != nil {
+		if _, err := correctionsAt(restoreAt).Restore(t.Context(), actor, id, nil, "Supprimé par erreur", false); err != nil {
 			t.Fatal(err)
 		}
 		got := read()
@@ -208,7 +208,7 @@ func TestChallengeCorrectionsDeleteAndRestoreFromTheDatabase(t *testing.T) {
 	})
 
 	t.Run("a challenge that is not deleted is not found", func(t *testing.T) {
-		if _, err := correctionsAt(restoreAt).Restore(t.Context(), actor, id, "Supprimé par erreur", false); !isNotFound(err) {
+		if _, err := correctionsAt(restoreAt).Restore(t.Context(), actor, id, nil, "Supprimé par erreur", false); !isNotFound(err) {
 			t.Fatalf("restore a challenge not deleted: %v, want challenge_not_found", err)
 		}
 		if got := read(); got.Actions != 2 {

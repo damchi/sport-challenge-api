@@ -79,7 +79,11 @@ func TestAdminChangesRunOnASingleConnection(t *testing.T) {
 		($1, 'cumulative_distance', 2, '{"factors": {"run": 1}}')`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := setup.Exec(t.Context(), `INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, id, bob, start); err != nil {
+	// Alice created it: an ongoing challenge always keeps a creator.
+	if _, err := setup.Exec(t.Context(), `INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)`, id, alice); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setup.Exec(t.Context(), `INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3), ($1, $4, $3)`, id, bob, start, alice); err != nil {
 		t.Fatal(err)
 	}
 

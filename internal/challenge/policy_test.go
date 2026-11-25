@@ -825,3 +825,34 @@ func TestAdminRemoveCreatorRefusalNamesTheChallenge(t *testing.T) {
 		t.Fatalf("AdminRemoveCreatorRefusal() = %v, want last_creator naming c1", err)
 	}
 }
+
+// TestAdminNoCreatorRefusal: a challenge always keeps a creator (README
+// §2.12): one without any left is refused upcoming or ongoing, allowed
+// finished (README §2.2).
+func TestAdminNoCreatorRefusal(t *testing.T) {
+	tests := []struct {
+		status   string
+		creators int
+		want     apperr.Code
+	}{
+		{status: StatusUpcoming, creators: 0, want: apperr.CodeNoCreator},
+		{status: StatusOngoing, creators: 0, want: apperr.CodeNoCreator},
+		{status: StatusFinished, creators: 0},
+		{status: StatusUpcoming, creators: 1},
+		{status: StatusOngoing, creators: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			err := AdminNoCreatorRefusal(tt.status, tt.creators)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("AdminNoCreatorRefusal(%s, %d) = %v, want nil", tt.status, tt.creators, err)
+				}
+				return
+			}
+			if !errors.Is(err, apperr.New(tt.want, nil)) {
+				t.Fatalf("AdminNoCreatorRefusal(%s, %d) = %v, want %s", tt.status, tt.creators, err, tt.want)
+			}
+		})
+	}
+}

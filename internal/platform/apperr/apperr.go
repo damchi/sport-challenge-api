@@ -43,6 +43,10 @@ const (
 	// CodeLastCreator refuses the deletion of an account that is the last
 	// creator of challenges not finished (ChallengesParam lists them).
 	CodeLastCreator Code = "last_creator"
+	// CodeNoCreator refuses an admin change that would bring a challenge
+	// without any creator who still has an account back upcoming or ongoing
+	// (README §2.12): the admin names a creator first.
+	CodeNoCreator Code = "no_creator"
 	// CodeChallengeEnded refuses a change to a finished challenge.
 	CodeChallengeEnded Code = "challenge_ended"
 	// CodeDistanceRequired refuses an activity without distance for a sport
@@ -120,6 +124,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "A creator cannot be excluded"}, true
 	case CodeLastCreator:
 		return definition{http.StatusUnprocessableEntity, "Last creator of a challenge"}, true
+	case CodeNoCreator:
+		return definition{http.StatusUnprocessableEntity, "Challenge without a creator"}, true
 	case CodeChallengeEnded:
 		return definition{http.StatusUnprocessableEntity, "Challenge ended"}, true
 	case CodeDistanceRequired:

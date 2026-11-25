@@ -69,8 +69,10 @@ var errReferenceChanged = errors.New("reference sport changed meanwhile")
 // suggested factors brought back to it; otherwise the factors of the
 // challenge stay; changes.DistanceFactors then replaces those it names.
 // The categories are written again (categoriesOf), the cumulative time
-// always among them. A missing or deleted challenge answers 404
-// challenge_not_found.
+// always among them. A change after which a challenge without any creator
+// with an account is upcoming or ongoing answers 422 no_creator
+// (AdminNoCreatorRefusal): the admin names a creator first. A missing or
+// deleted challenge answers 404 challenge_not_found.
 //
 // It writes in the transaction ctx carries, under the lock of the
 // challenge, and judges nothing: the caller (admin.ChallengeCorrections)
@@ -106,7 +108,7 @@ func (s *Service) AdminUpdate(ctx context.Context, actor auth.Actor, id string, 
 	}
 
 	var out SettingsChange
-	err = s.repo.UpdateSettings(ctx, id, actor.ID, s.clock.Now(), func(c Challenge, cats []Category) (Challenge, error) {
+	err = s.repo.UpdateSettings(ctx, id, actor.ID, s.clock.Now(), func(c Challenge, cats []Category, creators int) (Challenge, error) {
 		before, err := draftOf(c, cats)
 		if err != nil {
 			return Challenge{}, err
@@ -115,7 +117,9 @@ func (s *Service) AdminUpdate(ctx context.Context, actor auth.Actor, id string, 
 		if draft.reference() != reference {
 			return Challenge{}, errReferenceChanged
 		}
-		window, err := ValidateSettings(draft, s.clock.Now(), distanceSports, referenceMode)
+		// One instant for the rules and the status the change gives.
+		at := s.clock.Now()
+		window, err := ValidateSettings(draft, at, distanceSports, referenceMode)
 		if err != nil {
 			return Challenge{}, err
 		}
@@ -136,6 +140,9 @@ func (s *Service) AdminUpdate(ctx context.Context, actor auth.Actor, id string, 
 		next.ReferenceSport = reference
 		next.StartsAt, next.EndsAt = window.StartsAt, window.EndsAt
 		next.Categories = categoriesOf(draft, factors)
+		if err := AdminNoCreatorRefusal(StatusAt(at, next.StartsAt, next.EndsAt), creators); err != nil {
+			return Challenge{}, err
+		}
 
 		after, err := draftOf(next, next.Categories)
 		if err != nil {

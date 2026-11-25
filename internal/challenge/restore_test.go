@@ -2,6 +2,7 @@ package challenge
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -62,15 +63,15 @@ func TestServiceAdminRestore(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{challenge: tt.challenge}
-			at, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AdminRestore(t.Context(), tt.actor, "c")
+			r, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).AdminRestore(t.Context(), tt.actor, "c", nil)
 			if tt.want != "" {
 				if !errors.Is(err, apperr.New(tt.want, nil)) || repo.restored {
 					t.Fatalf("error = %v, restored %v, want %s and nothing restored", err, repo.restored, tt.want)
 				}
 				return
 			}
-			if err != nil || !repo.restored || !at.Equal(deletedAt) {
-				t.Fatalf("error %v, restored %v, deleted at %s, want restored and the instant of the deletion", err, repo.restored, at)
+			if err != nil || !repo.restored || !r.DeletedAt.Equal(deletedAt) || r.Creator.Old != nil || r.Creator.New != nil {
+				t.Fatalf("restore = %+v, error %v, restored %v, want restored, the instant of the deletion and no creator named", r, err, repo.restored)
 			}
 		})
 	}
@@ -81,11 +82,132 @@ func TestServiceAdminDeleteAndRestoreFailure(t *testing.T) {
 	s := NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
 	admin := auth.Actor{ID: actor, Admin: true}
 	_, deleteErr := s.AdminDelete(t.Context(), admin, "c")
-	_, restoreErr := s.AdminRestore(t.Context(), admin, "c")
+	_, restoreErr := s.AdminRestore(t.Context(), admin, "c", nil)
 	for _, err := range []error{deleteErr, restoreErr} {
 		var appErr *apperr.Error
 		if !errors.Is(err, storage) || errors.As(err, &appErr) {
 			t.Fatalf("storage: %v, want it wrapped as an internal error", err)
 		}
+	}
+}
+
+// named is the account a restore names as a creator in the tests below.
+const named = "5c0a3b2e-1d4f-4e6a-8b9c-0d1e2f3a4b5c"
+
+// TestServiceAdminRestoreKeepsACreator: a challenge always keeps a creator
+// (README §2.12). Without any creator with an account, the restore of a
+// challenge that comes back upcoming or ongoing is refused unless it names
+// one; a finished one is restored without (README §2.2). The account named
+// becomes a creator, first added as an active participant when it never
+// joined; it is refused, nothing restored, when unknown or deleted, or when
+// it never joined with an incomplete profile.
+func TestServiceAdminRestoreKeepsACreator(t *testing.T) {
+	deletedAt := time.Date(2026, 3, 3, 14, 0, 0, 0, time.UTC)
+	ongoing := *stored(VisibilityPrivate)
+	ongoing.DeletedAt = &deletedAt
+	over := ongoing
+	over.StartsAt, over.EndsAt = time.Date(2026, 1, 5, 5, 0, 0, 0, time.UTC), time.Date(2026, 2, 2, 5, 0, 0, 0, time.UTC)
+	upcoming := ongoing
+	upcoming.StartsAt, upcoming.EndsAt = time.Date(2026, 4, 6, 4, 0, 0, 0, time.UTC), time.Date(2026, 4, 20, 4, 0, 0, 0, time.UTC)
+	creatorID := func() *string { id := named; return &id }
+
+	tests := []struct {
+		name        string
+		challenge   Challenge
+		creatorless bool
+		creator     *string
+		target      Membership
+		complete    bool
+		lockErr     error
+		want        apperr.Code
+		// joined and madeCreator tell what the restore wrote of the account named.
+		joined, madeCreator bool
+		change              MemberChange
+	}{
+		{name: "ongoing without a creator, none named", challenge: ongoing, creatorless: true, want: apperr.CodeNoCreator},
+		{name: "upcoming without a creator, none named", challenge: upcoming, creatorless: true, want: apperr.CodeNoCreator},
+		{name: "finished without a creator, none named", challenge: over, creatorless: true},
+		{
+			name: "an active participant named", challenge: ongoing, creatorless: true, creator: creatorID(),
+			target: Membership{Participant: ParticipantActive}, madeCreator: true,
+			change: MemberChange{Old: map[string]any{memberCreator: false}, New: map[string]any{memberCreator: true}},
+		},
+		{
+			name: "one who abandoned named, not reinstated", challenge: ongoing, creatorless: true, creator: creatorID(),
+			target: Membership{Participant: ParticipantAbandoned}, madeCreator: true,
+			change: MemberChange{Old: map[string]any{memberCreator: false}, New: map[string]any{memberCreator: true}},
+		},
+		{
+			name: "an account that never joined named", challenge: ongoing, creatorless: true, creator: creatorID(), complete: true,
+			joined: true, madeCreator: true,
+			change: MemberChange{Old: map[string]any{memberStatus: nil, memberCreator: false}, New: map[string]any{memberStatus: ParticipantActive, memberCreator: true}},
+		},
+		{
+			name: "a creator named while others are left", challenge: ongoing, creator: creatorID(),
+			target: Membership{Participant: ParticipantActive}, madeCreator: true,
+			change: MemberChange{Old: map[string]any{memberCreator: false}, New: map[string]any{memberCreator: true}},
+		},
+		{
+			name: "a creator already named", challenge: ongoing, creator: creatorID(),
+			target: Membership{Participant: ParticipantActive, Creator: true}, change: noChange(),
+		},
+		{name: "never joined, profile incomplete", challenge: ongoing, creatorless: true, creator: creatorID(), want: apperr.CodeProfileIncomplete},
+		{name: "unknown or deleted account", challenge: ongoing, creatorless: true, creator: creatorID(), lockErr: errAccountDeleted, want: apperr.CodeUserNotFound},
+		// The account is locked before the challenge (the order of an
+		// account deletion): an unknown one answers first.
+		{name: "unknown account, challenge not deleted", challenge: *stored(VisibilityPrivate), creator: creatorID(), lockErr: errAccountDeleted, want: apperr.CodeUserNotFound},
+		{name: "known account, challenge not deleted", challenge: *stored(VisibilityPrivate), creator: creatorID(), complete: true, want: apperr.CodeChallengeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.challenge
+			repo := &fakeRepository{
+				challenge: &c, creatorless: tt.creatorless, lockErr: tt.lockErr,
+				others: map[string]Membership{named: tt.target}, membership: tt.target, target: tt.target,
+			}
+			svc := NewService(repo, fakeProfiles{complete: tt.complete}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
+			r, err := svc.AdminRestore(t.Context(), auth.Actor{ID: actor, Admin: true}, "c", tt.creator)
+			if tt.want != "" {
+				var appErr *apperr.Error
+				if !errors.As(err, &appErr) || appErr.Code != tt.want || repo.creatorAdded || !repo.joinedAt.IsZero() {
+					t.Fatalf("error = %v, creator added %v, joined at %s, want %s and nothing written", err, repo.creatorAdded, repo.joinedAt, tt.want)
+				}
+				// Refused before the restore, or in it: the change rolls it back.
+				return
+			}
+			if err != nil || !repo.restored {
+				t.Fatalf("error = %v, restored %v, want restored", err, repo.restored)
+			}
+			if tt.creator != nil && repo.locked != named {
+				t.Fatalf("locked %q, want the account named first", repo.locked)
+			}
+			if got := !repo.joinedAt.IsZero(); got != tt.joined || (tt.joined && !repo.joinedAt.Equal(now)) {
+				t.Fatalf("joined at %s, want joined %v at now", repo.joinedAt, tt.joined)
+			}
+			if repo.creatorAdded != tt.madeCreator {
+				t.Fatalf("creator added %v, want %v", repo.creatorAdded, tt.madeCreator)
+			}
+			if tt.creator == nil && (r.Creator.Old != nil || r.Creator.New != nil) {
+				t.Fatalf("creator change %+v, want none", r.Creator)
+			}
+			if tt.creator != nil && !reflect.DeepEqual(r.Creator, tt.change) {
+				t.Fatalf("creator change %+v, want %+v", r.Creator, tt.change)
+			}
+		})
+	}
+}
+
+// TestServiceAdminRestoreNamingACreatorNotAnAdmin: without the permission,
+// a restore naming a creator reaches nothing, the account not even locked.
+func TestServiceAdminRestoreNamingACreatorNotAnAdmin(t *testing.T) {
+	deletedAt := time.Date(2026, 3, 3, 14, 0, 0, 0, time.UTC)
+	c := *stored(VisibilityPrivate)
+	c.DeletedAt = &deletedAt
+	repo := &fakeRepository{challenge: &c, creatorless: true}
+	creator := named
+	_, err := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).
+		AdminRestore(t.Context(), auth.Actor{ID: actor}, "c", &creator)
+	if !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) || repo.locked != "" || repo.restored || repo.creatorAdded {
+		t.Fatalf("error = %v, locked %q, restored %v, creator added %v, want not_found and nothing touched", err, repo.locked, repo.restored, repo.creatorAdded)
 	}
 }

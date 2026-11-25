@@ -44,6 +44,9 @@ type fakeRepository struct {
 	deletedAt    time.Time
 	// restored tells whether Restore cleared the deletion of challenge.
 	restored bool
+	// creatorless makes Restore and UpdateSettings count no creator with an
+	// account (one otherwise).
+	creatorless bool
 	// participants serve Participants; participantsAsked records the call.
 	participants      []Participant
 	participantsAsked *participantsCall
@@ -237,7 +240,7 @@ func (f *fakeRepository) UpdateText(_ context.Context, _ string, changes TextCha
 	return nil
 }
 
-func (f *fakeRepository) Join(_ context.Context, _, _ string, _ time.Time, decide func(Challenge, Membership) (time.Time, error)) error {
+func (f *fakeRepository) Join(_ context.Context, _, userID string, _ time.Time, decide func(Challenge, Membership) (time.Time, error)) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -250,6 +253,11 @@ func (f *fakeRepository) Join(_ context.Context, _, _ string, _ time.Time, decid
 	}
 	f.joinedAt = joinedAt
 	f.membership.Participant = ParticipantActive
+	// A user other than actor who joins is the target read next (the
+	// creator a restore names).
+	if _, ok := f.others[userID]; ok {
+		f.target.Participant = ParticipantActive
+	}
 	return nil
 }
 
@@ -320,13 +328,25 @@ func (f *fakeRepository) Delete(_ context.Context, _, _ string, _ time.Time, dec
 	return nil
 }
 
-// Restore restores challenge when deleted (its DeletedAt set).
-func (f *fakeRepository) Restore(context.Context, string) (time.Time, error) {
+// creators is the number of creators with an account the fake counts.
+func (f *fakeRepository) creators() int {
+	if f.creatorless {
+		return 0
+	}
+	return 1
+}
+
+// Restore restores challenge when deleted (its DeletedAt set) and decide
+// lets it.
+func (f *fakeRepository) Restore(_ context.Context, _ string, decide func(Challenge, int) error) (time.Time, error) {
 	if f.err != nil {
 		return time.Time{}, f.err
 	}
 	if f.challenge == nil || f.challenge.DeletedAt == nil {
 		return time.Time{}, fmt.Errorf("restore challenge: %w", errChallengeNotFound)
+	}
+	if err := decide(*f.challenge, f.creators()); err != nil {
+		return time.Time{}, fmt.Errorf("restore challenge: %w", err)
 	}
 	f.restored = true
 	return *f.challenge.DeletedAt, nil

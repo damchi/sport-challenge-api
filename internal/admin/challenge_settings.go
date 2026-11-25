@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/challenge"
@@ -18,6 +19,10 @@ const (
 // journalDeletedAt is the journal field of the deletion of a challenge.
 const journalDeletedAt = "deleted_at"
 
+// journalNamedCreator is the journal field of the creator a restore named:
+// the account by its id alone, with what the restore made of it.
+const journalNamedCreator = "named_creator"
+
 // ChallengeChanges changes a challenge itself as an admin, in the
 // transaction ctx carries (module challenge): its settings, its deletion
 // and its restore, each of the last two returning the instant of the
@@ -25,7 +30,7 @@ const journalDeletedAt = "deleted_at"
 type ChallengeChanges interface {
 	AdminUpdate(ctx context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges) (challenge.SettingsChange, error)
 	AdminDelete(ctx context.Context, actor auth.Actor, id string) (time.Time, error)
-	AdminRestore(ctx context.Context, actor auth.Actor, id string) (time.Time, error)
+	AdminRestore(ctx context.Context, actor auth.Actor, id string, creatorID *string) (challenge.Restoration, error)
 }
 
 // InvitationExpiries moves the expiry of the invitation links of a
@@ -106,21 +111,38 @@ func (s *ChallengeCorrections) Delete(ctx context.Context, actor auth.Actor, id,
 // line and the recompute of the challenge, whose weeks locked while it was
 // deleted were judged by no one, in one transaction (Corrections.Run),
 // rolled back with dryRun. The challenge is ranked after the restore only.
-func (s *ChallengeCorrections) Restore(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error) {
+// creatorID, when given, names a creator in the restore, who is in its
+// journal line (journalNamedCreator): required when the challenge would
+// come back upcoming or ongoing without one (README §2.12).
+func (s *ChallengeCorrections) Restore(ctx context.Context, actor auth.Actor, id string, creatorID *string, reason string, dryRun bool) ([]ChallengePreview, error) {
 	return s.corrections.Run(ctx, actor, Correction{
 		Touched: func(context.Context) ([]string, error) { return []string{id}, nil },
 		Apply: func(ctx context.Context) (Entry, error) {
-			at, err := s.challenges.AdminRestore(ctx, actor, id)
+			r, err := s.challenges.AdminRestore(ctx, actor, id, creatorID)
 			if err != nil {
 				return Entry{}, err
 			}
-			return Entry{
+			entry := Entry{
 				Action: ActionChallengeRestore, TargetType: TargetChallenge, TargetID: id,
-				OldValue: map[string]any{journalDeletedAt: at}, NewValue: map[string]any{journalDeletedAt: nil},
-			}, nil
+				OldValue: map[string]any{journalDeletedAt: r.DeletedAt}, NewValue: map[string]any{journalDeletedAt: nil},
+			}
+			if creatorID != nil {
+				entry.OldValue[journalNamedCreator] = namedCreator(*creatorID, r.Creator.Old)
+				entry.NewValue[journalNamedCreator] = namedCreator(*creatorID, r.Creator.New)
+			}
+			return entry, nil
 		},
 		Reason:    reason,
 		DryRun:    dryRun,
 		lifecycle: restores,
 	})
+}
+
+// namedCreator is the journal value of the account userID a restore named:
+// its id and the fields of its membership in fields (status, creator).
+func namedCreator(userID string, fields map[string]any) map[string]any {
+	out := make(map[string]any, len(fields)+1)
+	maps.Copy(out, fields)
+	out["user_id"] = userID
+	return out
 }

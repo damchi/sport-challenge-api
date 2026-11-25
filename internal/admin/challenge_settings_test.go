@@ -28,6 +28,10 @@ type fakeSettings struct {
 	rescheduleOf string
 	// deletedAt is the instant AdminDelete and AdminRestore answer.
 	deletedAt time.Time
+	// creator is what AdminRestore wrote of the creator it named, whose id
+	// it records in creatorID.
+	creator   challenge.MemberChange
+	creatorID *string
 }
 
 func (f *fakeSettings) AdminDelete(_ context.Context, actor auth.Actor, id string) (time.Time, error) {
@@ -38,12 +42,13 @@ func (f *fakeSettings) AdminDelete(_ context.Context, actor auth.Actor, id strin
 	return f.deletedAt, f.err
 }
 
-func (f *fakeSettings) AdminRestore(_ context.Context, actor auth.Actor, id string) (time.Time, error) {
+func (f *fakeSettings) AdminRestore(_ context.Context, actor auth.Actor, id string, creatorID *string) (challenge.Restoration, error) {
 	f.log.add("restore " + id)
 	if !actor.Admin {
-		return time.Time{}, errors.New("restored for a non-admin")
+		return challenge.Restoration{}, errors.New("restored for a non-admin")
 	}
-	return f.deletedAt, f.err
+	f.creatorID = creatorID
+	return challenge.Restoration{DeletedAt: f.deletedAt, Creator: f.creator}, f.err
 }
 
 func (f *fakeSettings) AdminUpdate(_ context.Context, actor auth.Actor, id string, changes challenge.SettingsChanges) (challenge.SettingsChange, error) {
@@ -171,7 +176,7 @@ func (settingsUpdaterFunc) Delete(context.Context, auth.Actor, string, string, b
 	return nil, errors.New("delete not planned in this test")
 }
 
-func (settingsUpdaterFunc) Restore(context.Context, auth.Actor, string, string, bool) ([]ChallengePreview, error) {
+func (settingsUpdaterFunc) Restore(context.Context, auth.Actor, string, *string, string, bool) ([]ChallengePreview, error) {
 	return nil, errors.New("restore not planned in this test")
 }
 

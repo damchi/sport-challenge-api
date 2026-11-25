@@ -13,11 +13,11 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 )
 
-func (f *fakeRepository) UpdateSettings(_ context.Context, _, _ string, _ time.Time, decide func(Challenge, []Category) (Challenge, error)) error {
+func (f *fakeRepository) UpdateSettings(_ context.Context, _, _ string, _ time.Time, decide func(Challenge, []Category, int) (Challenge, error)) error {
 	if f.challenge == nil {
 		return errChallengeNotFound
 	}
-	next, err := decide(*f.challenge, f.challenge.Categories)
+	next, err := decide(*f.challenge, f.challenge.Categories, f.creators())
 	if err != nil {
 		return err
 	}
@@ -289,6 +289,45 @@ func TestServiceAdminUpdateRefusals(t *testing.T) {
 			}
 			if repo.settings != nil {
 				t.Fatalf("written %+v, want nothing", repo.settings)
+			}
+		})
+	}
+}
+
+// TestServiceAdminUpdateWithoutCreator: a challenge always keeps a creator
+// (README §2.12): a change that brings a finished challenge without any
+// creator back ongoing, or upcoming, is refused, nothing written; the same
+// challenge changed but left finished goes through, as one with a creator
+// made ongoing again.
+func TestServiceAdminUpdateWithoutCreator(t *testing.T) {
+	weeks := func(n int) *int { return &n }
+	text := func(s string) *string { return &s }
+	tests := []struct {
+		name        string
+		creatorless bool
+		changes     SettingsChanges
+		want        apperr.Code
+	}{
+		{name: "made longer, ongoing again", creatorless: true, changes: SettingsChanges{Weeks: weeks(6)}, want: apperr.CodeNoCreator},
+		{name: "moved ahead, upcoming", creatorless: true, changes: SettingsChanges{StartDate: text("2026-04-06")}, want: apperr.CodeNoCreator},
+		{name: "made shorter, still finished", creatorless: true, changes: SettingsChanges{Weeks: weeks(3)}},
+		{name: "title only, still finished", creatorless: true, changes: SettingsChanges{Title: text("Winter run again")}},
+		{name: "with a creator, ongoing again", changes: SettingsChanges{Weeks: weeks(6)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{challenge: finished(t), creatorless: tt.creatorless}
+			svc := NewService(repo, fakeProfiles{}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now))
+			_, err := svc.AdminUpdate(t.Context(), adminActor(), "c1", tt.changes)
+			if tt.want != "" {
+				var appErr *apperr.Error
+				if !errors.As(err, &appErr) || appErr.Code != tt.want || appErr.Status != http.StatusUnprocessableEntity || repo.settings != nil {
+					t.Fatalf("AdminUpdate() = %v, written %v, want 422 %s and nothing written", err, repo.settings != nil, tt.want)
+				}
+				return
+			}
+			if err != nil || repo.settings == nil {
+				t.Fatalf("AdminUpdate() = %v, written %v, want the change written", err, repo.settings != nil)
 			}
 		})
 	}

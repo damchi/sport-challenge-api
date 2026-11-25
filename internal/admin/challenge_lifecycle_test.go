@@ -7,15 +7,22 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/challenge"
 	"github.com/damchi/sport-challenge-api/internal/leaderboard"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 )
+
+// restoreNamingNone is Restore naming no creator, in the shape of Delete.
+func (s *ChallengeCorrections) restoreNamingNone(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error) {
+	return s.Restore(ctx, actor, id, nil, reason, dryRun)
+}
 
 // TestChallengeCorrectionsDeleteAndRestore: a deletion is ranked before the
 // change only and never recomputed; a restore is ranked after it only, once
@@ -47,7 +54,7 @@ func TestChallengeCorrectionsDeleteAndRestore(t *testing.T) {
 		},
 		{
 			name: "restore",
-			run:  (*ChallengeCorrections).Restore,
+			run:  (*ChallengeCorrections).restoreNamingNone,
 			wantSteps: []string{
 				"lock", "lock participants " + challengeID, "state " + challengeID, "restore " + challengeID, "journal",
 				"recompute " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID,
@@ -109,11 +116,11 @@ func TestChallengeCorrectionsDeleteAndRestoreRefusals(t *testing.T) {
 		wantSteps []string
 	}{
 		{name: "delete, not an admin", run: (*ChallengeCorrections).Delete, actor: auth.Actor{ID: annID}, reason: "Doublon", wantCode: apperr.CodeNotFound},
-		{name: "restore, not an admin", run: (*ChallengeCorrections).Restore, actor: auth.Actor{ID: annID}, reason: "Doublon", wantCode: apperr.CodeNotFound},
+		{name: "restore, not an admin", run: (*ChallengeCorrections).restoreNamingNone, actor: auth.Actor{ID: annID}, reason: "Doublon", wantCode: apperr.CodeNotFound},
 		{name: "delete, no reason", run: (*ChallengeCorrections).Delete, actor: admin, reason: "", wantCode: apperr.CodeValidationFailed},
-		{name: "restore, no reason", run: (*ChallengeCorrections).Restore, actor: admin, reason: "", wantCode: apperr.CodeValidationFailed},
+		{name: "restore, no reason", run: (*ChallengeCorrections).restoreNamingNone, actor: admin, reason: "", wantCode: apperr.CodeValidationFailed},
 		{
-			name: "restore, not deleted", run: (*ChallengeCorrections).Restore, actor: admin, reason: "Doublon", err: missing, wantCode: apperr.CodeChallengeNotFound,
+			name: "restore, not deleted", run: (*ChallengeCorrections).restoreNamingNone, actor: admin, reason: "Doublon", err: missing, wantCode: apperr.CodeChallengeNotFound,
 			wantSteps: []string{"lock", "lock participants " + challengeID, "state " + challengeID, "restore " + challengeID},
 		},
 	}
@@ -146,8 +153,12 @@ func (f *fakeLifecycle) Delete(_ context.Context, actor auth.Actor, id, reason s
 	return f.answer("delete", actor, id, reason, dryRun, &leaderboard.Leaderboard{}, nil)
 }
 
-func (f *fakeLifecycle) Restore(_ context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error) {
-	return f.answer("restore", actor, id, reason, dryRun, nil, &leaderboard.Leaderboard{})
+func (f *fakeLifecycle) Restore(_ context.Context, actor auth.Actor, id string, creatorID *string, reason string, dryRun bool) ([]ChallengePreview, error) {
+	what := "restore"
+	if creatorID != nil {
+		what += " naming " + *creatorID
+	}
+	return f.answer(what, actor, id, reason, dryRun, nil, &leaderboard.Leaderboard{})
 }
 
 func (f *fakeLifecycle) answer(what string, actor auth.Actor, id, reason string, dryRun bool, before, after *leaderboard.Leaderboard) ([]ChallengePreview, error) {
@@ -178,6 +189,11 @@ func TestDeleteAndRestoreAdminChallenge(t *testing.T) {
 			body: `{"reason": "Supprimé par erreur", "dry_run": true}`, wantAsked: "restore " + challengeID + " Supprimé par erreur dry run",
 			wantNull: "before", wantBoard: "after", wantDry: true,
 		},
+		{
+			name: "restore naming a creator", method: http.MethodPost, path: "/api/v1/admin/challenges/" + challengeID + "/restore",
+			body:      `{"reason": "Supprimé par erreur", "creator_user_id": "` + bobID + `"}`,
+			wantAsked: "restore naming " + bobID + " " + challengeID + " Supprimé par erreur", wantNull: "before", wantBoard: "after",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -207,5 +223,86 @@ func TestDeleteAndRestoreAdminChallenge(t *testing.T) {
 				t.Fatalf("got %d %v, asked %q, want 404 not_found and nothing asked", rec.Code, got, lifecycle.asked)
 			}
 		})
+	}
+}
+
+// TestChallengeCorrectionsRestoreNamingACreator: the creator a restore
+// names is passed on, and its journal line names the account by its id
+// with what the restore made of it, before and after; a refusal of the
+// restore (no creator, an incomplete profile, an unknown account) rolls
+// everything back, journal line included, preview included.
+func TestChallengeCorrectionsRestoreNamingACreator(t *testing.T) {
+	deletedAt := time.Date(2026, 3, 2, 14, 0, 0, 0, time.UTC)
+	t.Run("named", func(t *testing.T) {
+		log := &correctionLog{}
+		corrections, journal := newCorrections(log)
+		settings := &fakeSettings{log: log, deletedAt: deletedAt, creator: challenge.MemberChange{
+			Old: map[string]any{"creator": false},
+			New: map[string]any{"status": challenge.ParticipantActive, "creator": true},
+		}}
+		s := NewChallengeCorrections(corrections, settings, settings)
+		creator := bobID
+		if _, err := s.Restore(t.Context(), admin, challengeID, &creator, "Supprimé par erreur", false); err != nil {
+			t.Fatal(err)
+		}
+		if settings.creatorID == nil || *settings.creatorID != bobID {
+			t.Fatalf("creator asked %v, want %s", settings.creatorID, bobID)
+		}
+		a := journal.records[0]
+		wantOld, _ := json.Marshal(map[string]any{"deleted_at": deletedAt, "named_creator": map[string]any{"user_id": bobID, "creator": false}})
+		wantNew, _ := json.Marshal(map[string]any{"deleted_at": nil, "named_creator": map[string]any{"user_id": bobID, "status": "active", "creator": true}})
+		if a.Action != ActionChallengeRestore || string(a.OldValue) != string(wantOld) || string(a.NewValue) != string(wantNew) {
+			t.Fatalf("journal line %s -> %s, want %s -> %s", a.OldValue, a.NewValue, wantOld, wantNew)
+		}
+	})
+	for _, code := range []apperr.Code{apperr.CodeNoCreator, apperr.CodeProfileIncomplete, apperr.CodeUserNotFound} {
+		for _, dryRun := range []bool{false, true} {
+			t.Run(string(code)+map[bool]string{false: "", true: ", dry run"}[dryRun], func(t *testing.T) {
+				log := &correctionLog{}
+				corrections, journal := newCorrections(log)
+				settings := &fakeSettings{log: log, err: apperr.New(code, nil)}
+				s := NewChallengeCorrections(corrections, settings, settings)
+				creator := bobID
+				_, err := s.Restore(t.Context(), admin, challengeID, &creator, "Supprimé par erreur", dryRun)
+				var appErr *apperr.Error
+				if !errors.As(err, &appErr) || appErr.Code != code || appErr.Status == http.StatusOK {
+					t.Fatalf("error = %v, want %s", err, code)
+				}
+				if len(journal.records) != 0 || slices.Contains(log.steps, "recompute "+challengeID) {
+					t.Fatalf("journal %+v, steps %v, want no journal line and no recompute", journal.records, log.steps)
+				}
+			})
+		}
+	}
+}
+
+// TestRestoreAdminChallengeInvalidBody: a restore without a body, or with a
+// creator that is not a UUID, or an unknown field, answers 400
+// validation_failed to an admin, nothing asked, and 404 not_found to
+// anyone else.
+func TestRestoreAdminChallengeInvalidBody(t *testing.T) {
+	path := "/api/v1/admin/challenges/" + challengeID + "/restore"
+	for name, body := range map[string]string{
+		"no body":            "",
+		"creator not a uuid": `{"reason": "Supprimé par erreur", "creator_user_id": "bob"}`,
+		"unknown field":      `{"reason": "Supprimé par erreur", "creator": "` + bobID + `"}`,
+	} {
+		for _, tt := range []struct {
+			who, token string
+			status     int
+			code       string
+		}{
+			{who: "admin", token: adminToken, status: http.StatusBadRequest, code: "validation_failed"},
+			{who: "without the permission", token: "some.access.token", status: http.StatusNotFound, code: "not_found"},
+		} {
+			t.Run(name+", "+tt.who, func(t *testing.T) {
+				lifecycle := &fakeLifecycle{}
+				h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), lifecycle, nil, nil, nil)
+				rec, got := serveWith(t, h, tt.token, http.MethodPost, path, body, io.Discard)
+				if e, _ := got["error"].(map[string]any); rec.Code != tt.status || e["code"] != tt.code || lifecycle.asked != "" {
+					t.Fatalf("got %d %v, asked %q, want %d %s and nothing asked", rec.Code, got, lifecycle.asked, tt.status, tt.code)
+				}
+			})
+		}
 	}
 }
