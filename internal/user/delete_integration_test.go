@@ -91,7 +91,7 @@ func TestDeletedSubjectNeverLogsInAgain(t *testing.T) {
 	}
 
 	// The access token is still valid: the same subject logs in again.
-	_, err := svc.GetOrCreateBySubject(t.Context(), "email|carol", "")
+	_, err := svc.GetOrCreateBySubject(t.Context(), "email|carol", "", "")
 	if !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
 		t.Fatalf("error = %v, want account_deleted", err)
 	}
@@ -99,7 +99,7 @@ func TestDeletedSubjectNeverLogsInAgain(t *testing.T) {
 		t.Fatalf("%d users, want only the anonymized one: no account created", n)
 	}
 	// Another subject still gets its account.
-	if _, err := svc.GetOrCreateBySubject(t.Context(), "email|dave", ""); err != nil {
+	if _, err := svc.GetOrCreateBySubject(t.Context(), "email|dave", "", ""); err != nil {
 		t.Fatalf("new subject: %v", err)
 	}
 }

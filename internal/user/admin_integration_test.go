@@ -61,7 +61,7 @@ func TestAdminAccountChangesFromTheDatabase(t *testing.T) {
 	if err := inTx(func(ctx context.Context) error { _, err := s.AdminBlock(ctx, admin, bob.ID); return err }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetOrCreateBySubject(t.Context(), "email|bob", ""); !errors.Is(err, apperr.New(apperr.CodeAccountBlocked, nil)) {
+	if _, err := s.GetOrCreateBySubject(t.Context(), "email|bob", "", ""); !errors.Is(err, apperr.New(apperr.CodeAccountBlocked, nil)) {
 		t.Fatalf("login of a blocked account: %v, want account_blocked", err)
 	}
 	var blockedAt *time.Time
@@ -77,7 +77,7 @@ func TestAdminAccountChangesFromTheDatabase(t *testing.T) {
 	if err := inTx(func(ctx context.Context) error { _, err := s.AdminUnblock(ctx, admin, bob.ID); return err }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetOrCreateBySubject(t.Context(), "email|bob", ""); err != nil {
+	if _, err := s.GetOrCreateBySubject(t.Context(), "email|bob", "", ""); err != nil {
 		t.Fatalf("login once unblocked: %v", err)
 	}
 

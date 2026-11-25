@@ -19,7 +19,8 @@ const (
 	CodeTokenExpired    Code = "token_expired"
 	CodeAccountDeleted  Code = "account_deleted"
 	// CodeAccountBlocked refuses every request of an account an admin
-	// blocked (README §2.12): authenticated, but not allowed in (403).
+	// blocked but the deletion of its own account (README §2.12):
+	// authenticated, but not allowed in (403).
 	CodeAccountBlocked Code = "account_blocked"
 	// CodeProfileIncomplete refuses creating or joining a challenge and
 	// recording an activity until the first and last names are set: a

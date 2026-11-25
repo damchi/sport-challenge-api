@@ -94,7 +94,7 @@ func TestAdminChangesRunOnASingleConnection(t *testing.T) {
 		admin.NewActivityCorrections(corrections, activities),
 		admin.NewAccountCorrections(corrections, users))
 	opts := routerOptions{allowedOrigins: []string{webOrigin}, ipLimiter: testLimiter(1000), userLimiter: testLimiter(1000)}
-	r := newTestRouterWith(t, opts, handlers, adminVerifier{}, func(context.Context, auth.Claims) (string, error) {
+	r := newTestRouterWith(t, opts, handlers, adminVerifier{}, func(context.Context, auth.Claims, string) (string, error) {
 		return alice, nil
 	})
 

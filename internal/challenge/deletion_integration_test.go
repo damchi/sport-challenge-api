@@ -146,7 +146,7 @@ func TestAccountDeletionErasesTheChallengeRows(t *testing.T) {
 	}
 
 	// A login with the former subject (insertProfile uses the pseudo).
-	if _, err := users.GetOrCreateBySubject(t.Context(), "del_member", ""); !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
+	if _, err := users.GetOrCreateBySubject(t.Context(), "del_member", "", ""); !errors.Is(err, apperr.New(apperr.CodeAccountDeleted, nil)) {
 		t.Fatalf("login after deletion: %v, want account_deleted", err)
 	}
 	if n := count(t, pool, "SELECT count(*) FROM users WHERE auth_subject = 'del_member'"); n != 0 {

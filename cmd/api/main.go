@@ -167,10 +167,7 @@ func run() error {
 		ipLimiter:      httpx.NewRateLimiter(cfg.RateLimitIP.RPS, cfg.RateLimitIP.Burst, clock.Real{}),
 		userLimiter:    httpx.NewRateLimiter(cfg.RateLimitUser.RPS, cfg.RateLimitUser.Burst, clock.Real{}),
 	}
-	router, err := newRouter(logger, opts, handlers, verifier, func(ctx context.Context, claims auth.Claims) (string, error) {
-		u, err := users.GetOrCreateBySubject(ctx, claims.Subject, claims.Email)
-		return u.ID, err
-	})
+	router, err := newRouter(logger, opts, handlers, verifier, resolveUser(users))
 	if err != nil {
 		return err
 	}
@@ -545,6 +542,16 @@ type routerOptions struct {
 	// requests of a user.
 	ipLimiter   *httpx.RateLimiter
 	userLimiter *httpx.RateLimiter
+}
+
+// resolveUser is the resolver of CurrentUser: the local user of the token,
+// created on first login, refused when deleted, or blocked outside the
+// routes the policy of the users leaves open to it.
+func resolveUser(users *user.Service) auth.UserIDResolver {
+	return func(ctx context.Context, claims auth.Claims, route string) (string, error) {
+		u, err := users.GetOrCreateBySubject(ctx, claims.Subject, claims.Email, route)
+		return u.ID, err
+	}
 }
 
 // newRouter registers the routes of the contract behind the middlewares of

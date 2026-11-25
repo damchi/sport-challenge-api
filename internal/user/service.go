@@ -79,19 +79,21 @@ func NewService(repo repository, deletionLock DeletionLock, erasers []Eraser, id
 }
 
 // GetOrCreateBySubject returns the local user of an auth subject, created
-// with an empty profile (no pseudo, no names) on first login. A row that is
-// already anonymized answers account_deleted, one an admin blocked
-// account_blocked (README §2.12). Anonymization replaces
-// auth_subject, so a deleted subject no longer matches that row: its
-// fingerprint, checked before any insert, answers account_deleted too, so
-// the deletion is final.
+// with an empty profile (no pseudo, no names) on first login, for a request
+// to route ("METHOD /path" as registered). A row that is already anonymized
+// answers account_deleted, one an admin blocked account_blocked on every
+// route but the deletion of its own account (blockedRefusal, README §2.12).
+// Anonymization replaces auth_subject, so a deleted subject no longer
+// matches that row: its fingerprint, checked before any insert, answers
+// account_deleted too, so the deletion is final.
 //
 // email is the e-mail of the access token, empty when the token has none: it
 // is stored when it differs from the one kept, so a change at the auth
 // provider follows; a token without it leaves the stored one as is. Failing
 // to store it does not refuse the request: the e-mail is only displayed, and
-// the next request tries again.
-func (s *Service) GetOrCreateBySubject(ctx context.Context, subject, email string) (User, error) {
+// the next request tries again. A blocked account keeps the stored one
+// while it is blocked.
+func (s *Service) GetOrCreateBySubject(ctx context.Context, subject, email, route string) (User, error) {
 	u, err := s.repo.GetOrCreateBySubject(ctx, subject)
 	if errors.Is(err, errAccountDeleted) {
 		return User{}, apperr.New(apperr.CodeAccountDeleted, nil)
@@ -102,8 +104,11 @@ func (s *Service) GetOrCreateBySubject(ctx context.Context, subject, email strin
 	if u.AnonymizedAt != nil {
 		return User{}, apperr.New(apperr.CodeAccountDeleted, nil)
 	}
+	if err := blockedRefusal(u, route); err != nil {
+		return User{}, err
+	}
 	if u.BlockedAt != nil {
-		return User{}, apperr.New(apperr.CodeAccountBlocked, nil)
+		return u, nil
 	}
 	if email, ok := tokenEmail(email); ok && (u.Email == nil || *u.Email != email) {
 		if err := s.repo.UpdateEmail(ctx, u.ID, email); err != nil {

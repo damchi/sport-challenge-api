@@ -16,9 +16,12 @@ type userIDKey struct{}
 
 // UserIDResolver returns the identifier of the local user of the token's
 // claims (its subject, and its e-mail to keep up to date), creating the user
-// on first login. An *apperr.Error (such as account_deleted) is answered as
-// is.
-type UserIDResolver func(ctx context.Context, claims Claims) (string, error)
+// on first login. route is the route of the request, "METHOD /path" as
+// registered ("DELETE /api/v1/me"), empty path for no route ("GET "): the
+// policy of the users tells from it what an account it does not serve
+// (blocked) may still do. An *apperr.Error (such as account_deleted) is
+// answered as is.
+type UserIDResolver func(ctx context.Context, claims Claims, route string) (string, error)
 
 // UserID returns the identifier of the local user CurrentUser put in the
 // request context. It works with the *gin.Context the generated handlers
@@ -53,7 +56,9 @@ func ActorFrom(ctx context.Context) (Actor, bool) {
 // CurrentUser runs after Authenticate: it turns the token's subject into the
 // local user and puts its identifier in the request context. A deleted
 // account answers 401 account_deleted, a blocked one 403 account_blocked
-// (both decided by the resolver); any other failure is a 500, logged by
+// except on the routes the policy of the users leaves open to it (both
+// decided by the resolver, from the route of the request: CurrentUser
+// decides nothing); any other failure is a 500, logged by
 // httpx.RespondError. Claims missing from the context (Authenticate not run)
 // answer 401 unauthenticated: the route is never served anonymously.
 func CurrentUser(resolve UserIDResolver, logger *slog.Logger) gin.HandlerFunc {
@@ -63,7 +68,7 @@ func CurrentUser(resolve UserIDResolver, logger *slog.Logger) gin.HandlerFunc {
 			httpx.RespondError(c, logger, apperr.New(apperr.CodeUnauthenticated, nil))
 			return
 		}
-		id, err := resolve(c.Request.Context(), claims)
+		id, err := resolve(c.Request.Context(), claims, c.Request.Method+" "+c.FullPath())
 		switch {
 		case errors.Is(err, context.Canceled) && c.Request.Context().Err() != nil:
 			// Same exception as Authenticate: the client is gone. Any other

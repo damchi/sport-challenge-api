@@ -62,7 +62,7 @@ func serve(t *testing.T, svc *Service, method, target, body string, headers map[
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
 		auth.Authenticate(acceptingVerifier{}, logger),
-		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return actor, nil }, logger),
+		auth.CurrentUser(func(context.Context, auth.Claims, string) (string, error) { return actor, nil }, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(activitiesOnly{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, nil),

@@ -75,7 +75,9 @@ func serveWith(t *testing.T, h *Handler, token, method, target, body string, log
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
 		auth.Authenticate(acceptingVerifier{}, logger),
-		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return "11111111-1111-4111-8111-111111111111", nil }, logger),
+		auth.CurrentUser(func(context.Context, auth.Claims, string) (string, error) {
+			return "11111111-1111-4111-8111-111111111111", nil
+		}, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(adminOnly{Handler: h}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, HideInvalidRequest),
