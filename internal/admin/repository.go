@@ -643,7 +643,10 @@ func (r *Repository) inLockedTx(ctx context.Context, timeout string, fn func(ctx
 	if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
 		return apperr.New(apperr.CodeBusy, err)
 	}
-	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	// Only the error of the deadline itself: a refusal of fn met as the
+	// deadline falls keeps its code.
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return apperr.New(apperr.CodeBusy, err)
 	}
 	return err
