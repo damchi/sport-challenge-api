@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/config"
@@ -74,5 +79,49 @@ func TestWorkerEnvSatisfiesTheConfiguration(t *testing.T) {
 	}
 	if cfg.Port != 8080 {
 		t.Fatalf("Port = %d, want 8080", cfg.Port)
+	}
+}
+
+// The end of a task is logged as a failure when the task returns an error,
+// with its partial counters, and as done otherwise.
+func TestLogTaskResult(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		wantMsg   string
+		wantLevel string
+		wantError string
+	}{
+		{name: "success", wantMsg: "task done", wantLevel: "INFO"},
+		{name: "failure", err: errors.New("one challenge failed"), wantMsg: "task failed", wantLevel: "ERROR", wantError: "one challenge failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&buf, nil))
+			logTaskResult(context.Background(), logger, taskCloseWeeks, tt.err, slog.Int("challenges", 3))
+
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			if len(lines) != 1 {
+				t.Fatalf("logged %d lines, want 1: %q", len(lines), buf.String())
+			}
+			var entry struct {
+				Msg        string `json:"msg"`
+				Level      string `json:"level"`
+				Task       string `json:"task"`
+				Challenges int    `json:"challenges"`
+				Error      string `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+				t.Fatalf("decode %q: %v", lines[0], err)
+			}
+			if entry.Msg != tt.wantMsg || entry.Level != tt.wantLevel {
+				t.Fatalf("logged %q at %s, want %q at %s", entry.Msg, entry.Level, tt.wantMsg, tt.wantLevel)
+			}
+			if entry.Task != taskCloseWeeks || entry.Challenges != 3 || entry.Error != tt.wantError {
+				t.Fatalf("attributes = task %q, challenges %d, error %q; want %q, 3, %q",
+					entry.Task, entry.Challenges, entry.Error, taskCloseWeeks, tt.wantError)
+			}
+		})
 	}
 }

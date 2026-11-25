@@ -108,23 +108,36 @@ func run(args []string) error {
 		switch task {
 		case taskCloseWeeks:
 			result, err := service.CloseWeeks(ctx)
-			logger.Info("task done", slog.String("task", task),
+			logTaskResult(ctx, logger, task, err,
 				slog.Int("challenges", result.Challenges), slog.Int("weeks", result.Weeks), slog.Int("eliminations", result.Eliminations))
 			return err
 		case taskFinalizeChallenges:
 			result, err := service.FinalizeChallenges(ctx)
-			logger.Info("task done", slog.String("task", task), slog.Int("challenges", result.Challenges))
+			logTaskResult(ctx, logger, task, err, slog.Int("challenges", result.Challenges))
 			return err
 		case taskRetryAuth0Deletions:
 			// Only the replay is used: no participations to abandon.
 			management := auth.NewAuth0Management(cfg.Auth0MgmtDomain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
 			result, err := user.NewService(user.NewRepository(gdb), nil, nil, management, clk, logger).RetryAuth0Deletions(ctx)
-			logger.Info("task done", slog.String("task", task), slog.Int("deleted", result.Deleted), slog.Int("failed", result.Failed))
+			logTaskResult(ctx, logger, task, err, slog.Int("deleted", result.Deleted), slog.Int("failed", result.Failed))
 			return err
 		default:
 			return errUsage
 		}
 	})
+}
+
+// logTaskResult logs the end of a task with its counters: "task failed" at
+// ERROR when it returns an error (the counters are then partial), "task done"
+// at INFO otherwise.
+func logTaskResult(ctx context.Context, logger *slog.Logger, task string, err error, counters ...slog.Attr) {
+	attrs := append([]slog.Attr{slog.String("task", task)}, counters...)
+	if err != nil {
+		attrs = append(attrs, slog.String("error", err.Error()))
+		logger.LogAttrs(ctx, slog.LevelError, "task failed", attrs...)
+		return
+	}
+	logger.LogAttrs(ctx, slog.LevelInfo, "task done", attrs...)
 }
 
 // parseTask reads the name of the task: exactly one known argument.
