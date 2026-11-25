@@ -275,3 +275,34 @@ func TestChallengeCorrectionsRestoreNamingACreator(t *testing.T) {
 		}
 	}
 }
+
+// TestRestoreAdminChallengeInvalidBody: a restore without a body, or with a
+// creator that is not a UUID, or an unknown field, answers 400
+// validation_failed to an admin, nothing asked, and 404 not_found to
+// anyone else.
+func TestRestoreAdminChallengeInvalidBody(t *testing.T) {
+	path := "/api/v1/admin/challenges/" + challengeID + "/restore"
+	for name, body := range map[string]string{
+		"no body":            "",
+		"creator not a uuid": `{"reason": "Supprimé par erreur", "creator_user_id": "bob"}`,
+		"unknown field":      `{"reason": "Supprimé par erreur", "creator": "` + bobID + `"}`,
+	} {
+		for _, tt := range []struct {
+			who, token string
+			status     int
+			code       string
+		}{
+			{who: "admin", token: adminToken, status: http.StatusBadRequest, code: "validation_failed"},
+			{who: "without the permission", token: "some.access.token", status: http.StatusNotFound, code: "not_found"},
+		} {
+			t.Run(name+", "+tt.who, func(t *testing.T) {
+				lifecycle := &fakeLifecycle{}
+				h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), lifecycle, nil, nil, nil)
+				rec, got := serveWith(t, h, tt.token, http.MethodPost, path, body, io.Discard)
+				if e, _ := got["error"].(map[string]any); rec.Code != tt.status || e["code"] != tt.code || lifecycle.asked != "" {
+					t.Fatalf("got %d %v, asked %q, want %d %s and nothing asked", rec.Code, got, lifecycle.asked, tt.status, tt.code)
+				}
+			})
+		}
+	}
+}
