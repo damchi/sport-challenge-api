@@ -31,7 +31,8 @@ import (
 // changes the names of an account, blocks it (its next login answers
 // account_blocked), unblocks it, then deletes it, each change with its
 // journal line. The deletion is refused while the account is the last
-// creator of a challenge not finished, nothing written. Once deleted, by an
+// creator of a challenge not finished, nothing written. None waits for the
+// week lock (an activity write in progress). Once deleted, by an
 // admin or by DELETE /me, the profile values of the journal lines that
 // target the account, as an account or as a participant, are erased; the
 // action, the instant, the target and the reason stay, and the lines of the
@@ -140,10 +141,21 @@ func TestAdminAccountCorrections(t *testing.T) {
 		return out
 	}
 
+	// None of the changes below recomputes a challenge: each goes through
+	// while an activity write holds the week lock shared, under a deadline
+	// well before the 10 s a correction would wait for it (busy).
+	writer := gdb.Begin()
+	t.Cleanup(func() { _ = writer.Rollback().Error })
+	if err := db.ShareWeekLock(writer); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
 	// The profile, with the rules of PATCH /me.
 	clk.Set(recordNow.Add(time.Minute))
 	robert := "Robert"
-	if err := accounts.UpdateProfile(t.Context(), adminActor, bob, user.ProfileChanges{FirstName: &robert, RemovePseudo: true}, "Typo in the name"); err != nil {
+	if err := accounts.UpdateProfile(ctx, adminActor, bob, user.ProfileChanges{FirstName: &robert, RemovePseudo: true}, "Typo in the name"); err != nil {
 		t.Fatal(err)
 	}
 	got := lines(bob)
@@ -155,7 +167,7 @@ func TestAdminAccountCorrections(t *testing.T) {
 
 	// Blocked: his next login is refused; unblocked: served again.
 	clk.Set(recordNow.Add(2 * time.Minute))
-	if err := accounts.Block(t.Context(), adminActor, bob, "Spam"); err != nil {
+	if err := accounts.Block(ctx, adminActor, bob, "Spam"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := users.GetOrCreateBySubject(t.Context(), "bob", ""); !errors.Is(err, apperr.New(apperr.CodeAccountBlocked, nil)) {
@@ -163,14 +175,14 @@ func TestAdminAccountCorrections(t *testing.T) {
 	}
 	// Blocked already: blocked since the first time, an empty line.
 	clk.Set(recordNow.Add(150 * time.Second))
-	if err := accounts.Block(t.Context(), adminActor, bob, "Spam again"); err != nil {
+	if err := accounts.Block(ctx, adminActor, bob, "Spam again"); err != nil {
 		t.Fatal(err)
 	}
-	if err := accounts.Block(t.Context(), adminActor, eve, "Spam"); !errors.Is(err, apperr.New(apperr.CodeForbidden, nil)) {
+	if err := accounts.Block(ctx, adminActor, eve, "Spam"); !errors.Is(err, apperr.New(apperr.CodeForbidden, nil)) {
 		t.Fatalf("self block: %v, want forbidden", err)
 	}
 	clk.Set(recordNow.Add(3 * time.Minute))
-	if err := accounts.Unblock(t.Context(), adminActor, bob, "Blocked by mistake"); err != nil {
+	if err := accounts.Unblock(ctx, adminActor, bob, "Blocked by mistake"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := users.GetOrCreateBySubject(t.Context(), "bob", ""); err != nil {
@@ -185,7 +197,7 @@ func TestAdminAccountCorrections(t *testing.T) {
 
 	// The last creator of a challenge in progress: refused, as DELETE /me.
 	clk.Set(recordNow.Add(4 * time.Minute))
-	if err := accounts.Delete(t.Context(), adminActor, bob, "Asked by the owner"); !errors.Is(err, apperr.New(apperr.CodeLastCreator, nil)) {
+	if err := accounts.Delete(ctx, adminActor, bob, "Asked by the owner"); !errors.Is(err, apperr.New(apperr.CodeLastCreator, nil)) {
 		t.Fatalf("delete the last creator: %v, want last_creator", err)
 	}
 	if n := len(lines(bob)); n != 5 {
@@ -193,7 +205,7 @@ func TestAdminAccountCorrections(t *testing.T) {
 	}
 	exec(`INSERT INTO challenge_creators (challenge_id, user_id) VALUES ($1, $2)`, solo, eve)
 
-	if err := accounts.Delete(t.Context(), adminActor, bob, "Asked by the owner"); err != nil {
+	if err := accounts.Delete(ctx, adminActor, bob, "Asked by the owner"); err != nil {
 		t.Fatal(err)
 	}
 	var anonymized, pending int
@@ -217,6 +229,10 @@ func TestAdminAccountCorrections(t *testing.T) {
 	if got := lines(bob); !reflect.DeepEqual(got, want) {
 		t.Fatalf("journal of bob\n%+v\nwant\n%+v", got, want)
 	}
+
+	// The week lock is let go before DELETE /me, which is not under test
+	// here (the cleanup would only roll back at the end).
+	writer.Rollback()
 
 	// DELETE /me erases them too; dana's line stays as it was.
 	if err := users.Delete(t.Context(), carl); err != nil {

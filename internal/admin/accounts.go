@@ -71,7 +71,7 @@ func (s *AccountCorrections) Unblock(ctx context.Context, actor auth.Actor, id, 
 // under action.
 func (s *AccountCorrections) run(ctx context.Context, actor auth.Actor, id, action string, change accountChange, reason string) error {
 	_, err := s.corrections.Run(ctx, actor, Correction{
-		Touched: noChallenge,
+		NoChallenge: true,
 		Apply: func(ctx context.Context) (Entry, error) {
 			c, err := change(ctx, actor, id)
 			if err != nil {
@@ -91,7 +91,7 @@ func (s *AccountCorrections) run(ctx context.Context, actor auth.Actor, id, acti
 func (s *AccountCorrections) Delete(ctx context.Context, actor auth.Actor, id, reason string) error {
 	var deletion user.Deletion
 	_, err := s.corrections.Run(ctx, actor, Correction{
-		Touched: noChallenge,
+		NoChallenge: true,
 		Apply: func(ctx context.Context) (Entry, error) {
 			d, err := s.users.AdminDelete(ctx, actor, id)
 			if err != nil {
@@ -112,6 +112,3 @@ func (s *AccountCorrections) Delete(ctx context.Context, actor auth.Actor, id, r
 	s.users.CompleteDeletion(ctx, deletion)
 	return nil
 }
-
-// noChallenge is the Touched of a change that touches no challenge.
-func noChallenge(context.Context) ([]string, error) { return nil, nil }

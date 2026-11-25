@@ -94,11 +94,11 @@ func TestAccountCorrections(t *testing.T) {
 		wantOld    map[string]any
 		wantNew    map[string]any
 	}{
-		{name: "update", run: updateBob, wantSteps: []string{"lock", "update Robert " + bobID, "journal"}, wantAction: ActionUserUpdate, wantOld: change.Old, wantNew: change.New},
-		{name: "block", run: blockBob, wantSteps: []string{"lock", "block " + bobID, "journal"}, wantAction: ActionUserBlock, wantOld: change.Old, wantNew: change.New},
-		{name: "unblock", run: unblockBob, wantSteps: []string{"lock", "unblock " + bobID, "journal"}, wantAction: ActionUserUnblock, wantOld: change.Old, wantNew: change.New},
+		{name: "update", run: updateBob, wantSteps: []string{"tx", "update Robert " + bobID, "journal"}, wantAction: ActionUserUpdate, wantOld: change.Old, wantNew: change.New},
+		{name: "block", run: blockBob, wantSteps: []string{"tx", "block " + bobID, "journal"}, wantAction: ActionUserBlock, wantOld: change.Old, wantNew: change.New},
+		{name: "unblock", run: unblockBob, wantSteps: []string{"tx", "unblock " + bobID, "journal"}, wantAction: ActionUserUnblock, wantOld: change.Old, wantNew: change.New},
 		{
-			name: "delete", run: deleteBob, wantSteps: []string{"lock", "delete " + bobID, "journal", "auth0"}, wantAction: ActionUserDelete,
+			name: "delete", run: deleteBob, wantSteps: []string{"tx", "delete " + bobID, "journal", "auth0"}, wantAction: ActionUserDelete,
 			wantOld: map[string]any{"deleted_at": nil}, wantNew: map[string]any{"deleted_at": at},
 		},
 	}
@@ -145,11 +145,11 @@ func TestAccountCorrectionsRefusals(t *testing.T) {
 		{name: "unblock, no reason", run: unblockBob, actor: admin, reason: " ", wantCode: apperr.CodeValidationFailed},
 		{
 			name: "block, refused", run: blockBob, actor: admin, reason: "Demande", err: apperr.New(apperr.CodeForbidden, nil),
-			wantCode: apperr.CodeForbidden, wantSteps: []string{"lock", "block " + bobID},
+			wantCode: apperr.CodeForbidden, wantSteps: []string{"tx", "block " + bobID},
 		},
 		{
 			name: "delete, last creator", run: deleteBob, actor: admin, reason: "Demande", err: lastCreator,
-			wantCode: apperr.CodeLastCreator, wantSteps: []string{"lock", "delete " + bobID},
+			wantCode: apperr.CodeLastCreator, wantSteps: []string{"tx", "delete " + bobID},
 		},
 	}
 	for _, tt := range tests {

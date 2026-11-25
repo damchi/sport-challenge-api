@@ -84,7 +84,8 @@ const (
 	// address or of its user.
 	CodeRateLimited Code = "rate_limited"
 	// CodeBusy refuses an admin change that waited too long for the writes
-	// in progress: nothing was written, it can be tried again.
+	// in progress, or that a deadlock stopped: nothing was written, it can
+	// be tried again.
 	CodeBusy     Code = "busy"
 	CodeInternal Code = "internal_error"
 )

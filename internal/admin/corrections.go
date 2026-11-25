@@ -28,6 +28,9 @@ type correctionStore interface {
 	// InLockedTx runs fn in a transaction, carried by the ctx it gets, that
 	// takes the week lock alone first; rolled back when fn fails.
 	InLockedTx(ctx context.Context, fn func(ctx context.Context) error) error
+	// InTx runs fn in a transaction, carried by the ctx it gets, without the
+	// week lock; rolled back when fn fails.
+	InTx(ctx context.Context, fn func(ctx context.Context) error) error
 	// LockParticipants takes FOR SHARE, in the order of their ids, the
 	// accounts not deleted of the participants of the challenges ids, in
 	// the transaction ctx carries.
@@ -57,8 +60,14 @@ type Correction struct {
 	// Touched reads, in the transaction and before the change, every
 	// challenge it touches: those recomputed and previewed. A change that
 	// moves a target into other challenges (an activity whose date changes)
-	// gives those it counts in before and after it.
+	// gives those it counts in before and after it. Nil, and only then, for
+	// a change of NoChallenge.
 	Touched func(ctx context.Context) ([]string, error)
+	// NoChallenge marks a change that touches no challenge (an account):
+	// nothing is recomputed, and its transaction takes no week lock. Said
+	// rather than read from a nil Touched, so that a change of challenges
+	// that forgets its Touched is refused, not run without the week lock.
+	NoChallenge bool
 	// Apply makes the change in the transaction and returns its journal
 	// entry; its admin, challenges and reason are set by Run.
 	Apply func(ctx context.Context) (Entry, error)
@@ -135,6 +144,10 @@ var errDryRun = errors.New("dry run")
 // sent is refused by the contract (AdminReason, minLength), so a caller of
 // Run is to tell the two apart itself.
 //
+// A change of c.NoChallenge recomputes nothing: its transaction takes none
+// of the locks of steps 1 to 3 and 5 below, only those of c.Apply, so that it
+// holds back no activity write nor run of the worker (InTx).
+//
 // The locks are taken in this order, so that nothing waits for the change
 // in a cycle:
 //  1. the week lock alone (InLockedTx), so that no activity write and no
@@ -156,14 +169,23 @@ var errDryRun = errors.New("dry run")
 //     of each challenge.
 //
 // The author of step 2 comes before the others, out of the order of the ids:
-// no cycle follows, as only one admin change runs at a time (the week lock)
-// and an account deletion holds no row of users but its own.
+// no cycle follows between the changes that touch challenges, as only one of
+// them runs at a time (the week lock). A change of an account runs beside
+// them: it holds the row of its target FOR UPDATE, then its journal line
+// takes that of its admin FOR KEY SHARE (admin_actions.admin_id), out of any
+// order. Two of them crossed (two admins deleting each other), or one and a
+// correction that holds the row of its admin (an activity of that admin, step
+// 2) and waits for its target, may thus meet in a deadlock: PostgreSQL rolls
+// one back, which answers busy (InTx), as rare as the same deadlock with
+// DELETE /me, which never took the week lock. So may an account deletion
+// and a run of the worker (close-weeks), which holds the week lock shared
+// and writes the rows of participants and results the deletion writes too.
 func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) ([]ChallengePreview, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return nil, err
 	}
-	if c.Touched == nil || c.Apply == nil {
-		return nil, errors.New("correction without its challenges or its change")
+	if c.Apply == nil || (c.Touched == nil) != c.NoChallenge {
+		return nil, errors.New("correction without its change, or its challenges not said")
 	}
 	// The reason is checked again by the journal, which the entry reaches
 	// only after the change: refused here, nothing is locked for nothing. A
@@ -174,11 +196,20 @@ func (s *Corrections) Run(ctx context.Context, actor auth.Actor, c Correction) (
 			return nil, err
 		}
 	}
+	inTx := s.store.InLockedTx
+	if c.NoChallenge {
+		inTx = s.store.InTx
+	}
 	var previews []ChallengePreview
-	err := s.store.InLockedTx(ctx, func(ctx context.Context) error {
-		ids, err := c.Touched(ctx)
-		if err != nil {
-			return err
+	err := inTx(ctx, func(ctx context.Context) error {
+		var (
+			ids []string
+			err error
+		)
+		if !c.NoChallenge {
+			if ids, err = c.Touched(ctx); err != nil {
+				return err
+			}
 		}
 		if len(ids) > 0 {
 			if err := s.store.LockParticipants(ctx, ids); err != nil {

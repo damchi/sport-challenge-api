@@ -34,6 +34,15 @@ func (l *correctionLog) InLockedTx(ctx context.Context, fn func(ctx context.Cont
 	return err
 }
 
+func (l *correctionLog) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	l.add("tx")
+	err := fn(ctx)
+	if err != nil {
+		l.rolledBack = true
+	}
+	return err
+}
+
 func (l *correctionLog) LockParticipants(_ context.Context, ids []string) error {
 	l.add("lock participants " + strings.Join(ids, ","))
 	return l.lockErr
@@ -201,10 +210,26 @@ func TestCorrectionsRunPreviewsWithoutAReason(t *testing.T) {
 }
 
 func TestCorrectionsRunWithoutItsParts(t *testing.T) {
-	log := &correctionLog{}
-	s, _ := newCorrections(log)
-	if _, err := s.Run(t.Context(), admin, Correction{Reason: "Oubli"}); err == nil || len(log.steps) != 0 {
-		t.Fatalf("got %v, steps %v, want an error and nothing done", err, log.steps)
+	apply := func(context.Context) (Entry, error) { return Entry{}, nil }
+	touched := func(context.Context) ([]string, error) { return nil, nil }
+	tests := []struct {
+		name string
+		c    Correction
+	}{
+		{name: "no change", c: Correction{Touched: touched, Reason: "Oubli"}},
+		// A change of challenges that forgets its Touched is not run
+		// without the week lock.
+		{name: "no challenges", c: Correction{Apply: apply, Reason: "Oubli"}},
+		{name: "challenges of a change of none", c: Correction{Touched: touched, Apply: apply, NoChallenge: true, Reason: "Oubli"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log := &correctionLog{}
+			s, _ := newCorrections(log)
+			if _, err := s.Run(t.Context(), admin, tt.c); err == nil || len(log.steps) != 0 {
+				t.Fatalf("got %v, steps %v, want an error and nothing done", err, log.steps)
+			}
+		})
 	}
 }
 
