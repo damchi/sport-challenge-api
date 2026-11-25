@@ -13,6 +13,7 @@ import (
 
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
+	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
@@ -60,11 +61,13 @@ type Service struct {
 	// atRisk is how long before the end of a week a participant under the
 	// minimum is at risk.
 	atRisk time.Duration
+	// rankings keeps the rankings computed by this instance a short while.
+	rankings *rankings
 }
 
 // NewService returns a Service.
 func NewService(challenges Challenges, profiles Profiles, repo repository, c clock.Clock, atRisk time.Duration) *Service {
-	return &Service{challenges: challenges, profiles: profiles, repo: repo, clock: c, atRisk: atRisk}
+	return &Service{challenges: challenges, profiles: profiles, repo: repo, clock: c, atRisk: atRisk, rankings: newRankings()}
 }
 
 // Get returns the ranking of every category of challenge id, in position
@@ -75,7 +78,10 @@ func NewService(challenges Challenges, profiles Profiles, repo repository, c clo
 // day of the next week). Once the challenge is over, the frozen results are
 // served; until the worker has frozen them, at the earliest when the last
 // week locks, the ranking is computed, which gives the same result once it
-// is locked: the weeks are locked by the clock, not by the worker.
+// is locked: the weeks are locked by the clock, not by the worker. The
+// rights are checked on every call; the ranking computed may then be one
+// kept from less than keptFor before, at the instant it was computed
+// (ComputedAt), except in a transaction (live).
 func (s *Service) Get(ctx context.Context, actor auth.Actor, id string) (Leaderboard, error) {
 	c, err := s.challenges.Challenge(ctx, actor, id)
 	if err != nil {
@@ -97,26 +103,57 @@ func (s *Service) Get(ctx context.Context, actor auth.Actor, id string) (Leaderb
 		}
 	}
 
-	byChallenge, err := s.repo.ParticipantsOf(ctx, []string{id})
+	live, err := s.live(ctx, c, w, scorers)
 	if err != nil {
 		return Leaderboard{}, err
 	}
-	participants := byChallenge[id]
-	activitiesOf, err := s.repo.ActivitiesOf(ctx, []Scope{scopeOf(id, c.Categories, w)})
-	if err != nil {
-		return Leaderboard{}, err
+	return live.board, nil
+}
+
+// live returns the ranking of challenge c computed from the raw activities
+// in window w, by the scorers of its categories. Outside of a transaction,
+// the one computed less than keptFor before is served, at the instant it was
+// computed (rankings); in the transaction of an admin correction, it is
+// always computed, and never kept: it reads what the transaction has not
+// committed yet. The ranking is shared by every reader: nothing of it may
+// depend on the actor of the request that computes it.
+func (s *Service) live(ctx context.Context, c Challenge, w scoring.Window, scorers []scoring.Scorer) (computed, error) {
+	if _, ok := db.Tx(ctx); ok {
+		return s.compute(ctx, c, w, scorers)
 	}
-	activities := activitiesOf[id]
+	// The next week to lock is judged then: the ranking no longer holds.
+	until := w.Now.Add(keptFor)
+	if n := w.LockedWeeks(); n < w.Weeks() && w.WeekLocksAt(n+1).Before(until) {
+		until = w.WeekLocksAt(n + 1)
+	}
+	return s.rankings.get(ctx, c, w.Now, until, func() (computed, error) {
+		return s.compute(ctx, c, w, scorers)
+	})
+}
+
+// compute ranks the participants of challenge c from their activities in
+// window w, by the scorers of its categories, with their names.
+func (s *Service) compute(ctx context.Context, c Challenge, w scoring.Window, scorers []scoring.Scorer) (computed, error) {
+	byChallenge, err := s.repo.ParticipantsOf(ctx, []string{c.ID})
+	if err != nil {
+		return computed{}, err
+	}
+	participants := byChallenge[c.ID]
+	activitiesOf, err := s.repo.ActivitiesOf(ctx, []Scope{scopeOf(c.ID, c.Categories, w)})
+	if err != nil {
+		return computed{}, err
+	}
+	activities := activitiesOf[c.ID]
 	ids := make([]string, len(participants))
 	for i, p := range participants {
 		ids[i] = p.UserID
 	}
 	names, err := s.profiles.Names(ctx, ids)
 	if err != nil {
-		return Leaderboard{}, fmt.Errorf("read names: %w", err)
+		return computed{}, fmt.Errorf("read names: %w", err)
 	}
 
-	board := Leaderboard{ComputedAt: now, Categories: make([]CategoryRanking, len(c.Categories))}
+	board := Leaderboard{ComputedAt: w.Now, Categories: make([]CategoryRanking, len(c.Categories))}
 	for i, cat := range c.Categories {
 		entries := scorers[i].Score(w, participants, activities)
 		ranked := make([]Ranked, len(entries))
@@ -126,7 +163,7 @@ func (s *Service) Get(ctx context.Context, actor auth.Actor, id string) (Leaderb
 		}
 		board.Categories[i] = CategoryRanking{Type: cat.Type, RankedCount: rankedCount(entries), Entries: ranked}
 	}
-	return board, nil
+	return computed{window: w, participants: participants, activities: activities, board: board}, nil
 }
 
 // Standings returns where actorID stands in each of challenges that is in

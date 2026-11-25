@@ -802,7 +802,8 @@ func TestGetPointsOfAnAccountDeletedBeforeTheFreeze(t *testing.T) {
 		},
 	}
 	repo := &readActivities{Repository: NewRepository(gdb)}
-	svc := NewService(staticChallenge(ch), fakeProfiles{}, repo, clock.NewFake(at(10, 12)), 24*time.Hour)
+	fake := clock.NewFake(at(10, 12))
+	svc := NewService(staticChallenge(ch), fakeProfiles{}, repo, fake, 24*time.Hour)
 	points := func() []scoring.Entry {
 		t.Helper()
 		board, err := svc.Get(t.Context(), auth.Actor{ID: b}, challengeID)
@@ -826,6 +827,8 @@ func TestGetPointsOfAnAccountDeletedBeforeTheFreeze(t *testing.T) {
 	}
 
 	s.exec("UPDATE users SET anonymized_at = now(), pseudo = NULL WHERE id = $1", a)
+	// Read once the ranking kept has expired.
+	fake.Set(at(10, 12).Add(keptFor))
 	after := []scoring.Entry{
 		{UserID: b, Rank: 1, Value: 10, Provisional: &zero},
 		{UserID: c, Rank: 2, Value: 8, Provisional: &zero},
@@ -958,6 +961,11 @@ func TestPageFromTheDatabase(t *testing.T) {
 
 	// r6 runs again and moves up: the cursor given before is refused.
 	s.activity(runners[5], "run", start.Add(30*time.Hour), 9000, nil, false)
+	// The cursor stays valid while the ranking is kept, not after.
+	if _, err := pageOf(PageRequest{Category: CategoryCumulativeTime, Limit: 2, After: first.Next}); err != nil {
+		t.Fatalf("within the cache: %v, want the page", err)
+	}
+	fake.Set(start.AddDate(0, 0, 3).Add(keptFor))
 	var e *apperr.Error
 	if _, err := pageOf(PageRequest{Category: CategoryCumulativeTime, Limit: 2, After: first.Next}); !errors.As(err, &e) || e.Code != apperr.CodeCursorInvalid {
 		t.Fatalf("err = %v, want cursor_invalid", err)
@@ -984,4 +992,62 @@ func TestPageFromTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("frozen, last page", last, runners[:3], runners[5:], false)
+}
+
+// TestATransactionNeverReadsTheCache: the preview of an admin correction
+// reads the ranking in its transaction, never the one kept, and does not
+// keep it either: once rolled back, the kept one is still served.
+func TestATransactionNeverReadsTheCache(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc := toronto(t)
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	runner := s.user("runner")
+	var challengeID string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('Summer', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, start.AddDate(0, 0, 14), runner).Scan(&challengeID); err != nil {
+		t.Fatal(err)
+	}
+	s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", challengeID, runner, start)
+	s.activity(runner, "run", start.Add(time.Hour), 3600, nil, false)
+	c := Challenge{
+		ID: challengeID, Timezone: "America/Toronto", StartsAt: start.UTC(), EndsAt: start.AddDate(0, 0, 14).UTC(),
+		Categories: []Category{{Type: CategoryCumulativeTime}},
+	}
+	svc := NewService(staticChallenge(c), fakeProfiles{}, NewRepository(gdb), clock.NewFake(start.AddDate(0, 0, 3)), 24*time.Hour)
+	actor := auth.Actor{ID: runner}
+	seconds := func(ctx context.Context) int {
+		t.Helper()
+		board, err := svc.Get(ctx, actor, challengeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return board.Categories[0].Entries[0].Value
+	}
+	if got := seconds(t.Context()); got != 3600 {
+		t.Fatalf("first read: %d s, want 3600", got)
+	}
+
+	errRollback := errors.New("rollback")
+	err = db.InTx(t.Context(), gdb, func(ctx context.Context) error {
+		tx, _ := db.Tx(ctx)
+		if err := tx.Exec("UPDATE activities SET duration_seconds = 7200 WHERE user_id = ?", runner).Error; err != nil {
+			return err
+		}
+		if got := seconds(ctx); got != 7200 {
+			t.Errorf("in the transaction: %d s, want the 7200 it wrote", got)
+		}
+		return errRollback
+	})
+	if !errors.Is(err, errRollback) {
+		t.Fatal(err)
+	}
+	// Rolled back: the kept ranking is served, not the preview.
+	if got := seconds(t.Context()); got != 3600 {
+		t.Fatalf("after the rollback: %d s, want 3600", got)
+	}
 }
