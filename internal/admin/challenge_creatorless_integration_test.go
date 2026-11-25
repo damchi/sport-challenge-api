@@ -241,7 +241,7 @@ func TestRestoreKeepsACreatorFromTheDatabase(t *testing.T) {
 		}
 		a := f.lastAction()
 		if string(a.NewValue) != `{"deleted_at": null, "named_creator": {"status": "active", "creator": true, "user_id": "`+f.dan+`"}}` ||
-			string(a.OldValue) != `{"deleted_at": "`+f.start.AddDate(0, 0, 3).UTC().Format(time.RFC3339Nano)+`", "named_creator": {"creator": false, "user_id": "`+f.dan+`"}}` {
+			string(a.OldValue) != `{"deleted_at": "`+f.start.AddDate(0, 0, 3).UTC().Format(time.RFC3339Nano)+`", "named_creator": {"status": null, "creator": false, "user_id": "`+f.dan+`"}}` {
 			t.Fatalf("journal line %s -> %s, want dan's participation and role, none before", a.OldValue, a.NewValue)
 		}
 	})

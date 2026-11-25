@@ -140,7 +140,7 @@ func TestServiceAdminRestoreKeepsACreator(t *testing.T) {
 		{
 			name: "an account that never joined named", challenge: ongoing, creatorless: true, creator: creatorID(), complete: true,
 			joined: true, madeCreator: true,
-			change: MemberChange{Old: map[string]any{memberCreator: false}, New: map[string]any{memberStatus: ParticipantActive, memberCreator: true}},
+			change: MemberChange{Old: map[string]any{memberStatus: nil, memberCreator: false}, New: map[string]any{memberStatus: ParticipantActive, memberCreator: true}},
 		},
 		{
 			name: "a creator named while others are left", challenge: ongoing, creator: creatorID(),

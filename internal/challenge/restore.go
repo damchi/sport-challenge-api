@@ -114,6 +114,8 @@ func (s *Service) nameCreator(ctx context.Context, actor auth.Actor, id, userID 
 		if err := challengeErr(err); err != nil {
 			return MemberChange{}, err
 		}
+		// No participation before: an explicit null in the journal.
+		out.Old[memberStatus] = nil
 		out.New[memberStatus] = ParticipantActive
 	}
 	err = s.repo.AddCreator(ctx, id, actor.ID, userID, now, func(_ Challenge, _, target Membership) (bool, error) {
