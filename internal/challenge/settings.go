@@ -90,7 +90,8 @@ func (s *Service) AdminUpdate(ctx context.Context, actor auth.Actor, id string, 
 	if changes.ReferenceSport != nil {
 		reference = *changes.ReferenceSport
 	}
-	// The catalogue is read before the lock, as at creation.
+	// The catalogue is read before the lock of the challenge, in the
+	// transaction ctx carries, which holds the week lock already.
 	suggested, err := s.catalogue.SuggestedFactors(ctx)
 	if err != nil {
 		return SettingsChange{}, fmt.Errorf("read catalogue: %w", err)
