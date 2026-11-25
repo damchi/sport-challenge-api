@@ -79,8 +79,9 @@ func preview(id string, before, after reading, now time.Time, lc lifecycle) Chal
 	p.Eliminations = eliminationChanges(before.state.Eliminations, after.state.Eliminations)
 	p.Results = resultsChange(before.state.Frozen, after.state.Frozen)
 	if before.board != nil && after.board != nil && before.weeks != nil && after.weeks != nil {
-		p.Weeks = weekChanges(before, after)
-		p.Points = pointsChanges(*before.board, *after.board, *before.weeks, *after.weeks)
+		users := pointsUsers(*before.weeks, *after.weeks)
+		p.Weeks = weekChanges(before, after, users)
+		p.Points = pointsChanges(*before.board, *after.board, *before.weeks, *after.weeks, users)
 	}
 	return p
 }
@@ -104,7 +105,8 @@ func resultsChange(before, after bool) string {
 // before and after: their points or eliminations (judged in a locked week
 // only, so a week locked before and not after, its first day moved later,
 // loses them), or, for the week in progress, the elimination minimums.
-func weekChanges(before, after reading) []WeekChange {
+// users are the participants with points on either side (pointsUsers).
+func weekChanges(before, after reading, users []string) []WeekChange {
 	// The last week begun has points even once over, before it locks (no
 	// week in progress then).
 	last := max(before.weeks.Locked, before.weeks.Current, after.weeks.Locked, after.weeks.Current,
@@ -112,7 +114,7 @@ func weekChanges(before, after reading) []WeekChange {
 	var out []WeekChange
 	for n := 1; n <= last; n++ {
 		locked := n <= after.weeks.Locked
-		changed := pointsDiffer(*before.weeks, *after.weeks, n) ||
+		changed := pointsDiffer(*before.weeks, *after.weeks, users, n) ||
 			eliminationsDiffer(before.state.Eliminations, after.state.Eliminations, n) ||
 			(!locked && n == after.weeks.Current && !maps.Equal(minimums(*before.board), minimums(*after.board)))
 		if changed {
@@ -122,10 +124,10 @@ func weekChanges(before, after reading) []WeekChange {
 	return out
 }
 
-// pointsDiffer tells whether a participant has other points in week n
+// pointsDiffer tells whether one of users has other points in week n
 // before and after.
-func pointsDiffer(before, after leaderboard.Weeks, n int) bool {
-	for _, user := range pointsUsers(before, after) {
+func pointsDiffer(before, after leaderboard.Weeks, users []string, n int) bool {
+	for _, user := range users {
 		if before.Points[user][n] != after.Points[user][n] {
 			return true
 		}
@@ -167,9 +169,9 @@ func minimums(board leaderboard.Leaderboard) map[string]int {
 
 // pointsChanges lists, by week then participant ID, the points of a week
 // that differ between before and after, each participant named as in the
-// rankings (after the change first).
-func pointsChanges(beforeBoard, afterBoard leaderboard.Leaderboard, before, after leaderboard.Weeks) []PointsChange {
-	users := pointsUsers(before, after)
+// rankings (after the change first). users are the participants with
+// points on either side, sorted (pointsUsers).
+func pointsChanges(beforeBoard, afterBoard leaderboard.Leaderboard, before, after leaderboard.Weeks, users []string) []PointsChange {
 	names := namesOf(beforeBoard)
 	for id, n := range namesOf(afterBoard) {
 		names[id] = n
@@ -205,16 +207,13 @@ func lastPointsWeek(w leaderboard.Weeks) int {
 
 // pointsUsers lists, sorted, the participants with points before or after.
 func pointsUsers(before, after leaderboard.Weeks) []string {
-	var out []string
+	set := make(map[string]struct{}, max(len(before.Points), len(after.Points)))
 	for _, w := range []leaderboard.Weeks{before, after} {
 		for user := range w.Points {
-			if !slices.Contains(out, user) {
-				out = append(out, user)
-			}
+			set[user] = struct{}{}
 		}
 	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(set))
 }
 
 // namesOf gives the name of every participant ranked in board, by ID.
