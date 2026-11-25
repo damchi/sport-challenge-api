@@ -109,8 +109,8 @@ func TestAdminMemberChangeAndAccountDeletionInParallel(t *testing.T) {
 		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
 		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
 	}
-	users := user.NewService(user.NewRepository(gdb), abandonAllFunc(func(ctx context.Context, userID string) error {
-		return challenges.AbandonAll(ctx, userID)
+	users := user.NewService(user.NewRepository(gdb), lockForDeletionFunc(func(ctx context.Context, userID string) error {
+		return challenges.LockForDeletion(ctx, userID)
 	}), erasers, deletedAtAuth0{}, clk, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, challengeStandings{}, clk)

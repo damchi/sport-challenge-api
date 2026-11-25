@@ -197,7 +197,7 @@ func TestServiceAdminDelete(t *testing.T) {
 		name       string
 		actor      auth.Actor
 		deleteErr  error
-		abandonErr error
+		lockErr    error
 		wantCode   apperr.Code
 		wantStatus int
 	}{
@@ -206,7 +206,7 @@ func TestServiceAdminDelete(t *testing.T) {
 		{name: "unknown or deleted account", actor: anAdmin, deleteErr: fmt.Errorf("delete user: %w", errUserNotFound), wantCode: apperr.CodeUserNotFound, wantStatus: http.StatusNotFound},
 		// The refusal of DELETE /me: the account is the last creator of a
 		// challenge not finished.
-		{name: "last creator", actor: anAdmin, abandonErr: lastCreator, wantCode: apperr.CodeLastCreator, wantStatus: http.StatusUnprocessableEntity},
+		{name: "last creator", actor: anAdmin, lockErr: lastCreator, wantCode: apperr.CodeLastCreator, wantStatus: http.StatusUnprocessableEntity},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,11 +215,11 @@ func TestServiceAdminDelete(t *testing.T) {
 				user: User{ID: "u-1", AuthSubject: "email|1"}, deleted: new(string), deletedAt: new(time.Time),
 				deleteErr: tt.deleteErr, removed: &removed,
 			}
-			participations := &fakeParticipations{err: tt.abandonErr}
+			deletionLock := &fakeDeletionLock{err: tt.lockErr}
 			var erased []string
-			erasers := []Eraser{fakeEraser{name: "journal", participations: participations, calls: &erased}}
+			erasers := []Eraser{fakeEraser{name: "journal", deletionLock: deletionLock, calls: &erased}}
 			identities := &fakeIdentities{}
-			s := NewService(repo, participations, erasers, identities, clock.NewFake(adminNow), discard)
+			s := NewService(repo, deletionLock, erasers, identities, clock.NewFake(adminNow), discard)
 
 			d, err := s.AdminDelete(t.Context(), tt.actor, "u-1")
 			if tt.wantCode != "" {
@@ -229,10 +229,10 @@ func TestServiceAdminDelete(t *testing.T) {
 			if err != nil || !d.At.Equal(adminNow) {
 				t.Fatalf("AdminDelete() = %+v, %v, want the deletion at %v", d, err, adminNow)
 			}
-			// The path of DELETE /me: anonymized at the clock's now, abandons,
+			// The path of DELETE /me: anonymized at the clock's now, locked,
 			// then the erasers.
-			if *repo.deleted != "u-1" || !repo.deletedAt.Equal(adminNow) || participations.abandoned != "u-1" || !slices.Equal(erased, []string{"journal"}) {
-				t.Fatalf("anonymized %q at %v, abandoned %q, erased %v", *repo.deleted, *repo.deletedAt, participations.abandoned, erased)
+			if *repo.deleted != "u-1" || !repo.deletedAt.Equal(adminNow) || deletionLock.locked != "u-1" || !slices.Equal(erased, []string{"journal"}) {
+				t.Fatalf("anonymized %q at %v, locked %q, erased %v", *repo.deleted, *repo.deletedAt, deletionLock.locked, erased)
 			}
 			// Nothing at Auth0 before the commit: CompleteDeletion does it.
 			if identities.deleted != "" {

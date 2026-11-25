@@ -27,7 +27,7 @@ func namedUser(t *testing.T, repo *Repository, subject, pseudo string) User {
 	return u
 }
 
-func noAbandon(context.Context) error { return nil }
+func noErasure(context.Context) error { return nil }
 
 // deletionTime dates the deletions of the repository tests: not now, so that
 // a date written by the database instead would show.
@@ -41,7 +41,7 @@ func TestDeleteAnonymizes(t *testing.T) {
 	}
 	other := namedUser(t, repo, "email|bob", "bob_1")
 
-	subject, err := repo.Delete(t.Context(), u.ID, deletionTime, noAbandon)
+	subject, err := repo.Delete(t.Context(), u.ID, deletionTime, noErasure)
 	if err != nil || subject != "email|alice" {
 		t.Fatalf("Delete() = %q, %v, want the former subject", subject, err)
 	}
@@ -77,7 +77,7 @@ func TestDeleteAnonymizes(t *testing.T) {
 	if _, err := repo.GetByID(t.Context(), other.ID); err != nil {
 		t.Fatalf("other user: %v", err)
 	}
-	if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noAbandon); !errors.Is(err, errUserNotFound) {
+	if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noErasure); !errors.Is(err, errUserNotFound) {
 		t.Fatalf("second Delete() error = %v, want errUserNotFound", err)
 	}
 }
@@ -86,7 +86,7 @@ func TestDeletedSubjectNeverLogsInAgain(t *testing.T) {
 	repo, pool := newRepository(t)
 	svc := NewService(repo, nil, nil, nil, nil, discard)
 	u := namedUser(t, repo, "email|carol", "carol_1")
-	if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noAbandon); err != nil {
+	if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noErasure); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,19 +104,19 @@ func TestDeletedSubjectNeverLogsInAgain(t *testing.T) {
 	}
 }
 
-func TestDeleteRollsBackWhenAbandonFails(t *testing.T) {
+func TestDeleteRollsBackWhenErasureFails(t *testing.T) {
 	repo, pool := newRepository(t)
 	u := namedUser(t, repo, "email|erin", "erin_1")
-	failure := errors.New("abandon failed")
+	failure := errors.New("erasure failed")
 
 	_, err := repo.Delete(t.Context(), u.ID, deletionTime, func(ctx context.Context) error {
-		// The abandons and the erasure run in the deletion's transaction: they see the anonymization.
+		// The lock and the erasure run in the deletion's transaction: they see the anonymization.
 		var anonymized bool
 		if err := db.Conn(ctx, repo.db).Raw("SELECT anonymized_at IS NOT NULL FROM users WHERE id = ?", u.ID).Scan(&anonymized).Error; err != nil {
 			return err
 		}
 		if !anonymized {
-			t.Error("the abandons do not see the anonymization")
+			t.Error("the erasure does not see the anonymization")
 		}
 		return failure
 	})
@@ -186,7 +186,7 @@ func TestServiceDeleteRecordsTheAuth0Deletion(t *testing.T) {
 		repo, pool := newRepository(t)
 		u := namedUser(t, repo, "email|gina", "gina_1")
 		identities := &flakyIdentities{}
-		if err := NewService(repo, abandonThen(func() {}), nil, identities, clock.Real{}, discard).Delete(t.Context(), u.ID); err != nil {
+		if err := NewService(repo, lockThen(func() {}), nil, identities, clock.Real{}, discard).Delete(t.Context(), u.ID); err != nil {
 			t.Fatal(err)
 		}
 		if n := pending(t, pool, "email|gina"); n != 0 || !slices.Equal(identities.calls, []string{"email|gina"}) {
@@ -197,7 +197,7 @@ func TestServiceDeleteRecordsTheAuth0Deletion(t *testing.T) {
 		repo, pool := newRepository(t)
 		u := namedUser(t, repo, "email|hugo", "hugo_1")
 		identities := &flakyIdentities{failing: map[string]bool{"email|hugo": true}}
-		if err := NewService(repo, abandonThen(func() {}), nil, identities, clock.Real{}, discard).Delete(t.Context(), u.ID); err != nil {
+		if err := NewService(repo, lockThen(func() {}), nil, identities, clock.Real{}, discard).Delete(t.Context(), u.ID); err != nil {
 			t.Fatalf("error = %v, want nil: the account is deleted", err)
 		}
 		if n := pending(t, pool, "email|hugo"); n != 1 {
@@ -208,7 +208,7 @@ func TestServiceDeleteRecordsTheAuth0Deletion(t *testing.T) {
 		repo, pool := newRepository(t)
 		u := namedUser(t, repo, "email|iris", "iris_1")
 		// The process stops right after the commit: Auth0 is never called.
-		if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noAbandon); err != nil {
+		if _, err := repo.Delete(t.Context(), u.ID, deletionTime, noErasure); err != nil {
 			t.Fatal(err)
 		}
 		if n := pending(t, pool, "email|iris"); n != 1 {

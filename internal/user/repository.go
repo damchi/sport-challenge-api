@@ -124,16 +124,16 @@ func (r *Repository) UpdateEmail(ctx context.Context, id, email string) error {
 }
 
 // Delete anonymizes the account of user id and makes its deletion final, in
-// one transaction that abandon joins (ctx carries it): the row is locked,
+// one transaction that erase joins (ctx carries it): the row is locked,
 // the fingerprint of its subject is stored, the subject is replaced by a
 // placeholder and the pseudo, names, e-mail, avatar and language are erased,
-// the deletion at Auth0 is recorded as pending; then abandon runs (the
-// abandons, then the erasure of the account's other rows). Both the
+// the deletion at Auth0 is recorded as pending; then erase runs (the
+// lock of its challenges, then the erasure of the account's other rows). Both the
 // anonymization and the fingerprint are dated at (the service's clock). It
 // returns the former subject, for the deletion at Auth0. An unknown or
-// already anonymized user gives errUserNotFound; an error of abandon rolls
+// already anonymized user gives errUserNotFound; an error of erase rolls
 // everything back, the pending deletion included.
-func (r *Repository) Delete(ctx context.Context, id string, at time.Time, abandon func(ctx context.Context) error) (string, error) {
+func (r *Repository) Delete(ctx context.Context, id string, at time.Time, erase func(ctx context.Context) error) (string, error) {
 	var subject string
 	err := db.InTx(ctx, r.db, func(ctx context.Context) error {
 		tx := db.Conn(ctx, r.db)
@@ -171,7 +171,7 @@ func (r *Repository) Delete(ctx context.Context, id string, at time.Time, abando
 			return fmt.Errorf("insert pending auth0 deletion: %w", err)
 		}
 		subject = u.AuthSubject
-		return abandon(ctx)
+		return erase(ctx)
 	})
 	if err != nil {
 		return "", fmt.Errorf("delete user: %w", err)

@@ -27,9 +27,9 @@ type deletedAtAuth0 struct{}
 
 func (deletedAtAuth0) DeleteUser(context.Context, string) error { return nil }
 
-// accounts returns the user service of pool, whose deletions abandon the
-// challenges of svc and erase nothing: these tests judge AbandonAll alone
-// (the erasure of the rows is tested in cmd/api, wired as in production).
+// accounts returns the user service of pool, whose deletions lock the
+// challenges of svc and erase the rows of the account there (the erasure of
+// the other modules is tested in cmd/api, wired as in production).
 func accounts(t *testing.T, pool *pgxpool.Pool, svc *Service) *user.Service {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -37,21 +37,23 @@ func accounts(t *testing.T, pool *pgxpool.Pool, svc *Service) *user.Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return user.NewService(user.NewRepository(gdb), svc, nil, deletedAtAuth0{}, svc.clock, logger)
+	return user.NewService(user.NewRepository(gdb), svc, []user.Eraser{svc}, deletedAtAuth0{}, svc.clock, logger)
 }
 
-func statusOf(t *testing.T, pool *pgxpool.Pool, challengeID, userID string) (string, *time.Time) {
+func statusOf(t *testing.T, pool *pgxpool.Pool, challengeID, userID string) string {
 	t.Helper()
 	var status string
-	var abandonedAt *time.Time
-	if err := pool.QueryRow(t.Context(), "SELECT status, abandoned_at FROM participants WHERE challenge_id = $1 AND user_id = $2", challengeID, userID).
-		Scan(&status, &abandonedAt); err != nil {
+	if err := pool.QueryRow(t.Context(), "SELECT status FROM participants WHERE challenge_id = $1 AND user_id = $2", challengeID, userID).
+		Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	return status, abandonedAt
+	return status
 }
 
-func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
+// TestAccountDeletionErasesTheChallengeRows: the deletion leaves no row of
+// the account in any challenge, upcoming, ongoing, finished, abandoned
+// earlier or deleted (README §2.2), and keeps the challenges it created.
+func TestAccountDeletionErasesTheChallengeRows(t *testing.T) {
 	svc, clk, pool, ongoing := joinFixture(t)
 	var creatorID string
 	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", ongoing).Scan(&creatorID); err != nil {
@@ -86,7 +88,6 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 	if _, err := svc.Abandon(t.Context(), member, left.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, leftAt := statusOf(t, pool, left.ID, member)
 	if err := svc.Delete(t.Context(), creatorID, gone.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -114,35 +115,24 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if status, at := statusOf(t, pool, ongoing, member); status != "abandoned" || at == nil || !at.Equal(now.Add(time.Hour)) {
-		t.Fatalf("ongoing challenge: %s at %v, want abandoned at the clock's now", status, at)
+	for name, id := range map[string]string{"ongoing": ongoing, "finished": finished.ID, "abandoned before": left.ID, "deleted": gone.ID, "upcoming": upcoming.ID, "ending at the deletion": endingNow.ID} {
+		if n := count(t, pool, "SELECT count(*) FROM participants WHERE challenge_id = $1 AND user_id = $2", id, member); n != 0 {
+			t.Fatalf("%s challenge: %d participations of the deleted account, want none", name, n)
+		}
 	}
-	if status, _ := statusOf(t, pool, finished.ID, member); status != "active" {
-		t.Fatalf("finished challenge: %s, want active: AbandonAll leaves it", status)
+	if n := count(t, pool, "SELECT count(*) FROM challenge_creators WHERE user_id = $1", member); n != 0 {
+		t.Fatalf("%d creator rows, want none", n)
 	}
-	if status, at := statusOf(t, pool, left.ID, member); status != "abandoned" || !at.Equal(*leftAt) {
-		t.Fatalf("challenge abandoned before: %s at %v, want the first abandon kept (%v)", status, at, leftAt)
-	}
-	if status, _ := statusOf(t, pool, gone.ID, member); status != "active" {
-		t.Fatalf("deleted challenge: %s, want untouched", status)
-	}
-	if status, _ := statusOf(t, pool, upcoming.ID, member); status != "abandoned" {
-		t.Fatalf("upcoming challenge: %s, want abandoned", status)
-	}
-	if status, _ := statusOf(t, pool, endingNow.ID, member); status != "active" {
-		t.Fatalf("challenge ending at the deletion: %s, want active: finished from that instant", status)
-	}
-	// AbandonAll leaves the creator rows (the erasure removes them).
-	if n := count(t, pool, "SELECT count(*) FROM challenge_creators WHERE challenge_id = $1 AND user_id = $2", finished.ID, member); n != 1 {
-		t.Fatalf("%d creator rows, want the link kept", n)
+	if n := count(t, pool, "SELECT count(*) FROM challenges WHERE id = $1 AND created_by = $2", finished.ID, member); n != 1 {
+		t.Fatal("the challenge the account created is gone, want it kept")
 	}
 	page, err := svc.Participants(t.Context(), auth.Actor{ID: creatorID}, ongoing, 20, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range page.Items {
-		if p.UserID == member && (p.Name.Pseudo != nil || p.Status != ParticipantAbandoned) {
-			t.Fatalf("listed as %+v, want abandoned without pseudo", p)
+		if p.UserID == member {
+			t.Fatalf("listed as %+v, want the deleted account left out", p)
 		}
 	}
 
@@ -165,12 +155,12 @@ func TestAccountDeletionAbandonsTheChallenges(t *testing.T) {
 }
 
 // TestAccountDeletionRaces: the member joins challenges and a creator excludes
-// them while the account is deleted. Whatever the order, no active
-// participation is left to the anonymized account (a challenge it created
+// them while the account is deleted. Whatever the order, no participation
+// is left to the anonymized account (a challenge it created
 // meanwhile included), nothing fails with a 500 and no deadlock: a join or a
 // creation answers or is refused (account_deleted, or not_found when the
 // profile is read once deleted), an exclusion answers, making them a creator
-// answers or is refused once they abandoned.
+// answers or is refused once the account is deleted.
 func TestAccountDeletionRaces(t *testing.T) {
 	svc, _, pool, excludeFrom := joinFixture(t)
 	var creatorID string
@@ -240,7 +230,8 @@ func TestAccountDeletionRaces(t *testing.T) {
 			t.Fatalf("join %d: %v, want nil, account_deleted or not_found", i, err)
 		}
 	}
-	// Made a creator before the deletion, or refused once abandoned.
+	// Made a creator before the deletion, or refused once the account is
+	// deleted (README §2.2: not_active_participant).
 	if !refusedOrDone(promoteErr, apperr.CodeNotActiveParticipant) {
 		t.Fatalf("add creator: %v, want nil or not_active_participant", promoteErr)
 	}
@@ -256,8 +247,8 @@ func TestAccountDeletionRaces(t *testing.T) {
 		}
 		return
 	}
-	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1 AND status = 'active'", member); n != 0 {
-		t.Fatalf("%d active participations left to the anonymized account, want 0", n)
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE user_id = $1", member); n != 0 {
+		t.Fatalf("%d participations left to the anonymized account, want 0", n)
 	}
 }
 
@@ -328,7 +319,7 @@ func TestAccountDeletionOfTheLastCreator(t *testing.T) {
 	if n := count(t, pool, "SELECT count(*) FROM users WHERE id = $1 AND anonymized_at IS NULL", member); n != 1 {
 		t.Fatal("refused, but the account is anonymized")
 	}
-	if status, _ := statusOf(t, pool, alone, member); status != "active" {
+	if status := statusOf(t, pool, alone, member); status != "active" {
 		t.Fatalf("refused, but the participation is %s", status)
 	}
 
@@ -341,8 +332,8 @@ func TestAccountDeletionOfTheLastCreator(t *testing.T) {
 	if err := users.Delete(t.Context(), member); err != nil {
 		t.Fatalf("delete with another creator: %v", err)
 	}
-	if status, _ := statusOf(t, pool, alone, member); status != "abandoned" {
-		t.Fatalf("deleted, but the participation is %s, want abandoned", status)
+	if n := count(t, pool, "SELECT count(*) FROM participants WHERE challenge_id = $1 AND user_id = $2", alone, member); n != 0 {
+		t.Fatalf("deleted, but %d participations left, want them erased", n)
 	}
 }
 

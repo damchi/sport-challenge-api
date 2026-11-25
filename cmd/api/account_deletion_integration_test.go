@@ -50,9 +50,9 @@ type erasureFixture struct {
 	users *user.Service
 	// leaderboards gives a leaderboard service without any ranking kept:
 	// each read is computed, as past the cache.
-	leaderboards   func() *leaderboard.Service
-	erasers        []user.Eraser
-	participations user.Participations
+	leaderboards func() *leaderboard.Service
+	erasers      []user.Eraser
+	deletionLock user.DeletionLock
 
 	gone, alice, bob, carol, dave, erin string
 	finished, ongoing, other            string
@@ -74,15 +74,15 @@ func newErasureFixture(t *testing.T) erasureFixture {
 		invitations *invitation.Service
 	)
 	f := erasureFixture{t: t, pool: pool}
-	f.participations = abandonAllFunc(func(ctx context.Context, userID string) error {
-		return challenges.AbandonAll(ctx, userID)
+	f.deletionLock = lockForDeletionFunc(func(ctx context.Context, userID string) error {
+		return challenges.LockForDeletion(ctx, userID)
 	})
 	f.erasers = []user.Eraser{
 		eraseUserFunc(func(ctx context.Context, userID string) error { return invitations.EraseUser(ctx, userID) }),
 		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
 		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
 	}
-	f.users = user.NewService(user.NewRepository(gdb), f.participations, f.erasers, deletedAtAuth0{}, clk, logger)
+	f.users = user.NewService(user.NewRepository(gdb), f.deletionLock, f.erasers, deletedAtAuth0{}, clk, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{f.users}, sports, challengeStandings{}, clk)
 	activities = activity.NewService(activity.NewRepository(gdb), activityProfiles{f.users}, activityCatalogue{sports}, participations{challenges}, activityScopes{challenges}, clk)
@@ -382,7 +382,7 @@ func TestAccountDeletionErasesNothingOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	users := user.NewService(user.NewRepository(gdb), f.participations, erasers, deletedAtAuth0{}, clock.NewFake(recordNow), logger)
+	users := user.NewService(user.NewRepository(gdb), f.deletionLock, erasers, deletedAtAuth0{}, clock.NewFake(recordNow), logger)
 	before, snapshotBefore := f.rowsOf(f.gone), f.snapshotEntries()
 
 	if err := users.Delete(t.Context(), f.gone); !errors.Is(err, failure) {
@@ -397,9 +397,6 @@ func TestAccountDeletionErasesNothingOnFailure(t *testing.T) {
 	}
 	if n := f.count("SELECT count(*) FROM users WHERE id = $1 AND anonymized_at IS NULL AND pseudo = 'gone'", f.gone); n != 1 {
 		t.Errorf("account anonymized, want it untouched")
-	}
-	if n := f.count("SELECT count(*) FROM participants WHERE user_id = $1 AND status = 'abandoned'", f.gone); n != 0 {
-		t.Errorf("%d abandons kept, want none", n)
 	}
 	if n := f.count("SELECT count(*) FROM pending_auth0_deletions"); n != 0 {
 		t.Errorf("%d pending Auth0 deletions, want none: the deletion rolled back", n)

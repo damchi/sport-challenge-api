@@ -19,7 +19,7 @@ type repository interface {
 	UpdateProfile(ctx context.Context, id string, changes ProfileChanges) (User, error)
 	UpdateEmail(ctx context.Context, id, email string) error
 	PublicNames(ctx context.Context, ids []string) (map[string]PublicName, error)
-	Delete(ctx context.Context, id string, at time.Time, abandon func(ctx context.Context) error) (string, error)
+	Delete(ctx context.Context, id string, at time.Time, erase func(ctx context.Context) error) (string, error)
 	// Lock and SetBlockedAt serve the admin changes of an account, in the
 	// transaction ctx carries.
 	Lock(ctx context.Context, id string) (User, error)
@@ -28,9 +28,10 @@ type repository interface {
 	RemovePendingAuth0Deletion(ctx context.Context, subject string) error
 }
 
-// Participations makes a user abandon their challenges (module challenge).
-type Participations interface {
-	AbandonAll(ctx context.Context, userID string) error
+// DeletionLock locks the challenges an account deletion touches and
+// refuses it while the user is their last creator (module challenge).
+type DeletionLock interface {
+	LockForDeletion(ctx context.Context, userID string) error
 }
 
 // Eraser deletes the rows of a user kept by another module (challenge,
@@ -52,17 +53,17 @@ const pendingRemovalTimeout = 5 * time.Second
 
 // Service holds the use cases of the local users.
 type Service struct {
-	repo           repository
-	participations Participations
-	erasers        []Eraser
-	identities     Identities
-	clock          clock.Clock
-	logger         *slog.Logger
+	repo         repository
+	deletionLock DeletionLock
+	erasers      []Eraser
+	identities   Identities
+	clock        clock.Clock
+	logger       *slog.Logger
 }
 
 // NewService returns a Service on repo.
-func NewService(repo repository, participations Participations, erasers []Eraser, identities Identities, c clock.Clock, logger *slog.Logger) *Service {
-	return &Service{repo: repo, participations: participations, erasers: erasers, identities: identities, clock: c, logger: logger}
+func NewService(repo repository, deletionLock DeletionLock, erasers []Eraser, identities Identities, c clock.Clock, logger *slog.Logger) *Service {
+	return &Service{repo: repo, deletionLock: deletionLock, erasers: erasers, identities: identities, clock: c, logger: logger}
 }
 
 // GetOrCreateBySubject returns the local user of an auth subject, created
@@ -171,7 +172,7 @@ func (s *Service) PublicNames(ctx context.Context, ids []string) (map[string]Pub
 // transaction, the account is anonymized (pseudo, names, e-mail, avatar and
 // language erased, subject replaced, its fingerprint kept so that it never logs in
 // again), its deletion at Auth0 is recorded as pending, every challenge not
-// finished is abandoned (which refuses the last creator), then every row of
+// finished it touches is locked (which refuses the last creator), then every row of
 // the account kept by the other modules is erased (erasers); the row of the
 // user stays, anonymized, for the challenges it created. The deletion is
 // dated by the clock, like the other business dates. The user is then
@@ -194,12 +195,12 @@ func (s *Service) Delete(ctx context.Context, actorID string) error {
 
 // erase anonymizes account id at the instant at, in one transaction (that
 // of ctx, if any): its deletion at Auth0 recorded as pending, its
-// challenges not finished abandoned, its rows in the other modules erased
+// challenges not finished locked, its rows in the other modules erased
 // (Delete). It returns its former subject, for deleteIdentity. An unknown
 // or anonymized account gives errUserNotFound.
 func (s *Service) erase(ctx context.Context, id string, at time.Time) (string, error) {
 	return s.repo.Delete(ctx, id, at, func(ctx context.Context) error {
-		if err := s.participations.AbandonAll(ctx, id); err != nil {
+		if err := s.deletionLock.LockForDeletion(ctx, id); err != nil {
 			return err
 		}
 		for _, e := range s.erasers {

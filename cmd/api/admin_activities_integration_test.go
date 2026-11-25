@@ -42,8 +42,8 @@ func TestAdminActivityCorrections(t *testing.T) {
 	now := toronto(t, 2026, 5, 20, 12)
 	clk := clock.NewFake(now)
 	var challenges *challenge.Service
-	users := user.NewService(user.NewRepository(gdb), abandonAllFunc(func(ctx context.Context, userID string) error {
-		return challenges.AbandonAll(ctx, userID)
+	users := user.NewService(user.NewRepository(gdb), lockForDeletionFunc(func(ctx context.Context, userID string) error {
+		return challenges.LockForDeletion(ctx, userID)
 	}), nil, deletedAtAuth0{}, clk, logger)
 	sports := sport.NewService(sport.NewRepository(gdb))
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{users}, sports, challengeStandings{}, clk)

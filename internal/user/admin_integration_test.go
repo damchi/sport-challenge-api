@@ -24,7 +24,7 @@ func TestAdminAccountChangesFromTheDatabase(t *testing.T) {
 	gdb := repo.db
 	now := time.Date(2026, 11, 24, 15, 0, 0, 0, time.UTC)
 	identities := &fakeIdentities{}
-	s := NewService(repo, &fakeParticipations{}, nil, identities, clock.NewFake(now), discard)
+	s := NewService(repo, &fakeDeletionLock{}, nil, identities, clock.NewFake(now), discard)
 	admin := auth.Actor{ID: newUser(t, repo, "email|admin").ID, Admin: true}
 	bob := namedUser(t, repo, "email|bob", "bob_1")
 	namedUser(t, repo, "email|other", "taken")
