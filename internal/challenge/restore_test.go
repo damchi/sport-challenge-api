@@ -196,3 +196,18 @@ func TestServiceAdminRestoreKeepsACreator(t *testing.T) {
 		})
 	}
 }
+
+// TestServiceAdminRestoreNamingACreatorNotAnAdmin: without the permission,
+// a restore naming a creator reaches nothing, the account not even locked.
+func TestServiceAdminRestoreNamingACreatorNotAnAdmin(t *testing.T) {
+	deletedAt := time.Date(2026, 3, 3, 14, 0, 0, 0, time.UTC)
+	c := *stored(VisibilityPrivate)
+	c.DeletedAt = &deletedAt
+	repo := &fakeRepository{challenge: &c, creatorless: true}
+	creator := named
+	_, err := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).
+		AdminRestore(t.Context(), auth.Actor{ID: actor}, "c", &creator)
+	if !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) || repo.locked != "" || repo.restored || repo.creatorAdded {
+		t.Fatalf("error = %v, locked %q, restored %v, creator added %v, want not_found and nothing touched", err, repo.locked, repo.restored, repo.creatorAdded)
+	}
+}
