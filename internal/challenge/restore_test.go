@@ -153,6 +153,10 @@ func TestServiceAdminRestoreKeepsACreator(t *testing.T) {
 		},
 		{name: "never joined, profile incomplete", challenge: ongoing, creatorless: true, creator: creatorID(), want: apperr.CodeProfileIncomplete},
 		{name: "unknown or deleted account", challenge: ongoing, creatorless: true, creator: creatorID(), lockErr: errAccountDeleted, want: apperr.CodeUserNotFound},
+		// The account is locked before the challenge (the order of an
+		// account deletion): an unknown one answers first.
+		{name: "unknown account, challenge not deleted", challenge: *stored(VisibilityPrivate), creator: creatorID(), lockErr: errAccountDeleted, want: apperr.CodeUserNotFound},
+		{name: "known account, challenge not deleted", challenge: *stored(VisibilityPrivate), creator: creatorID(), complete: true, want: apperr.CodeChallengeNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
