@@ -25,7 +25,8 @@ type User struct {
 	UpdatedAt    time.Time `gorm:"->"`
 	AnonymizedAt *time.Time
 	// BlockedAt is when an admin blocked the account, nil while it is not:
-	// every request of a blocked account answers account_blocked.
+	// every request of a blocked account but DELETE /me answers
+	// account_blocked (blockedRefusal).
 	BlockedAt *time.Time
 }
 

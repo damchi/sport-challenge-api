@@ -214,7 +214,7 @@ func TestServiceGetOrCreateBySubjectKeepsTheEmail(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var written string
 			repo := fakeRepository{user: User{ID: "u-1", Email: tt.stored}, email: &written, emailErr: tt.emailErr}
-			got, err := NewService(repo, nil, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", tt.token)
+			got, err := NewService(repo, nil, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", tt.token, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -246,7 +246,7 @@ func TestServiceGetOrCreateBySubject(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewService(tt.repo, nil, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", "")
+			got, err := NewService(tt.repo, nil, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", "", "")
 
 			switch {
 			case tt.wantCode != "":

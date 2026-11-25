@@ -105,10 +105,11 @@ func value(s *string) any {
 }
 
 // AdminBlock blocks account id at the clock's now: from then on, its
-// requests answer account_blocked (GetOrCreateBySubject). Its challenges
-// are left as they are. An account already blocked stays blocked since the
-// first time, and nothing changes. An admin never blocks their own account
-// (blockRefusal, 403 forbidden).
+// requests but the deletion of its own account answer account_blocked
+// (GetOrCreateBySubject, blockedRefusal). Its challenges are left as they
+// are. An account already blocked stays blocked since the first time, and
+// nothing changes. An admin never blocks their own account (blockRefusal,
+// 403 forbidden).
 func (s *Service) AdminBlock(ctx context.Context, actor auth.Actor, id string) (AccountChange, error) {
 	if err := adminRefusal(actor); err != nil {
 		return AccountChange{}, err

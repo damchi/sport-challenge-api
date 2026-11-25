@@ -60,7 +60,7 @@ func newMeRouterWith(t *testing.T, svc *Service, verifier auth.TokenVerifier) *g
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
 		auth.Authenticate(verifier, logger),
-		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return meID, nil }, logger),
+		auth.CurrentUser(func(context.Context, auth.Claims, string) (string, error) { return meID, nil }, logger),
 	))
 	strict := api.NewStrictHandlerWithOptions(meHandlers{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, nil),

@@ -170,8 +170,18 @@ func TestAdminAccountCorrections(t *testing.T) {
 	if err := accounts.Block(ctx, adminActor, bob, "Spam"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.GetOrCreateBySubject(t.Context(), "bob", ""); !errors.Is(err, apperr.New(apperr.CodeAccountBlocked, nil)) {
+	if _, err := users.GetOrCreateBySubject(t.Context(), "bob", "", ""); !errors.Is(err, apperr.New(apperr.CodeAccountBlocked, nil)) {
 		t.Fatalf("login of a blocked account: %v, want account_blocked", err)
+	}
+	// Blocked, he may still delete his account, by the same path as an
+	// active one: refused while he is the last creator of a challenge in
+	// progress, nothing written.
+	resolve := resolveUser(users)
+	if id, err := resolve(t.Context(), auth.Claims{Subject: "bob"}, "DELETE /api/v1/me"); err != nil || id != bob {
+		t.Fatalf("DELETE /me of a blocked account resolved %q, %v, want bob", id, err)
+	}
+	if err := users.Delete(ctx, bob); !errors.Is(err, apperr.New(apperr.CodeLastCreator, nil)) {
+		t.Fatalf("DELETE /me of a blocked last creator: %v, want last_creator", err)
 	}
 	// Blocked already: blocked since the first time, an empty line.
 	clk.Set(recordNow.Add(150 * time.Second))
@@ -185,7 +195,7 @@ func TestAdminAccountCorrections(t *testing.T) {
 	if err := accounts.Unblock(ctx, adminActor, bob, "Blocked by mistake"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.GetOrCreateBySubject(t.Context(), "bob", ""); err != nil {
+	if _, err := users.GetOrCreateBySubject(t.Context(), "bob", "", ""); err != nil {
 		t.Fatalf("login once unblocked: %v", err)
 	}
 	// Nothing else changed: his participation is as it was.
@@ -245,5 +255,24 @@ func TestAdminAccountCorrections(t *testing.T) {
 	}
 	if got := lines(dana); len(got) != 1 || got[0].OldValue["last_name"] != "Old" || got[0].Values["last_name"] != "New" {
 		t.Fatalf("journal of dana %+v, want it untouched", got)
+	}
+
+	// Blocked, dana deletes her account by DELETE /me, at Auth0 too.
+	if err := accounts.Block(t.Context(), adminActor, dana, "Spam"); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := resolve(t.Context(), auth.Claims{Subject: "dana"}, "DELETE /api/v1/me"); err != nil || id != dana {
+		t.Fatalf("DELETE /me of a blocked account resolved %q, %v, want dana", id, err)
+	}
+	if err := users.Delete(t.Context(), dana); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT
+		(SELECT count(*) FROM users WHERE id = $1 AND anonymized_at IS NOT NULL AND first_name IS NULL),
+		(SELECT count(*) FROM pending_auth0_deletions WHERE user_id = $1)`, dana).Scan(&anonymized, &pending); err != nil {
+		t.Fatal(err)
+	}
+	if anonymized != 1 || pending != 0 {
+		t.Fatalf("blocked dana: anonymized %d, pending at Auth0 %d, want 1 and 0", anonymized, pending)
 	}
 }

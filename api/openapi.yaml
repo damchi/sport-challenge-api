@@ -13,8 +13,9 @@ info:
     probes opt out with `security: []`.
 
     A blocked account (README §2.12) answers 403 `account_blocked` on every
-    protected route, whatever the route: this answer is not repeated on each
-    operation. The apps show a "blocked account" page.
+    protected route but `DELETE /api/v1/me`, which stays open to it: this
+    answer is not repeated on each operation. The apps show a "blocked
+    account" page, from which the account can still be deleted.
 
     Every response, errors included, carries `X-Content-Type-Options: nosniff`
     and `Cache-Control: no-store` (the responses hold personal data). A route
@@ -175,6 +176,8 @@ paths:
         with an account of a challenge not finished: the user first adds
         another creator, or deletes the challenge; `params.challenges` lists
         their ids, comma-separated. Nothing is deleted then.
+        Open to a blocked account (README §2.12), by the same path: the
+        only route it may still call.
       tags: [me]
       responses:
         "204":
@@ -2268,7 +2271,8 @@ paths:
       description: |
         Admin only (404 `not_found` otherwise). Blocks the account (README
         §2.12): from then on, every request of it answers 403
-        `account_blocked`. Its challenges are left as they are: it stays
+        `account_blocked`, except the deletion of its own account
+        (`DELETE /api/v1/me`). Its challenges are left as they are: it stays
         ranked and its activities count. An account already blocked stays
         blocked since the first time; the call still answers and is
         recorded. The change is recorded in the journal with its `reason`,

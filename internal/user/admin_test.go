@@ -246,9 +246,40 @@ func TestServiceAdminDelete(t *testing.T) {
 	}
 }
 
-func TestServiceGetOrCreateBySubjectRefusesABlockedAccount(t *testing.T) {
+// TestServiceGetOrCreateBySubjectOfABlockedAccount: a blocked account is
+// refused on every route but the deletion of its own account (README
+// §2.12), where it is served without its e-mail updated from the token.
+func TestServiceGetOrCreateBySubjectOfABlockedAccount(t *testing.T) {
 	blockedAt := adminNow
-	repo := fakeRepository{user: User{ID: "u-1", BlockedAt: &blockedAt}}
-	_, err := NewService(repo, nil, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", "")
-	wantCode(t, err, apperr.CodeAccountBlocked, http.StatusForbidden)
+	tests := []struct {
+		name, route string
+		served      bool
+	}{
+		{name: "deletion of its own account", route: "DELETE /api/v1/me", served: true},
+		{name: "its profile", route: "GET /api/v1/me"},
+		{name: "a change of its profile", route: "PATCH /api/v1/me"},
+		{name: "another module", route: "GET /api/v1/challenges"},
+		{name: "an admin route", route: "DELETE /api/v1/admin/users/:userId"},
+		{name: "another method on the path", route: "POST /api/v1/me"},
+		{name: "no route", route: "DELETE "},
+		{name: "no route given", route: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var written string
+			repo := fakeRepository{user: User{ID: "u-1", Email: ptr("old@example.com"), BlockedAt: &blockedAt}, email: &written}
+			got, err := NewService(repo, nil, nil, nil, nil, discard).GetOrCreateBySubject(t.Context(), "email|1", "new@example.com", tt.route)
+			if !tt.served {
+				wantCode(t, err, apperr.CodeAccountBlocked, http.StatusForbidden)
+				if got != (User{}) {
+					t.Fatalf("user = %+v, want none", got)
+				}
+			} else if err != nil || got.ID != "u-1" {
+				t.Fatalf("got %+v, %v, want the blocked account", got, err)
+			}
+			if written != "" || (tt.served && *got.Email != "old@example.com") {
+				t.Fatalf("e-mail written %q, kept %v, want the stored one untouched", written, got.Email)
+			}
+		})
+	}
 }

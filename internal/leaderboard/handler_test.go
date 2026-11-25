@@ -71,7 +71,7 @@ func getAs(t *testing.T, svc *Service, target, token string) (*httptest.Response
 	r := httpx.NewRouter(logger)
 	r.Use(auth.Protect(nil,
 		auth.Authenticate(acceptingVerifier{}, logger),
-		auth.CurrentUser(func(context.Context, auth.Claims) (string, error) { return ann, nil }, logger),
+		auth.CurrentUser(func(context.Context, auth.Claims, string) (string, error) { return ann, nil }, logger),
 	))
 	api.RegisterHandlersWithOptions(r, api.NewStrictHandlerWithOptions(leaderboardOnly{Handler: NewHandler(svc)}, nil, api.StrictGinServerOptions{
 		RequestErrorHandlerFunc:  httpx.BadRequestHandler(logger, nil),

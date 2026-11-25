@@ -62,10 +62,10 @@ func TestCurrentUser(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, nil))
-			var gotSubject, gotEmail, gotID string
+			var gotSubject, gotEmail, gotID, gotRoute string
 			var served bool
-			resolve := func(_ context.Context, claims Claims) (string, error) {
-				gotSubject, gotEmail = claims.Subject, claims.Email
+			resolve := func(_ context.Context, claims Claims, route string) (string, error) {
+				gotSubject, gotEmail, gotRoute = claims.Subject, claims.Email, route
 				return tt.resolveID, tt.resolveErr
 			}
 
@@ -100,6 +100,9 @@ func TestCurrentUser(t *testing.T) {
 			if served && (gotID != localUserID || gotSubject != "email|123" || gotEmail != "marie@example.com") {
 				t.Fatalf("user ID = %q for subject %q, e-mail %q, want %q for email|123 and its e-mail", gotID, gotSubject, gotEmail, localUserID)
 			}
+			if tt.authorization != "" && gotRoute != "GET /private" {
+				t.Fatalf("route given to the resolver = %q, want GET /private", gotRoute)
+			}
 			// Personal data: the e-mail never reaches the logs.
 			if strings.Contains(logs.String(), "marie@example.com") {
 				t.Fatalf("logs hold the e-mail: %s", logs.String())
@@ -115,7 +118,7 @@ func TestCurrentUserWithoutClaimsIsUnauthenticated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	r := httpx.NewRouter(logger)
-	r.GET("/private", CurrentUser(func(context.Context, Claims) (string, error) {
+	r.GET("/private", CurrentUser(func(context.Context, Claims, string) (string, error) {
 		t.Error("resolver called without claims")
 		return localUserID, nil
 	}, logger), func(c *gin.Context) { c.Status(http.StatusNoContent) })
@@ -206,5 +209,29 @@ func TestProtect(t *testing.T) {
 				t.Fatalf("ran %q, status %d, want %q, %d", got, rec.Code, tt.wantRan, tt.wantStatus)
 			}
 		})
+	}
+}
+
+// TestCurrentUserGivesNoRouteForAnUnknownPath: a path matching no route
+// reaches the resolver with an empty path, so that no policy can take it
+// for a route it leaves open.
+func TestCurrentUserGivesNoRouteForAnUnknownPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	var gotRoute string
+	r := httpx.NewRouter(logger)
+	r.Use(Protect(nil, Authenticate(&fakeVerifier{}, logger), CurrentUser(func(_ context.Context, _ Claims, route string) (string, error) {
+		gotRoute = route
+		return "", apperr.New(apperr.CodeAccountBlocked, nil)
+	}, logger)))
+	r.DELETE("/private", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	req := httptest.NewRequest(http.MethodDelete, "/private/x", nil)
+	req.Header.Set("Authorization", "Bearer "+goodToken)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if gotRoute != "DELETE " || rec.Code != http.StatusForbidden {
+		t.Fatalf("route %q, status %d, want an empty path refused", gotRoute, rec.Code)
 	}
 }

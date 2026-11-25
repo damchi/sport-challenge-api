@@ -168,7 +168,7 @@ var pathParam = regexp.MustCompile(`(/)[:*][^/]+`)
 // that keeps the guard from passing on public routes only.
 func TestEveryRouteIsProtectedByDefault(t *testing.T) {
 	public := map[string]bool{"GET /health": true, "GET /ready": true}
-	r := newTestRouter(t, rejectingVerifier{t}, func(context.Context, auth.Claims) (string, error) {
+	r := newTestRouter(t, rejectingVerifier{t}, func(context.Context, auth.Claims, string) (string, error) {
 		t.Error("user resolved for a request without a token")
 		return "", nil
 	})
@@ -232,7 +232,7 @@ func TestEveryRouteIsProtectedByDefault(t *testing.T) {
 // An admin route whose contract refused a request (400) before the policy ran
 // would reveal that it exists.
 func TestEveryAdminRouteIsHiddenWithoutThePermission(t *testing.T) {
-	r := newTestRouter(t, acceptingVerifier{}, func(context.Context, auth.Claims) (string, error) {
+	r := newTestRouter(t, acceptingVerifier{}, func(context.Context, auth.Claims, string) (string, error) {
 		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
 	})
 
@@ -289,7 +289,7 @@ func TestEveryAdminRouteIsHiddenWithoutThePermission(t *testing.T) {
 // /admin routes changes no other route, whose malformed request still
 // answers 400 validation_failed.
 func TestInvalidRequestOutsideAdminRoutesStaysAValidationError(t *testing.T) {
-	r := newTestRouter(t, acceptingVerifier{}, func(context.Context, auth.Claims) (string, error) {
+	r := newTestRouter(t, acceptingVerifier{}, func(context.Context, auth.Claims, string) (string, error) {
 		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
 	})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/challenges/not-a-uuid", nil)
@@ -312,7 +312,7 @@ func TestProtectedRouteResolvesTheCurrentUser(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := newTestRouter(t, acceptingVerifier{}, func(_ context.Context, claims auth.Claims) (string, error) {
+			r := newTestRouter(t, acceptingVerifier{}, func(_ context.Context, claims auth.Claims, _ string) (string, error) {
 				if claims.Subject != "email|123" {
 					t.Errorf("subject = %q, want email|123", claims.Subject)
 				}
@@ -344,7 +344,7 @@ func TestSecurityHeaders(t *testing.T) {
 	handlers := testHandlers()
 	handlers.sportHandler = sport.NewHandler(sport.NewService(sportCatalogue{{Code: "run", DistanceMode: "required"}}))
 	opts := routerOptions{allowedOrigins: []string{webOrigin}, ipLimiter: testLimiter(1000), userLimiter: testLimiter(1000)}
-	r := newTestRouterWith(t, opts, handlers, acceptingVerifier{}, func(context.Context, auth.Claims) (string, error) {
+	r := newTestRouterWith(t, opts, handlers, acceptingVerifier{}, func(context.Context, auth.Claims, string) (string, error) {
 		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
 	})
 	r.GET("/api/v1/probe", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"pseudo": "runner"}) })
@@ -388,7 +388,7 @@ func TestSecurityHeaders(t *testing.T) {
 // runs under the deadline of requestTimeout.
 func TestRequestTimeout(t *testing.T) {
 	var remaining time.Duration
-	r := newTestRouter(t, acceptingVerifier{}, func(ctx context.Context, _ auth.Claims) (string, error) {
+	r := newTestRouter(t, acceptingVerifier{}, func(ctx context.Context, _ auth.Claims, _ string) (string, error) {
 		if deadline, ok := ctx.Deadline(); ok {
 			remaining = time.Until(deadline)
 		}
@@ -439,7 +439,7 @@ func TestSecurityHeadersBeforeEarlyAnswers(t *testing.T) {
 }
 
 func TestPreflightSkipsAuthentication(t *testing.T) {
-	r := newTestRouter(t, rejectingVerifier{t}, func(context.Context, auth.Claims) (string, error) {
+	r := newTestRouter(t, rejectingVerifier{t}, func(context.Context, auth.Claims, string) (string, error) {
 		t.Error("user resolved for a preflight")
 		return "", nil
 	})
@@ -461,7 +461,7 @@ func TestPreflightSkipsAuthentication(t *testing.T) {
 func TestRateLimitIPComesBeforeAuthentication(t *testing.T) {
 	var verified int
 	opts := routerOptions{ipLimiter: testLimiter(2), userLimiter: testLimiter(1000)}
-	r := newTestRouterWith(t, opts, testHandlers(), countingVerifier{&verified}, func(context.Context, auth.Claims) (string, error) {
+	r := newTestRouterWith(t, opts, testHandlers(), countingVerifier{&verified}, func(context.Context, auth.Claims, string) (string, error) {
 		return "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f", nil
 	})
 	r.GET("/api/v1/probe", func(c *gin.Context) { c.Status(http.StatusNoContent) })
@@ -563,7 +563,7 @@ func TestRateLimitUserComesBeforeTheHandler(t *testing.T) {
 	var calls int
 	opts := routerOptions{ipLimiter: testLimiter(1000), userLimiter: testLimiter(2)}
 	// The token stands for the subject, the subject for the user.
-	r := newTestRouterWith(t, opts, takenPseudo{testHandlers(), &calls}, subjectVerifier{}, func(_ context.Context, claims auth.Claims) (string, error) {
+	r := newTestRouterWith(t, opts, takenPseudo{testHandlers(), &calls}, subjectVerifier{}, func(_ context.Context, claims auth.Claims, _ string) (string, error) {
 		return claims.Subject, nil
 	})
 	r.GET("/api/v1/probe", func(c *gin.Context) { c.Status(http.StatusNoContent) })
