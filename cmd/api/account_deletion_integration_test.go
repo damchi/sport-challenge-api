@@ -45,10 +45,12 @@ func (deletedAtAuth0) DeleteUser(context.Context, string) error { return nil }
 //   - other, private, created by alice: gone and erin opened alice's
 //     invitation.
 type erasureFixture struct {
-	t              *testing.T
-	pool           *pgxpool.Pool
-	users          *user.Service
-	leaderboards   *leaderboard.Service
+	t     *testing.T
+	pool  *pgxpool.Pool
+	users *user.Service
+	// leaderboards gives a leaderboard service without any ranking kept:
+	// each read is computed, as past the cache.
+	leaderboards   func() *leaderboard.Service
 	erasers        []user.Eraser
 	participations user.Participations
 
@@ -85,7 +87,9 @@ func newErasureFixture(t *testing.T) erasureFixture {
 	challenges = challenge.NewService(challenge.NewRepository(gdb), challengeProfiles{f.users}, sports, challengeStandings{}, clk)
 	activities = activity.NewService(activity.NewRepository(gdb), activityProfiles{f.users}, activityCatalogue{sports}, participations{challenges}, activityScopes{challenges}, clk)
 	invitations = invitation.NewService(invitationChallenges{challenges}, invitation.NewRepository(gdb), clk)
-	f.leaderboards = leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{f.users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
+	f.leaderboards = func() *leaderboard.Service {
+		return leaderboard.NewService(leaderboardChallenges{challenges}, leaderboardProfiles{f.users}, leaderboard.NewRepository(gdb), clk, 24*time.Hour)
+	}
 
 	insertUser := func(subject string) string {
 		var id string
@@ -248,7 +252,7 @@ func (f erasureFixture) snapshotEntries() map[string][]map[string]any {
 
 func (f erasureFixture) leaderboard(challengeID string) leaderboard.Leaderboard {
 	f.t.Helper()
-	got, err := f.leaderboards.Get(f.t.Context(), auth.Actor{ID: f.alice}, challengeID)
+	got, err := f.leaderboards().Get(f.t.Context(), auth.Actor{ID: f.alice}, challengeID)
 	if err != nil {
 		f.t.Fatal(err)
 	}

@@ -39,7 +39,7 @@ func (s *Service) Breakdown(ctx context.Context, actor auth.Actor, id, userID st
 		return Breakdown{}, apperr.New(apperr.CodeNotFound, nil)
 	}
 	now := s.clock.Now()
-	w, _, err := s.prepare(c, now)
+	w, scorers, err := s.prepare(c, now)
 	if err != nil {
 		return Breakdown{}, err
 	}
@@ -50,29 +50,27 @@ func (s *Service) Breakdown(ctx context.Context, actor auth.Actor, id, userID st
 		}
 	}
 
-	byChallenge, err := s.repo.ParticipantsOf(ctx, []string{id})
+	// From the ranking of the leaderboard, kept or computed: the breakdown
+	// is that of the same instant.
+	live, err := s.live(ctx, c, w, scorers)
 	if err != nil {
 		return Breakdown{}, err
 	}
-	participants := byChallenge[id]
+	w = live.window
 	var me *scoring.Participant
-	for i := range participants {
-		if participants[i].UserID == userID {
-			me = &participants[i]
+	for i := range live.participants {
+		if live.participants[i].UserID == userID {
+			me = &live.participants[i]
 		}
 	}
 	if me == nil {
 		return Breakdown{}, apperr.New(apperr.CodeNotFound, nil)
 	}
-	activitiesOf, err := s.repo.ActivitiesOf(ctx, []Scope{scopeOf(id, c.Categories, w)})
-	if err != nil {
-		return Breakdown{}, err
-	}
 	points := scoring.Points{Criteria: cat.Criteria, Podium: cat.Podium, Factors: cat.Factors}
-	weeks := points.Breakdown(w, participants, activitiesOf[id])[userID]
+	weeks := points.Breakdown(w, live.participants, live.activities)[userID]
 
 	locked := w.LockedWeeks()
-	out := Breakdown{UserID: userID, ComputedAt: now, Abandoned: me.Abandoned, Weeks: make([]BreakdownWeek, len(weeks))}
+	out := Breakdown{UserID: userID, ComputedAt: w.Now, Abandoned: me.Abandoned, Weeks: make([]BreakdownWeek, len(weeks))}
 	provisional := 0
 	pending := false
 	for i, wp := range weeks {
