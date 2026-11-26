@@ -168,9 +168,18 @@ func TestValidate(t *testing.T) {
 		// Points: at least one known criterion, each once; a podium of 5 or
 		// 10; a minimum session of 1 to 180 minutes.
 		{name: "points with every criterion", draft: with(func(d *Draft) {
-			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation)
+			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDistance, scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation, scoring.CriterionFastestRun)
 		})},
 		{name: "points with the weekly elevation alone", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionWeeklyElevation) })},
+		{name: "points with the fastest run alone needs no factors", draft: with(func(d *Draft) {
+			d.Distance = false
+			d.Points = points(scoring.CriterionFastestRun)
+		})},
+		{name: "factors for the fastest run alone", draft: with(func(d *Draft) {
+			d.Distance = false
+			d.Points = points(scoring.CriterionFastestRun)
+			d.DistanceFactors = map[string]float64{"ride": 0.25}
+		}), wantFields: "distance_factors"},
 		{name: "points in a top 10", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.Podium = 10 })},
 		{name: "points with a session of 1 min", draft: with(func(d *Draft) {
 			d.Points = points(scoring.CriterionSessionCount)
@@ -187,6 +196,9 @@ func TestValidate(t *testing.T) {
 		}), wantFields: "categories.points.criteria"},
 		{name: "points with the weekly elevation twice", draft: with(func(d *Draft) {
 			d.Points = points(scoring.CriterionWeeklyElevation, scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation)
+		}), wantFields: "categories.points.criteria"},
+		{name: "points with the fastest run twice", draft: with(func(d *Draft) {
+			d.Points = points(scoring.CriterionFastestRun, scoring.CriterionFastestRun)
 		}), wantFields: "categories.points.criteria"},
 		{name: "points in a top 3", draft: with(func(d *Draft) { d.Points = points(scoring.CriterionSessionCount); d.Points.Podium = 3 }), wantFields: "categories.points.podium"},
 		{name: "points with a session of 0 min", draft: with(func(d *Draft) {

@@ -14,9 +14,9 @@ const (
 	CriterionFastestRun      = "fastest_run"
 )
 
-// runSport is the sport of the fastest run criterion, whatever the
+// RunSport is the sport of the fastest run criterion, whatever the
 // reference sport of the challenge.
-const runSport = "run"
+const RunSport = "run"
 
 // Points is the points category: each week, each criterion ranks the
 // participants, and the top of each of these weekly rankings scores the
@@ -216,7 +216,7 @@ func (p Points) weeklyBests(w Window, started int, participants []Participant, a
 		if a.ElevationMeters != nil {
 			b.elevationMeters += *a.ElevationMeters
 		}
-		if a.SportCode == runSport && a.FastestMeters != nil && *a.FastestMeters > 0 {
+		if a.SportCode == RunSport && a.FastestMeters != nil && *a.FastestMeters > 0 {
 			if v := pace(a.FastestSeconds, *a.FastestMeters); !b.hasPace || v < b.fastestPace {
 				b.fastestPace, b.hasPace = v, true
 			}

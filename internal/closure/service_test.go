@@ -569,6 +569,42 @@ func TestFinalizeChallenges(t *testing.T) {
 		}
 	})
 
+	t.Run("the fastest run criterion is frozen from the paces of each week, and frozen again by a recompute", func(t *testing.T) {
+		withPoints := c
+		withPoints.Categories = append(slices.Clone(c.Categories), Category{
+			ID: "cat4", Type: categoryPoints, Criteria: []string{scoring.CriterionFastestRun}, Podium: 5, MinSessionSeconds: 1200,
+		})
+		// Seconds per km: a runs faster in weeks 1 to 3, b in week 4.
+		paces := map[string][]int{"a": {250, 250, 250, 300}, "b": {300, 300, 300, 260}}
+		groups, km := slices.Clone(activities), 1000
+		weeks := scoring.Window{Start: c.StartsAt, End: c.EndsAt, Location: loc}
+		for i, a := range groups {
+			groups[i].FastestSeconds, groups[i].FastestMeters = paces[a.UserID][weeks.WeekOf(a.StartedAt)-1], &km
+		}
+		// a 10 + 10 + 10 + 8; b 8 + 8 + 8 + 10. All acquired.
+		want := payload{Entries: []payloadEntry{{UserID: "a", Rank: 1, Value: 38}, {UserID: "b", Rank: 2, Value: 34}, {UserID: "quitter", Abandoned: true}}}
+		repo := newFakeRepo()
+		repo.ended = []EndedChallenge{withPoints}
+		svc := NewService(repo, &fakeData{participants: participants, activities: groups}, clock.NewFake(lock), discard())
+		if _, err := svc.FinalizeChallenges(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		got := payloadOf(t, repo, "cat4")
+		if w := (*got.Entries[0].Weeks)[0]; w.Criteria[0].Value != 250 || w.Criteria[0].Rank != 1 {
+			t.Fatalf("week 1 of a = %+v, want 250 s/km, ranked first", w)
+		}
+		if got := withoutWeeks(t, got, 4); !reflect.DeepEqual(got, want) {
+			t.Fatalf("points ranking = %+v, want %+v", got, want)
+		}
+		repo.snapshots["c1"] = []Snapshot{{CategoryID: "old"}}
+		if err := svc.Recompute(t.Context(), "c1"); err != nil {
+			t.Fatal(err)
+		}
+		if got := withoutWeeks(t, payloadOf(t, repo, "cat4"), 4); !reflect.DeepEqual(got, want) {
+			t.Fatalf("points ranking once recomputed = %+v, want %+v", got, want)
+		}
+	})
+
 	t.Run("the cumulative elevation category is frozen from the elevation gains", func(t *testing.T) {
 		repo := newFakeRepo()
 		withElevation := c

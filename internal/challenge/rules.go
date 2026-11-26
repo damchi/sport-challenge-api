@@ -50,6 +50,7 @@ var pointsPodiums = []int{5, 10}
 var pointsCriteria = []string{
 	scoring.CriterionLongestDuration, scoring.CriterionLongestDistance,
 	scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation,
+	scoring.CriterionFastestRun,
 }
 
 // Draft is a challenge as its creator describes it.

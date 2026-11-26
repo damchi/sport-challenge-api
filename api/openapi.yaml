@@ -4241,18 +4241,21 @@ components:
         criteria:
           type: array
           minItems: 1
-          maxItems: 4
+          maxItems: 5
           uniqueItems: true
           description: |
             The longest session by duration (every sport), the longest
             session by equivalent distance (with the factors of
             `distance_factors`), the number of sessions of at least
             `min_session_minutes`, the elevation gain of the week (every
-            sport that takes one, in real meters, without factor). At least
-            one, each once.
+            sport that takes one, in real meters, without factor), the
+            fastest run (the lowest pace of a single `run` session with a
+            distance, in seconds per km, real distance without factor, the
+            lowest winning; it needs no `distance_factors`). At least one,
+            each once.
           items:
             type: string
-            enum: [longest_duration, longest_distance, session_count, weekly_elevation]
+            enum: [longest_duration, longest_distance, session_count, weekly_elevation, fastest_run]
         podium:
           type: integer
           enum: [5, 10]
@@ -4338,7 +4341,7 @@ components:
           description: Points category only, its criteria in the order chosen.
           items:
             type: string
-            enum: [longest_duration, longest_distance, session_count, weekly_elevation]
+            enum: [longest_duration, longest_distance, session_count, weekly_elevation, fastest_run]
         podium:
           type: integer
           enum: [5, 10]
@@ -4578,22 +4581,26 @@ components:
       properties:
         criterion:
           type: string
-          enum: [longest_duration, longest_distance, session_count, weekly_elevation]
+          enum: [longest_duration, longest_distance, session_count, weekly_elevation, fastest_run]
         rank:
           type: integer
           minimum: 1
           nullable: true
           description: |
             The rank in the weekly ranking of the criterion, equal values
-            sharing it (1, 1, 3); null for a value of 0, which does not score.
+            sharing it (1, 1, 3), the lowest pace first for `fastest_run`;
+            null without a value, which does not score: a value of 0, or no
+            `run` session with a distance for `fastest_run` (a pace of 0 is
+            a value).
         value:
           type: integer
           minimum: 0
           nullable: true
           description: |
             Seconds (`longest_duration`), equivalent meters
-            (`longest_distance`), sessions (`session_count`) or meters of
-            elevation gain (`weekly_elevation`). Null for a reader who may
+            (`longest_distance`), sessions (`session_count`), meters of
+            elevation gain (`weekly_elevation`) or seconds per km
+            (`fastest_run`). Null for a reader who may
             not see the activities of the participants (not a participant,
             abandoned ones included, a creator nor an admin: README §5.7);
             the rank and the points stay.
