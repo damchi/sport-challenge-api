@@ -1,4 +1,17 @@
 {
+  "extraKnownMarketplaces": {
+    "damchi": {
+      "source": {
+        "source": "github",
+        "repo": "damchi/claude-library"
+      },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "dev-workflow@damchi": true,
+    "backend-review@damchi": true
+  },
   "permissions": {
     "allow": [
       "Bash(go build:*)",
@@ -24,15 +37,18 @@
       "Bash(gh pr view:*)",
       "Bash(gh pr checks:*)",
       "Bash(gh pr list:*)",
-      "Bash(python3 .claude/scripts/tasks.py next)",
-      "Bash(python3 .claude/scripts/tasks.py start:*)",
-      "Bash(python3 .claude/scripts/tasks.py tick:*)",
+      "Bash(ticket config)",
+      "Bash(ticket size)",
+      "Bash(ticket new:*)",
+      "Bash(ticket next)",
+      "Bash(ticket start:*)",
+      "Bash(ticket tick:*)",
+      "Bash(ticket add:*)",
+      "Bash(ticket cleanup:*)",
       "Bash(gh issue view:*)",
       "Bash(gh issue list:*)",
       "Bash(gh pr create:*)",
       "Bash(gh issue create:*)",
-      "Bash(python3 .claude/scripts/tasks.py add:*)",
-      "Bash(python3 .claude/scripts/tasks.py cleanup:*)",
       "Bash(gh project item-add:*)"
     ],
     "ask": [
@@ -56,42 +72,6 @@
       "Bash(terraform apply:*)",
       "Bash(terraform destroy:*)",
       "Bash(gcloud run deploy:*)"
-    ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard_git.py"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/issue_to_project.py",
-            "timeout": 60
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/cleanup_merged.sh",
-            "timeout": 120
-          }
-        ]
-      }
     ]
   }
 }

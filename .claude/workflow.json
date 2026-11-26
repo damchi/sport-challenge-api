@@ -1,0 +1,13 @@
+{
+  "ticket_prefix": "SC-API",
+  "project": "Sport Challenge",
+  "auto_pr": true,
+  "checks": [
+    { "run": "make fmt && make lint && make test" },
+    { "run": "make test-integration", "when": "le ticket touche au SQL, à un repository ou aux migrations" },
+    { "run": "make migrate-up && make migrate-down && make migrate-up", "when": "le ticket ajoute une migration (base locale démarrée avec make docker-up)" },
+    { "run": "make openapi-lint && make generate", "when": "le ticket modifie api/openapi.yaml (le code régénéré part dans le même commit)" }
+  ],
+  "rules": ["README.md §2"],
+  "pr_size": { "max_lines": 200 }
+}
