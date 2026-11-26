@@ -2434,10 +2434,23 @@ paths:
         `reason`, naming those challenges, all in one
         transaction; with `dry_run`, everything is rolled back and the answer
         tells what the change would do. The answer lists those challenges,
-        none for an activity that counts nowhere.
+        none for an activity that counts nowhere. With `Idempotency-Key`,
+        unique per account of the activity as for `POST /activities` (a key
+        the account used for its own entry included), a valid request sent again
+        with the same key, even with another body, records nothing, writes
+        no journal line and judges nothing again: it answers 200 with no
+        challenge, or 404 `activity_not_found` once that activity is
+        deleted. A `dry_run` records nothing and leaves the key free.
       tags: [admin]
       parameters:
         - $ref: "#/components/parameters/AdminUserId"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Key chosen by the client (a UUID, for instance), unique per account of the activity.
+          schema:
+            type: string
+            pattern: "^[!-~]{1,128}$"
       requestBody:
         required: true
         content:
@@ -2456,7 +2469,16 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          $ref: "#/components/responses/AdminUserNotFound"
+          description: |
+            The account has no `admin` permission (`not_found`), no such
+            account, or a deleted one (`user_not_found`), or the
+            `Idempotency-Key` gave a deleted activity (`activity_not_found`).
+            `not_found` also answers a malformed request without the
+            permission, without `params`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: |
             The profile of the account is incomplete (`profile_incomplete`),

@@ -25,6 +25,8 @@ type fakeActivities struct {
 	change   activity.AdminChange
 	err      error
 	writeErr error
+	// key is the idempotency key AdminRecord got.
+	key *string
 }
 
 func (f *fakeActivities) prepare(step string, actor auth.Actor) (activity.AdminWrite, error) {
@@ -41,7 +43,8 @@ func (f *fakeActivities) prepare(step string, actor auth.Actor) (activity.AdminW
 	}}, nil
 }
 
-func (f *fakeActivities) AdminRecord(_ context.Context, actor auth.Actor, userID string, _ activity.Draft) (activity.AdminWrite, error) {
+func (f *fakeActivities) AdminRecord(_ context.Context, actor auth.Actor, userID string, key *string, _ activity.Draft) (activity.AdminWrite, error) {
+	f.key = key
 	return f.prepare("record "+userID, actor)
 }
 
@@ -62,7 +65,7 @@ var activityCorrections = []struct {
 	action string
 }{
 	{name: "record", step: "record " + bobID, action: ActionActivityCreate, run: func(s *ActivityCorrections, ctx context.Context, actor auth.Actor, reason string, dryRun bool) ([]ChallengePreview, error) {
-		return s.Record(ctx, actor, bobID, activity.Draft{}, reason, dryRun)
+		return s.Record(ctx, actor, bobID, nil, activity.Draft{}, reason, dryRun)
 	}},
 	{name: "update", step: "update " + actionID, action: ActionActivityUpdate, run: func(s *ActivityCorrections, ctx context.Context, actor auth.Actor, reason string, dryRun bool) ([]ChallengePreview, error) {
 		return s.Update(ctx, actor, actionID, activity.Draft{}, reason, dryRun)
@@ -128,6 +131,30 @@ func TestActivityCorrectionsCountingNowhere(t *testing.T) {
 	}
 }
 
+// TestActivityCorrectionsRecordedBefore: a key that gave an activity
+// recorded before writes nothing, no journal line, judges no challenge
+// again and previews none, a dry run included.
+func TestActivityCorrectionsRecordedBefore(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		log := &correctionLog{}
+		corrections, journal := newCorrections(log)
+		fake := &fakeActivities{log: log, touched: []string{challengeID}, writeErr: activity.ErrRecordedBefore}
+		s := NewActivityCorrections(corrections, fake)
+		key := "k1"
+		previews, err := s.Record(t.Context(), admin, bobID, &key, activity.Draft{}, "Saisie oubliée", dryRun)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"lock", "record " + bobID, "lock participants " + challengeID, "rank " + challengeID, "weeks " + challengeID, "state " + challengeID, "write"}
+		if !reflect.DeepEqual(log.steps, want) || previews == nil || len(previews) != 0 || len(journal.records) != 0 {
+			t.Fatalf("dry run %v: steps %v, previews %#v, journal %+v; want %v, an empty list, no line", dryRun, log.steps, previews, journal.records, want)
+		}
+		if fake.key != &key {
+			t.Fatalf("key %v, want that of the request", fake.key)
+		}
+	}
+}
+
 // TestActivityCorrectionsRefusals: a non-admin reaches nothing; a refused
 // change or reason rolls everything back, its journal line included.
 func TestActivityCorrectionsRefusals(t *testing.T) {
@@ -177,7 +204,10 @@ func TestActivityCorrectionsRefusals(t *testing.T) {
 // with the name of the method and the id it targets.
 type activityUpdaterFunc func(method string, actor auth.Actor, id string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error)
 
-func (f activityUpdaterFunc) Record(_ context.Context, actor auth.Actor, userID string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error) {
+func (f activityUpdaterFunc) Record(_ context.Context, actor auth.Actor, userID string, key *string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error) {
+	if key != nil {
+		return f("record "+*key, actor, userID, draft, reason, dryRun)
+	}
 	return f("record", actor, userID, draft, reason, dryRun)
 }
 
@@ -257,5 +287,37 @@ func TestAdminActivityRoutes(t *testing.T) {
 				t.Fatalf("empty reason: got %d %v, want 400 validation_failed", rec.Code, body)
 			}
 		})
+	}
+}
+
+// TestCreateAdminActivityIdempotencyKey: the Idempotency-Key header reaches
+// the change; one that gave an activity recorded before answers 200 with no
+// challenge; a malformed one is refused, as not_found without the
+// permission.
+func TestCreateAdminActivityIdempotencyKey(t *testing.T) {
+	var method string
+	activities := activityUpdaterFunc(func(m string, _ auth.Actor, _ string, _ activity.Draft, _ string, _ bool) ([]ChallengePreview, error) {
+		method = m
+		return []ChallengePreview{}, nil
+	})
+	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities, nil)
+	target := "/api/v1/admin/users/" + bobID + "/activities"
+	body := `{"sport_code": "run", "started_at": "2026-06-03T11:00:00Z", "duration_seconds": 1500, "distance_meters": 5000, "reason": "Saisie oubliée"}`
+
+	rec, got := serveWith(t, h, adminToken, http.MethodPost, target, body, io.Discard, http.Header{"Idempotency-Key": {"k1"}})
+	if previews, ok := got["challenges"].([]any); rec.Code != http.StatusOK || method != "record k1" || !ok || len(previews) != 0 || got["dry_run"] != false {
+		t.Fatalf("got %d %v, asked %q; want 200 with no challenge, the key passed", rec.Code, got, method)
+	}
+
+	method = ""
+	rec, got = serveWith(t, h, adminToken, http.MethodPost, target, body, io.Discard, http.Header{"Idempotency-Key": {"a key"}})
+	if e, _ := got["error"].(map[string]any); rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || method != "" {
+		t.Fatalf("malformed key: got %d %v, asked %q; want 400 validation_failed, nothing asked", rec.Code, got, method)
+	}
+
+	// Without the permission, a malformed key tells nothing of the route.
+	rec, got = serveWith(t, h, "some.access.token", http.MethodPost, target, body, io.Discard, http.Header{"Idempotency-Key": {"a key"}})
+	if e, _ := got["error"].(map[string]any); rec.Code != http.StatusNotFound || e["code"] != "not_found" || method != "" {
+		t.Fatalf("malformed key without the permission: got %d %v, asked %q; want 404 not_found, nothing asked", rec.Code, got, method)
 	}
 }

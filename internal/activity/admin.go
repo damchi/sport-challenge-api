@@ -42,11 +42,19 @@ type AdminChange struct {
 // The caller records the change and recomputes the challenges touched in
 // the same transaction.
 
+// ErrRecordedBefore is what the Write of AdminRecord gives when its
+// idempotency key gave an activity recorded before: nothing is written, the
+// caller writes no journal line and recomputes nothing.
+var ErrRecordedBefore = errors.New("activity recorded before with this idempotency key")
+
 // AdminRecord prepares the recording of draft for userID, whose profile
 // must be complete (422 profile_incomplete): an unknown or deleted account
 // answers 404 user_not_found. The source is manual, as an entry by the
-// account: the journal tells them apart.
-func (s *Service) AdminRecord(ctx context.Context, actor auth.Actor, userID string, draft Draft) (AdminWrite, error) {
+// account: the journal tells them apart. idempotencyKey, if any, is that of
+// the account, as for Record: an activity of userID recorded before with it
+// makes Write give ErrRecordedBefore, or 404 activity_not_found once
+// deleted, whatever draft is.
+func (s *Service) AdminRecord(ctx context.Context, actor auth.Actor, userID string, idempotencyKey *string, draft Draft) (AdminWrite, error) {
 	draft, err := s.adminDraft(ctx, actor, draft)
 	if err != nil {
 		return AdminWrite{}, err
@@ -66,13 +74,16 @@ func (s *Service) AdminRecord(ctx context.Context, actor auth.Actor, userID stri
 		return AdminWrite{}, fmt.Errorf("read participations: %w", err)
 	}
 	a := draftActivity(draft)
-	a.UserID, a.Source = userID, SourceManual
+	a.UserID, a.Source, a.IdempotencyKey = userID, SourceManual, idempotencyKey
 	return AdminWrite{
 		Touched: Touched(ps, a.StartedAt),
 		Write: func(ctx context.Context) (AdminChange, error) {
-			stored, _, err := s.repo.Record(ctx, a, anyTime)
+			stored, created, err := s.repo.Record(ctx, a, anyTime)
 			if err != nil {
 				return AdminChange{}, storageError(err)
+			}
+			if !created {
+				return AdminChange{}, ErrRecordedBefore
 			}
 			return AdminChange{ActivityID: stored.ID, New: journalFields(stored)}, nil
 		},
