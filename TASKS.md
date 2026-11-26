@@ -37,8 +37,8 @@ Correspondance avec les anciens statuts :
 2. Claude lit l'issue (`gh issue view`), relit les sections du README citées, la marque « en cours » (`tasks.py start`) et annonce un court plan.
 3. Implémentation, puis `make check` (et `make test-integration` si SQL ou migration).
 4. Revue par les agents indiqués dans le ticket.
-5. Claude coche les critères dans l'issue (`tasks.py tick`), puis **propose** (sans l'exécuter) les fichiers et le message de commit, qui se termine par `Closes #N`. **Aucun commit ni push sans ton accord explicite.**
-6. Tu relis, tu commits, tu ouvres la pull request ; l'issue se ferme à la fusion et le ticket suivant devient disponible.
+5. Claude coche les critères dans l'issue (`tasks.py tick`), puis commite (message terminé par `Closes #N`) et pousse la branche du ticket, sans demander l'accord.
+6. Claude commite, pousse et ouvre la pull request ; tu la fusionnes : l'issue se ferme, la branche est supprimée (GitHub et local) et le ticket suivant devient disponible.
 
 ## Conventions
 

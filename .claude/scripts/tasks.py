@@ -10,8 +10,16 @@ Commandes
         Crée une issue par ticket de TASKS.md, avec ses étiquettes, et les ajoute au GitHub Project.
         Sûr à relancer : un ticket déjà présent (même identifiant dans le titre) n'est jamais recréé.
   next  Affiche le prochain ticket à traiter (ouvert, dépendances fermées, ni reporté ni en cours).
+  add   TICKET
+        Ajoute l'issue au GitHub Project (statut « Todo ») si elle n'y est pas encore. Lancé
+        automatiquement après chaque `gh issue create` (hook PostToolUse).
   start TICKET
-        Marque le ticket « en cours » (étiquette, assigné à toi, statut du Project).
+        Marque le ticket « en cours » (étiquette, assigné à toi, statut du Project ; ajoute l'issue
+        au Project si elle n'y est pas).
+  cleanup [--quiet]
+        Supprime, en local et sur GitHub, les branches dont la pull request est fusionnée (seulement si
+        la branche locale pointe encore sur le dernier commit de la pull request). Si la branche courante
+        est concernée et l'arbre propre, bascule d'abord sur main à jour. Lancé à chaque début de session.
   tick  TICKET
         Coche les critères d'acceptation du ticket (à lancer quand ils sont tous remplis).
   sync  TICKET [--force]
@@ -309,12 +317,87 @@ def set_project_status(repo, owner, number, wanted):
         print(f"Statut du Project non modifié ({type(e).__name__}) : fais-le à la main si besoin.")
 
 
+def ensure_in_project(info, number):
+    """Add the issue to the Project with status Todo when it is not there yet. Returns True if added."""
+    owner = info["owner"]["login"]
+    project = find_project(owner, DEFAULT_PROJECT)
+    if not project:
+        print("Project introuvable : issue non ajoutée.")
+        return False
+    issue = gh_json("issue", "view", str(number), "--json", "url,projectItems")
+    if any(pi.get("title") == DEFAULT_PROJECT for pi in issue.get("projectItems") or []):
+        return False
+    gh("project", "item-add", str(project["number"]), "--owner", owner, "--url", issue["url"])
+    # The new item can take a moment to show up in item-list.
+    for _ in range(5):
+        time.sleep(1)
+        items = gh_json("project", "item-list", str(project["number"]), "--owner", owner, "--format", "json", "--limit", "1000")["items"]
+        if any(it.get("content", {}).get("number") == number and it["content"].get("repository") == info["nameWithOwner"] for it in items):
+            break
+    set_project_status(info["nameWithOwner"], owner, number, {"todo"})
+    return True
+
+
+def cmd_add(args):
+    ref = args.ticket.strip().lstrip("#")
+    # A bare issue number also covers issues without a ticket identifier in their title.
+    number = int(ref) if ref.isdigit() and not ref.startswith("0") else resolve(load_issues(), ref)["number"]
+    if ensure_in_project(repo_info(), number):
+        print(f"#{number} ajoutée au Project « {DEFAULT_PROJECT} » (Todo).")
+    else:
+        print(f"#{number} déjà dans le Project « {DEFAULT_PROJECT} ».")
+
+
+def git(*args, check=True):
+    p = subprocess.run(["git", *args], capture_output=True, text=True, cwd=ROOT)
+    if check and p.returncode != 0:
+        sys.exit(f"git {' '.join(args[:2])} a échoué : {p.stderr.strip() or p.stdout.strip()}")
+    return p.stdout.strip()
+
+
+def cmd_cleanup(args):
+    say = (lambda *_: None) if args.quiet else print
+    git("fetch", "--prune", "--quiet", "origin")
+    default = gh_json("repo", "view", "--json", "defaultBranchRef")["defaultBranchRef"]["name"]
+    merged = gh_json("pr", "list", "--state", "merged", "--limit", "200", "--json", "headRefName,headRefOid,number")
+    by_branch = {}
+    for pr in merged or []:
+        by_branch.setdefault(pr["headRefName"], []).append(pr)
+    current = git("branch", "--show-current")
+    remote = set(git("for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin").split())
+    deleted = []
+    for branch in git("for-each-ref", "--format=%(refname:short)", "refs/heads").split():
+        if branch == default or branch not in by_branch:
+            continue
+        sha = git("rev-parse", branch)
+        pr = next((p for p in by_branch[branch] if p["headRefOid"] == sha), None)
+        if pr is None:
+            say(f"{branch} : commits locaux absents de la pull request fusionnée, branche gardée.")
+            continue
+        if branch == current:
+            if git("status", "--porcelain", "--untracked-files=no"):
+                say(f"{branch} : fusionnée, mais modifications en cours ; branche gardée.")
+                continue
+            git("switch", "--quiet", default)
+            git("pull", "--ff-only", "--quiet")
+            current = default
+        git("branch", "-D", branch)
+        if branch in remote:
+            git("push", "--quiet", "origin", "--delete", branch, check=False)
+        deleted.append(f"{branch} (#{pr['number']})")
+    if deleted:
+        print("Branches fusionnées supprimées (local et GitHub) : " + ", ".join(deleted))
+    else:
+        say("Aucune branche fusionnée à supprimer.")
+
+
 def cmd_start(args):
     issue = resolve(load_issues(), args.ticket)
     if issue["state"] != "OPEN":
         sys.exit(f"{issue['tid']} est déjà fermé.")
     gh("issue", "edit", str(issue["number"]), "--add-label", "en-cours", "--add-assignee", "@me")
     info = repo_info()
+    ensure_in_project(info, issue["number"])
     set_project_status(info["nameWithOwner"], info["owner"]["login"], issue["number"], {"in progress", "en cours"})
     print(f"#{issue['number']} {issue['tid']} : en cours.")
 
@@ -366,13 +449,14 @@ def main():
     imp.add_argument("--project-title", default=DEFAULT_PROJECT)
     imp.add_argument("--no-project", action="store_true")
     sub.add_parser("next")
-    for name in ("start", "tick"):
+    sub.add_parser("cleanup").add_argument("--quiet", action="store_true")
+    for name in ("add", "start", "tick"):
         sub.add_parser(name).add_argument("ticket")
     sy = sub.add_parser("sync")
     sy.add_argument("ticket")
     sy.add_argument("--force", action="store_true")
     args = parser.parse_args()
-    {"import": cmd_import, "next": cmd_next, "start": cmd_start, "tick": cmd_tick, "sync": cmd_sync}[args.cmd](args)
+    {"import": cmd_import, "next": cmd_next, "add": cmd_add, "start": cmd_start, "cleanup": cmd_cleanup, "tick": cmd_tick, "sync": cmd_sync}[args.cmd](args)
 
 
 if __name__ == "__main__":

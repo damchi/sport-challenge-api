@@ -112,7 +112,10 @@ Règles de dépendance :
 6. **Git** : une fois format, lint, tests et relectures passés, tu **commits et pushes sans demander l'accord** (en anglais, un changement cohérent par commit, sur la branche du ticket). Tu présentes ensuite les fichiers modifiés, le résumé du diff et les commits poussés.
    - Tu peux utiliser `git status`, `git diff`, `git log`, `git add`, `git commit` et `git push` (branche de travail) librement.
    - **Pull request** : une fois ouverte, et après chaque push, attends la fin de la CI (`Monitor` sur `gh pr checks`, sans sondage), vérifie qu'elle est entièrement verte, puis lis tous les commentaires (`gh pr view --comments`, commentaires en ligne). Applique les corrections fondées (commit et push sur la même branche) ou explique pourquoi tu ne les suis pas, et recommence jusqu'à une CI verte sans commentaire en suspens. Ne dis un ticket terminé qu'à ce moment-là ; un point qui touche une règle produit (🟡 ou ❓) ou le périmètre se demande à l'utilisateur.
-   - Push vers `main`, suppression de branche distante, merge, rebase, tag, reset, `gh pr create/merge` : uniquement sur demande explicite de l'utilisateur, une action à la fois.
+   - **Pull request** : dès que le code est poussé, ouvre-la sans demander (`gh pr create`, titre = message du commit, description avec `Closes #<numéro>`). Ne la fusionne jamais.
+   - **Issues** : toute issue créée rejoint le Project https://github.com/users/damchi/projects/7, statut « Todo » (hook PostToolUse sur `gh issue create` ; à défaut `python3 .claude/scripts/tasks.py add <numéro>`).
+   - **Branches fusionnées** : supprimées automatiquement sur GitHub (réglage du dépôt « delete branch on merge ») et en local (`tasks.py cleanup`, lancé par le hook SessionStart et au début de `next-task`).
+   - Push vers `main`, suppression manuelle de branche distante, merge, rebase, tag, reset, `gh pr merge` : uniquement sur demande explicite de l'utilisateur, une action à la fois.
    - Push forcé, `git reset --hard`, `git clean`, `--no-verify` : interdits (bloqués par la configuration).
 
 ## Ne jamais
