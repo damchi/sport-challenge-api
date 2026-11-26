@@ -186,7 +186,7 @@ func TestAdminMemberRoutes(t *testing.T) {
 		}
 		return []ChallengePreview{{ChallengeID: id, Status: StatusOngoing}}, nil
 	})
-	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, members, nil, nil)
+	h := NewHandler(NewService(&fakeRepo{}, nil, clock.NewFake(statsAt), buildinfo.Info{}), nil, members, nil, nil)
 	member := "/api/v1/admin/challenges/" + challengeID + "/participants/" + bobID
 	creator := "/api/v1/admin/challenges/" + challengeID + "/creators/" + bobID
 	routes := []struct {

@@ -155,7 +155,7 @@ func run() error {
 		activityHandler:    activity.NewHandler(activities),
 		leaderboardHandler: leaderboard.NewHandler(leaderboards),
 		invitationHandler:  invitation.NewHandler(invitations, challengeHandler),
-		adminHandler:       admin.NewHandler(admin.NewService(adminRepo, clk, build), challengeCorrections, memberCorrections, activityCorrections, accountCorrections),
+		adminHandler:       admin.NewHandler(admin.NewService(adminRepo, activities, clk, build), challengeCorrections, memberCorrections, activityCorrections, accountCorrections),
 	}
 	opts := routerOptions{
 		allowedOrigins: cfg.CORSAllowedOrigins,

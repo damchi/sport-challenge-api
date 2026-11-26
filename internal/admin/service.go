@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
 	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
@@ -30,17 +31,25 @@ type repository interface {
 	ListActions(ctx context.Context, q ActionQuery) ([]Action, error)
 }
 
+// ActivityPlaces tells, for activities of account userID, where each counts
+// now and whether its week is locked; 404 not_found unless actor is an
+// admin (module activity).
+type ActivityPlaces interface {
+	AdminPlaces(ctx context.Context, actor auth.Actor, userID string, as []activity.Activity) ([]activity.Recorded, error)
+}
+
 // Service holds the admin reads.
 type Service struct {
-	repo  repository
-	clock clock.Clock
-	build buildinfo.Info
+	repo   repository
+	places ActivityPlaces
+	clock  clock.Clock
+	build  buildinfo.Info
 }
 
 // NewService returns a Service on repo; build is the build of the running
 // API, given on the dashboard.
-func NewService(repo repository, clk clock.Clock, build buildinfo.Info) *Service {
-	return &Service{repo: repo, clock: clk, build: build}
+func NewService(repo repository, places ActivityPlaces, clk clock.Clock, build buildinfo.Info) *Service {
+	return &Service{repo: repo, places: places, clock: clk, build: build}
 }
 
 // Stats returns the figures of the dashboard, read now, never stored. Admin
@@ -319,7 +328,8 @@ func (s *Service) UserChallenges(ctx context.Context, actor auth.Actor, id strin
 }
 
 // UserActivities returns a page of at most limit (at least 1) activities of
-// account id, deleted ones excluded, the most recent session first. Admin
+// account id, deleted ones excluded, the most recent session first, each
+// with where it counts and whether it is locked (ActivityPlaces). Admin
 // only (RequireAdmin), checked before anything is read, the cursor included;
 // 404 user_not_found when there is no such account.
 func (s *Service) UserActivities(ctx context.Context, actor auth.Actor, id string, limit int, cursor string) (ActivityPage, error) {
@@ -341,7 +351,21 @@ func (s *Service) UserActivities(ctx context.Context, actor auth.Actor, id strin
 		return ActivityPage{}, userError("list user activities", err)
 	}
 	items, last, more := cut(rows, limit)
-	page := ActivityPage{Items: items}
+	as := make([]activity.Activity, len(items))
+	for i, r := range items {
+		as[i] = activity.Activity{
+			ID: r.ID, UserID: id, SportCode: r.SportCode, SportLabel: r.SportLabel, StartedAt: r.StartedAt,
+			DurationSeconds: r.DurationSeconds, DistanceMeters: r.DistanceMeters, ElevationGainMeters: r.ElevationGainMeters, Source: r.Source,
+		}
+	}
+	places, err := s.places.AdminPlaces(ctx, actor, id, as)
+	if err != nil {
+		return ActivityPage{}, fmt.Errorf("read where activities count: %w", err)
+	}
+	page := ActivityPage{Items: make([]UserActivity, len(items))}
+	for i, r := range items {
+		page.Items[i] = UserActivity{ActivityRow: r, Contributions: places[i].Contributions, Locked: places[i].Locked}
+	}
 	if more {
 		page.Next = &ActivityPosition{StartedAt: last.StartedAt, ID: last.ID}
 	}

@@ -150,7 +150,7 @@ func TestGetAdminChallenge(t *testing.T) {
 			OldValue: []byte(`{"weeks": 2}`), NewValue: []byte(`{"weeks": 3}`), Reason: "Oubli",
 		}},
 	}}
-	svc := NewService(repo, clock.NewFake(statsAt), buildinfo.Info{})
+	svc := NewService(repo, nil, clock.NewFake(statsAt), buildinfo.Info{})
 
 	rec, got := serve(t, svc, adminToken, "/api/v1/admin/challenges/"+challengeID)
 	if rec.Code != http.StatusOK {

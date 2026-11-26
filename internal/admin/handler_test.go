@@ -118,7 +118,7 @@ func serveWith(t *testing.T, h *Handler, token, method, target, body string, log
 
 func TestGetAdminStatsWithoutThePermission(t *testing.T) {
 	repo := &fakeRepo{}
-	rec, body := getStats(t, NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}), "some.access.token")
+	rec, body := getStats(t, NewService(repo, nil, clock.NewFake(statsAt), buildinfo.Info{}), "some.access.token")
 	e, _ := body["error"].(map[string]any)
 	if rec.Code != http.StatusNotFound || e["code"] != "not_found" {
 		t.Fatalf("got %d %v, want 404 not_found", rec.Code, body)
@@ -138,7 +138,7 @@ func TestGetAdminStats(t *testing.T) {
 			{Task: "close-weeks", Failure: true, Run: WorkerRun{StartedAt: statsAt.Add(-2 * time.Hour), EndedAt: &ended, Outcome: &failed, ErrorCode: ptr("internal_error")}},
 		},
 	}
-	svc := NewService(repo, clock.NewFake(statsAt), buildinfo.Info{Version: "v1.2.3", Commit: "abc"})
+	svc := NewService(repo, nil, clock.NewFake(statsAt), buildinfo.Info{Version: "v1.2.3", Commit: "abc"})
 
 	rec, got := getStats(t, svc, adminToken)
 	if rec.Code != http.StatusOK {
@@ -212,7 +212,7 @@ func TestInvalidAdminRequestIsHiddenWithoutThePermission(t *testing.T) {
 				{token: adminToken, wantStatus: http.StatusBadRequest, wantCode: "validation_failed"},
 			} {
 				repo := &fakeRepo{}
-				rec, got := serveWith(t, NewHandler(NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, nil, nil), tt.token, rq.method, rq.target, rq.body, io.Discard)
+				rec, got := serveWith(t, NewHandler(NewService(repo, nil, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, nil, nil), tt.token, rq.method, rq.target, rq.body, io.Discard)
 				e, _ := got["error"].(map[string]any)
 				if rec.Code != tt.wantStatus || e["code"] != tt.wantCode {
 					t.Fatalf("%s: got %d %v, want %d %s", tt.token, rec.Code, got, tt.wantStatus, tt.wantCode)
@@ -277,7 +277,7 @@ func TestAdminPreviewWithoutAReason(t *testing.T) {
 				journal := &journalLog{log: log}
 				corrections := NewCorrections(log, NewJournal(journal, clock.NewFake(statsAt)), log, uncategorizedBoards{})
 				settings := &fakeSettings{log: log}
-				h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}),
+				h := NewHandler(NewService(&fakeRepo{}, nil, clock.NewFake(statsAt), buildinfo.Info{}),
 					NewChallengeCorrections(corrections, settings, settings),
 					NewMemberCorrections(corrections, &fakeMembers{log: log}),
 					NewActivityCorrections(corrections, &fakeActivities{log: log, touched: []string{challengeID}, change: activity.AdminChange{ActivityID: actionID}}),

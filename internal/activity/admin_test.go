@@ -275,3 +275,43 @@ func withDistance(d Draft, meters int) Draft {
 	d.DistanceMeters = &meters
 	return d
 }
+
+func TestAdminPlaces(t *testing.T) {
+	c1, c2 := challengeOf(t, "c1"), challengeOf(t, "c2")
+	open := Activity{ID: "a2", UserID: author, SportCode: "run", StartedAt: toronto(t, 2026, 6, 10, 7), DurationSeconds: 60}
+	locked := Activity{ID: "a1", UserID: author, SportCode: "run", StartedAt: toronto(t, 2026, 6, 3, 7), DurationSeconds: 60}
+	nowhere := Activity{ID: "a0", UserID: author, SportCode: "run", StartedAt: toronto(t, 2026, 3, 2, 7), DurationSeconds: 60}
+	got, err := adminService(t, &fakeRepository{}, true, c1, c2).AdminPlaces(t.Context(), admin, author, []Activity{open, locked, nowhere})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		ids    []string
+		locked bool
+	}{{ids: []string{"c1", "c2"}}, {ids: []string{"c1", "c2"}, locked: true}, {}}
+	for i, w := range want {
+		if got[i].ID != []string{"a2", "a1", "a0"}[i] || !reflect.DeepEqual(challengeIDs(got[i].Contributions), w.ids) || got[i].Locked != w.locked {
+			t.Errorf("item %d = %s: challenges %v, locked %v, want %v, %v", i, got[i].ID, challengeIDs(got[i].Contributions), got[i].Locked, w.ids, w.locked)
+		}
+	}
+}
+
+func TestAdminPlacesRefused(t *testing.T) {
+	calls := 0
+	ps := fakeParticipations{t: t, user: author, calls: &calls}
+	s := NewService(&fakeRepository{}, fakeProfiles{}, catalogue, ps, nil, clock.NewFake(recordNow))
+	_, err := s.AdminPlaces(t.Context(), auth.Actor{ID: actor}, author, []Activity{{ID: "a1"}})
+	checkError(t, err, apperr.CodeNotFound, nil)
+	if calls != 0 {
+		t.Fatalf("non-admin: %d reads, want none", calls)
+	}
+	if got, err := s.AdminPlaces(t.Context(), admin, author, nil); err != nil || got != nil || calls != 0 {
+		t.Fatalf("no activity: %v, %v, %d reads, want nothing read", got, err, calls)
+	}
+	storage := errors.New("connection reset")
+	ps.err = storage
+	s = NewService(&fakeRepository{}, fakeProfiles{}, catalogue, ps, nil, clock.NewFake(recordNow))
+	if _, err := s.AdminPlaces(t.Context(), admin, author, []Activity{{ID: "a1"}}); !errors.Is(err, storage) {
+		t.Fatalf("read fails: error = %v, want the cause kept", err)
+	}
+}

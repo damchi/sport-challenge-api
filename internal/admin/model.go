@@ -9,6 +9,7 @@ package admin
 import (
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 )
 
@@ -364,10 +365,19 @@ type ActivityRow struct {
 	CreatedAt           time.Time
 }
 
+// UserActivity is an activity of an account with what it brings now to
+// each challenge where it counts and whether its week is locked, as its
+// author sees them (activity.Contributions, activity.IsLocked).
+type UserActivity struct {
+	ActivityRow
+	Contributions []activity.Contribution
+	Locked        bool
+}
+
 // ActivityPage is a page of the activities of an account; Next is nil on
 // the last page.
 type ActivityPage struct {
-	Items []ActivityRow
+	Items []UserActivity
 	Next  *ActivityPosition
 }
 

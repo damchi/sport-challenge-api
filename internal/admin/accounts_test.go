@@ -238,7 +238,7 @@ func TestAdminUserChanges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			accounts := &fakeAccountUpdater{}
 			repo := &fakeRepo{user: UserRow{ID: bobID, State: UserBlocked, CreatedAt: statsAt}}
-			h := NewHandler(NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, nil, accounts)
+			h := NewHandler(NewService(repo, nil, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, nil, accounts)
 			rec, got := serveWith(t, h, adminToken, tt.method, tt.path, tt.body, io.Discard)
 			if rec.Code != tt.wantStatus || accounts.asked != tt.wantAsked {
 				t.Fatalf("got %d %v, asked %q, want %d and %q", rec.Code, got, accounts.asked, tt.wantStatus, tt.wantAsked)
@@ -250,7 +250,7 @@ func TestAdminUserChanges(t *testing.T) {
 		})
 		t.Run(tt.name+", without the permission", func(t *testing.T) {
 			accounts := &fakeAccountUpdater{}
-			h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, nil, accounts)
+			h := NewHandler(NewService(&fakeRepo{}, nil, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, nil, accounts)
 			rec, got := serveWith(t, h, "some.access.token", tt.method, tt.path, tt.body, io.Discard)
 			if e, _ := got["error"].(map[string]any); rec.Code != http.StatusNotFound || e["code"] != "not_found" || accounts.asked != "" {
 				t.Fatalf("got %d %v, asked %q, want 404 not_found and nothing asked", rec.Code, got, accounts.asked)

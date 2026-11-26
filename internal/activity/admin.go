@@ -139,6 +139,30 @@ func (s *Service) AdminDelete(ctx context.Context, actor auth.Actor, id string) 
 	}, nil
 }
 
+// AdminPlaces returns as, activities of account userID, each with what it
+// brings now to every challenge where it counts and whether its week is
+// locked (Contributions, IsLocked), as their author sees them, for actor,
+// an admin (AdminRefusal, 404 not_found otherwise). The participations of
+// userID are read once, and only when as holds an activity.
+func (s *Service) AdminPlaces(ctx context.Context, actor auth.Actor, userID string, as []Activity) ([]Recorded, error) {
+	if err := AdminRefusal(actor.Admin); err != nil {
+		return nil, err
+	}
+	if len(as) == 0 {
+		return nil, nil
+	}
+	ps, err := s.participations.Participations(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("read participations: %w", err)
+	}
+	now := s.clock.Now()
+	out := make([]Recorded, len(as))
+	for i, a := range as {
+		out[i] = Recorded{Activity: a, Contributions: Contributions(a, ps), Locked: IsLocked(now, a.StartedAt, ps)}
+	}
+	return out, nil
+}
+
 // adminDraft refuses actor unless an admin (AdminRefusal), then validates
 // draft as an entry (validate).
 func (s *Service) adminDraft(ctx context.Context, actor auth.Actor, draft Draft) (Draft, error) {
