@@ -23,6 +23,11 @@ type Activity struct {
 	LongestSeconds int
 	LongestMeters  *int
 	Sessions       int
+	// FastestSeconds and FastestMeters are the duration and the distance
+	// of its session of the lowest pace (not the shortest) among those with
+	// a distance (nil without one), for the fastest run criterion.
+	FastestSeconds int
+	FastestMeters  *int
 }
 
 // Scorer ranks the participants of a category from the raw activities.

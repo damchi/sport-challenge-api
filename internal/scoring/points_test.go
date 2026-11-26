@@ -20,6 +20,7 @@ func session(user, sport string, start time.Time, seconds int, distance *int) Ac
 		UserID: user, SportCode: sport, StartedAt: start,
 		DurationSeconds: seconds, DistanceMeters: distance,
 		LongestSeconds: seconds, LongestMeters: distance,
+		FastestSeconds: seconds, FastestMeters: distance,
 	}
 	if seconds >= minSession {
 		a.Sessions = 1
@@ -629,6 +630,159 @@ func TestPointsWeeklyElevation(t *testing.T) {
 	}
 }
 
+func TestPointsFastestRun(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 3)
+	lock := w.WeekLocksAt
+	final := lock(3)
+	in := func(n int) time.Time { s, _ := w.WeekBounds(n); return s.Add(time.Hour) }
+	// The reference sport is ride and run has no frozen factor: the
+	// criterion uses the real distance of runs all the same.
+	fastest := Points{Criteria: []string{CriterionFastestRun}, Podium: 5, Factors: map[string]float64{"ride": 1}}
+	// run is a run of km kilometers at pace seconds per km.
+	run := func(user string, start time.Time, km, pace int) Activity {
+		return session(user, "run", start, km*pace, meters(km*1000))
+	}
+	abandoned := func(id string, left time.Time) Participant {
+		return Participant{UserID: id, Abandoned: true, AbandonedAt: at(left)}
+	}
+
+	tests := []struct {
+		name         string
+		now          time.Time
+		participants []Participant
+		activities   []Activity
+		want         []Entry
+	}{
+		{
+			name:         "the fastest run of the week counts, not the longest, and the lowest pace wins",
+			now:          final,
+			participants: users("a", "b"),
+			// a: 10 km at 5:00, 5 km at 4:30; b: 5 km at 4:40.
+			activities: []Activity{run("a", in(1), 10, 300), run("a", in(1).Add(time.Hour), 5, 270), run("b", in(1), 5, 280)},
+			want:       []Entry{{UserID: "a", Rank: 1, Value: 10}, {UserID: "b", Rank: 2, Value: 8}},
+		},
+		{
+			name:         "other sports and runs without distance do not count; no run, no rank",
+			now:          final,
+			participants: users("a", "b", "c"),
+			activities: []Activity{
+				session("a", "ride", in(1), 1800, meters(20000)), session("a", "run", in(1), 600, nil),
+				session("a", "run", in(1), 600, meters(0)),
+				session("b", "hike", in(1), 600, meters(5000)), run("c", in(1), 5, 400),
+			},
+			want: []Entry{{UserID: "c", Rank: 1, Value: 10}, {UserID: "a", Rank: 2}, {UserID: "b", Rank: 2}},
+		},
+		{
+			name:         "paces rounded to 0 s/km score, and tie",
+			now:          final,
+			participants: users("a", "b", "c"),
+			activities: []Activity{
+				session("a", "run", in(1), 1, meters(3000)), session("b", "run", in(1), 1, meters(4000)), run("c", in(1), 5, 300),
+			},
+			want: []Entry{{UserID: "a", Rank: 1, Value: 10}, {UserID: "b", Rank: 1, Value: 10}, {UserID: "c", Rank: 3, Value: 6}},
+		},
+		{
+			name:         "ties to the second per km, three of them at the edge of the top 5",
+			now:          final,
+			participants: users("a", "b", "c", "d", "e", "f", "g", "h"),
+			activities: []Activity{
+				run("a", in(1), 5, 240), run("b", in(1), 5, 250), run("c", in(1), 5, 260), run("d", in(1), 5, 270),
+				// f: 559 s over 2 km is 279.5 s/km, rounded half up to 280.
+				run("e", in(1), 5, 280), session("f", "run", in(1), 559, meters(2000)), run("g", in(1), 5, 280),
+				run("h", in(1), 5, 290),
+			},
+			want: []Entry{
+				{UserID: "a", Rank: 1, Value: 10},
+				{UserID: "b", Rank: 2, Value: 8},
+				{UserID: "c", Rank: 3, Value: 6},
+				{UserID: "d", Rank: 4, Value: 4},
+				{UserID: "e", Rank: 5, Value: 2},
+				{UserID: "f", Rank: 5, Value: 2},
+				{UserID: "g", Rank: 5, Value: 2},
+				{UserID: "h", Rank: 8},
+			},
+		},
+		{
+			name:         "6:59 on the first day of week 2: week 1 still provisional",
+			now:          lock(1).Add(-time.Minute),
+			participants: users("a", "b"),
+			activities:   []Activity{run("a", in(1), 5, 270), run("b", in(1), 5, 300)},
+			want:         []Entry{{UserID: "a", Rank: 1, Provisional: points(10)}, {UserID: "b", Rank: 1, Provisional: points(8)}},
+		},
+		{
+			name:         "7:00 on the first day of week 2: week 1 acquired",
+			now:          lock(1),
+			participants: users("a", "b"),
+			activities:   []Activity{run("a", in(1), 5, 270), run("b", in(1), 5, 300)},
+			want: []Entry{
+				{UserID: "a", Rank: 1, Value: 10, Provisional: points(0)}, {UserID: "b", Rank: 2, Value: 8, Provisional: points(0)},
+			},
+		},
+		{
+			name: "abandoned: kept in the weeks locked by the time they left, out of the others",
+			now:  final,
+			// q left after the lock of week 1, r before it.
+			participants: []Participant{abandoned("q", lock(1).Add(time.Hour)), abandoned("r", lock(1).Add(-time.Second)), {UserID: "a"}},
+			activities: []Activity{
+				run("q", in(1), 5, 240), run("r", in(1), 5, 230), run("a", in(1), 5, 300), run("q", in(2), 5, 240), run("a", in(2), 5, 300),
+			},
+			// a: 8 in week 1 behind q, 10 in week 2 alone.
+			want: []Entry{{UserID: "a", Rank: 1, Value: 18}, {UserID: "q", Abandoned: true}, {UserID: "r", Abandoned: true}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := w
+			w.Now = tt.now
+			got := fastest.Score(w, tt.participants, tt.activities)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Score() =\n%s\nwant\n%s", formatEntries(got), formatEntries(tt.want))
+			}
+		})
+	}
+
+	t.Run("the breakdown gives the pace in seconds per km, beside a criterion ranked highest first", func(t *testing.T) {
+		w := w
+		w.Now = final
+		both := Points{Criteria: []string{CriterionLongestDuration, CriterionFastestRun}, Podium: 5}
+		// a: the longest session, the slowest; b: no run.
+		got := both.Breakdown(w, users("a", "b", "c"), []Activity{
+			run("a", in(1), 10, 300), session("b", "hike", in(1), 600, meters(2000)), run("c", in(1), 5, 270),
+		})
+		want := map[string][]CriterionPoints{
+			"a": {{Criterion: CriterionLongestDuration, Rank: 1, Value: 3000, Points: 10}, {Criterion: CriterionFastestRun, Rank: 2, Value: 300, Points: 8}},
+			"b": {{Criterion: CriterionLongestDuration, Rank: 3, Value: 600, Points: 6}, {Criterion: CriterionFastestRun}},
+			"c": {{Criterion: CriterionLongestDuration, Rank: 2, Value: 1350, Points: 8}, {Criterion: CriterionFastestRun, Rank: 1, Value: 270, Points: 10}},
+		}
+		for user, criteria := range want {
+			if line := got[user][0].Criteria; !reflect.DeepEqual(line, criteria) {
+				t.Errorf("Breakdown() %s week 1 = %+v, want %+v", user, line, criteria)
+			}
+		}
+	})
+}
+
+func TestPaceRounding(t *testing.T) {
+	tests := []struct {
+		name            string
+		seconds, meters int
+		want            int
+	}{
+		{name: "4:30 per km", seconds: 1350, meters: 5000, want: 270},
+		{name: "half a second rounds up", seconds: 539, meters: 2000, want: 270},
+		{name: "just under half a second rounds down", seconds: 5389, meters: 20000, want: 269},
+		{name: "under half a second per km is 0", seconds: 1, meters: 2001, want: 0},
+		{name: "half a second per km is 1", seconds: 1, meters: 2000, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pace(tt.seconds, tt.meters); got != tt.want {
+				t.Fatalf("pace(%d, %d) = %d, want %d", tt.seconds, tt.meters, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestWeekRankingMatchesRank checks that weekRanking, which ranks positions,
 // gives each participant the rank Rank gives them on the same values (none
 // for a value of 0), and the points of the scale for that rank: the ties of
@@ -675,14 +829,14 @@ func TestWeekRankingMatchesRank(t *testing.T) {
 				id := fmt.Sprintf("u%02d", k)
 				participants[k] = Participant{UserID: id}
 				values[id] = v
-				lines[k] = valueAt{k: k, value: v}
+				lines[k] = valueAt{k: k, value: v, none: v <= 0}
 			}
 			ranks := make(map[string]int, len(participants))
 			for _, e := range Rank(participants, values) {
 				ranks[e.UserID] = e.Rank
 			}
 			scale := pointsScale(tt.podium)
-			got := weekRanking(lines, scale)
+			got := weekRanking(lines, scale, false)
 			if len(got) != len(tt.values) {
 				t.Fatalf("weekRanking() returned %d lines, want %d", len(got), len(tt.values))
 			}

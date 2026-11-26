@@ -11,7 +11,12 @@ const (
 	CriterionLongestDistance = "longest_distance"
 	CriterionSessionCount    = "session_count"
 	CriterionWeeklyElevation = "weekly_elevation"
+	CriterionFastestRun      = "fastest_run"
 )
+
+// runSport is the sport of the fastest run criterion, whatever the
+// reference sport of the challenge.
+const runSport = "run"
 
 // Points is the points category: each week, each criterion ranks the
 // participants, and the top of each of these weekly rankings scores the
@@ -23,8 +28,9 @@ const (
 // applied by the repository, which counts the Sessions of each group.
 //
 // The scorer reads groups of sessions (Activity.LongestSeconds,
-// LongestMeters, Sessions, and ElevationMeters, the sum of their elevation
-// gains), never DurationSeconds nor DistanceMeters.
+// LongestMeters, Sessions, ElevationMeters, the sum of their elevation
+// gains, and FastestSeconds and FastestMeters), never DurationSeconds nor
+// DistanceMeters.
 type Points struct {
 	Criteria []string
 	Podium   int
@@ -77,9 +83,10 @@ type WeekPoints struct {
 }
 
 // CriterionPoints is the line of a participant in the ranking of a
-// criterion for a week: their rank in it (0 for a value of 0, which does
-// not score), their value (seconds, equivalent meters, sessions or meters
-// of elevation gain, by criterion) and the points of the scale it gives.
+// criterion for a week: their rank in it (0 without a value, which does
+// not score), their value (seconds, equivalent meters, sessions, meters of
+// elevation gain or seconds per km, by criterion) and the points of the
+// scale it gives.
 type CriterionPoints struct {
 	Criterion string
 	Rank      int
@@ -114,9 +121,10 @@ func (p Points) Breakdown(w Window, participants []Participant, activities []Act
 		for c, criterion := range p.Criteria {
 			lines = lines[:0]
 			for k, i := range ranked {
-				lines = append(lines, valueAt{k: k, value: week[i].of(criterion)})
+				v, none := week[i].of(criterion)
+				lines = append(lines, valueAt{k: k, value: v, none: none})
 			}
-			for _, l := range weekRanking(lines, scale) {
+			for _, l := range weekRanking(lines, scale, criterion == CriterionFastestRun) {
 				criteria[l.k*nc+c] = CriterionPoints{Criterion: criterion, Rank: l.rank, Value: l.value, Points: l.points}
 				totals[l.k] += l.points
 			}
@@ -144,21 +152,35 @@ type best struct {
 	sessions       int
 	// elevationMeters is the elevation gain of the week, in real meters.
 	elevationMeters int
+	// fastestPace is the lowest pace of a run of the week, in seconds per
+	// km, when hasPace: a pace of 0 is a value.
+	fastestPace int
+	hasPace     bool
 }
 
-// of is the value of b on criterion.
-func (b best) of(criterion string) int {
+// of is the value of b on criterion, and none when it has no value, which
+// does not score: no run for the fastest run, 0 for the others.
+func (b best) of(criterion string) (value int, none bool) {
 	switch criterion {
 	case CriterionLongestDuration:
-		return b.longestSeconds
+		value = b.longestSeconds
 	case CriterionLongestDistance:
-		return b.longestMeters
+		value = b.longestMeters
 	case CriterionSessionCount:
-		return b.sessions
+		value = b.sessions
 	case CriterionWeeklyElevation:
-		return b.elevationMeters
+		value = b.elevationMeters
+	case CriterionFastestRun:
+		return b.fastestPace, !b.hasPace
 	}
-	return 0
+	return value, value <= 0
+}
+
+// pace is the pace of a session in seconds per km, rounded to the second,
+// half a second up (README §2.3), in exact integer arithmetic. meters is
+// positive.
+func pace(seconds, meters int) int {
+	return (2000*seconds + meters) / (2 * meters)
 }
 
 // weeklyBests is what each participant did in each started week n:
@@ -194,28 +216,47 @@ func (p Points) weeklyBests(w Window, started int, participants []Participant, a
 		if a.ElevationMeters != nil {
 			b.elevationMeters += *a.ElevationMeters
 		}
+		if a.SportCode == runSport && a.FastestMeters != nil && *a.FastestMeters > 0 {
+			if v := pace(a.FastestSeconds, *a.FastestMeters); !b.hasPace || v < b.fastestPace {
+				b.fastestPace, b.hasPace = v, true
+			}
+		}
 	}
 	return bests
 }
 
 // valueAt is the value of the participant at position k of the ranked
-// participants of a week, on a criterion, and what it gives in the ranking.
+// participants of a week, on a criterion, and what it gives in the ranking;
+// none when the participant has no value on it.
 type valueAt struct {
 	k, value, rank, points int
+	none                   bool
 }
 
-// weekRanking ranks the values of a week on a criterion, highest first,
-// and gives the points of the scale to its top: equal values share the
-// rank and the points, at the edge of the top too; a value of 0 has no
-// rank and does not score. It sorts lines in place and returns them. It
-// shares the ties of Rank, on positions rather than user IDs: the order
-// within a tie does not matter here.
-func weekRanking(lines []valueAt, scale []int) []valueAt {
-	slices.SortFunc(lines, func(a, b valueAt) int { return cmp.Compare(b.value, a.value) })
+// weekRanking ranks the values of a week on a criterion, highest first, or
+// lowest first when ascending (the fastest run), and gives the points of
+// the scale to its top: equal values share the rank and the points, at the
+// edge of the top too; a line without value has no rank and does not
+// score. It sorts lines in place and returns them. It shares the ties of
+// Rank, on positions rather than user IDs: the order within a tie does not
+// matter here.
+func weekRanking(lines []valueAt, scale []int, ascending bool) []valueAt {
+	slices.SortFunc(lines, func(a, b valueAt) int {
+		if a.none != b.none {
+			if a.none {
+				return 1
+			}
+			return -1
+		}
+		if ascending {
+			return cmp.Compare(a.value, b.value)
+		}
+		return cmp.Compare(b.value, a.value)
+	})
 	for j := range lines {
 		l := &lines[j]
 		switch {
-		case l.value <= 0:
+		case l.none:
 			l.rank, l.value = 0, 0
 		case j > 0 && l.value == lines[j-1].value:
 			l.rank = lines[j-1].rank
