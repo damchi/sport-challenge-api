@@ -567,7 +567,7 @@ func resolveUser(users *user.Service) auth.UserIDResolver {
 }
 
 // newRouter registers the routes of the contract behind the middlewares of
-// README §5.7: CORS, RateLimitIP, then the protection (Authenticate,
+// README §5.7: Timeout, CORS, RateLimitIP, then the protection (Authenticate,
 // CurrentUser, RateLimitUser) on every route except the public list below.
 // Protect is added before the routes, so it applies to all of them, including
 // the ones added later. Each request is then checked against the contract

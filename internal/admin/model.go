@@ -1,8 +1,9 @@
-// Package admin holds the cross-module reads of the administration of the
-// app (README §2.12): the figures of the dashboard, every challenge and
-// every account, deleted ones included, for the accounts with the admin
-// permission of their access token. The admin changes are use cases of each module, not of
-// this one.
+// Package admin holds the administration of the app (README §2.12), for the
+// accounts with the admin permission of their access token: the cross-module
+// reads (the figures of the dashboard, every challenge and every account,
+// deleted ones included) and the orchestration of the admin changes (their
+// transaction and locks, journal, recompute and preview). The changes
+// themselves stay use cases of each module.
 package admin
 
 import (

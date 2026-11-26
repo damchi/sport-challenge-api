@@ -41,11 +41,13 @@ make docker-up / docker-down   PostgreSQL (émulateur de stockage en V1.1)
 Structure **cible** : chaque dossier est créé par le premier ticket qui y met du code utile.
 
 ```
-cmd/api, cmd/worker
+cmd/api, cmd/worker, cmd/migrate
 internal/
   platform/   config, db, httpx, auth, storage, clock, apperr
+  api         code generated from api/openapi.yaml (make generate)
+  health      GET /health, GET /ready
   user, challenge, invitation, sport, activity, scoring,
-  leaderboard, closure, workerrun, badge, integration (V2+), notification (V3)
+  leaderboard, closure, workerrun, admin, badge (V1.1), integration (V2+), notification (V3)
 migrations/   api/openapi.yaml   deploy/   .github/workflows/
 ```
 
