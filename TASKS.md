@@ -124,7 +124,7 @@ Les tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` ne 
 
 ## Épopées
 
-Les tickets de chaque épopée, avec leurs points, sont les issues GitHub qui portent son étiquette (`E0` à `E9`) : la liste à jour est là, pas ici.
+La liste à jour des tickets est dans les issues GitHub, pas ici. Les tickets importés depuis ce fichier portent l'étiquette de leur épopée (`E0` à `E9`) ; beaucoup de ceux créés ensuite (audits, administration…) n'en ont pas. Un ticket créé avec `ticket new --like <ticket voisin>` reprend l'épopée de son voisin.
 
 | Épopée | Contenu |
 |---|---|
