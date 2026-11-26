@@ -10,7 +10,7 @@ description: Ajoute une route à l'API du backend Sport Challenge en partant du 
 1. **Vérifie la règle** : relis la règle fonctionnelle concernée dans le `README.md` (§2) et la liste des routes (§5.2). Si une décision est ❓, demande avant d'écrire.
 2. **Contrat d'abord** : modifie `api/openapi.yaml` (chemin, méthode, `operationId`, schémas de requête et de réponse, codes d'erreur possibles, sécurité), puis `make openapi-lint` et `make generate`. Le routage est **généré** dans `internal/api/api.gen.go` (jamais modifié à la main) : n'écris aucun `router.GET(...)`. Le flux complet est décrit dans `CONTRIBUTING.md` (« Ajouter ou modifier une route »).
 3. **Handler fin** : implémente la méthode ajoutée à `api.StrictServerInterface` (un objet de requête typé en entrée, une réponse typée du contrat en sortie, pas de `gin.Context`). Récupère l'utilisateur **depuis le contexte** (jamais depuis un paramètre), appelle le service, renvoie la réponse. Si le module est nouveau, câble son implémentation dans `cmd/api/main.go` (`api.NewStrictHandlerWithOptions`) sans retirer les gestionnaires d'erreur de `httpx`.
-4. **Service** : vérifie l'**autorisation** (créateur, participant, public ; challenge privé = participants et invités seulement), applique les règles métier, renvoie des erreurs `apperr` avec un code stable.
+4. **Service** : vérifie l'**autorisation** d'après la matrice des droits (README §5.7), avec une fonction pure de `policy.go`, applique les règles métier (README §2), renvoie des erreurs `apperr` avec un code stable.
 5. **Tests** :
    - service : table-driven avec un faux repository, y compris les cas interdits ;
    - handler : `httptest` (statuts, format d'erreur, authentification absente ou invalide), et **chaque** réponse validée contre le contrat avec `apitest.ValidateResponse`.
@@ -24,9 +24,3 @@ description: Ajoute une route à l'API du backend Sport Challenge en partant du 
 - Format d'erreur unique : `{ "error": { "code": "challenge_not_found", "message": "..." } }`. Le `code` est stable (`snake_case`, en anglais) ; le client le traduit.
 - Statuts : 200/201/204 en succès ; 400 forme invalide ; 401 non authentifié ; 403 interdit ; 404 introuvable (aussi pour une ressource privée dont l'existence ne doit pas fuiter) ; 409 conflit ; 422 règle métier violée.
 - Aucune donnée personnelle ni jeton dans les logs de la route.
-
-## Rappels métier fréquents
-
-- Une activité hors de la fenêtre du challenge est refusée ; après la fin, aucune écriture n'est possible.
-- Les catégories ne sont pas modifiables après la création ; titre et description le sont.
-- Rejoindre : possible seulement jusqu'à la fin de la première semaine.

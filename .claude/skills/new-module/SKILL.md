@@ -16,7 +16,7 @@ internal/<nom>/
 ├── model.go            entités (tags GORM pour le mapping, pas pour le schéma)
 ├── service.go          règles métier + interface Repository (définie ICI, côté consommateur)
 ├── repository.go       implémentation GORM ou SQL, seul accès à la base
-├── handler.go          routes Gin, fin : parse, appelle le service, répond
+├── handler.go          méthodes du serveur généré (api.StrictServerInterface), fines : appellent le service
 ├── rules.go            (si utile) validation pure, sans dépendance
 ├── policy.go           (si utile) qui peut faire quoi : fonctions pures, testées sans base
 └── service_test.go     tests unitaires avec un faux repository
@@ -29,8 +29,8 @@ internal/<nom>/
 3. **Modèle et règles** : `model.go`, puis `rules.go` avec ses tests.
 4. **Service** : définis l'interface `Repository` dans `service.go` avec seulement les méthodes dont le service a besoin. Le temps vient de `clock.Clock` injecté, jamais de `time.Now()`.
 5. **Repository** : implémente l'interface. Contexte en premier paramètre ; transactions via le helper de `platform/db` quand plusieurs écritures vont ensemble ; pas de `Preload` en boucle.
-6. **Handler** : méthode `Register(r *gin.RouterGroup)` ; lit la requête, appelle le service, traduit les erreurs métier en réponses (format `{ "error": { "code", "message" } }`).
-7. **Câblage** : instancie repository → service → handler dans `cmd/api/main.go` (et dans `cmd/worker/main.go` si une tâche en a besoin).
+6. **Handler** : implémente les méthodes que `make generate` ajoute à `api.StrictServerInterface` (skill `new-endpoint`) : requête typée en entrée, appel du service, réponse typée du contrat en sortie. Aucun routage écrit à la main ; les erreurs `apperr` sont traduites en réponses par `platform/httpx`.
+7. **Câblage** : instancie repository → service → handler dans `cmd/api/main.go` (`api.NewStrictHandlerWithOptions`), et dans `cmd/worker/main.go` si une tâche en a besoin.
 8. **Tests** : unitaires (table-driven) ; test d'intégration sur le repository si le SQL est non trivial.
 
 ## Règles
