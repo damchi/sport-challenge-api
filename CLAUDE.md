@@ -145,7 +145,7 @@ Les règles produit sont **uniquement** dans le README : lis la section concern�
 
 ## Agents et skills
 
-Du dépôt (`.claude/skills/`) :
+Du dépôt (`.claude/skills/` et `.claude/agents/`) :
 
 | Nom | Type | Quand l'utiliser |
 |---|---|---|

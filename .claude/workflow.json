@@ -15,7 +15,7 @@
     { "agent": "backend-review:openapi-contract-reviewer", "paths": ["api/openapi.yaml"] },
     { "agent": "backend-review:sql-query-reviewer", "paths": ["internal/*/repository.go"] },
     { "agent": "dev-workflow:spec-guardian", "paths": ["internal/scoring/**", "internal/*/rules.go", "internal/*/service.go"] },
-    { "agent": "dev-workflow:rules-tester", "paths": ["internal/scoring/**", "internal/*/rules.go"] },
+    { "agent": "backend-review:rules-tester", "paths": ["internal/scoring/**", "internal/*/rules.go"] },
     { "agent": "closure-reviewer", "paths": ["internal/scoring/window.go", "internal/closure/**", "internal/activity/repository.go", "internal/activity/policy.go", "internal/admin/corrections.go", "internal/admin/repository.go", "internal/platform/db/weeklock.go", "cmd/worker/**"] }
   ],
   "rules": ["README.md §2"],
