@@ -490,11 +490,11 @@ func (s *Service) Join(ctx context.Context, actorID, id string) (Detail, error) 
 // InvitationDeadline returns the end of week 1 of challenge id, when an
 // invitation to it expires, once actorID may invite to it (InviteRefusal:
 // visible, creator or participant allowed by members_can_invite, before the
-// end of week 1). A missing or deleted challenge answers 404
-// challenge_not_found. It writes nothing: module invitation stores the
-// invitation.
-func (s *Service) InvitationDeadline(ctx context.Context, actorID, id string) (time.Time, error) {
-	now := s.clock.Now()
+// end of week 1), judged at now: the creation instant of the invitation, so
+// that an invitation the rule lets through never expires before it is
+// created. A missing or deleted challenge answers 404 challenge_not_found. It
+// writes nothing: module invitation stores the invitation.
+func (s *Service) InvitationDeadline(ctx context.Context, actorID, id string, now time.Time) (time.Time, error) {
 	c, m, err := s.repo.Get(ctx, id, actorID, now)
 	if errors.Is(err, errChallengeNotFound) {
 		return time.Time{}, apperr.New(apperr.CodeChallengeNotFound, nil)
@@ -529,7 +529,7 @@ func (s *Service) Abandon(ctx context.Context, actorID, id string) (Detail, erro
 	err := s.repo.Abandon(ctx, id, actorID, s.clock.Now(), func(c Challenge, m Membership) (bool, time.Time, error) {
 		now := s.clock.Now()
 		noop, err := AbandonRefusal(m, c.Visibility, now, c.EndsAt)
-		return noop, now, err
+		return noop, AbandonInstant(m, now), err
 	})
 	if errors.Is(err, errChallengeNotFound) {
 		return Detail{}, apperr.New(apperr.CodeChallengeNotFound, nil)
@@ -664,7 +664,7 @@ func (s *Service) Exclude(ctx context.Context, actorID, id, targetID string) err
 	err := s.repo.Exclude(ctx, id, actorID, targetID, s.clock.Now(), func(c Challenge, actor, target Membership) (bool, time.Time, error) {
 		now := s.clock.Now()
 		noop, err := ExcludeRefusal(actor, target, c.Visibility, now, c.EndsAt)
-		return noop, now, err
+		return noop, AbandonInstant(target, now), err
 	})
 	if errors.Is(err, errChallengeNotFound) {
 		return apperr.New(apperr.CodeChallengeNotFound, nil)

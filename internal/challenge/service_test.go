@@ -1276,10 +1276,13 @@ func TestServiceAbandon(t *testing.T) {
 		membership Membership
 		now        time.Time
 		wantWrite  bool
+		wantAt     time.Time // zero: the clock's now
 		wantRole   Role
 		want       apperr.Code
 	}{
 		{name: "active participant", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, now: endsAt.Add(-time.Second), wantWrite: true, wantRole: RoleAbandoned},
+		{name: "joined at the clock's now", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive, JoinedAt: new(endsAt.Add(-time.Hour))}, now: endsAt.Add(-time.Hour), wantWrite: true, wantRole: RoleAbandoned},
+		{name: "joined on a clock a millisecond ahead: abandoned at the join", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive, JoinedAt: new(endsAt.Add(-time.Hour + time.Millisecond))}, now: endsAt.Add(-time.Hour), wantWrite: true, wantAt: endsAt.Add(-time.Hour + time.Millisecond), wantRole: RoleAbandoned},
 		{name: "creator keeps the creator role", visibility: VisibilityPublic, membership: Membership{Creator: true, Participant: ParticipantActive}, now: endsAt.Add(-time.Hour), wantWrite: true, wantRole: RoleCreator},
 		{name: "again: idempotent, nothing written", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantAbandoned}, now: endsAt.Add(-time.Hour), wantRole: RoleAbandoned},
 		{name: "at the exact end", visibility: VisibilityPublic, membership: Membership{Participant: ParticipantActive}, now: endsAt, want: apperr.CodeChallengeEnded},
@@ -1302,8 +1305,12 @@ func TestServiceAbandon(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if wrote := !repo.abandonedAt.IsZero(); wrote != tt.wantWrite || (wrote && !repo.abandonedAt.Equal(tt.now)) {
-				t.Fatalf("abandoned at %s, want written %v at the clock's now", repo.abandonedAt, tt.wantWrite)
+			wantAt := tt.wantAt
+			if wantAt.IsZero() {
+				wantAt = tt.now
+			}
+			if wrote := !repo.abandonedAt.IsZero(); wrote != tt.wantWrite || (wrote && !repo.abandonedAt.Equal(wantAt)) {
+				t.Fatalf("abandoned at %s, want written %v at %s", repo.abandonedAt, tt.wantWrite, wantAt)
 			}
 			if d.Role != tt.wantRole || d.Participant != ParticipantAbandoned {
 				t.Fatalf("detail role %v, participation %s, want %v and abandoned", d.Role, d.Participant, tt.wantRole)
@@ -1328,7 +1335,9 @@ func (d *duplicateJoin) Join(context.Context, string, string, time.Time, func(Ch
 }
 
 // TestServiceInvitationDeadline: the end of week 1 of stored(), once the
-// rule lets the actor invite; the invitations are judged at the clock's now.
+// rule lets the actor invite; the rule and the invitations are judged at the
+// instant given (the creation instant of the invitation), not at the clock's
+// now, which has passed the end of week 1 meanwhile.
 func TestServiceInvitationDeadline(t *testing.T) {
 	deadline := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC) // end of week 1 of stored()
 	tests := []struct {
@@ -1351,9 +1360,9 @@ func TestServiceInvitationDeadline(t *testing.T) {
 			c := stored(tt.visibility)
 			c.MembersCanInvite = tt.membersCanInvite
 			repo := &fakeRepository{challenge: c, membership: tt.membership}
-			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(tt.now)).InvitationDeadline(t.Context(), actor, c.ID)
+			got, err := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(deadline.Add(time.Hour))).InvitationDeadline(t.Context(), actor, c.ID, tt.now)
 			if !repo.invitationsAt.Equal(tt.now) {
-				t.Fatalf("invitations judged at %s, want the clock's now %s", repo.invitationsAt, tt.now)
+				t.Fatalf("invitations judged at %s, want the instant given %s", repo.invitationsAt, tt.now)
 			}
 			if tt.want == "" {
 				if err != nil || !got.Equal(deadline) {
@@ -1369,12 +1378,12 @@ func TestServiceInvitationDeadline(t *testing.T) {
 }
 
 func TestServiceInvitationDeadlineMissingAndFailure(t *testing.T) {
-	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x")
+	_, err := NewService(&fakeRepository{}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x", now)
 	if !errors.Is(err, apperr.New(apperr.CodeChallengeNotFound, nil)) {
 		t.Fatalf("missing: %v, want challenge_not_found", err)
 	}
 	storage := errors.New("connection refused")
-	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x")
+	_, err = NewService(&fakeRepository{err: storage}, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now)).InvitationDeadline(t.Context(), actor, "x", now)
 	var appErr *apperr.Error
 	if !errors.Is(err, storage) || errors.As(err, &appErr) {
 		t.Fatalf("error = %v, want it to wrap %v as an internal error", err, storage)
@@ -1403,9 +1412,12 @@ func TestServiceExclude(t *testing.T) {
 		target    Membership
 		now       time.Time
 		wantWrite bool
+		wantAt    time.Time // zero: the clock's now
 		want      apperr.Code
 	}{
 		{name: "creator excludes a participant", actor: creator, target: Membership{Participant: ParticipantActive}, now: endsAt.Add(-time.Second), wantWrite: true},
+		{name: "target joined at the clock's now", actor: creator, target: Membership{Participant: ParticipantActive, JoinedAt: new(endsAt.Add(-time.Hour))}, now: endsAt.Add(-time.Hour), wantWrite: true},
+		{name: "target joined on a clock a millisecond ahead: excluded at the join", actor: creator, target: Membership{Participant: ParticipantActive, JoinedAt: new(endsAt.Add(-time.Hour + time.Millisecond))}, now: endsAt.Add(-time.Hour), wantWrite: true, wantAt: endsAt.Add(-time.Hour + time.Millisecond)},
 		{name: "already out: nothing written", actor: creator, target: Membership{Participant: ParticipantAbandoned}, now: endsAt.Add(-time.Hour)},
 		{name: "participant: forbidden", actor: Membership{Participant: ParticipantActive}, target: Membership{Participant: ParticipantActive}, now: endsAt.Add(-time.Hour), want: apperr.CodeForbidden},
 		{name: "creator target", actor: creator, target: creator, now: endsAt.Add(-time.Hour), want: apperr.CodeCannotExcludeCreator},
@@ -1423,8 +1435,12 @@ func TestServiceExclude(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if wrote := !repo.abandonedAt.IsZero(); wrote != tt.wantWrite || (wrote && !repo.abandonedAt.Equal(tt.now)) {
-				t.Fatalf("abandoned at %s, want written %v at the clock's now", repo.abandonedAt, tt.wantWrite)
+			wantAt := tt.wantAt
+			if wantAt.IsZero() {
+				wantAt = tt.now
+			}
+			if wrote := !repo.abandonedAt.IsZero(); wrote != tt.wantWrite || (wrote && !repo.abandonedAt.Equal(wantAt)) {
+				t.Fatalf("abandoned at %s, want written %v at %s", repo.abandonedAt, tt.wantWrite, wantAt)
 			}
 		})
 	}

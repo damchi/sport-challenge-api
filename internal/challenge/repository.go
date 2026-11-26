@@ -168,6 +168,7 @@ var errChallengeNotFound = errors.New("challenge not found")
 const membershipQuery = `SELECT c.*,
 	EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
 	(SELECT status FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS participant,
+	(SELECT joined_at FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS joined_at,
 	(SELECT abandoned_at FROM participants WHERE challenge_id = c.id AND user_id = @actor) AS abandoned_at,
 	` + invitedColumn + ` AS invited,
 	EXISTS (SELECT 1 FROM users WHERE id = @actor AND anonymized_at IS NOT NULL) AS account_deleted,
@@ -190,6 +191,7 @@ func readWithMembership(gdb *gorm.DB, id, actorID string, now time.Time) (Challe
 		Challenge
 		Creator          bool
 		Participant      *string
+		JoinedAt         *time.Time
 		AbandonedAt      *time.Time
 		Invited          bool
 		AccountDeleted   bool
@@ -202,7 +204,7 @@ func readWithMembership(gdb *gorm.DB, id, actorID string, now time.Time) (Challe
 	if row.ID == "" {
 		return Challenge{}, Membership{}, fmt.Errorf("read challenge: %w", errChallengeNotFound)
 	}
-	m := Membership{Creator: row.Creator, Invited: row.Invited, AccountDeleted: row.AccountDeleted, AbandonedAt: row.AbandonedAt}
+	m := Membership{Creator: row.Creator, Invited: row.Invited, AccountDeleted: row.AccountDeleted, JoinedAt: row.JoinedAt, AbandonedAt: row.AbandonedAt}
 	if row.Participant != nil {
 		m.Participant = ParticipantStatus(*row.Participant)
 	}

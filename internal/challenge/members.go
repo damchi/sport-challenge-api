@@ -106,7 +106,7 @@ func (s *Service) AdminExcludeParticipant(ctx context.Context, actor auth.Actor,
 		if err == nil && !noop {
 			out = MemberChange{Old: map[string]any{memberStatus: ParticipantActive}, New: map[string]any{memberStatus: ParticipantAbandoned}}
 		}
-		return noop, s.clock.Now(), err
+		return noop, AbandonInstant(m, s.clock.Now()), err
 	})
 	if err := challengeErr(err); err != nil {
 		return MemberChange{}, err
