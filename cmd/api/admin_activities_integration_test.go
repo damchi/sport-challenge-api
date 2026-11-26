@@ -295,6 +295,114 @@ func TestAdminActivityCorrections(t *testing.T) {
 		}
 	})
 
+	// keyed counts the activities of userID recorded with key, and those of
+	// them not deleted.
+	keyed := func(userID, key string) (all, live int) {
+		t.Helper()
+		err := pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE deleted_at IS NULL)
+			FROM activities WHERE user_id = $1 AND idempotency_key = $2`, userID, key).Scan(&all, &live)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return all, live
+	}
+	// results reads the eliminations and the frozen results of every
+	// challenge.
+	results := func() []string {
+		t.Helper()
+		out := []string{}
+		for _, c := range []string{spring, april, may} {
+			out = append(out, eliminated(c)...)
+		}
+		rows, err := pool.Query(t.Context(), `SELECT category_id::text || payload::text FROM result_snapshot ORDER BY category_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	t.Run("idempotency key: the same key for two accounts records two activities", func(t *testing.T) {
+		key, before := "shared-key", len(journal())
+		for _, userID := range []string{bob, dan} {
+			if _, err := corrections.Record(t.Context(), adminActor, userID, &key, run(toronto(t, 2026, 5, 13, 10), 3000), "Clé partagée "+userID, false); err != nil {
+				t.Fatal(err)
+			}
+			if all, _ := keyed(userID, key); all != 1 {
+				t.Fatalf("%d activities with the key for %s, want one", all, userID)
+			}
+		}
+		if got := len(journal()) - before; got != 2 {
+			t.Fatalf("%d new journal lines, want two", got)
+		}
+	})
+
+	t.Run("idempotency key: a key of the account's own entry records nothing", func(t *testing.T) {
+		key := "own-key"
+		// After every challenge: counts nowhere, locked nowhere.
+		if _, err := activities.Record(t.Context(), bob, &key, run(toronto(t, 2026, 5, 19, 10), 3000)); err != nil {
+			t.Fatal(err)
+		}
+		before := len(journal())
+		previews, err := corrections.Record(t.Context(), adminActor, bob, &key, run(toronto(t, 2026, 5, 14, 10), 3000), "Clé de bob", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if all, _ := keyed(bob, key); len(previews) != 0 || all != 1 || len(journal()) != before {
+			t.Fatalf("%d previews, %d activities, %d new journal lines; want none, one, none", len(previews), all, len(journal())-before)
+		}
+	})
+
+	t.Run("idempotency key: a replay with another body records nothing and judges nothing again", func(t *testing.T) {
+		key := "body-key"
+		if _, err := corrections.Record(t.Context(), adminActor, bob, &key, run(toronto(t, 2026, 5, 14, 10), 3000), "Clé de bob avant rejeu", false); err != nil {
+			t.Fatal(err)
+		}
+		before, judged := len(journal()), results()
+		// Counted, a long run in week 2 of spring and april would change
+		// their frozen results, which carry the proof; the eliminations
+		// are only a guard, since it would eliminate nobody.
+		long := activity.Draft{SportCode: "run", StartedAt: toronto(t, 2026, 4, 15, 10), DurationSeconds: 7200, DistanceMeters: new(20000)}
+		previews, err := corrections.Record(t.Context(), adminActor, bob, &key, long, "Clé rejouée autrement", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if all, _ := keyed(bob, key); len(previews) != 0 || all != 1 || len(journal()) != before {
+			t.Fatalf("%d previews, %d activities, %d new journal lines; want none, one, none", len(previews), all, len(journal())-before)
+		}
+		if got := results(); !slices.Equal(got, judged) {
+			t.Fatalf("results after the replay\n%v\nwant\n%v", got, judged)
+		}
+	})
+
+	t.Run("idempotency key: a replay after the deletion answers activity_not_found", func(t *testing.T) {
+		key := "deleted-key"
+		if _, err := corrections.Record(t.Context(), adminActor, bob, &key, run(toronto(t, 2026, 5, 15, 10), 3000), "Séance de bob supprimée", false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := corrections.Delete(t.Context(), adminActor, line("Séance de bob supprimée").TargetID, "Suppression de bob", false); err != nil {
+			t.Fatal(err)
+		}
+		before := len(journal())
+		_, err := corrections.Record(t.Context(), adminActor, bob, &key, run(toronto(t, 2026, 5, 15, 10), 3000), "Séance de bob rejouée", false)
+		if !errors.Is(err, apperr.New(apperr.CodeActivityNotFound, nil)) {
+			t.Fatalf("replayed after the deletion: %v, want activity_not_found", err)
+		}
+		if all, live := keyed(bob, key); all != 1 || live != 0 || len(journal()) != before {
+			t.Fatalf("%d activities, %d not deleted, %d new journal lines; want one, none, none", all, live, len(journal())-before)
+		}
+	})
+
 	t.Run("validation and overlap unchanged", func(t *testing.T) {
 		before := len(journal())
 		_, err := corrections.Record(t.Context(), adminActor, bob, nil, run(toronto(t, 2026, 4, 14, 10), 4000), "Séance de bob", false)
