@@ -386,7 +386,9 @@ def cmd_cleanup(args):
         git("branch", "-D", branch)
         where = "local"
         # GitHub deletes the branch at merge time; this only covers branches merged before that setting.
-        if branch in remote:
+        if branch in remote and git("rev-parse", f"origin/{branch}") != pr["headRefOid"]:
+            where = "local seulement, la branche GitHub a d'autres commits"
+        elif branch in remote:
             push = subprocess.run(["git", "push", "--quiet", "origin", "--delete", branch], capture_output=True, text=True, cwd=ROOT)
             where = "local et GitHub" if push.returncode == 0 else f"local seulement, GitHub a refusé : {push.stderr.strip()}"
         deleted.append(f"{branch} (#{pr['number']}, {where})")
