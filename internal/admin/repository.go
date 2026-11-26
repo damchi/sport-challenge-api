@@ -347,7 +347,7 @@ func (r *Repository) ofUser(ctx context.Context, id string, read func(tx *gorm.D
 // role in each; errUserNotFound when there is no such account.
 func (r *Repository) ListUserChallenges(ctx context.Context, id string, q PageQuery) ([]UserChallengeRow, error) {
 	var query strings.Builder
-	query.WriteString(`SELECT c.id, c.title, c.visibility, c.starts_at, c.ends_at, c.created_at, c.deleted_at,
+	query.WriteString(`SELECT c.id, c.title, c.visibility, c.timezone, c.starts_at, c.ends_at, c.created_at, c.deleted_at,
 		cc.user_id IS NOT NULL AS is_creator, p.status AS participant_status, p.joined_at, p.abandoned_at
 		FROM (SELECT challenge_id FROM participants WHERE user_id = @id
 			UNION SELECT challenge_id FROM challenge_creators WHERE user_id = @id) m

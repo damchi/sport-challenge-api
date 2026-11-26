@@ -836,6 +836,7 @@ func (h *Handler) ListAdminUserChallenges(ctx context.Context, req api.ListAdmin
 			Id:          id,
 			Title:       c.Title,
 			Visibility:  api.AdminUserChallengeVisibility(c.Visibility),
+			Timezone:    c.Timezone,
 			Status:      api.AdminUserChallengeStatus(c.Status),
 			StartsAt:    c.StartsAt.UTC(),
 			EndsAt:      c.EndsAt.UTC(),
