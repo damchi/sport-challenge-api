@@ -270,11 +270,12 @@ func TestReferenceSportDefault(t *testing.T) {
 	}
 }
 
-// TestErasureIndexes checks that each query of the deletion of an account
-// filtering by user can use the index made for it. The test tables are tiny,
-// so sequential scans are disabled: the plan then shows whether an index
-// serves the query at all.
-func TestErasureIndexes(t *testing.T) {
+// TestQueryIndexes checks that each query of the deletion of an account
+// filtering by user (000011), and each read of the admin and the recompute
+// (000023), can use the index made for it. The test tables are tiny, so
+// sequential scans are disabled: the plan then shows whether an index serves
+// the query at all.
+func TestQueryIndexes(t *testing.T) {
 	pool := testdb.New(t)
 	tests := []struct {
 		name  string
@@ -288,6 +289,11 @@ func TestErasureIndexes(t *testing.T) {
 		// The check of elimination_participant_fkey when a participation is deleted.
 		{name: "elimination of a participation", query: "SELECT 1 FROM elimination WHERE challenge_id = '" + challengeID + "' AND user_id = '" + userID + "'", index: "elimination_user_id_challenge_id_idx"},
 		{name: "invitations", query: "DELETE FROM invitations WHERE invited_by = '" + userID + "'", index: "invitations_invited_by_idx"},
+		{name: "dashboard activities", query: "SELECT count(*) FROM activities WHERE deleted_at IS NULL AND created_at >= now() - interval '7 days'", index: "activities_created_at_idx"},
+		{name: "eliminations of a challenge (ClearResults)", query: "DELETE FROM elimination WHERE challenge_id = '" + challengeID + "'", index: "elimination_challenge_id_idx"},
+		{name: "invitations of a challenge (Reschedule)", query: "UPDATE invitations SET expires_at = now() WHERE challenge_id = '" + challengeID + "' AND revoked_at IS NULL", index: "invitations_challenge_id_idx"},
+		{name: "admin list of challenges", query: "SELECT id FROM challenges ORDER BY created_at DESC, id DESC LIMIT 51", index: "challenges_created_at_id_idx"},
+		{name: "admin list of accounts", query: "SELECT id FROM users ORDER BY created_at DESC, id DESC LIMIT 51", index: "users_created_at_id_idx"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
