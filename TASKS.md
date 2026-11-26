@@ -111,10 +111,12 @@ Le frontend démarre en **web uniquement** (le mobile viendra en V2) et la V1 re
 
 **Décision D10 ✅** : les badges et l'upload d'avatar sont **reportés à une V1.1** pour sortir la V1 plus vite. Au lancement, les avatars sont des **initiales par défaut**.
 
-| Reporté en V1.1 | Tickets | Points | Effet |
-|---|---|---|---|
-| Badges | 059 à 064 | 23 | Pas de badges au lancement ; la table et les règles viendront ensuite sans toucher au reste |
-| Upload d'avatar | 023 | 5 | Avatars par défaut (initiales) au lancement |
+| Reporté en V1.1 | Effet |
+|---|---|
+| Badges | Pas de badges au lancement ; la table et les règles viendront ensuite sans toucher au reste |
+| Upload d'avatar | Avatars par défaut (initiales) au lancement |
+
+Les tickets reportés sont ceux qui portent l'étiquette `v1.1` dans GitHub.
 
 À **garder** même pour aller vite : fondations et CI (E0, E1), authentification (E2), catalogue de sports, challenges et participation (E4), activités avec verrouillage de semaine (E5), classement des 3 catégories (E6), clôtures et résultats figés (E7), invitations (065 et 066, indispensables aux challenges privés), limitation de débit (022) et un déploiement minimal reproductible (067, 069 à 071, 073, 076, 077). L'observabilité (072) et le runbook (074) peuvent être réduits à l'essentiel mais pas supprimés : alerte de budget et alerte d'échec du worker comprises.
 
@@ -122,18 +124,20 @@ Les tickets reportés ont le statut `Reporté (V1.1)` ; le skill `next-task` ne 
 
 ## Épopées
 
-| Épopée | Contenu | Tickets |
-|---|---|---|
-| E0 | Fondations minimales et CI | 001, 003, 002, 068, 075 |
-| E1 | Serveur minimal | 006, 007 |
-| E2 | Utilisateurs et authentification (Auth0) | 015, 016, 017, 018, 019, 020, 012, 021, 023 |
-| E3 | Catalogue de sports | 024, 025 |
-| E4 | Challenges, catégories, participation | 026, 027, 028, 029, 030, 031, 032, 033, 034, 035, 036, 037, 038, 039 |
-| E5 | Activités | 040, 041, 042, 043, 044, 045, 046 |
-| E6 | Scoring et classement | 047, 048, 049, 050, 051, 052, 053 |
-| E7 | Clôtures et worker | 054, 055, 056, 057, 058 |
-| E8 | Invitations (badges reportés en V1.1) | 059, 060, 061, 062, 063, 064, 065, 066 |
-| E9 | Sécurité avant exposition, déploiement et exploitation | 022, 067, 069, 070, 071, 072, 073, 074, 076, 077 |
+Les tickets de chaque épopée, avec leurs points, sont les issues GitHub qui portent son étiquette (`E0` à `E9`) : la liste à jour est là, pas ici.
+
+| Épopée | Contenu |
+|---|---|
+| E0 | Fondations minimales et CI |
+| E1 | Serveur minimal |
+| E2 | Utilisateurs et authentification (Auth0) |
+| E3 | Catalogue de sports |
+| E4 | Challenges, catégories, participation |
+| E5 | Activités |
+| E6 | Scoring et classement |
+| E7 | Clôtures et worker |
+| E8 | Invitations (badges reportés en V1.1) |
+| E9 | Sécurité avant exposition, déploiement et exploitation |
 
 ---
 
