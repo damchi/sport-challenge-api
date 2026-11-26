@@ -654,6 +654,45 @@ func TestAbandonIsStoredAndFinal(t *testing.T) {
 	}
 }
 
+// TestAbandonRightAfterAJoinOnAClockAhead: the joins come from an instance
+// whose clock runs a millisecond ahead; the abandon and the exclusion that
+// follow at once are stored at the join, never before it
+// (participants_abandoned_after_joined_check), instead of failing.
+func TestAbandonRightAfterAJoinOnAClockAhead(t *testing.T) {
+	svc, clk, pool, id := joinFixture(t)
+	var creatorID string
+	if err := pool.QueryRow(t.Context(), "SELECT created_by FROM challenges WHERE id = $1", id).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
+	quitter := insertProfile(t, pool, "ahead_quitter")
+	excluded := insertProfile(t, pool, "ahead_excluded")
+	before := clk.Now()
+	clk.Advance(time.Millisecond)
+	joinedAt := clk.Now()
+	for _, u := range []string{quitter, excluded} {
+		if _, err := svc.Join(t.Context(), u, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clk.Set(before)
+
+	if _, err := svc.Abandon(t.Context(), quitter, id); err != nil {
+		t.Fatalf("abandon: %v, want it stored", err)
+	}
+	if err := svc.Exclude(t.Context(), creatorID, id, excluded); err != nil {
+		t.Fatalf("exclude: %v, want it stored", err)
+	}
+	for _, u := range []string{quitter, excluded} {
+		var abandonedAt time.Time
+		if err := pool.QueryRow(t.Context(), "SELECT abandoned_at FROM participants WHERE challenge_id = $1 AND user_id = $2 AND status = 'abandoned'", id, u).Scan(&abandonedAt); err != nil {
+			t.Fatal(err)
+		}
+		if !abandonedAt.Equal(joinedAt) {
+			t.Fatalf("abandoned at %s, want the join %s", abandonedAt, joinedAt)
+		}
+	}
+}
+
 func TestAbandonByTheCreatorAndAfterTheEnd(t *testing.T) {
 	svc, clk, pool, id := joinFixture(t)
 	var creatorID string
