@@ -379,14 +379,19 @@ def cmd_cleanup(args):
                 say(f"{branch} : fusionnée, mais modifications en cours ; branche gardée.")
                 continue
             git("switch", "--quiet", default)
-            git("pull", "--ff-only", "--quiet")
             current = default
+            pull = subprocess.run(["git", "pull", "--ff-only", "--quiet"], capture_output=True, text=True, cwd=ROOT)
+            if pull.returncode != 0:
+                print(f"{default} n'a pas pu être mis à jour : {pull.stderr.strip()}")
         git("branch", "-D", branch)
+        where = "local"
+        # GitHub deletes the branch at merge time; this only covers branches merged before that setting.
         if branch in remote:
-            git("push", "--quiet", "origin", "--delete", branch, check=False)
-        deleted.append(f"{branch} (#{pr['number']})")
+            push = subprocess.run(["git", "push", "--quiet", "origin", "--delete", branch], capture_output=True, text=True, cwd=ROOT)
+            where = "local et GitHub" if push.returncode == 0 else f"local seulement, GitHub a refusé : {push.stderr.strip()}"
+        deleted.append(f"{branch} (#{pr['number']}, {where})")
     if deleted:
-        print("Branches fusionnées supprimées (local et GitHub) : " + ", ".join(deleted))
+        print("Branches fusionnées supprimées : " + ", ".join(deleted))
     else:
         say("Aucune branche fusionnée à supprimer.")
 

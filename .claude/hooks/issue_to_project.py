@@ -19,12 +19,19 @@ cmd = (data.get("tool_input") or {}).get("command", "") or ""
 if data.get("tool_name") != "Bash" or not re.search(r"\bgh\s+issue\s+create\b", cmd):
     sys.exit(0)
 
+root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
+origin = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, cwd=root).stdout.strip()
+m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$", origin)
+if not m:
+    sys.exit(0)
+
+# Only issues of this repository: `tasks.py add` receives a bare number resolved against it.
 output = json.dumps(data.get("tool_response") or "")
-numbers = sorted(set(re.findall(r"https://github\.com/[\w.-]+/[\w.-]+/issues/(\d+)", output)), key=int)
+pattern = r"https://github\.com/" + re.escape(m.group(1)) + r"/issues/(\d+)"
+numbers = sorted(set(re.findall(pattern, output)), key=int)
 if not numbers:
     sys.exit(0)
 
-root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 script = os.path.join(root, ".claude", "scripts", "tasks.py")
 lines = []
 for n in numbers:
