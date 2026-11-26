@@ -117,11 +117,12 @@ Les règles produit sont **uniquement** dans le README : lis la section concern�
 ## Workflow attendu
 
 1. Lis la partie du README concernée. S'il y a un ❓ ou un 🟡 qui bloque, pose la question.
-2. Fais un court plan avant les changements importants (plusieurs fichiers, migration, nouveau module).
-3. Pour `scoring`, les règles de temps et les règles de badges : écris d'abord les tests.
-4. Implémente, puis lance format, lint et tests.
-5. Fais relire par les agents adaptés (voir ci-dessous) avant de committer.
-6. **Git** : une fois format, lint, tests et relectures passés, tu **commits et pushes sans demander l'accord** (en anglais, un changement cohérent par commit, sur la branche du ticket). Tu présentes ensuite les fichiers modifiés, le résumé du diff et les commits poussés.
+2. Avant de coder, lance le skill du dépôt qui correspond au ticket (plusieurs si besoin) : `new-endpoint` s'il touche à `api/openapi.yaml`, `new-migration` s'il touche au schéma, `new-module` s'il crée un dossier `internal/<nom>`, `scoring-rules` s'il touche aux catégories, au classement ou aux règles de temps. Cela vaut aussi dans `/dev-workflow:next-task`.
+3. Fais un court plan avant les changements importants (plusieurs fichiers, migration, nouveau module).
+4. Pour `scoring`, les règles de temps et les règles de badges : écris d'abord les tests.
+5. Implémente, puis lance format, lint et tests.
+6. Fais relire par les agents adaptés (voir ci-dessous) avant de committer.
+7. **Git** : une fois format, lint, tests et relectures passés, tu **commits et pushes sans demander l'accord** (en anglais, un changement cohérent par commit, sur la branche du ticket). Tu présentes ensuite les fichiers modifiés, le résumé du diff et les commits poussés.
    - Tu peux utiliser `git status`, `git diff`, `git log`, `git add`, `git commit` et `git push` (branche de travail) librement.
    - **Pull request** : dès que le code est poussé, ouvre-la sans demander (`gh pr create`, titre = message du commit, description avec `Closes #<numéro>`) ; ne la fusionne jamais. Une fois ouverte, et après chaque push, attends la fin de la CI (`Monitor` sur `gh pr checks`, sans sondage), vérifie qu'elle est entièrement verte, puis lis tous les commentaires (`gh pr view --comments`, commentaires en ligne). Applique les corrections fondées (commit et push sur la même branche) ou explique pourquoi tu ne les suis pas, et recommence jusqu'à une CI verte sans commentaire en suspens. Ne dis un ticket terminé qu'à ce moment-là ; un point qui touche une règle produit (🟡 ou ❓) ou le périmètre se demande à l'utilisateur.
    - **Taille** : une pull request fait au plus 200 lignes ajoutées + supprimées (`pr_size` de `.claude/workflow.json`, mesurée par `ticket size`). Au-delà, découpe le ticket (skill `/dev-workflow:new-ticket`) ; la garde Git demande la validation de l'utilisateur pour pousser une branche plus grosse.
