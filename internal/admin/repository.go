@@ -433,13 +433,18 @@ func (r *Repository) InsertAction(ctx context.Context, a ActionRecord) error {
 	return nil
 }
 
-// EraseUserValues removes the profile values (profileFields) from the old
-// and new values of the journal lines that target account userID, as an
-// account or as a participant, in the transaction ctx carries (that of the
-// deletion of the account). The action, the instant, the target and the
-// reason stay.
+// EraseUserValues erases, in the transaction ctx carries (that of the
+// deletion of the account), the values account userID leaves in the
+// journal: the profile values (profileFields) of the lines that target it,
+// as an account or as a participant, and every old and new value of the
+// lines that target one of its activities, deleted ones included (left an
+// empty object, a creation keeping no old value). Those lines do not name
+// the author of the activity: they are found by its activities, so this
+// runs before they are deleted (the first of the erasers). The action, the
+// instant, the target, the challenges and the reason stay.
 func (r *Repository) EraseUserValues(ctx context.Context, userID string) error {
-	err := db.Conn(ctx, r.db).Exec(`UPDATE admin_actions
+	conn := db.Conn(ctx, r.db)
+	err := conn.Exec(`UPDATE admin_actions
 		SET old_value = old_value - CAST(@fields AS text[]), new_value = new_value - CAST(@fields AS text[])
 		WHERE target_id = @user_id AND target_type IN (@user, @participant)`,
 		map[string]any{
@@ -449,6 +454,15 @@ func (r *Repository) EraseUserValues(ctx context.Context, userID string) error {
 	).Error
 	if err != nil {
 		return fmt.Errorf("erase profile values of the admin journal: %w", err)
+	}
+	err = conn.Exec(`UPDATE admin_actions
+		SET old_value = CASE WHEN old_value IS NULL THEN NULL ELSE '{}'::jsonb END,
+			new_value = CASE WHEN new_value IS NULL THEN NULL ELSE '{}'::jsonb END
+		WHERE target_type = @activity AND target_id IN (SELECT id FROM activities WHERE user_id = @user_id)`,
+		map[string]any{"user_id": userID, "activity": TargetActivity},
+	).Error
+	if err != nil {
+		return fmt.Errorf("erase activity values of the admin journal: %w", err)
 	}
 	return nil
 }

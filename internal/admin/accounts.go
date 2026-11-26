@@ -85,8 +85,8 @@ func (s *AccountCorrections) run(ctx context.Context, actor auth.Actor, id, acti
 }
 
 // Delete deletes account id with the effect of DELETE /me: its deletion,
-// which erases the profile values of its journal lines too (Journal.EraseUser,
-// one of its erasers), and its own journal line commit together; its
+// which erases its values from the journal too (Journal.EraseUser, one of
+// its erasers), and its own journal line commit together; its
 // identity is then deleted at Auth0, a failure being replayed by the worker.
 func (s *AccountCorrections) Delete(ctx context.Context, actor auth.Actor, id, reason string) error {
 	var deletion user.Deletion

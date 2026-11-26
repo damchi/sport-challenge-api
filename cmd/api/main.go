@@ -123,16 +123,12 @@ func run() error {
 	deletionLock := lockForDeletionFunc(func(ctx context.Context, userID string) error {
 		return challenges.LockForDeletion(ctx, userID)
 	})
-	// The deletion of an account erases its profile from the admin journal
-	// too, whoever deletes it.
+	// The deletion of an account erases its profile and the values of its
+	// activities from the admin journal too, whoever deletes it: the journal
+	// first, as it finds the lines of the activities by them.
 	adminRepo := admin.NewRepository(gdb)
 	journal := admin.NewJournal(adminRepo, clk)
-	erasers := []user.Eraser{
-		journal,
-		eraseUserFunc(func(ctx context.Context, userID string) error { return invitations.EraseUser(ctx, userID) }),
-		eraseUserFunc(func(ctx context.Context, userID string) error { return activities.EraseUser(ctx, userID) }),
-		eraseUserFunc(func(ctx context.Context, userID string) error { return challenges.EraseUser(ctx, userID) }),
-	}
+	erasers := accountErasers(journal, &invitations, &activities, &challenges)
 	management := auth.NewAuth0Management(cfg.Auth0MgmtDomain, cfg.Auth0MgmtClientID, cfg.Auth0MgmtClientSecret)
 	users := user.NewService(user.NewRepository(gdb), deletionLock, erasers, management, clk, logger)
 
@@ -210,6 +206,22 @@ type lockForDeletionFunc func(ctx context.Context, userID string) error
 
 func (f lockForDeletionFunc) LockForDeletion(ctx context.Context, userID string) error {
 	return f(ctx, userID)
+}
+
+// accountErasers lists what the deletion of an account erases from the
+// other modules, in this order: first (the admin journal in run), then the
+// invitations, the activities and the challenges of the account. The
+// journal must come before the activities: it finds the lines of the
+// activities of the account by them (admin.Journal.EraseUser). The services
+// are given by pointer, as they are built after the user service these
+// erasers serve.
+func accountErasers(first user.Eraser, invitations **invitation.Service, activities **activity.Service, challenges **challenge.Service) []user.Eraser {
+	return []user.Eraser{
+		first,
+		eraseUserFunc(func(ctx context.Context, userID string) error { return (*invitations).EraseUser(ctx, userID) }),
+		eraseUserFunc(func(ctx context.Context, userID string) error { return (*activities).EraseUser(ctx, userID) }),
+		eraseUserFunc(func(ctx context.Context, userID string) error { return (*challenges).EraseUser(ctx, userID) }),
+	}
 }
 
 // eraseUserFunc is a function as a user.Eraser.
