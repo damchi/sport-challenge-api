@@ -628,3 +628,84 @@ func TestPointsWeeklyElevation(t *testing.T) {
 		})
 	}
 }
+
+// TestWeekRankingMatchesRank checks that weekRanking, which ranks positions,
+// gives each participant the rank Rank gives them on the same values (none
+// for a value of 0), and the points of the scale for that rank: the ties of
+// README §2.6 live in both.
+func TestWeekRankingMatchesRank(t *testing.T) {
+	tests := []struct {
+		name       string
+		podium     int
+		values     []int
+		wantPoints []int
+	}{
+		{name: "empty list", podium: 5},
+		{name: "one participant", podium: 5, values: []int{15}, wantPoints: []int{10}},
+		{name: "one participant at 0", podium: 10, values: []int{0}, wantPoints: []int{0}},
+		{name: "distinct values", podium: 5, values: []int{10, 30, 20}, wantPoints: []int{6, 10, 8}},
+		{name: "tie at the top", podium: 5, values: []int{30, 30, 20}, wantPoints: []int{10, 10, 6}},
+		{
+			name:       "tie at the edge of the top 5",
+			podium:     5,
+			values:     []int{60, 50, 40, 30, 20, 20, 10},
+			wantPoints: []int{10, 8, 6, 4, 2, 2, 0},
+		},
+		{
+			name:       "tie across the edge of the top 5",
+			podium:     5,
+			values:     []int{50, 40, 30, 20, 20, 20},
+			wantPoints: []int{10, 8, 6, 4, 4, 4},
+		},
+		{
+			name:       "tie at the edge of the top 10",
+			podium:     10,
+			values:     []int{110, 100, 90, 80, 70, 60, 50, 40, 30, 20, 20, 10},
+			wantPoints: []int{25, 18, 15, 12, 10, 8, 6, 4, 2, 1, 1, 0},
+		},
+		{name: "values at 0", podium: 5, values: []int{20, 0, 0, 10}, wantPoints: []int{10, 0, 0, 8}},
+		{name: "all at 0", podium: 10, values: []int{0, 0}, wantPoints: []int{0, 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			participants := make([]Participant, len(tt.values))
+			values := make(map[string]int, len(tt.values))
+			lines := make([]valueAt, len(tt.values))
+			for k, v := range tt.values {
+				id := fmt.Sprintf("u%02d", k)
+				participants[k] = Participant{UserID: id}
+				values[id] = v
+				lines[k] = valueAt{k: k, value: v}
+			}
+			ranks := make(map[string]int, len(participants))
+			for _, e := range Rank(participants, values) {
+				ranks[e.UserID] = e.Rank
+			}
+			scale := pointsScale(tt.podium)
+			got := weekRanking(lines, scale)
+			if len(got) != len(tt.values) {
+				t.Fatalf("weekRanking() returned %d lines, want %d", len(got), len(tt.values))
+			}
+			for _, l := range got {
+				id, v := participants[l.k].UserID, tt.values[l.k]
+				wantRank := 0
+				if v > 0 {
+					wantRank = ranks[id]
+				}
+				if l.rank != wantRank {
+					t.Errorf("%s (value %d): weekRanking rank %d, Rank gives %d", id, v, l.rank, wantRank)
+				}
+				wantScale := 0
+				if l.rank > 0 && l.rank <= len(scale) {
+					wantScale = scale[l.rank-1]
+				}
+				if l.points != wantScale {
+					t.Errorf("%s (rank %d): %d points, the scale gives %d", id, l.rank, l.points, wantScale)
+				}
+				if l.points != tt.wantPoints[l.k] {
+					t.Errorf("%s (rank %d): %d points, want %d", id, l.rank, l.points, tt.wantPoints[l.k])
+				}
+			}
+		})
+	}
+}
