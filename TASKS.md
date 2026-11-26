@@ -54,7 +54,7 @@ Correspondance avec les anciens statuts :
   - [ ] Migration : paire `.up.sql` / `.down.sql`, `up → down → up` vérifié
   - [ ] **Route ajoutée ou modifiée** : `api/openapi.yaml` mis à jour **avant** le code, `make generate` et `make openapi-lint` sans différence ni erreur, réponses validées par le test de contrat
   - [ ] **Aucun code inutilisé** : chaque fonction, type, variable de configuration ou package ajouté est utilisé par ce ticket
-  - [ ] Agents de revue lancés et points bloquants corrigés
+  - [ ] Agents de revue lancés et points bloquants corrigés. Le champ **Revue** d'un ticket nomme les agents de `CLAUDE.md` (« Agents et skills »), y compris `openapi-contract-reviewer`, `sql-query-reviewer`, `rules-tester` et `closure-reviewer`
   - [ ] README mis à jour **seulement** si l'utilisateur a validé un changement de règle
 
 ## Principe : pas de code d'avance

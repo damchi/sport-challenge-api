@@ -153,6 +153,7 @@ Du dépôt (`.claude/skills/`) :
 | `new-migration` | skill | Ajouter ou modifier le schéma de la base |
 | `new-endpoint` | skill | Ajouter une route (OpenAPI d'abord) |
 | `scoring-rules` | skill | Toucher aux catégories, au classement ou aux règles de temps |
+| `closure-reviewer` | agent | Relecture de la clôture des semaines : `internal/closure`, worker, `workerrun`, `result_snapshot`, verrou des semaines |
 
 Des plugins (les tickets peuvent garder les noms courts) :
 
@@ -164,3 +165,6 @@ Des plugins (les tickets peuvent garder les noms courts) :
 | `backend-review:go-reviewer` | agent | Relecture du code Go après modification |
 | `backend-review:migration-reviewer` | agent | Relecture de toute migration |
 | `backend-review:security-reviewer` | agent | Relecture sécurité des routes, de l'authentification et des données |
+| `backend-review:openapi-contract-reviewer` | agent | Relecture de tout changement de `api/openapi.yaml` : changements cassants, cohérence avec le code généré, les codes d'erreur et les tests |
+| `backend-review:sql-query-reviewer` | agent | Relecture des requêtes d'un repository, d'un classement, d'une agrégation ou d'une liste paginée |
+| `backend-review:rules-tester` | agent | Écrire et lancer les tests des cas limites d'une règle produit touchée (complète `spec-guardian`) |

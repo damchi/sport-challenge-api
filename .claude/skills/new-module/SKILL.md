@@ -41,4 +41,4 @@ internal/<nom>/
 
 ## Fin
 
-`make fmt && make lint && make test`, puis agent `go-reviewer` (et `security-reviewer` si des routes sont exposées).
+`make fmt && make lint && make test`, puis agents `go-reviewer` et `sql-query-reviewer` (repository), et `security-reviewer` et `openapi-contract-reviewer` si des routes sont exposées.

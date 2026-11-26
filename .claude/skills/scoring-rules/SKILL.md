@@ -31,7 +31,7 @@ Le package `internal/scoring` est du **Go pur** (bibliothèque standard seulemen
 3. Valide les paramètres de la catégorie dans `challenge/rules.go`.
 4. Branche-le dans `leaderboard` (sélection du scorer par type) et, si la règle évolue dans le temps, dans `closure`.
 5. Mets à jour le `README.md` (§2.3) **seulement** si l'utilisateur a validé le changement de règle.
-6. Agents `spec-guardian` puis `go-reviewer`.
+6. Agents `spec-guardian`, `rules-tester` (tests des cas limites de la règle) puis `go-reviewer` ; `closure-reviewer` si la clôture des semaines, le worker ou le recalcul changent.
 
 ## Pièges
 
