@@ -64,3 +64,6 @@ docs/audit-*.md
 
 # Local design notes and plans (superpowers)
 docs/superpowers/
+
+# Python caches of the Claude scripts
+__pycache__/
