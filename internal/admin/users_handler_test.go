@@ -10,6 +10,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/damchi/sport-challenge-api/internal/activity"
+	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
+	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 )
 
 const (
@@ -186,7 +190,12 @@ func TestListAdminUserActivities(t *testing.T) {
 		{ID: inviteID, SportCode: "run", StartedAt: started, DurationSeconds: 1800, DistanceMeters: ptr(5000), ElevationGainMeters: ptr(40), Source: "manual", CreatedAt: listAt.Add(-time.Hour)},
 		{ID: bobID, SportCode: "other", SportLabel: ptr("Escalade"), StartedAt: started.Add(-time.Hour), DurationSeconds: 600, Source: "manual", CreatedAt: listAt},
 	}}
-	rec, got := serve(t, newChallengeService(repo), adminToken, userPath+"/activities?limit=1")
+	timeOnly := []activity.Contribution{
+		{ChallengeID: challengeID, ChallengeTitle: "Défi", DistanceMeters: ptr(5000), DurationSeconds: 1800},
+		{ChallengeID: bobID, ChallengeTitle: "Dénivelé", DurationSeconds: 1800},
+	}
+	places := &fakePlaces{byID: map[string]activity.Recorded{inviteID: {Contributions: timeOnly, Locked: true}}}
+	rec, got := serve(t, NewService(repo, places, clock.NewFake(listAt), buildinfo.Info{}), adminToken, userPath+"/activities?limit=1")
 	if rec.Code != http.StatusOK || repo.id != annID || repo.activityQuery.Limit != 2 {
 		t.Fatalf("status = %d (asked %q, %+v), body %s", rec.Code, repo.id, repo.activityQuery, rec.Body.String())
 	}
@@ -194,7 +203,11 @@ func TestListAdminUserActivities(t *testing.T) {
 		"items": []any{map[string]any{
 			"id": inviteID, "sport_code": "run", "sport_label": nil, "started_at": "2026-11-23T12:30:00Z",
 			"duration_seconds": 1800.0, "distance_meters": 5000.0, "elevation_gain_meters": 40.0,
-			"source": "manual", "created_at": "2026-11-23T14:30:00Z",
+			"source": "manual", "created_at": "2026-11-23T14:30:00Z", "locked": true,
+			"contributions": []any{
+				map[string]any{"challenge_id": challengeID, "challenge_title": "Défi", "distance_meters": 5000.0, "duration_seconds": 1800.0},
+				map[string]any{"challenge_id": bobID, "challenge_title": "Dénivelé", "distance_meters": nil, "duration_seconds": 1800.0},
+			},
 		}},
 		"next_cursor": encoded(t, ActivityPosition{StartedAt: started, ID: inviteID}),
 	})

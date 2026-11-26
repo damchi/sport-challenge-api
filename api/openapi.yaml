@@ -3820,9 +3820,9 @@ components:
           description: Pass it as `cursor` for the next page; null on the last page.
     AdminActivity:
       type: object
-      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, created_at]
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, created_at, contributions, locked]
       additionalProperties: false
-      description: An activity as stored.
+      description: An activity as stored, with where it counts now.
       properties:
         id:
           type: string
@@ -3852,6 +3852,21 @@ components:
           type: string
           format: date-time
           description: When the activity was recorded.
+        contributions:
+          type: array
+          description: |
+            What the activity brings, now, to each challenge where it counts,
+            as `Activity.contributions`; possibly empty. A deleted challenge
+            never appears.
+          items:
+            $ref: "#/components/schemas/ActivityContribution"
+        locked:
+          type: boolean
+          description: |
+            As `Activity.locked`: true once the week of the activity is locked
+            in a challenge where it counts, or was already locked when the
+            author left a challenge (abandoned or excluded). An admin can
+            still change it.
     AdminActionPage:
       type: object
       required: [items, next_cursor]

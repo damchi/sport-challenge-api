@@ -885,6 +885,17 @@ func (h *Handler) ListAdminUserActivities(ctx context.Context, req api.ListAdmin
 			ElevationGainMeters: a.ElevationGainMeters,
 			Source:              api.AdminActivitySource(a.Source),
 			CreatedAt:           a.CreatedAt.UTC(),
+			Contributions:       make([]api.ActivityContribution, len(a.Contributions)),
+			Locked:              a.Locked,
+		}
+		for j, c := range a.Contributions {
+			cid, err := uuid.Parse(c.ChallengeID)
+			if err != nil {
+				return nil, fmt.Errorf("challenge id: %w", err)
+			}
+			out.Items[i].Contributions[j] = api.ActivityContribution{
+				ChallengeId: cid, ChallengeTitle: c.ChallengeTitle, DistanceMeters: c.DistanceMeters, DurationSeconds: c.DurationSeconds,
+			}
 		}
 	}
 	if out.NextCursor, err = nextCursor(page.Next); err != nil {

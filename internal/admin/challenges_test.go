@@ -20,7 +20,7 @@ var (
 )
 
 func newChallengeService(repo *fakeRepo) *Service {
-	return NewService(repo, clock.NewFake(listAt), buildinfo.Info{})
+	return NewService(repo, &fakePlaces{}, clock.NewFake(listAt), buildinfo.Info{})
 }
 
 func TestChallengeReadsAreHiddenFromANonAdmin(t *testing.T) {
@@ -205,7 +205,7 @@ func TestChallenge(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepo{data: data}
-			got, err := NewService(repo, clock.NewFake(tt.now), buildinfo.Info{}).Challenge(t.Context(), adminActor, "c1")
+			got, err := NewService(repo, nil, clock.NewFake(tt.now), buildinfo.Info{}).Challenge(t.Context(), adminActor, "c1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -318,7 +318,7 @@ func TestChallengeWeeksAcrossATimeChange(t *testing.T) {
 	lock2 := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	repo := &fakeRepo{data: ChallengeData{Challenge: ChallengeRecord{ID: "c1", Timezone: "America/Toronto", StartsAt: start, EndsAt: end}}}
 
-	got, err := NewService(repo, clock.NewFake(lock1), buildinfo.Info{}).Challenge(t.Context(), adminActor, "c1")
+	got, err := NewService(repo, nil, clock.NewFake(lock1), buildinfo.Info{}).Challenge(t.Context(), adminActor, "c1")
 	if err != nil {
 		t.Fatal(err)
 	}

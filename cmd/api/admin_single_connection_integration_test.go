@@ -88,7 +88,7 @@ func TestAdminChangesRunOnASingleConnection(t *testing.T) {
 	}
 
 	handlers := testHandlers()
-	handlers.adminHandler = admin.NewHandler(admin.NewService(adminRepo, clk, buildinfo.Get()),
+	handlers.adminHandler = admin.NewHandler(admin.NewService(adminRepo, nil, clk, buildinfo.Get()),
 		admin.NewChallengeCorrections(corrections, challenges, invitations),
 		admin.NewMemberCorrections(corrections, challenges),
 		admin.NewActivityCorrections(corrections, activities),

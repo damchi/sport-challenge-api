@@ -116,7 +116,7 @@ func ptr[T any](v T) *T { return &v }
 
 func TestStatsIsHiddenFromANonAdmin(t *testing.T) {
 	repo := &fakeRepo{}
-	_, err := NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}).Stats(t.Context(), auth.Actor{ID: "u1"})
+	_, err := NewService(repo, nil, clock.NewFake(statsAt), buildinfo.Info{}).Stats(t.Context(), auth.Actor{ID: "u1"})
 	if !errors.Is(err, apperr.New(apperr.CodeNotFound, nil)) {
 		t.Fatalf("Stats() = %v, want not_found", err)
 	}
@@ -143,7 +143,7 @@ func TestStats(t *testing.T) {
 	}
 	build := buildinfo.Info{Version: "v1.2.3", Commit: "abc"}
 
-	got, err := NewService(repo, clock.NewFake(statsAt), build).Stats(t.Context(), auth.Actor{ID: "u1", Admin: true})
+	got, err := NewService(repo, nil, clock.NewFake(statsAt), build).Stats(t.Context(), auth.Actor{ID: "u1", Admin: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestStatsStorageFailure(t *testing.T) {
 		"runs":    {runsErr: boom},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewService(repo, clock.NewFake(statsAt), buildinfo.Info{}).Stats(t.Context(), auth.Actor{ID: "u1", Admin: true})
+			_, err := NewService(repo, nil, clock.NewFake(statsAt), buildinfo.Info{}).Stats(t.Context(), auth.Actor{ID: "u1", Admin: true})
 			if !errors.Is(err, boom) {
 				t.Fatalf("Stats() = %v, want it to wrap %v", err, boom)
 			}

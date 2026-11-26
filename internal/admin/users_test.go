@@ -1,13 +1,17 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
+	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
+	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
 )
 
@@ -15,6 +19,27 @@ const (
 	someUUID  = "0b9d4a5e-6a43-4c8e-9d1f-7a2b3c4d5e6f"
 	otherUUID = "7f3e2a1b-4c5d-4e6f-8a9b-0c1d2e3f4a5b"
 )
+
+// fakePlaces gives each activity the contributions and lock of byID, the
+// account asked and its activities kept in user and asked; err fails it.
+type fakePlaces struct {
+	byID  map[string]activity.Recorded
+	err   error
+	user  string
+	asked []activity.Activity
+}
+
+func (f *fakePlaces) AdminPlaces(_ context.Context, _ auth.Actor, userID string, as []activity.Activity) ([]activity.Recorded, error) {
+	f.user, f.asked = userID, as
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]activity.Recorded, len(as))
+	for i, a := range as {
+		out[i] = activity.Recorded{Activity: a, Contributions: f.byID[a.ID].Contributions, Locked: f.byID[a.ID].Locked}
+	}
+	return out, nil
+}
 
 // encoded encodes position as a client sends it back.
 func encoded(t *testing.T, position any) string {
@@ -157,14 +182,19 @@ func TestUserActivities(t *testing.T) {
 	after := ActivityPosition{StartedAt: listAt, ID: "urn:uuid:" + someUUID}
 
 	repo := &fakeRepo{activities: rows}
-	got, err := newChallengeService(repo).UserActivities(t.Context(), adminActor, otherUUID, 1, encoded(t, after))
+	two := []activity.Contribution{{ChallengeID: "c1", DurationSeconds: 60}, {ChallengeID: "c2", DurationSeconds: 60}}
+	places := &fakePlaces{byID: map[string]activity.Recorded{"a2": {Contributions: two, Locked: true}}}
+	got, err := NewService(repo, places, clock.NewFake(listAt), buildinfo.Info{}).UserActivities(t.Context(), adminActor, otherUUID, 1, encoded(t, after))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if repo.id != otherUUID || repo.activityQuery.Limit != 2 || !reflect.DeepEqual(repo.activityQuery.After, &ActivityPosition{StartedAt: listAt, ID: someUUID}) {
 		t.Errorf("asked %q with %+v, want the account, limit 2 and the normalized cursor", repo.id, repo.activityQuery)
 	}
-	want := ActivityPage{Items: rows[:1], Next: &ActivityPosition{StartedAt: rows[0].StartedAt, ID: "a2"}}
+	if places.user != otherUUID || len(places.asked) != 1 || places.asked[0].ID != "a2" || places.asked[0].UserID != otherUUID || !places.asked[0].StartedAt.Equal(rows[0].StartedAt) {
+		t.Errorf("places asked for %q: %+v, want the page's activity of the account", places.user, places.asked)
+	}
+	want := ActivityPage{Items: []UserActivity{{ActivityRow: rows[0], Contributions: two, Locked: true}}, Next: &ActivityPosition{StartedAt: rows[0].StartedAt, ID: "a2"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("UserActivities() =\n%+v\nwant\n%+v", got, want)
 	}
@@ -173,6 +203,12 @@ func TestUserActivities(t *testing.T) {
 	got, err = newChallengeService(repo).UserActivities(t.Context(), adminActor, otherUUID, 2, "")
 	if err != nil || got.Next != nil || len(got.Items) != 2 || repo.activityQuery.After != nil {
 		t.Fatalf("last page = %+v, %v (after %+v), want both activities and no next page", got, err, repo.activityQuery.After)
+	}
+
+	storage := errors.New("connection reset")
+	_, err = NewService(&fakeRepo{activities: rows}, &fakePlaces{err: storage}, clock.NewFake(listAt), buildinfo.Info{}).UserActivities(t.Context(), adminActor, otherUUID, 2, "")
+	if !errors.Is(err, storage) {
+		t.Fatalf("places fail: error = %v, want the cause kept", err)
 	}
 }
 

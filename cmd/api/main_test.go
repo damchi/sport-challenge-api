@@ -114,7 +114,7 @@ func testHandlers() server {
 		sportHandler:     sport.NewHandler(nil),
 		challengeHandler: challenge.NewHandler(nil),
 		activityHandler:  activity.NewHandler(nil),
-		adminHandler: admin.NewHandler(admin.NewService(nil, clock.Real{}, buildinfo.Get()),
+		adminHandler: admin.NewHandler(admin.NewService(nil, nil, clock.Real{}, buildinfo.Get()),
 			admin.NewChallengeCorrections(admin.NewCorrections(nil, nil, nil, nil), nil, nil),
 			admin.NewMemberCorrections(admin.NewCorrections(nil, nil, nil, nil), nil),
 			admin.NewActivityCorrections(admin.NewCorrections(nil, nil, nil, nil), nil),

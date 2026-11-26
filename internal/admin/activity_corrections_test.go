@@ -243,7 +243,7 @@ func TestAdminActivityRoutes(t *testing.T) {
 		}
 		return []ChallengePreview{{ChallengeID: challengeID, Status: StatusOngoing}}, nil
 	})
-	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities, nil)
+	h := NewHandler(NewService(&fakeRepo{}, nil, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities, nil)
 	started := time.Date(2026, 6, 3, 11, 0, 0, 0, time.UTC)
 	distance := 5000
 	run := activity.Draft{SportCode: "run", StartedAt: started, DurationSeconds: 1500, DistanceMeters: &distance}
@@ -300,7 +300,7 @@ func TestCreateAdminActivityIdempotencyKey(t *testing.T) {
 		method = m
 		return []ChallengePreview{}, nil
 	})
-	h := NewHandler(NewService(&fakeRepo{}, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities, nil)
+	h := NewHandler(NewService(&fakeRepo{}, nil, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities, nil)
 	target := "/api/v1/admin/users/" + bobID + "/activities"
 	body := `{"sport_code": "run", "started_at": "2026-06-03T11:00:00Z", "duration_seconds": 1500, "distance_meters": 5000, "reason": "Saisie oubliée"}`
 
