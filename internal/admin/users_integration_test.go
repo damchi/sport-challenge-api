@@ -269,6 +269,49 @@ func TestRepositoryListUserActivities(t *testing.T) {
 		t.Fatalf("first = %+v, want %+v", first, want)
 	}
 
+	t.Run("the last change of an admin", func(t *testing.T) {
+		dan := insertUser(t, pool, "email|dan", recorded, false)
+		// session(6) entered by ann; the three others of ann listed above.
+		insertActivity(t, pool, ann, recorded, false, session(6))
+		all, err := r.ListUserActivities(t.Context(), ann, ActivityQuery{Limit: 10})
+		if err != nil || len(all) != 4 {
+			t.Fatalf("ListUserActivities() = %d activities, %v; want 4", len(all), err)
+		}
+		untouched, added, addedThenChanged, entered := all[0], all[1], all[2], all[3]
+		at := func(n int) time.Time { return recorded.Add(time.Duration(n) * time.Hour) }
+		line := func(action, target string, when time.Time) {
+			exec(t, pool, `INSERT INTO admin_actions (admin_id, created_at, action, target_type, target_id, reason)
+				VALUES ($1, $2, $3, 'activity', $4, 'Correction')`, dan, when, action, target)
+		}
+		line(ActionActivityCreate, added.ID, at(1))
+		// The update written before the creation in the table, later in time.
+		line(ActionActivityUpdate, addedThenChanged.ID, at(3))
+		line(ActionActivityCreate, addedThenChanged.ID, at(2))
+		line(ActionActivityUpdate, entered.ID, at(4))
+		// Neither an activity line nor another target counts.
+		exec(t, pool, `INSERT INTO admin_actions (admin_id, created_at, action, target_type, target_id, reason)
+			VALUES ($1, $2, 'user.block', 'user', $3, 'Blocage')`, dan, at(5), untouched.ID)
+
+		got, err := r.ListUserActivities(t.Context(), ann, ActivityQuery{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []*ActivityChange{
+			nil,
+			{Action: ActivityCreated, At: at(1), AdminID: dan},
+			{Action: ActivityUpdated, At: at(3), AdminID: dan},
+			{Action: ActivityUpdated, At: at(4), AdminID: dan},
+		}
+		for i, a := range got {
+			if c := a.AdminChange; c != nil {
+				c.At = c.At.UTC()
+			}
+			if !reflect.DeepEqual(a.AdminChange, want[i]) {
+				t.Fatalf("activity %d: admin change %+v, want %+v", i, a.AdminChange, want[i])
+			}
+		}
+	})
+
 	t.Run("a page after a position", func(t *testing.T) {
 		got2, err := r.ListUserActivities(t.Context(), ann, ActivityQuery{Limit: 1, After: &ActivityPosition{StartedAt: got[0].StartedAt, ID: got[0].ID}})
 		if err != nil || len(got2) != 1 || got2[0].ID != got[1].ID {

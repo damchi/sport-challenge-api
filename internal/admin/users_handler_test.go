@@ -187,16 +187,24 @@ func TestListAdminUserChallenges(t *testing.T) {
 func TestListAdminUserActivities(t *testing.T) {
 	started := listAt.Add(-3 * time.Hour)
 	repo := &fakeRepo{activities: []ActivityRow{
-		{ID: inviteID, SportCode: "run", StartedAt: started, DurationSeconds: 1800, DistanceMeters: ptr(5000), ElevationGainMeters: ptr(40), Source: "manual", CreatedAt: listAt.Add(-time.Hour)},
+		{
+			ID: inviteID, SportCode: "run", StartedAt: started, DurationSeconds: 1800, DistanceMeters: ptr(5000), ElevationGainMeters: ptr(40), Source: "manual", CreatedAt: listAt.Add(-time.Hour),
+			AdminChange: &ActivityChange{Action: ActivityCreated, At: listAt.Add(-time.Hour), AdminID: bobID},
+		},
 		{ID: bobID, SportCode: "other", SportLabel: ptr("Escalade"), StartedAt: started.Add(-time.Hour), DurationSeconds: 600, Source: "manual", CreatedAt: listAt},
+		{
+			ID: challengeID, SportCode: "run", StartedAt: started.Add(-2 * time.Hour), DurationSeconds: 600, Source: "manual", CreatedAt: listAt,
+			AdminChange: &ActivityChange{Action: ActivityUpdated, At: listAt, AdminID: bobID},
+		},
+		{ID: annID, SportCode: "run", StartedAt: started.Add(-3 * time.Hour), DurationSeconds: 600, Source: "manual", CreatedAt: listAt},
 	}}
 	timeOnly := []activity.Contribution{
 		{ChallengeID: challengeID, ChallengeTitle: "Défi", DistanceMeters: ptr(5000), DurationSeconds: 1800},
 		{ChallengeID: bobID, ChallengeTitle: "Dénivelé", DurationSeconds: 1800},
 	}
 	places := &fakePlaces{byID: map[string]activity.Recorded{inviteID: {Contributions: timeOnly, Locked: true}}}
-	rec, got := serve(t, NewService(repo, places, clock.NewFake(listAt), buildinfo.Info{}), adminToken, userPath+"/activities?limit=1")
-	if rec.Code != http.StatusOK || repo.id != annID || repo.activityQuery.Limit != 2 {
+	rec, got := serve(t, NewService(repo, places, clock.NewFake(listAt), buildinfo.Info{}), adminToken, userPath+"/activities?limit=3")
+	if rec.Code != http.StatusOK || repo.id != annID || repo.activityQuery.Limit != 4 {
 		t.Fatalf("status = %d (asked %q, %+v), body %s", rec.Code, repo.id, repo.activityQuery, rec.Body.String())
 	}
 	sameJSON(t, got, map[string]any{
@@ -208,8 +216,20 @@ func TestListAdminUserActivities(t *testing.T) {
 				map[string]any{"challenge_id": challengeID, "challenge_title": "Défi", "distance_meters": 5000.0, "duration_seconds": 1800.0},
 				map[string]any{"challenge_id": bobID, "challenge_title": "Dénivelé", "distance_meters": nil, "duration_seconds": 1800.0},
 			},
+			// The admin by its id only.
+			"admin_change": map[string]any{"action": "created", "at": "2026-11-23T14:30:00Z", "admin_id": bobID},
+		}, map[string]any{
+			"id": bobID, "sport_code": "other", "sport_label": "Escalade", "started_at": "2026-11-23T11:30:00Z",
+			"duration_seconds": 600.0, "distance_meters": nil, "elevation_gain_meters": nil,
+			"source": "manual", "created_at": "2026-11-23T15:30:00Z", "locked": false, "contributions": []any{},
+			"admin_change": nil,
+		}, map[string]any{
+			"id": challengeID, "sport_code": "run", "sport_label": nil, "started_at": "2026-11-23T10:30:00Z",
+			"duration_seconds": 600.0, "distance_meters": nil, "elevation_gain_meters": nil,
+			"source": "manual", "created_at": "2026-11-23T15:30:00Z", "locked": false, "contributions": []any{},
+			"admin_change": map[string]any{"action": "updated", "at": "2026-11-23T15:30:00Z", "admin_id": bobID},
 		}},
-		"next_cursor": encoded(t, ActivityPosition{StartedAt: started, ID: inviteID}),
+		"next_cursor": encoded(t, ActivityPosition{StartedAt: started.Add(-2 * time.Hour), ID: challengeID}),
 	})
 }
 

@@ -3820,7 +3820,7 @@ components:
           description: Pass it as `cursor` for the next page; null on the last page.
     AdminActivity:
       type: object
-      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, created_at, contributions, locked]
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, created_at, contributions, locked, admin_change]
       additionalProperties: false
       description: An activity as stored, with where it counts now.
       properties:
@@ -3867,6 +3867,34 @@ components:
             in a challenge where it counts, or was already locked when the
             author left a challenge (abandoned or excluded). An admin can
             still change it.
+        admin_change:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminActivityChange"
+          description: |
+            The last time an admin added or changed the activity, from the
+            journal (`activity.create`, `activity.update`): its source stays
+            `manual`. Null when no admin added nor changed it.
+    AdminActivityChange:
+      type: object
+      description: The last line of the journal where an admin added or changed an activity.
+      required: [action, at, admin_id]
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          enum: [created, updated]
+          x-enum-varnames: [AdminActivityChangeActionCreated, AdminActivityChangeActionUpdated]
+          description: "`created`: an admin added the activity; `updated`: an admin changed it."
+        at:
+          type: string
+          format: date-time
+          description: When the admin did it (the time of the journal line).
+        admin_id:
+          type: string
+          format: uuid
+          description: The account of the admin, its id only.
     AdminActionPage:
       type: object
       required: [items, next_cursor]
