@@ -213,3 +213,26 @@ func TestBreakdownFrozenWithoutAWeek(t *testing.T) {
 		t.Fatalf("Breakdown() = %+v (%d reads), want frozen, abandoned, no week, nothing computed", got, repo.calls)
 	}
 }
+
+// TestBreakdownOfTheFastestRun: the pace is a value like the others, shown
+// to a member, hidden from a reader who may not see the activities.
+func TestBreakdownOfTheFastestRun(t *testing.T) {
+	c, _, at := pointsChallenge(t)
+	c.Categories[1].Criteria = []string{scoring.CriterionFastestRun}
+	meters := 2000
+	// 269.5 s/km, rounded to 270.
+	activities := []scoring.Activity{{UserID: "b", SportCode: scoring.RunSport, StartedAt: at(1, 10), FastestSeconds: 539, FastestMeters: &meters}}
+	for _, member := range []bool{true, false} {
+		c.ReadsActivities = member
+		repo := &fakeRepo{participants: []scoring.Participant{{UserID: "a"}, {UserID: "b"}}, activities: activities}
+		svc := NewService(&fakeChallenges{c: c}, pseudos, repo, clock.NewFake(at(10, 12)), 24*time.Hour)
+		got, err := svc.Breakdown(t.Context(), auth.Actor{ID: "actor"}, "c1", "b")
+		want := scoring.CriterionPoints{Criterion: scoring.CriterionFastestRun, Rank: 1, Points: 10}
+		if member {
+			want.Value = 270
+		}
+		if err != nil || got.ValuesHidden == member || got.Weeks[0].Criteria[0] != want {
+			t.Fatalf("member %v: Breakdown() = %+v, %v, want week 1 %+v", member, got, err, want)
+		}
+	}
+}

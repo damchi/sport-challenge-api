@@ -300,6 +300,7 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		}
 		a.StartedAt = a.StartedAt.UTC()
 		a.LongestSeconds, a.LongestMeters = a.DurationSeconds, a.DistanceMeters
+		a.FastestSeconds, a.FastestMeters = a.DurationSeconds, a.DistanceMeters
 		if a.DurationSeconds >= minSession {
 			a.Sessions = 1
 		}
@@ -338,6 +339,7 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		Podium:   5, Factors: factors,
 	}
 	weeklyElevation := scoring.Points{Criteria: []string{scoring.CriterionWeeklyElevation}, Podium: 5}
+	fastestRun := scoring.Points{Criteria: []string{scoring.CriterionFastestRun}, Podium: 5}
 	scorers := []struct {
 		name   string
 		scorer scoring.Scorer
@@ -353,6 +355,7 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		{"elimination, points category", elimination, groups},
 		{"points", points, groups},
 		{"points, weekly elevation", weeklyElevation, groups},
+		{"points, fastest run", fastestRun, groups},
 		{"elevation", scoring.Elevation{}, totals},
 		{"elevation, points category", scoring.Elevation{}, groups},
 	}
@@ -393,6 +396,10 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	// The weekly elevation must score too.
 	if e := weeklyElevation.Score(w, participants, raw); e[0].Value == 0 {
 		t.Fatalf("weekly elevation points %+v: want points, or the comparison proves little", e)
+	}
+	// So must the fastest run.
+	if e := fastestRun.Score(w, participants, raw); e[0].Value == 0 {
+		t.Fatalf("fastest run points %+v: want points, or the comparison proves little", e)
 	}
 	// And the points must differ, the abandoned participant's included.
 	w.Now = w.WeekLocksAt(3)
@@ -650,10 +657,58 @@ func TestActivitiesOfGroupsThePointsCategoryPerWeek(t *testing.T) {
 			group(runner, "yoga", week1, 2700, nil, 0, nil, 0),
 		},
 	}
+	// The runs carry their session of the lowest pace: 1199 s for 6000 m in
+	// week 1; the other sports none.
+	for i, fastest := range [][2]int{{1199, 6000}, {0, 0}, {0, 0}, {1300, 8000}, {2000, 4000}} {
+		if fastest[1] > 0 {
+			want[withPoints][i].FastestSeconds, want[withPoints][i].FastestMeters = fastest[0], km(fastest[1])
+		}
+	}
 	for id, groups := range want {
 		if !sameActivities(got[id], groups) {
 			t.Fatalf("challenge %s: %+v, want %+v", id, got[id], groups)
 		}
+	}
+}
+
+// TestActivitiesOfReadsTheFastestRun: the groups of the runs carry the
+// session of the lowest pace, which ranks: a short and fast run beats a
+// long one, a ride and a run without distance are left out, and 269.5 s/km
+// rounds to 270.
+func TestActivitiesOfReadsTheFastestRun(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	quick, steady, rider := s.user("quick"), s.user("steady"), s.user("rider")
+	loc := toronto(t)
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	var id string
+	if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by)
+		VALUES ('C', 'public', 'America/Toronto', $1, $2, $3) RETURNING id`, start, start.AddDate(0, 0, 7), quick).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $5), ($1, $3, $5), ($1, $4, $5)", id, quick, steady, rider, start)
+	km := func(m int) *int { return &m }
+	at := start.Add(time.Hour)
+	s.activity(quick, "run", at, 3000, km(10000), false) // long, 300 s/km
+	s.activity(quick, "run", at, 539, km(2000), false)   // short, 269.5 s/km
+	s.activity(quick, "run", at, 100, nil, false)        // no distance
+	s.activity(quick, "run", at, 100, km(0), false)
+	s.activity(steady, "run", at, 3000, km(10000), false)
+	s.activity(rider, "ride", at, 600, km(10000), false) // 60 s/km, not a run
+	w := scoring.Window{Start: start.UTC(), End: start.AddDate(0, 0, 7).UTC(), Location: loc, Now: start.AddDate(0, 0, 7).UTC()}
+	got, err := NewRepository(gdb).Activities(t.Context(), id, w, "", 1200, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := []scoring.Participant{{UserID: quick}, {UserID: steady}, {UserID: rider}}
+	b := scoring.Points{Criteria: []string{scoring.CriterionFastestRun}, Podium: 5}.Breakdown(w, participants, got)
+	q, st, r := b[quick][0].Criteria[0], b[steady][0].Criteria[0], b[rider][0].Criteria[0]
+	if q.Rank != 1 || q.Value != 270 || st.Rank != 2 || st.Value != 300 || r.Rank != 0 {
+		t.Fatalf("fastest run %+v %+v %+v, want quick 1st at 270 s/km, steady 2nd at 300, rider unranked", q, st, r)
 	}
 }
 

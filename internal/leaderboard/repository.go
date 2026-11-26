@@ -125,11 +125,17 @@ type scopeRow struct {
 }
 
 // pointsColumns are the columns ActivitiesOf adds for the points category:
-// the longest session of a group by duration and by distance, and how many
-// of its sessions last at least the minimum.
+// the longest session of a group by duration and by distance, how many of
+// its sessions last at least the minimum, and its run of the lowest pace
+// with a distance (null without one), compared in numeric, never in float, ID
+// breaking ties so that both columns read the same session.
 const pointsColumns = `,
 			MAX(a.duration_seconds) AS longest_seconds, MAX(a.distance_meters) AS longest_meters,
-			COUNT(*) FILTER (WHERE a.duration_seconds >= w.min_seconds) AS sessions`
+			COUNT(*) FILTER (WHERE a.duration_seconds >= w.min_seconds) AS sessions,
+			(ARRAY_AGG(a.duration_seconds ORDER BY a.duration_seconds::numeric / a.distance_meters, a.id)
+				FILTER (WHERE a.sport_code = @run AND a.distance_meters > 0))[1] AS fastest_seconds,
+			(ARRAY_AGG(a.distance_meters ORDER BY a.duration_seconds::numeric / a.distance_meters, a.id)
+				FILTER (WHERE a.sport_code = @run AND a.distance_meters > 0))[1] AS fastest_meters`
 
 // elevationColumn is the column ActivitiesOf adds for the cumulative
 // elevation category and the weekly elevation criterion of the points
@@ -151,10 +157,11 @@ const elevationColumn = `,
 //
 // For a challenge with a points category (Scope.Points), every sport is
 // grouped per participant, week and sport, and each group also carries its
-// longest session by duration and by distance and how many of its sessions
-// last at least the minimum (Activity.LongestSeconds, LongestMeters,
-// Sessions; zero for the other challenges). For a challenge whose elevation
-// gains are read (Scope.Elevation: the cumulative elevation category, or the
+// longest session by duration and by distance, how many of its sessions
+// last at least the minimum and its fastest run (Activity.LongestSeconds,
+// LongestMeters, Sessions, FastestSeconds, FastestMeters; zero for the other
+// challenges). For a challenge whose elevation gains are read
+// (Scope.Elevation: the cumulative elevation category, or the
 // weekly elevation criterion of the points category), each total or group
 // also carries the sum of its elevation gains (Activity.ElevationMeters; nil
 // for the other challenges). With a points category, the activities of the
@@ -167,9 +174,9 @@ const elevationColumn = `,
 // Contract: the scorers only sum durations, distances and elevation gains,
 // per participant and sport, and per week for the elimination sport, and the
 // points category only reads the longest session, the count of a
-// participant's sessions and the sum of their elevation gains per week and
-// sport, so these groups rank exactly as the raw activities do (the
-// equivalent distance of a session is its distance times the factor of its
+// participant's sessions, the sum of their elevation gains and the fastest
+// run per week and sport, so these groups rank exactly as raw activities do
+// (the equivalent distance of a session is its distance times the factor of its
 // sport, so the longest of a sport is its longest distance); the
 // rankings are still computed from them, never stored. A scorer that would
 // read anything else of one activity needs the raw activities instead. The
@@ -217,6 +224,8 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 		LongestSeconds  int
 		LongestMeters   *int
 		Sessions        int
+		FastestSeconds  *int
+		FastestMeters   *int
 		ElevationMeters *int
 	}
 	// width_bucket gives the week: the number of starts at or before the
@@ -237,7 +246,7 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 		WHERE a.deleted_at IS NULL AND a.started_at >= w.from_at AND a.started_at < w.to_at
 			AND (p.status = 'active' OR w.points OR a.sport_code = w.weekly)
 		GROUP BY 1, 2, 3, 4`,
-		map[string]any{"windows": string(windows)},
+		map[string]any{"windows": string(windows), "run": scoring.RunSport},
 	).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("read activities: %w", err)
@@ -259,6 +268,9 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 		}
 		if sc.Points {
 			a.LongestSeconds, a.LongestMeters, a.Sessions = row.LongestSeconds, row.LongestMeters, row.Sessions
+			if row.FastestSeconds != nil {
+				a.FastestSeconds, a.FastestMeters = *row.FastestSeconds, row.FastestMeters
+			}
 		}
 		if sc.Elevation {
 			a.ElevationMeters = row.ElevationMeters
