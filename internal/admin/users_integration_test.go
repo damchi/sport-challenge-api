@@ -201,10 +201,10 @@ func TestRepositoryListUserChallenges(t *testing.T) {
 	active := "active"
 	abandoned := "abandoned"
 	want := []UserChallengeRow{
-		{ID: gone, Title: "Gone", Visibility: "public", StartsAt: starts, EndsAt: ends, CreatedAt: at(4), DeletedAt: &deletedAt, IsCreator: true, ParticipantStatus: &active, JoinedAt: ptr(at(4))},
-		{ID: creatorOnly, Title: "Creator", Visibility: "public", StartsAt: starts, EndsAt: ends, CreatedAt: at(3), IsCreator: true},
-		{ID: left, Title: "Left", Visibility: "public", StartsAt: starts, EndsAt: ends, CreatedAt: at(2), ParticipantStatus: &abandoned, JoinedAt: ptr(at(2)), AbandonedAt: ptr(at(3))},
-		{ID: created, Title: "Mine", Visibility: "private", StartsAt: starts, EndsAt: ends, CreatedAt: at(1), IsCreator: true, ParticipantStatus: &active, JoinedAt: ptr(at(1))},
+		{ID: gone, Title: "Gone", Visibility: "public", Timezone: "America/Toronto", StartsAt: starts, EndsAt: ends, CreatedAt: at(4), DeletedAt: &deletedAt, IsCreator: true, ParticipantStatus: &active, JoinedAt: ptr(at(4))},
+		{ID: creatorOnly, Title: "Creator", Visibility: "public", Timezone: "America/Toronto", StartsAt: starts, EndsAt: ends, CreatedAt: at(3), IsCreator: true},
+		{ID: left, Title: "Left", Visibility: "public", Timezone: "America/Toronto", StartsAt: starts, EndsAt: ends, CreatedAt: at(2), ParticipantStatus: &abandoned, JoinedAt: ptr(at(2)), AbandonedAt: ptr(at(3))},
+		{ID: created, Title: "Mine", Visibility: "private", Timezone: "America/Toronto", StartsAt: starts, EndsAt: ends, CreatedAt: at(1), IsCreator: true, ParticipantStatus: &active, JoinedAt: ptr(at(1))},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListUserChallenges() =\n%+v\nwant\n%+v", got, want)

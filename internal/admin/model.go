@@ -314,6 +314,7 @@ type UserChallengeRow struct {
 	ID                string
 	Title             string
 	Visibility        string
+	Timezone          string
 	StartsAt          time.Time
 	EndsAt            time.Time
 	CreatedAt         time.Time
