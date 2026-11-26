@@ -1,5 +1,10 @@
 package scoring
 
+import (
+	"cmp"
+	"slices"
+)
+
 // Criteria of the points category.
 const (
 	CriterionLongestDuration = "longest_duration"
@@ -87,25 +92,46 @@ type CriterionPoints struct {
 // provisional before). A participant is in the weeks they are ranked in:
 // all of them while active; once abandoned, those locked by the time they
 // left, so that their points do not move.
+//
+// Participants are indexed by position, and the buffers of a week are
+// reused for the next one: a large challenge ranks thousands of
+// participants on each criterion of each week.
 func (p Points) Breakdown(w Window, participants []Participant, activities []Activity) map[string][]WeekPoints {
 	started := startedWeeks(w)
-	bests := p.weeklyBests(w, started, activities)
-	out := make(map[string][]WeekPoints, len(participants))
+	bests := p.weeklyBests(w, started, participants, activities)
+	scale := pointsScale(p.Podium)
+	nc := len(p.Criteria)
+	weeks := make([][]WeekPoints, len(participants))
+	ranked := make([]int, 0, len(participants))
+	totals := make([]int, len(participants))
+	lines := make([]valueAt, 0, len(participants))
 	for n := 1; n <= started; n++ {
-		ranked := rankedIn(w, n, participants)
-		week := make(map[string]*WeekPoints, len(ranked))
-		for _, r := range ranked {
-			week[r.UserID] = &WeekPoints{Week: n, Criteria: make([]CriterionPoints, 0, len(p.Criteria))}
-		}
-		for _, c := range p.Criteria {
-			for _, line := range p.weekRanking(ranked, bests[n], c) {
-				wp := week[line.UserID]
-				wp.Criteria = append(wp.Criteria, line.CriterionPoints)
-				wp.Points += line.Points
+		ranked = rankedIn(w, n, participants, ranked[:0])
+		week := bests[(n-1)*len(participants) : n*len(participants)]
+		criteria := make([]CriterionPoints, len(ranked)*nc)
+		totals = totals[:len(ranked)]
+		clear(totals)
+		for c, criterion := range p.Criteria {
+			lines = lines[:0]
+			for k, i := range ranked {
+				lines = append(lines, valueAt{k: k, value: week[i].of(criterion)})
+			}
+			for _, l := range weekRanking(lines, scale) {
+				criteria[l.k*nc+c] = CriterionPoints{Criterion: criterion, Rank: l.rank, Value: l.value, Points: l.points}
+				totals[l.k] += l.points
 			}
 		}
-		for _, r := range ranked {
-			out[r.UserID] = append(out[r.UserID], *week[r.UserID])
+		for k, i := range ranked {
+			if weeks[i] == nil {
+				weeks[i] = make([]WeekPoints, 0, started)
+			}
+			weeks[i] = append(weeks[i], WeekPoints{Week: n, Points: totals[k], Criteria: criteria[k*nc : (k+1)*nc : (k+1)*nc]})
+		}
+	}
+	out := make(map[string][]WeekPoints, len(participants))
+	for i, pt := range participants {
+		if weeks[i] != nil {
+			out[pt.UserID] = weeks[i]
 		}
 	}
 	return out
@@ -120,22 +146,46 @@ type best struct {
 	elevationMeters int
 }
 
-// weeklyBests is, for each started week n, what each user did in it:
-// bests[n][user], index 0 unused. A group counts for the week of its
-// start, even when a session runs into the next one; outside the window, it
-// counts nowhere.
-func (p Points) weeklyBests(w Window, started int, activities []Activity) []map[string]best {
-	distance := Distance{Factors: p.Factors}
-	bests := make([]map[string]best, started+1)
-	for n := 1; n <= started; n++ {
-		bests[n] = make(map[string]best)
+// of is the value of b on criterion.
+func (b best) of(criterion string) int {
+	switch criterion {
+	case CriterionLongestDuration:
+		return b.longestSeconds
+	case CriterionLongestDistance:
+		return b.longestMeters
+	case CriterionSessionCount:
+		return b.sessions
+	case CriterionWeeklyElevation:
+		return b.elevationMeters
 	}
+	return 0
+}
+
+// weeklyBests is what each participant did in each started week n:
+// bests[(n-1)*len(participants)+i] for participants[i]. A group counts for
+// the week of its start, even when a session runs into the next one;
+// outside the window, or of a user who is not a participant, it counts
+// nowhere.
+func (p Points) weeklyBests(w Window, started int, participants []Participant, activities []Activity) []best {
+	index := make(map[string]int, len(participants))
+	for i, pt := range participants {
+		index[pt.UserID] = i
+	}
+	distance := Distance{Factors: p.Factors}
+	bests := make([]best, started*len(participants))
+	// The groups of a participant come one after the other: look their
+	// position up once.
+	user, i, ok := "", 0, false
 	for _, a := range activities {
+		if a.UserID != user || user == "" {
+			user = a.UserID
+			i, ok = index[user]
+		}
 		n := w.WeekOf(a.StartedAt)
-		if n == 0 || n > started {
+		if n == 0 || n > started || !ok {
 			continue
 		}
-		b := bests[n][a.UserID]
+		b := &bests[(n-1)*len(participants)+i]
 		b.longestSeconds = max(b.longestSeconds, a.LongestSeconds)
 		if m := distance.Weighted(a.SportCode, a.LongestMeters); m != nil {
 			b.longestMeters = max(b.longestMeters, *m)
@@ -144,50 +194,37 @@ func (p Points) weeklyBests(w Window, started int, activities []Activity) []map[
 		if a.ElevationMeters != nil {
 			b.elevationMeters += *a.ElevationMeters
 		}
-		bests[n][a.UserID] = b
 	}
 	return bests
 }
 
-// criterionLine is the line of a participant in the ranking of a criterion
-// for a week.
-type criterionLine struct {
-	UserID string
-	CriterionPoints
+// valueAt is the value of the participant at position k of the ranked
+// participants of a week, on a criterion, and what it gives in the ranking.
+type valueAt struct {
+	k, value, rank, points int
 }
 
-// weekRanking ranks the participants of a week on a criterion and gives the
-// points of the scale to its top: equal values share the rank and the
-// points, at the edge of the top too; a value of 0 has no rank and does not
-// score. One line per participant ranked.
-func (p Points) weekRanking(ranked []Participant, bests map[string]best, criterion string) []criterionLine {
-	values := make(map[string]int, len(bests))
-	for user, b := range bests {
-		switch criterion {
-		case CriterionLongestDuration:
-			values[user] = b.longestSeconds
-		case CriterionLongestDistance:
-			values[user] = b.longestMeters
-		case CriterionSessionCount:
-			values[user] = b.sessions
-		case CriterionWeeklyElevation:
-			values[user] = b.elevationMeters
+// weekRanking ranks the values of a week on a criterion, highest first,
+// and gives the points of the scale to its top: equal values share the
+// rank and the points, at the edge of the top too; a value of 0 has no
+// rank and does not score. It sorts lines in place and returns them.
+func weekRanking(lines []valueAt, scale []int) []valueAt {
+	slices.SortFunc(lines, func(a, b valueAt) int { return cmp.Compare(b.value, a.value) })
+	for j := range lines {
+		l := &lines[j]
+		switch {
+		case l.value <= 0:
+			l.rank, l.value = 0, 0
+		case j > 0 && l.value == lines[j-1].value:
+			l.rank = lines[j-1].rank
+		default:
+			l.rank = j + 1
+		}
+		if l.rank > 0 && l.rank <= len(scale) {
+			l.points = scale[l.rank-1]
 		}
 	}
-	scale := pointsScale(p.Podium)
-	entries := Rank(ranked, values)
-	out := make([]criterionLine, len(entries))
-	for i, e := range entries {
-		line := criterionLine{UserID: e.UserID, CriterionPoints: CriterionPoints{Criterion: criterion}}
-		if e.Value > 0 {
-			line.Rank, line.Value = e.Rank, e.Value
-			if e.Rank <= len(scale) {
-				line.Points = scale[e.Rank-1]
-			}
-		}
-		out[i] = line
-	}
-	return out
+	return lines
 }
 
 // pointsScale is the points of each rank of the top, from the first.
@@ -201,14 +238,14 @@ func pointsScale(podium int) []int {
 	return nil
 }
 
-// rankedIn lists the participants ranked in week n: the active ones, and
-// those who left once the week was locked, ranked as active for it.
-func rankedIn(w Window, n int, participants []Participant) []Participant {
+// rankedIn appends to ranked the positions of the participants ranked in
+// week n: the active ones, and those who left once the week was locked,
+// ranked as active for it.
+func rankedIn(w Window, n int, participants []Participant, ranked []int) []int {
 	locks := w.WeekLocksAt(n)
-	ranked := make([]Participant, 0, len(participants))
-	for _, p := range participants {
+	for i, p := range participants {
 		if !p.Abandoned || (p.AbandonedAt != nil && !p.AbandonedAt.Before(locks)) {
-			ranked = append(ranked, Participant{UserID: p.UserID})
+			ranked = append(ranked, i)
 		}
 	}
 	return ranked
