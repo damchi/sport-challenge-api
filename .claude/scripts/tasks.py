@@ -359,7 +359,7 @@ def cmd_cleanup(args):
     say = (lambda *_: None) if args.quiet else print
     git("fetch", "--prune", "--quiet", "origin")
     default = gh_json("repo", "view", "--json", "defaultBranchRef")["defaultBranchRef"]["name"]
-    merged = gh_json("pr", "list", "--state", "merged", "--limit", "200", "--json", "headRefName,headRefOid,number")
+    merged = gh_json("pr", "list", "--state", "merged", "--limit", "1000", "--json", "headRefName,headRefOid,number")
     by_branch = {}
     for pr in merged or []:
         by_branch.setdefault(pr["headRefName"], []).append(pr)
@@ -378,12 +378,19 @@ def cmd_cleanup(args):
             if git("status", "--porcelain", "--untracked-files=no"):
                 say(f"{branch} : fusionnée, mais modifications en cours ; branche gardée.")
                 continue
-            git("switch", "--quiet", default)
+            switch = subprocess.run(["git", "switch", "--quiet", default], capture_output=True, text=True, cwd=ROOT)
+            if switch.returncode != 0:
+                print(f"{branch} : impossible de basculer sur {default} ({switch.stderr.strip()}), branche gardée.")
+                continue
             current = default
             pull = subprocess.run(["git", "pull", "--ff-only", "--quiet"], capture_output=True, text=True, cwd=ROOT)
             if pull.returncode != 0:
                 print(f"{default} n'a pas pu être mis à jour : {pull.stderr.strip()}")
-        git("branch", "-D", branch)
+        # A branch checked out in another worktree cannot be deleted: report it and go on.
+        local = subprocess.run(["git", "branch", "-D", branch], capture_output=True, text=True, cwd=ROOT)
+        if local.returncode != 0:
+            print(f"{branch} : suppression locale refusée ({local.stderr.strip()}), branche gardée.")
+            continue
         where = "local"
         # GitHub deletes the branch at merge time; this only covers branches merged before that setting.
         if branch in remote and git("rev-parse", f"origin/{branch}") != pr["headRefOid"]:
