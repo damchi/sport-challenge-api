@@ -14,7 +14,7 @@ description: Ajoute une route à l'API du backend Sport Challenge en partant du 
 5. **Tests** :
    - service : table-driven avec un faux repository, y compris les cas interdits ;
    - handler : `httptest` (statuts, format d'erreur, authentification absente ou invalide), et **chaque** réponse validée contre le contrat avec `apitest.ValidateResponse`.
-6. **Revue** : agents `go-reviewer` et `security-reviewer`, et `spec-guardian` si la route porte une règle métier.
+6. **Revue** : agents `openapi-contract-reviewer`, `go-reviewer` et `security-reviewer`, `sql-query-reviewer` si la route ajoute ou change une requête, et `spec-guardian` si la route porte une règle métier.
 
 ## Conventions
 

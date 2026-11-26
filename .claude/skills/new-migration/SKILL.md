@@ -33,7 +33,7 @@ Cela crée `migrations/NNNNNN_create_challenge_tables.up.sql` et `.down.sql`. Re
 1. `make docker-up`
 2. `make migrate-up` → `make migrate-down` → `make migrate-up` (doit passer sans erreur).
 3. Adapte les modèles GORM et les repositories ; `make test-integration`.
-4. Agent `migration-reviewer`.
+4. Agent `migration-reviewer`, et `sql-query-reviewer` si le changement ajoute ou modifie des requêtes.
 
 ## Déploiement
 
