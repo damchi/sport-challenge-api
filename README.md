@@ -770,7 +770,7 @@ La V2 (synchronisations) a peu d'impact sur la V1 si ces choix, presque gratuits
 
 ## 7. Feuille de route
 
-### V1, phase par phase (même ordre que le skill `bootstrap`)
+### V1, phase par phase (même ordre que les phases de `TASKS.md`)
 
 Le détail ticket par ticket (critères d'acceptation, commits proposés) est dans [`TASKS.md`](TASKS.md) (importé en issues GitHub, voir « Les tickets vivent dans GitHub »).
 

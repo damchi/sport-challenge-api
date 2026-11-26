@@ -6,7 +6,8 @@ API Go d'une application de challenges sportifs entre amis : catégories avec po
 
 - `README.md` est la spécification du produit et de l'architecture. **Lis le §2 (règles fonctionnelles) et le §5 (architecture) avant toute tâche qui touche au métier ou à la structure.**
 - Légende du README : ✅ décidé · 🟡 proposition · ❓ question ouverte. Applique les ✅. Ne transforme jamais un 🟡 ou un ❓ en règle sans demander.
-- **Backlog** : issues GitHub (importées depuis `TASKS.md`, qui reste le document de référence ; numérotation non consécutive : les anciens tickets de préparation ont été fusionnés dans les tickets fonctionnels ; un ticket = un commit). Utilise le skill `next-task` pour le traiter ; le statut vit dans l'issue, pas dans `TASKS.md`.
+- **Backlog** : issues GitHub (importées depuis `TASKS.md`, qui reste le document de référence ; numérotation non consécutive : les anciens tickets de préparation ont été fusionnés dans les tickets fonctionnels ; un ticket = un commit). Utilise le skill `/dev-workflow:next-task` pour le traiter ; le statut vit dans l'issue, pas dans `TASKS.md`.
+- **Workflow Claude** : plugins `dev-workflow` et `backend-review` de [claude-library](https://github.com/damchi/claude-library), configurés par `.claude/workflow.json` (préfixe, Project, vérifications, taille maximale d'une pull request). `ticket config` en donne le résumé. Si `ticket` est introuvable, le plugin `dev-workflow` n'est pas chargé, et sa garde Git non plus : arrête-toi et demande à l'utilisateur de l'installer (`/plugin`) avant toute écriture git.
 - Contrat HTTP : `api/openapi.yaml` (spec-first : on modifie le contrat avant le code).
 - Si le code et le README se contredisent, signale-le et demande, ne tranche pas seul.
 
@@ -33,7 +34,7 @@ make generate             régénère le code depuis openapi.yaml
 make docker-up / docker-down   PostgreSQL (émulateur de stockage en V1.1)
 ```
 
-**Avant de dire qu'une tâche est terminée** : `make fmt && make lint && make test` passent. Lance aussi `make test-integration` si tu as touché au SQL ou aux migrations.
+**Avant de dire qu'une tâche est terminée** : `make fmt && make lint && make test` passent. Lance aussi `make test-integration` si tu as touché au SQL ou aux migrations. La définition de terminé complète est dans `TASKS.md`, section Conventions.
 
 ## Architecture
 
@@ -75,7 +76,7 @@ Règles de dépendance :
 
 - Le schéma vient **uniquement** des migrations golang-migrate. Jamais `AutoMigrate`. Les tags GORM ne pilotent pas le schéma.
 - Une paire `NNNNNN_nom.up.sql` / `.down.sql` par changement. Ne modifie jamais une migration déjà appliquée : crée-en une nouvelle.
-- Voir le skill `new-migration` et l'agent `migration-reviewer`.
+- Modèle de données : README §5.4. Voir le skill `new-migration` et l'agent `backend-review:migration-reviewer`.
 
 ## Conventions de code
 
@@ -106,16 +107,17 @@ Règles de dépendance :
 
 1. Lis la partie du README concernée. S'il y a un ❓ ou un 🟡 qui bloque, pose la question.
 2. Fais un court plan avant les changements importants (plusieurs fichiers, migration, nouveau module).
-3. Pour `scoring` et les règles de temps : écris d'abord les tests.
+3. Pour `scoring`, les règles de temps et les règles de badges : écris d'abord les tests.
 4. Implémente, puis lance format, lint et tests.
 5. Fais relire par les agents adaptés (voir ci-dessous) avant de committer.
 6. **Git** : une fois format, lint, tests et relectures passés, tu **commits et pushes sans demander l'accord** (en anglais, un changement cohérent par commit, sur la branche du ticket). Tu présentes ensuite les fichiers modifiés, le résumé du diff et les commits poussés.
    - Tu peux utiliser `git status`, `git diff`, `git log`, `git add`, `git commit` et `git push` (branche de travail) librement.
    - **Pull request** : dès que le code est poussé, ouvre-la sans demander (`gh pr create`, titre = message du commit, description avec `Closes #<numéro>`) ; ne la fusionne jamais. Une fois ouverte, et après chaque push, attends la fin de la CI (`Monitor` sur `gh pr checks`, sans sondage), vérifie qu'elle est entièrement verte, puis lis tous les commentaires (`gh pr view --comments`, commentaires en ligne). Applique les corrections fondées (commit et push sur la même branche) ou explique pourquoi tu ne les suis pas, et recommence jusqu'à une CI verte sans commentaire en suspens. Ne dis un ticket terminé qu'à ce moment-là ; un point qui touche une règle produit (🟡 ou ❓) ou le périmètre se demande à l'utilisateur.
-   - **Issues** : toute issue créée rejoint le Project https://github.com/users/damchi/projects/7, statut « Todo » (hook PostToolUse sur `gh issue create` ; à défaut `python3 .claude/scripts/tasks.py add <numéro>`).
-   - **Branches fusionnées** : supprimées automatiquement sur GitHub (réglage du dépôt « delete branch on merge ») et en local (`tasks.py cleanup`, lancé par le hook SessionStart et au début de `next-task` ; il supprime aussi la branche distante d'une pull request fusionnée si GitHub ne l'a pas fait, seule suppression distante autorisée sans demande).
+   - **Taille** : une pull request fait au plus 200 lignes ajoutées + supprimées (`pr_size` de `.claude/workflow.json`, mesurée par `ticket size`). Au-delà, découpe le ticket (skill `/dev-workflow:new-ticket`) ; la garde Git demande la validation de l'utilisateur pour pousser une branche plus grosse.
+   - **Issues** : toute issue créée rejoint le Project https://github.com/users/damchi/projects/7, statut « Todo » (`ticket new`, ou hook PostToolUse du plugin sur `gh issue create` ; à défaut `ticket add <numéro>`).
+   - **Branches fusionnées** : supprimées automatiquement sur GitHub (réglage du dépôt « delete branch on merge ») et en local (`ticket cleanup`, lancé par le hook SessionStart du plugin et au début de `next-task` ; il supprime aussi la branche distante d'une pull request fusionnée si GitHub ne l'a pas fait, seule suppression distante autorisée sans demande).
    - Push vers `main`, suppression manuelle de branche distante, merge, rebase, tag, reset, `gh pr merge` : uniquement sur demande explicite de l'utilisateur, une action à la fois.
-   - Push forcé, `git reset --hard`, `git clean`, `--no-verify` : interdits (bloqués par la configuration).
+   - Push forcé, `git reset --hard`, `git clean`, `--no-verify` : interdits (bloqués par la garde Git du plugin et par les permissions).
 
 ## Ne jamais
 
@@ -127,17 +129,24 @@ Règles de dépendance :
 - Inventer une règle produit absente du README.
 - Écrire du code d'avance : helper, méthode, package, variable de configuration ou cible `make` que le ticket en cours n'utilise pas.
 
-## Agents et skills du projet
+## Agents et skills
+
+Du dépôt (`.claude/skills/`) :
 
 | Nom | Type | Quand l'utiliser |
 |---|---|---|
-| `next-task` | skill | Prendre la prochaine issue GitHub du backlog, l'implémenter, committer, pousser, relire les commentaires de la PR |
-| `bootstrap` | skill | Aperçu des phases du projet (le détail est dans `TASKS.md`) |
 | `new-module` | skill | Créer un module `internal/<nom>` |
 | `new-migration` | skill | Ajouter ou modifier le schéma de la base |
 | `new-endpoint` | skill | Ajouter une route (OpenAPI d'abord) |
 | `scoring-rules` | skill | Toucher aux catégories, au classement ou aux règles de temps |
-| `go-reviewer` | agent | Relecture du code Go après modification |
-| `migration-reviewer` | agent | Relecture de toute migration |
-| `spec-guardian` | agent | Vérifier que le code respecte les règles du README |
-| `security-reviewer` | agent | Relecture sécurité des routes, de l'authentification et des données |
+
+Des plugins (les tickets peuvent garder les noms courts) :
+
+| Nom | Type | Quand l'utiliser |
+|---|---|---|
+| `dev-workflow:next-task` | skill | Prendre la prochaine issue GitHub du backlog, l'implémenter, committer, pousser, relire les commentaires de la PR |
+| `dev-workflow:new-ticket` | skill | Créer un ticket au format du backlog, ou découper un ticket trop gros |
+| `dev-workflow:spec-guardian` | agent | Vérifier que le code respecte les règles du README |
+| `backend-review:go-reviewer` | agent | Relecture du code Go après modification |
+| `backend-review:migration-reviewer` | agent | Relecture de toute migration |
+| `backend-review:security-reviewer` | agent | Relecture sécurité des routes, de l'authentification et des données |
