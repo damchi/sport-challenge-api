@@ -422,10 +422,10 @@ sport-challenge-api/
 ├── internal/
 │   ├── platform/                    socle technique, importé par tous les modules
 │   │   ├── config/                  lecture et validation des variables d'environnement
-│   │   ├── db/                      connexion PostgreSQL (pgx, GORM), transactions (WithTx, InTx) ;
+│   │   ├── db/                      connexion PostgreSQL (pgx, GORM), transactions (WithTx, InTx), verrou des semaines (§2.12)
 │   │   │   └── testdb/              une base PostgreSQL par test d'intégration, construite par les migrations
 │   │   ├── httpx/                   routeur Gin et middlewares : en-têtes de sécurité, identifiant de requête, logs,
-│   │   │                            recovery, CORS, limitation de débit, validation des requêtes contre le contrat ;
+│   │   │                            recovery, échéance, CORS, limitation de débit, validation des requêtes contre le contrat ;
 │   │   │                            curseurs de pagination ; conversion des erreurs en réponses JSON
 │   │   ├── auth/                    validation des JWT (JWKS Auth0), middlewares Authenticate et CurrentUser,
 │   │   │                            client de l'API Management d'Auth0 (suppression de compte)
@@ -450,6 +450,8 @@ sport-challenge-api/
 │   │   ├── profile.go               règles du profil : pseudo, prénom, nom, langue, e-mail du jeton
 │   │   ├── service.go               création au premier login, profil, suppression (anonymisation), reprise
 │   │   │                            des suppressions Auth0 échouées
+│   │   ├── policy.go                compte bloqué : routes refusées (§2.12)
+│   │   ├── admin.go                 cas d'usage admin : profil, blocage, déblocage, suppression d'un compte
 │   │   ├── repository.go            accès base (GORM)
 │   │   └── handler.go               routes /me
 │   │
@@ -459,6 +461,8 @@ sport-challenge-api/
 │   │   ├── status.go                statut (à venir, en cours, terminé) déduit des dates
 │   │   ├── policy.go                qui peut faire quoi (fonctions pures, testées sans base)
 │   │   ├── service.go               création, modification limitée, rejoindre, abandonner, exclure, supprimer
+│   │   ├── settings.go · restore.go · members.go   cas d'usage admin : réglages, suppression et restauration,
+│   │   │                            participants et créateurs
 │   │   ├── repository.go
 │   │   └── handler.go
 │   │
@@ -473,11 +477,13 @@ sport-challenge-api/
 │   │   └── handler.go               GET /sports
 │   │
 │   ├── activity/
-│   │   ├── model.go                 Activity (source, identifiant externe, sport, durée, distance)
+│   │   ├── model.go                 Activity (source, sport, durée, distance, D+ ; la colonne external_id existe en base)
 │   │   ├── rules.go                 validation pure : bornes techniques (durée et distance positives, valeurs
-│   │   │                            maximales raisonnables), distance selon le sport ; vitesse calculée
+│   │   │                            maximales raisonnables), distance et D+ selon le sport ; vitesse calculée
 │   │   ├── policy.go                qui peut saisir, modifier, supprimer (auteur, semaine verrouillée)
 │   │   ├── service.go               point d'entrée unique : validation, fenêtre du challenge, idempotence
+│   │   ├── admin.go                 cas d'usage admin : ajout, modification, suppression de l'activité d'un compte
+│   │   ├── weeks.go                 semaines locales de /me/activities/weeks
 │   │   ├── repository.go
 │   │   └── handler.go
 │   │
@@ -487,7 +493,8 @@ sport-challenge-api/
 │   │   ├── distance.go              distance cumulée (coefficients)
 │   │   ├── duration.go              catégorie durée
 │   │   ├── elimination.go           catégorie à élimination
-│   │   ├── points.go                (cible, SC-API-135) catégorie Points (mini-classements hebdomadaires, barème)
+│   │   ├── elevation.go             D+ cumulé (mètres réels, sans coefficient)
+│   │   ├── points.go                catégorie Points (mini-classements hebdomadaires, barème, détail par semaine)
 │   │   └── ranks.go                 classement ex aequo (1, 1, 3)
 │   │
 │   ├── leaderboard/
@@ -495,9 +502,12 @@ sport-challenge-api/
 │   │   ├── repository.go            participants et activités de la fenêtre (SQL brut, lecture seule)
 │   │   ├── service.go               charge participants et activités, appelle les scorers
 │   │   ├── cache.go                 classement calculé gardé 5 s par challenge (SC-API-181)
-│   │   └── handler.go               GET /challenges/{id}/leaderboard
+│   │   ├── page.go                  catégorie seule et pagination après le podium (SC-API-171)
+│   │   ├── breakdown.go             détail des points d'un participant, valeurs masquées selon le lecteur
+│   │   ├── weeks.go                 semaines en cours et verrouillées, points de chaque semaine (aperçu admin)
+│   │   └── handler.go               GET /challenges/{id}/leaderboard, …/participants/{userId}/points
 │   │
-│   ├── closure/                     sans handler : appelé par le worker
+│   ├── closure/                     sans handler : appelé par le worker, et par admin pour le recalcul (§2.12)
 │   │   ├── model.go                 challenges à clore, résultats, instantanés
 │   │   ├── repository.go            clôtures de semaine, éliminations, result_snapshot (SQL brut)
 │   │   └── service.go               clôture de semaine, éliminations, gel des résultats
@@ -508,13 +518,20 @@ sport-challenge-api/
 │   │                                et du dernier échec (SQL brut)
 │   │   └── service.go               consigne chaque passage autour de la tâche, échec compris (code d'erreur stable)
 │   │
-│   ├── admin/                       lectures transverses de l'administration (§2.12)
-│   │   ├── model.go                 chiffres du tableau de bord, passages du worker, défis vus par l'admin
+│   ├── admin/                       administration (§2.12) : lectures transverses et corrections
+│   │   ├── model.go                 chiffres du tableau de bord, passages du worker, défis et comptes vus par l'admin
 │   │   ├── policy.go                RequireAdmin : 404 sans la permission admin
-│   │   ├── repository.go            agrégations du tableau de bord, liste et fiche des défis, supprimés compris
-│   │   │                                (SQL brut, lecture seule ; la fiche lue dans un seul instantané)
+│   │   ├── repository.go            agrégations du tableau de bord, listes et fiches, supprimés compris (SQL brut ;
+│   │   │                                la fiche lue dans un seul instantané) ; journal ; transaction d'une correction
 │   │   ├── service.go               lit à l'instant de l'horloge (statuts, semaines verrouillées, liens expirés)
-│   │   └── handler.go               GET /admin/stats, /admin/challenges, /admin/challenges/{id}
+│   │   ├── corrections.go           déroulé d'une correction : verrous, transaction, journal, recalcul, aperçu
+│   │   ├── journal.go               motif et lignes du journal des actions admin (admin_actions)
+│   │   ├── preview.go               aperçu (dry_run) : ce que la correction change aux résultats et aux semaines
+│   │   ├── challenge_settings.go    réglages, suppression et restauration d'un défi, liens d'invitation
+│   │   ├── challenge_members.go     ajout, retrait, réintégration des participants ; créateurs
+│   │   ├── accounts.go              modification, blocage, déblocage et suppression d'un compte
+│   │   ├── activity_corrections.go  ajout, modification et suppression de l'activité d'un compte
+│   │   └── handler.go               routes /admin/* (voir « Routes par module »)
 │   │
 │   ├── badge/                       (cible, V1.1)
 │   │   ├── model.go                 BadgeDefinition (par challenge, règle en JSON), BadgeAward
@@ -574,12 +591,13 @@ flowchart TD
 | `user` | `GET /me`, `PATCH /me`, `DELETE /me` |
 | `challenge` | `POST /challenges`, `GET /challenges` (publics et les miens), `GET /challenges/{id}`, `PATCH /challenges/{id}` (titre, description), `POST /challenges/{id}/join`, `POST /challenges/{id}/abandon`, `GET /challenges/{id}/participants`, `DELETE /challenges/{id}/participants/{userId}` (exclure), `POST /challenges/{id}/creators`, `DELETE /challenges/{id}` (créateurs : supprimer le challenge) |
 | `invitation` | `POST /challenges/{id}/invitations`, `POST /invitations/open`, `POST /invitations/accept` (le jeton dans le corps, jamais dans l'URL) |
-| `leaderboard` | `GET /challenges/{id}/leaderboard` (toutes les catégories du challenge ensemble ; une catégorie seule et une pagination après le podium au choix, SC-API-171) |
+| `leaderboard` | `GET /challenges/{id}/leaderboard` (toutes les catégories du challenge ensemble ; une catégorie seule et une pagination après le podium au choix, SC-API-171), `GET /challenges/{id}/participants/{userId}/points` (détail des points, SC-API-173) |
 | `activity` | `POST /activities`, `GET /me/activities` (filtre facultatif par sport), `GET /me/activities/summary` et `GET /me/activities/weeks` (totaux de la semaine en cours jour par jour, puis de chaque semaine, du lundi au lundi dans le fuseau `tz` donné par le client, nombre d'activités par sport, durée totale et nombre de défis rejoints, §2.8 ; utilisateur authentifié seulement), `GET /challenges/{id}/participants/{userId}/activities` et `GET /challenges/{id}/activities` (activités de tous les participants, avec leur auteur ; participants du challenge et créateurs), `PATCH` et `DELETE /activities/{id}` (auteur, tant que la semaine n'est verrouillée dans aucun challenge où l'activité compte) |
 | `sport` | `GET /sports` |
 | `badge` (V1.1) | `GET /me/badges`, `GET /challenges/{id}/badges`, `POST /challenges/{id}/badges` (créateur), `PATCH` et `DELETE /challenges/{id}/badges/{badgeId}` (créateur, tant que personne ne l'a gagné) |
 | uploads (V1.1) | `POST /uploads/avatar` (URL signée) |
 | `integration` (V2) | `GET /integrations`, `POST /integrations/{provider}/connect`, `DELETE /integrations/{provider}`, `POST /webhooks/{provider}` (public) |
+| `admin` | `GET /admin/stats`, `GET /admin/challenges`, `GET`, `PATCH` et `DELETE /admin/challenges/{id}`, `POST /admin/challenges/{id}/restore`, `POST /admin/challenges/{id}/participants`, `DELETE /admin/challenges/{id}/participants/{userId}`, `POST …/participants/{userId}/reinstate`, `PUT` et `DELETE /admin/challenges/{id}/creators/{userId}`, `GET /admin/users`, `POST /admin/users/search`, `GET`, `PATCH` et `DELETE /admin/users/{userId}`, `POST /admin/users/{userId}/block` et `/unblock`, `GET /admin/users/{userId}/challenges`, `GET` et `POST /admin/users/{userId}/activities`, `PATCH` et `DELETE /admin/activities/{id}`, `GET /admin/actions` (journal) ; permission `admin` seulement, 404 sinon |
 | `health` | `GET /health`, `GET /ready` (à la racine, hors `/api/v1`) |
 
 **Tâches du worker**
@@ -600,9 +618,9 @@ flowchart TD
 | `activity` | Saisie manuelle, validation (durée obligatoire, distance selon le sport, vitesse calculée et jamais saisie), marquage « manuelle » ; une activité hors de toute fenêtre est enregistrée et ne compte nulle part (ADR 0001) |
 | `scoring` | Calcule un classement à partir d'activités et de règles, sans dépendance à la base ni à Gin |
 | `leaderboard` | Charge participants et activités, appelle les scorers, renvoie un classement par catégorie |
-| `closure` | Au verrouillage de chaque semaine : éliminations, badges « semaines de suite » ; au verrouillage de la dernière : gel des résultats |
+| `closure` | Au verrouillage de chaque semaine : éliminations, badges « semaines de suite » ; au verrouillage de la dernière : gel des résultats ; recalcul d'un défi après une correction admin (§2.12) |
 | `workerrun` | Consigne chaque passage du worker (tâche, début, fin, issue, code d'erreur sans donnée personnelle) et ne garde que les 500 derniers par tâche, plus le dernier échec de chacune ; alimente le tableau de bord admin (§2.12) |
-| `admin` | Lectures transverses de l'administration (§2.12) : chiffres du tableau de bord, liste et fiche de tous les challenges et de tous les comptes (supprimés compris) ; les modifications admin restent des cas d'usage de chaque module |
+| `admin` | Administration (§2.12) : lectures transverses (chiffres du tableau de bord, liste et fiche de tous les challenges et de tous les comptes, supprimés compris, journal) et orchestration de toutes les corrections : transaction, verrous, ligne du journal, recalcul des défis touchés et aperçu (`dry_run`) ; chaque modification elle-même reste un cas d'usage admin de son module |
 | `badge` | Badges créés par les créateurs d'un challenge (nom, description, condition structurée) ; évaluation à chaque nouvelle activité, attribution idempotente |
 | `integration` | (V2+) Connexion OAuth au fournisseur, réception des webhooks, import, dédoublonnage |
 
@@ -659,16 +677,17 @@ Index à prévoir : `activity (utilisateur, date de début)`, `participant (chal
 | 2 | `RequestID` | Identifiant de requête, repris dans les logs et les réponses d'erreur |
 | 3 | `Logger` | Logs structurés (`slog`), sans donnée personnelle ni jeton |
 | 4 | `Recovery` | Transforme un plantage en erreur 500 propre, sans arrêter le serveur ; placé après `RequestID` et `Logger` pour que le plantage rattrapé soit journalisé comme un 500 avec son identifiant de requête |
-| 5 | `CORS` | Origines explicites (web uniquement, `CORS_ALLOWED_ORIGINS`), jamais `*` ; répond aux pré-requêtes `OPTIONS` sans jeton ; pas de cookie, donc pas d'`Allow-Credentials` |
-| 6 | `RateLimitIP` | Limite de débit par adresse IP, avant tout travail coûteux ; répond 429 au-delà |
-| 7 | `Authenticate` | Lit le jeton `Bearer`, le vérifie (signature par JWKS, émetteur, audience, expiration), place les informations du jeton dans le contexte |
-| 8 | `CurrentUser` | Retrouve l'utilisateur local à partir de l'identifiant du fournisseur (`sub`), le crée au premier login, place son identifiant dans le contexte ; refuse un compte supprimé (401 `account_deleted`) ou bloqué (403 `account_blocked`, §2.12, sauf sur `DELETE /me`) ; il ne décide rien lui-même : il passe la route de la requête au module `user`, dont la politique tranche |
-| 9 | `RateLimitUser` | Limite de débit par utilisateur, sur les requêtes d'écriture seulement (toute méthode sauf `GET`, `HEAD` et `OPTIONS`) |
-| 10 | `RequestValidator` | Par route du contrat, juste avant le handler : vérifie la requête contre `api/openapi.yaml` (400 `validation_failed` ; sur une route `/admin/*`, 404 `not_found` sans la permission `admin`, voir plus bas) |
+| 5 | `Timeout` | Donne au contexte de chaque requête une échéance de 25 s : les appels à la base et l'attente d'une connexion du pool s'arrêtent là au lieu d'attendre sans limite |
+| 6 | `CORS` | Origines explicites (web uniquement, `CORS_ALLOWED_ORIGINS`), jamais `*` ; répond aux pré-requêtes `OPTIONS` sans jeton ; pas de cookie, donc pas d'`Allow-Credentials` |
+| 7 | `RateLimitIP` | Limite de débit par adresse IP, avant tout travail coûteux ; répond 429 au-delà |
+| 8 | `Authenticate` | Lit le jeton `Bearer`, le vérifie (signature par JWKS, émetteur, audience, expiration), place les informations du jeton dans le contexte |
+| 9 | `CurrentUser` | Retrouve l'utilisateur local à partir de l'identifiant du fournisseur (`sub`), le crée au premier login, place son identifiant dans le contexte ; refuse un compte supprimé (401 `account_deleted`) ou bloqué (403 `account_blocked`, §2.12, sauf sur `DELETE /me`) ; il ne décide rien lui-même : il passe la route de la requête au module `user`, dont la politique tranche |
+| 10 | `RateLimitUser` | Limite de débit par utilisateur, sur les requêtes d'écriture seulement (toute méthode sauf `GET`, `HEAD` et `OPTIONS`) |
+| 11 | `RequestValidator` | Par route du contrat, juste avant le handler : vérifie la requête contre `api/openapi.yaml` (400 `validation_failed` ; sur une route `/admin/*`, 404 `not_found` sans la permission `admin`, voir plus bas) |
 
 **Groupes de routes**
 - Publiques, sans jeton : `GET /health` et `GET /ready` (sondes de Cloud Run), et les pré-requêtes `OPTIONS` (CORS).
-- Protégées (tout le reste, dont `/api/v1`) : middlewares 1 à 10 ; les routes publiques passent par tous sauf 7 à 9. **Protégé par défaut** : `cmd/api` applique `Authenticate` puis `CurrentUser` à toute route absente d'une liste explicite de routes publiques, et `api/openapi.yaml` exige `bearerAuth` au niveau global (seules les sondes le surchargent avec `security: []`). Une nouvelle route est donc protégée sans rien ajouter ; un test parcourt les routes enregistrées pour le vérifier.
+- Protégées (tout le reste, dont `/api/v1`) : middlewares 1 à 11 ; les routes publiques passent par tous sauf 8 à 10. **Protégé par défaut** : `cmd/api` applique `Authenticate` puis `CurrentUser` à toute route absente d'une liste explicite de routes publiques, et `api/openapi.yaml` exige `bearerAuth` au niveau global (seules les sondes le surchargent avec `security: []`). Une nouvelle route est donc protégée sans rien ajouter ; un test parcourt les routes enregistrées pour le vérifier.
 - ✅ Connexion **obligatoire** pour toutes les routes, y compris la lecture des challenges publics (V1). Pas de middleware `OptionalAuth` pour l'instant. La page de présentation publique (§2.11) n'y fait pas exception : servie par le frontend, elle n'appelle pas l'API.
 - V2 : `POST /webhooks/{provider}` n'utilise pas le jeton utilisateur mais un middleware de **vérification de signature** du fournisseur.
 

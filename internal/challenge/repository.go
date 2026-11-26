@@ -621,8 +621,8 @@ func (r *Repository) RemoveCreator(ctx context.Context, id, userID string, now t
 // join, an abandon or any other write on the challenge either happens before
 // (and stays) or waits and then finds the challenge gone. decide gets the
 // challenge and the actor's membership and refuses with an error, or gives
-// the instant of the deletion. Nothing else is removed: participations,
-// categories and, later, activities stay for the final purge.
+// the instant of the deletion. Nothing else is removed: participations and
+// categories stay, never purged (README §2.12).
 func (r *Repository) Delete(ctx context.Context, id, actorID string, now time.Time, decide func(Challenge, Membership) (time.Time, error)) error {
 	err := r.withLockedMembership(ctx, id, actorID, now, func(tx *gorm.DB, c Challenge, m Membership) error {
 		at, err := decide(c, m)

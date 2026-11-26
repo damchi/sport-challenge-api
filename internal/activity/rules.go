@@ -52,7 +52,8 @@ type Draft struct {
 	// DistanceMeters is nil when no distance is entered.
 	DistanceMeters *int
 	// ElevationGainMeters is nil when no elevation gain is entered. Only the
-	// cumulative elevation category counts it, no badge (README §2.5).
+	// cumulative elevation category and the weekly elevation criterion of the
+	// Points category count it, no badge (README §2.5).
 	ElevationGainMeters *int
 }
 

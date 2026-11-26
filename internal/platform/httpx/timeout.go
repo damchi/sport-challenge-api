@@ -10,7 +10,7 @@ import (
 // Timeout gives the context of each request a deadline d away. The database
 // calls and the wait for a connection of the pool stop there instead of
 // waiting without limit when the pool is exhausted; the error answers as any
-// other (500 internal_error).
+// other (500 internal_error), except in an admin change, which answers busy.
 func Timeout(d time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), d)

@@ -16,7 +16,8 @@ type Activity struct {
 	DurationSeconds int
 	DistanceMeters  *int
 	// ElevationGainMeters is nil when not entered; only the cumulative
-	// elevation category counts it.
+	// elevation category and the weekly elevation criterion of the Points
+	// category count it.
 	ElevationGainMeters *int
 	Source              string
 	// IdempotencyKey is the key the client sent with the creation, if any.

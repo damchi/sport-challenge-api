@@ -5027,7 +5027,8 @@ components:
           maximum: 20000
           description: |
             Positive elevation gain in meters, optional; it counts for the
-            `cumulative_elevation` category alone (no other category, no
+            `cumulative_elevation` category and the `weekly_elevation`
+            criterion of the `points` category, and for nothing else (no
             badge). Refused (`elevation_not_allowed`)
             when the sport's `elevation_allowed` is false or the activity has
             no distance. On a change, leaving it out removes it.
