@@ -23,7 +23,7 @@ Cela crée `migrations/NNNNNN_create_challenge_tables.up.sql` et `.down.sql`. Re
 - `down` : annule exactement le `up`, dans l'ordre inverse.
 - Types : `timestamptz` pour tous les instants (jamais `timestamp`), `uuid` avec `DEFAULT gen_random_uuid()`, `text`, distances en mètres, durées en secondes, `numeric` ou `bigint` plutôt que `float` pour ce qui est cumulé.
 - Contraintes : clés primaires et étrangères, `NOT NULL`, `CHECK` pour les énumérations (visibilité, type de catégorie, statut). Pour `ON DELETE`, pense à l'anonymisation d'un compte : ne supprime pas en cascade les résultats d'un challenge.
-- Index du README : `activity (user_id, started_at)`, `participant (challenge_id)`, `category (challenge_id)`. N'en ajoute pas d'autres sans raison de requête.
+- Index : chacun se justifie par une requête du code (modèle de données au README §5.4) ; pas d'index sans requête qui s'en sert.
 - `CREATE INDEX CONCURRENTLY` : seul dans son fichier (il ne peut pas être combiné à d'autres instructions dans la même migration).
 - Table qui contient déjà des données : évite les verrous longs (colonne `NOT NULL` sans valeur par défaut, réécriture de table). Pour un changement destructif, fais-le en plusieurs migrations (ajouter, migrer les données, retirer) car l'ancienne version du code tourne encore pendant le déploiement.
 - Données de référence (catalogue de sports) : idempotentes (`INSERT ... ON CONFLICT DO NOTHING`). Aucune donnée de test ni secret.
