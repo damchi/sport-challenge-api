@@ -38,6 +38,8 @@ type Membership struct {
 	// this is (the target, when read for one) was deleted (anonymized): it is
 	// then shown nowhere, its participation included.
 	AccountDeleted bool
+	// JoinedAt is when the user joined, nil without a participation.
+	JoinedAt *time.Time
 	// AbandonedAt is when the participation was abandoned (left or
 	// excluded), nil otherwise. No rule here reads it: module activity keeps
 	// locked the weeks locked by then.
@@ -303,6 +305,17 @@ func AbandonRefusal(m Membership, visibility string, now, endsAt time.Time) (noo
 	default:
 		return false, apperr.New(apperr.CodeNotFound, nil)
 	}
+}
+
+// AbandonInstant is the instant to store as the abandon of the participation
+// m, at now: now, or the instant of the join if later. The join may come from
+// another instance whose clock runs a few milliseconds ahead, and an abandon
+// never precedes the join (participants_abandoned_after_joined_check).
+func AbandonInstant(m Membership, now time.Time) time.Time {
+	if m.JoinedAt != nil && m.JoinedAt.After(now) {
+		return *m.JoinedAt
+	}
+	return now
 }
 
 // DeletionRefusal is the rule of the last creator (README §2.2): an account

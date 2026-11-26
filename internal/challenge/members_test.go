@@ -73,6 +73,11 @@ func TestServiceAdminMembers(t *testing.T) {
 			want: MemberChange{Old: status(ParticipantActive), New: status(ParticipantAbandoned)}, written: func(f *fakeRepository) bool { return f.abandonedAt.Equal(now) },
 		},
 		{
+			name: "exclude someone who joined on a clock a millisecond ahead: excluded at the join", useCase: excludeParticipant,
+			target: Membership{Participant: ParticipantActive, JoinedAt: new(now.Add(time.Millisecond))},
+			want:   MemberChange{Old: status(ParticipantActive), New: status(ParticipantAbandoned)}, written: func(f *fakeRepository) bool { return f.abandonedAt.Equal(now.Add(time.Millisecond)) },
+		},
+		{
 			name: "exclude someone already out: nothing written", useCase: excludeParticipant, target: abandoned,
 			want: noChange(), written: func(f *fakeRepository) bool { return !f.abandonedAt.IsZero() },
 		},

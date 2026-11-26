@@ -479,7 +479,7 @@ func toRankings(places []leaderboard.Place) []challenge.Ranking {
 
 // invited is what invitationChallenges reads from module challenge.
 type invited interface {
-	InvitationDeadline(ctx context.Context, actorID, id string) (time.Time, error)
+	InvitationDeadline(ctx context.Context, actorID, id string, now time.Time) (time.Time, error)
 	Get(ctx context.Context, actor auth.Actor, id string) (challenge.Detail, error)
 	Join(ctx context.Context, actorID, id string) (challenge.Detail, error)
 }
@@ -489,8 +489,8 @@ type invited interface {
 // matrix and the join rule to the actor.
 type invitationChallenges struct{ challenges invited }
 
-func (i invitationChallenges) InvitationDeadline(ctx context.Context, actorID, challengeID string) (time.Time, error) {
-	return i.challenges.InvitationDeadline(ctx, actorID, challengeID)
+func (i invitationChallenges) InvitationDeadline(ctx context.Context, actorID, challengeID string, now time.Time) (time.Time, error) {
+	return i.challenges.InvitationDeadline(ctx, actorID, challengeID, now)
 }
 
 func (i invitationChallenges) Preview(ctx context.Context, actorID, challengeID string) (invitation.Challenge, error) {

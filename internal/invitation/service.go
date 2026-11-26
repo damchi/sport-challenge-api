@@ -48,9 +48,9 @@ type Challenge struct {
 // its own rules to actorID each time.
 type Challenges interface {
 	// InvitationDeadline gives the end of week 1 of challenge challengeID
-	// once actorID may invite to it, and refuses otherwise (rule
+	// once actorID may invite to it at now, and refuses otherwise (rule
 	// challenge.InviteRefusal).
-	InvitationDeadline(ctx context.Context, actorID, challengeID string) (time.Time, error)
+	InvitationDeadline(ctx context.Context, actorID, challengeID string, now time.Time) (time.Time, error)
 	// Preview gives the preview of a challenge actorID may see; 404
 	// challenge_not_found otherwise.
 	Preview(ctx context.Context, actorID, challengeID string) (Challenge, error)
@@ -100,9 +100,13 @@ func (s *Service) Reschedule(ctx context.Context, challengeID string, expiresAt 
 // token exists in clear, as only its hash is stored. The rule is the
 // challenge module's: nothing is written before it passes. A challenge
 // deleted between the rule and the insert keeps a harmless invitation:
-// Link refuses any invitation to a deleted challenge.
+// Link refuses any invitation to a deleted challenge. The rule is judged at
+// the creation instant: read once, an invitation it lets through expires
+// after its creation, even when week 1 ends meanwhile (422
+// registration_closed then, never a violated constraint).
 func (s *Service) Create(ctx context.Context, actorID, challengeID string) (Invitation, string, error) {
-	deadline, err := s.challenges.InvitationDeadline(ctx, actorID, challengeID)
+	now := s.clock.Now()
+	deadline, err := s.challenges.InvitationDeadline(ctx, actorID, challengeID, now)
 	if err != nil {
 		return Invitation{}, "", err
 	}
@@ -115,7 +119,7 @@ func (s *Service) Create(ctx context.Context, actorID, challengeID string) (Invi
 		InvitedBy:   actorID,
 		TokenHash:   hash[:],
 		ExpiresAt:   deadline,
-		CreatedAt:   s.clock.Now(),
+		CreatedAt:   now,
 	})
 	if errors.Is(err, errAccountDeleted) {
 		return Invitation{}, "", apperr.New(apperr.CodeAccountDeleted, err)

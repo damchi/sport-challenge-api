@@ -33,9 +33,20 @@ type fakeChallenges struct {
 	err, previewErr, joinErr error
 	// joined, if set, records the join made: user and challenge.
 	joined *[2]string
+	// judgedAt, if set, records the instant the rule was judged at;
+	// clock, if set, is moved to the end of week 1 once the rule passed,
+	// as when week 1 ends between the rule and the insert.
+	judgedAt *time.Time
+	clock    *clock.FakeClock
 }
 
-func (f fakeChallenges) InvitationDeadline(context.Context, string, string) (time.Time, error) {
+func (f fakeChallenges) InvitationDeadline(_ context.Context, _, _ string, now time.Time) (time.Time, error) {
+	if f.judgedAt != nil {
+		*f.judgedAt = now
+	}
+	if f.err == nil && f.clock != nil {
+		f.clock.Set(deadline)
+	}
 	return deadline, f.err
 }
 
@@ -138,6 +149,25 @@ func TestServiceCreate(t *testing.T) {
 	}
 	if inv.ID == "" {
 		t.Fatal("the stored invitation is not returned")
+	}
+}
+
+// TestServiceCreateAtTheEndOfWeek1: week 1 ends between the rule, which let
+// the invitation through a nanosecond before, and the insert. The invitation
+// is created at the instant the rule judged, before it expires: never a
+// violated invitations_expires_after_created_check.
+func TestServiceCreateAtTheEndOfWeek1(t *testing.T) {
+	repo := &fakeRepository{}
+	clk := clock.NewFake(deadline.Add(-time.Nanosecond))
+	var judgedAt time.Time
+	if _, _, err := NewService(fakeChallenges{judgedAt: &judgedAt, clock: clk}, repo, clk).Create(t.Context(), actor, challengeID); err != nil {
+		t.Fatal(err)
+	}
+	if !judgedAt.Equal(deadline.Add(-time.Nanosecond)) {
+		t.Fatalf("rule judged at %s, want the clock's now before the insert", judgedAt)
+	}
+	if repo.created == nil || !repo.created.CreatedAt.Equal(judgedAt) || !repo.created.CreatedAt.Before(repo.created.ExpiresAt) {
+		t.Fatalf("stored %+v, want created at %s, the instant the rule judged, before it expires", repo.created, judgedAt)
 	}
 }
 

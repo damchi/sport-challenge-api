@@ -686,6 +686,30 @@ func TestAllActivitiesRefusal(t *testing.T) {
 	}
 }
 
+// TestAbandonInstant: an abandon is stored at now, never before the join,
+// which may come from a clock running ahead.
+func TestAbandonInstant(t *testing.T) {
+	at := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		joinedAt *time.Time
+		want     time.Time
+	}{
+		{name: "no join known", want: at},
+		{name: "joined before", joinedAt: new(at.Add(-time.Hour)), want: at},
+		{name: "joined at now, on the bound", joinedAt: new(at), want: at},
+		{name: "joined a nanosecond after now", joinedAt: new(at.Add(time.Nanosecond)), want: at.Add(time.Nanosecond)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AbandonInstant(Membership{Participant: ParticipantActive, JoinedAt: tt.joinedAt}, at)
+			if !got.Equal(tt.want) {
+				t.Fatalf("AbandonInstant() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDeletionRefusal(t *testing.T) {
 	if err := DeletionRefusal(nil); err != nil {
 		t.Fatalf("no challenge: DeletionRefusal() = %v, want nil", err)
