@@ -327,7 +327,11 @@ def ensure_in_project(info, number):
     issue = gh_json("issue", "view", str(number), "--json", "url,projectItems")
     if any(pi.get("title") == DEFAULT_PROJECT for pi in issue.get("projectItems") or []):
         return False
-    gh("project", "item-add", str(project["number"]), "--owner", owner, "--url", issue["url"])
+    p = subprocess.run(["gh", "project", "item-add", str(project["number"]), "--owner", owner, "--url", issue["url"]], capture_output=True, text=True)
+    if p.returncode != 0:
+        # Same as set_project_status: report and go on, so `start` still finishes its other steps.
+        print(f"Project non mis à jour (#{number}) : {p.stderr.strip()} ; fais-le à la main.")
+        return False
     # The new item can take a moment to show up in item-list.
     for _ in range(5):
         time.sleep(1)
