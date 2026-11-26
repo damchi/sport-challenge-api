@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,7 +61,7 @@ func serveLogged(t *testing.T, svc *Service, token, method, target, body string,
 }
 
 // serveWith is serveLogged on handler h.
-func serveWith(t *testing.T, h *Handler, token, method, target, body string, logs io.Writer) (*httptest.ResponseRecorder, map[string]any) {
+func serveWith(t *testing.T, h *Handler, token, method, target, body string, logs io.Writer, headers ...http.Header) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
@@ -94,6 +95,9 @@ func serveWith(t *testing.T, h *Handler, token, method, target, body string, log
 		}
 		req := httptest.NewRequest(method, target, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+		for _, hs := range headers {
+			maps.Copy(req.Header, hs)
+		}
 		return req
 	}
 	req := newRequest()

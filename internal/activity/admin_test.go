@@ -43,7 +43,7 @@ func TestAdminRecord(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{}
-			w, err := adminService(t, repo, true, c1, other).AdminRecord(t.Context(), admin, author, tt.draft)
+			w, err := adminService(t, repo, true, c1, other).AdminRecord(t.Context(), admin, author, nil, tt.draft)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -93,7 +93,7 @@ func TestAdminRecordRefused(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeRepository{lockErr: tt.lockErr}
-			_, err := adminService(t, repo, tt.complete, challengeOf(t, "c1")).AdminRecord(t.Context(), tt.actor, author, tt.draft)
+			_, err := adminService(t, repo, tt.complete, challengeOf(t, "c1")).AdminRecord(t.Context(), tt.actor, author, nil, tt.draft)
 			checkError(t, err, tt.code, tt.wantErr)
 			if repo.recorded != nil {
 				t.Fatal("recorded")
@@ -104,12 +104,50 @@ func TestAdminRecordRefused(t *testing.T) {
 
 func TestAdminRecordOverlap(t *testing.T) {
 	repo := &fakeRepository{err: errActivityOverlap}
-	w, err := adminService(t, repo, true).AdminRecord(t.Context(), admin, author, run(toronto(t, 2026, 6, 10, 7)))
+	w, err := adminService(t, repo, true).AdminRecord(t.Context(), admin, author, nil, run(toronto(t, 2026, 6, 10, 7)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = w.Write(t.Context())
 	checkError(t, err, apperr.CodeActivityOverlap, nil)
+}
+
+func TestAdminRecordIdempotencyKey(t *testing.T) {
+	key := "k1"
+	before := Activity{ID: "a0", UserID: author, SportCode: "run", IdempotencyKey: &key}
+	tests := []struct {
+		name     string
+		repo     *fakeRepository
+		recorded bool
+		code     apperr.Code
+		wantErr  error
+	}{
+		{name: "new key: recorded with it", repo: &fakeRepository{}, recorded: true},
+		{name: "same key, another body: recorded before", repo: &fakeRepository{existing: &before}, wantErr: ErrRecordedBefore},
+		{name: "same key, activity deleted since", repo: &fakeRepository{err: errActivityNotFound}, code: apperr.CodeActivityNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, err := adminService(t, tt.repo, true, challengeOf(t, "c1")).AdminRecord(t.Context(), admin, author, &key, run(toronto(t, 2026, 6, 10, 7)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = w.Write(t.Context())
+			if !tt.recorded {
+				checkError(t, err, tt.code, tt.wantErr)
+				if tt.repo.recorded != nil {
+					t.Fatal("recorded")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := tt.repo.recorded; r == nil || r.IdempotencyKey == nil || *r.IdempotencyKey != key || r.UserID != author {
+				t.Fatalf("recorded %+v, want the key for the author", r)
+			}
+		})
+	}
 }
 
 func TestAdminUpdate(t *testing.T) {

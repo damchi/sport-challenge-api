@@ -254,7 +254,7 @@ func TestAdminActivityCorrections(t *testing.T) {
 	})
 
 	t.Run("recorded and deleted in a finished challenge", func(t *testing.T) {
-		previews, err := corrections.Record(t.Context(), adminActor, ann, run(toronto(t, 2026, 4, 15, 10), 8000), "Séance oubliée", false)
+		previews, err := corrections.Record(t.Context(), adminActor, ann, nil, run(toronto(t, 2026, 4, 15, 10), 8000), "Séance oubliée", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -281,13 +281,27 @@ func TestAdminActivityCorrections(t *testing.T) {
 		}
 	})
 
+	t.Run("idempotency key: a dry run leaves it free, a replay records nothing", func(t *testing.T) {
+		key, before := "admin-key", len(journal())
+		for _, dryRun := range []bool{true, false, false} {
+			if _, err := corrections.Record(t.Context(), adminActor, bob, &key, run(toronto(t, 2026, 5, 12, 10), 3000), "Clé rejouée", dryRun); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var n int
+		err := pool.QueryRow(t.Context(), `SELECT count(*) FROM activities WHERE user_id = $1 AND idempotency_key = $2`, bob, key).Scan(&n)
+		if err != nil || n != 1 || len(journal()) != before+1 {
+			t.Fatalf("%d activities, %d new journal lines, %v; want one of each", n, len(journal())-before, err)
+		}
+	})
+
 	t.Run("validation and overlap unchanged", func(t *testing.T) {
 		before := len(journal())
-		_, err := corrections.Record(t.Context(), adminActor, bob, run(toronto(t, 2026, 4, 14, 10), 4000), "Séance de bob", false)
+		_, err := corrections.Record(t.Context(), adminActor, bob, nil, run(toronto(t, 2026, 4, 14, 10), 4000), "Séance de bob", false)
 		if !errors.Is(err, apperr.New(apperr.CodeActivityOverlap, nil)) {
 			t.Fatalf("overlapping: %v, want activity_overlap", err)
 		}
-		_, err = corrections.Record(t.Context(), adminActor, bob, run(now.Add(time.Hour), 4000), "Séance de bob", false)
+		_, err = corrections.Record(t.Context(), adminActor, bob, nil, run(now.Add(time.Hour), 4000), "Séance de bob", false)
 		if !errors.Is(err, apperr.New(apperr.CodeValidationFailed, nil)) {
 			t.Fatalf("in the future: %v, want validation_failed", err)
 		}
@@ -315,7 +329,7 @@ func TestAdminActivityCorrections(t *testing.T) {
 	t.Run("the account deleted: the lines of its activities keep no value", func(t *testing.T) {
 		// An activity of ann recorded, changed then deleted by the admin,
 		// in may.
-		previews, err := corrections.Record(t.Context(), adminActor, ann, run(toronto(t, 2026, 5, 5, 10), 4000), "Séance de mai", false)
+		previews, err := corrections.Record(t.Context(), adminActor, ann, nil, run(toronto(t, 2026, 5, 5, 10), 4000), "Séance de mai", false)
 		if err != nil || len(previews) != 1 {
 			t.Fatalf("recorded in may: %d previews, %v", len(previews), err)
 		}

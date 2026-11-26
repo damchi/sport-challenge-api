@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 
 	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/platform/auth"
@@ -18,7 +19,7 @@ const (
 // transaction ctx carries, each one first locking the row of the account of
 // the activity (module activity).
 type ActivityWriter interface {
-	AdminRecord(ctx context.Context, actor auth.Actor, userID string, draft activity.Draft) (activity.AdminWrite, error)
+	AdminRecord(ctx context.Context, actor auth.Actor, userID string, idempotencyKey *string, draft activity.Draft) (activity.AdminWrite, error)
 	AdminUpdate(ctx context.Context, actor auth.Actor, id string, draft activity.Draft) (activity.AdminWrite, error)
 	AdminDelete(ctx context.Context, actor auth.Actor, id string) (activity.AdminWrite, error)
 }
@@ -38,11 +39,17 @@ func NewActivityCorrections(corrections *Corrections, activities ActivityWriter)
 	return &ActivityCorrections{corrections: corrections, activities: activities}
 }
 
-// Record records draft for account userID.
-func (s *ActivityCorrections) Record(ctx context.Context, actor auth.Actor, userID string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error) {
-	return s.run(ctx, actor, ActionActivityCreate, func(ctx context.Context) (activity.AdminWrite, error) {
-		return s.activities.AdminRecord(ctx, actor, userID, draft)
+// Record records draft for account userID. An idempotencyKey that gave an
+// activity of the account recorded before writes nothing, its journal line
+// neither, and touches no challenge (an empty list), whatever draft is.
+func (s *ActivityCorrections) Record(ctx context.Context, actor auth.Actor, userID string, idempotencyKey *string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error) {
+	previews, err := s.run(ctx, actor, ActionActivityCreate, func(ctx context.Context) (activity.AdminWrite, error) {
+		return s.activities.AdminRecord(ctx, actor, userID, idempotencyKey, draft)
 	}, reason, dryRun)
+	if errors.Is(err, activity.ErrRecordedBefore) {
+		return []ChallengePreview{}, nil
+	}
+	return previews, err
 }
 
 // Update replaces activity id with draft.

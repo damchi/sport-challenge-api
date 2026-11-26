@@ -70,7 +70,7 @@ type memberUpdater interface {
 // activityUpdater changes the activity of anyone as an admin
 // (ActivityCorrections).
 type activityUpdater interface {
-	Record(ctx context.Context, actor auth.Actor, userID string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error)
+	Record(ctx context.Context, actor auth.Actor, userID string, idempotencyKey *string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error)
 	Update(ctx context.Context, actor auth.Actor, id string, draft activity.Draft, reason string, dryRun bool) ([]ChallengePreview, error)
 	Delete(ctx context.Context, actor auth.Actor, id, reason string, dryRun bool) ([]ChallengePreview, error)
 }
@@ -101,7 +101,7 @@ func (h *Handler) CreateAdminActivity(ctx context.Context, req api.CreateAdminAc
 	// The contract requires the body: an empty one is refused there, and
 	// here as one without its reason, once the permission is checked.
 	b := activityBody(req.Body)
-	previews, err := h.activities.Record(ctx, actor, req.UserId.String(), activityDraft(b), b.Reason, isDryRun(b.DryRun))
+	previews, err := h.activities.Record(ctx, actor, req.UserId.String(), req.Params.IdempotencyKey, activityDraft(b), b.Reason, isDryRun(b.DryRun))
 	if err != nil {
 		return nil, err
 	}
