@@ -124,3 +124,23 @@ func TestPointsBreakdownBeforeTheStart(t *testing.T) {
 		t.Fatalf("Breakdown() = %+v, want no week", got)
 	}
 }
+
+// TestPointsBreakdownIgnoresNonParticipants: the groups of a user who is
+// not a participant count nowhere, even between those of a participant.
+func TestPointsBreakdownIgnoresNonParticipants(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 1, 5}, 1)
+	p := Points{Criteria: []string{CriterionLongestDuration}, Podium: 5}
+	activities := []Activity{
+		session("ann", "run", w.Start.Add(10*time.Hour), 30*60, nil),
+		session("zed", "run", w.Start.Add(11*time.Hour), 90*60, nil),
+		session("ann", "run", w.Start.Add(12*time.Hour), 40*60, nil),
+	}
+	w.Now = w.WeekLocksAt(1)
+	got := p.Breakdown(w, users("ann"), activities)
+	want := map[string][]WeekPoints{"ann": {{Week: 1, Points: 10, Criteria: []CriterionPoints{
+		{Criterion: CriterionLongestDuration, Rank: 1, Value: 40 * 60, Points: 10},
+	}}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Breakdown() = %+v\nwant %+v", got, want)
+	}
+}

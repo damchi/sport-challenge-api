@@ -207,7 +207,9 @@ type valueAt struct {
 // weekRanking ranks the values of a week on a criterion, highest first,
 // and gives the points of the scale to its top: equal values share the
 // rank and the points, at the edge of the top too; a value of 0 has no
-// rank and does not score. It sorts lines in place and returns them.
+// rank and does not score. It sorts lines in place and returns them. It
+// shares the ties of Rank, on positions rather than user IDs: the order
+// within a tie does not matter here.
 func weekRanking(lines []valueAt, scale []int) []valueAt {
 	slices.SortFunc(lines, func(a, b valueAt) int { return cmp.Compare(b.value, a.value) })
 	for j := range lines {
