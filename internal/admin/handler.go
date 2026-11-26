@@ -888,6 +888,13 @@ func (h *Handler) ListAdminUserActivities(ctx context.Context, req api.ListAdmin
 			Contributions:       make([]api.ActivityContribution, len(a.Contributions)),
 			Locked:              a.Locked,
 		}
+		if c := a.AdminChange; c != nil {
+			adminID, err := uuid.Parse(c.AdminID)
+			if err != nil {
+				return nil, fmt.Errorf("admin id: %w", err)
+			}
+			out.Items[i].AdminChange = &api.AdminActivityChange{Action: api.AdminActivityChangeAction(c.Action), At: c.At.UTC(), AdminId: adminID}
+		}
 		for j, c := range a.Contributions {
 			cid, err := uuid.Parse(c.ChallengeID)
 			if err != nil {

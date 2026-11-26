@@ -363,6 +363,24 @@ type ActivityRow struct {
 	ElevationGainMeters *int
 	Source              string
 	CreatedAt           time.Time
+	// AdminChange is the last time an admin added or changed the activity;
+	// nil if none did.
+	AdminChange *ActivityChange `gorm:"-"`
+}
+
+// What an admin did to an activity (ActivityChange.Action).
+const (
+	ActivityCreated = "created"
+	ActivityUpdated = "updated"
+)
+
+// ActivityChange is the last journal line of an admin that added
+// (ActivityCreated) or changed (ActivityUpdated) an activity: its instant
+// and the id of the admin.
+type ActivityChange struct {
+	Action  string
+	At      time.Time
+	AdminID string
 }
 
 // UserActivity is an activity of an account with what it brings now to

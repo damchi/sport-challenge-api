@@ -378,29 +378,65 @@ func (r *Repository) ListUserChallenges(ctx context.Context, id string, q PageQu
 // ListUserActivities returns at most q.Limit activities of account id,
 // deleted ones excluded, the most recent session first; the key
 // (started_at, id) makes the order total, on the index
-// activities_user_started_at_idx. errUserNotFound when there is no such
-// account.
+// activities_user_started_at_idx. Each one carries the last journal line
+// of an admin that added or changed it (activity.create, activity.update),
+// read in the same query on admin_actions_target_idx. errUserNotFound when
+// there is no such account.
 func (r *Repository) ListUserActivities(ctx context.Context, id string, q ActivityQuery) ([]ActivityRow, error) {
 	var query strings.Builder
-	query.WriteString(`SELECT id, sport_code, sport_label, started_at, duration_seconds, distance_meters,
-		elevation_gain_meters, source, created_at
-		FROM activities WHERE user_id = @id AND deleted_at IS NULL`)
-	args := map[string]any{"id": id, "limit": q.Limit}
+	query.WriteString(`SELECT a.id, a.sport_code, a.sport_label, a.started_at, a.duration_seconds, a.distance_meters,
+		a.elevation_gain_meters, a.source, a.created_at,
+		c.action AS change_action, c.created_at AS changed_at, c.admin_id AS changed_by
+		FROM activities a
+		LEFT JOIN LATERAL (
+			SELECT action, created_at, admin_id FROM admin_actions
+			WHERE target_id = a.id AND target_type = @target AND action IN (@created, @updated)
+			ORDER BY created_at DESC, id DESC LIMIT 1
+		) c ON true
+		WHERE a.user_id = @id AND a.deleted_at IS NULL`)
+	args := map[string]any{
+		"id": id, "limit": q.Limit,
+		"target": TargetActivity, "created": ActionActivityCreate, "updated": ActionActivityUpdate,
+	}
 	if q.After != nil {
-		query.WriteString(" AND (started_at, id) < (@after_started, @after_id)")
+		query.WriteString(" AND (a.started_at, a.id) < (@after_started, @after_id)")
 		args["after_started"], args["after_id"] = q.After.StartedAt, q.After.ID
 	}
-	query.WriteString(" ORDER BY started_at DESC, id DESC LIMIT @limit")
+	query.WriteString(" ORDER BY a.started_at DESC, a.id DESC LIMIT @limit")
 
-	var out []ActivityRow
+	// ActivityRow.AdminChange is not a column (gorm:"-"): it is built from
+	// the three columns of the journal line below.
+	var rows []struct {
+		ActivityRow
+		ChangeAction *string
+		ChangedAt    *time.Time
+		ChangedBy    *string
+	}
 	err := r.ofUser(ctx, id, func(tx *gorm.DB) error {
-		if err := tx.Raw(query.String(), args).Scan(&out).Error; err != nil {
+		if err := tx.Raw(query.String(), args).Scan(&rows).Error; err != nil {
 			return fmt.Errorf("list user activities: %w", err)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	out := make([]ActivityRow, len(rows))
+	for i, row := range rows {
+		out[i] = row.ActivityRow
+		if row.ChangeAction == nil || row.ChangedAt == nil || row.ChangedBy == nil {
+			continue
+		}
+		var action string
+		switch *row.ChangeAction {
+		case ActionActivityCreate:
+			action = ActivityCreated
+		case ActionActivityUpdate:
+			action = ActivityUpdated
+		default:
+			return nil, fmt.Errorf("list user activities: unexpected admin action %q", *row.ChangeAction)
+		}
+		out[i].AdminChange = &ActivityChange{Action: action, At: *row.ChangedAt, AdminID: *row.ChangedBy}
 	}
 	return out, nil
 }
