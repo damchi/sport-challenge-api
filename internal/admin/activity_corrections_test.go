@@ -292,7 +292,8 @@ func TestAdminActivityRoutes(t *testing.T) {
 
 // TestCreateAdminActivityIdempotencyKey: the Idempotency-Key header reaches
 // the change; one that gave an activity recorded before answers 200 with no
-// challenge; a malformed one is refused.
+// challenge; a malformed one is refused, as not_found without the
+// permission.
 func TestCreateAdminActivityIdempotencyKey(t *testing.T) {
 	var method string
 	activities := activityUpdaterFunc(func(m string, _ auth.Actor, _ string, _ activity.Draft, _ string, _ bool) ([]ChallengePreview, error) {
@@ -312,5 +313,11 @@ func TestCreateAdminActivityIdempotencyKey(t *testing.T) {
 	rec, got = serveWith(t, h, adminToken, http.MethodPost, target, body, io.Discard, http.Header{"Idempotency-Key": {"a key"}})
 	if e, _ := got["error"].(map[string]any); rec.Code != http.StatusBadRequest || e["code"] != "validation_failed" || method != "" {
 		t.Fatalf("malformed key: got %d %v, asked %q; want 400 validation_failed, nothing asked", rec.Code, got, method)
+	}
+
+	// Without the permission, a malformed key tells nothing of the route.
+	rec, got = serveWith(t, h, "some.access.token", http.MethodPost, target, body, io.Discard, http.Header{"Idempotency-Key": {"a key"}})
+	if e, _ := got["error"].(map[string]any); rec.Code != http.StatusNotFound || e["code"] != "not_found" || method != "" {
+		t.Fatalf("malformed key without the permission: got %d %v, asked %q; want 404 not_found, nothing asked", rec.Code, got, method)
 	}
 }
