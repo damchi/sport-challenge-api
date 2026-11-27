@@ -212,6 +212,8 @@ func TestListAdminUserActivities(t *testing.T) {
 			"id": inviteID, "sport_code": "run", "sport_label": nil, "started_at": "2026-11-23T12:30:00Z",
 			"duration_seconds": 1800.0, "distance_meters": 5000.0, "elevation_gain_meters": 40.0,
 			"source": "manual", "created_at": "2026-11-23T14:30:00Z", "locked": true,
+			// Computed as for Activity: 5 km in 30 min.
+			"speed_mps": 5000.0 / 1800, "pace_seconds_per_km": 360.0,
 			"contributions": []any{
 				map[string]any{"challenge_id": challengeID, "challenge_title": "Défi", "distance_meters": 5000.0, "duration_seconds": 1800.0},
 				map[string]any{"challenge_id": bobID, "challenge_title": "Dénivelé", "distance_meters": nil, "duration_seconds": 1800.0},
@@ -222,11 +224,14 @@ func TestListAdminUserActivities(t *testing.T) {
 			"id": bobID, "sport_code": "other", "sport_label": "Escalade", "started_at": "2026-11-23T11:30:00Z",
 			"duration_seconds": 600.0, "distance_meters": nil, "elevation_gain_meters": nil,
 			"source": "manual", "created_at": "2026-11-23T15:30:00Z", "locked": false, "contributions": []any{},
+			// No distance, no speed nor pace.
+			"speed_mps": nil, "pace_seconds_per_km": nil,
 			"admin_change": nil,
 		}, map[string]any{
 			"id": challengeID, "sport_code": "run", "sport_label": nil, "started_at": "2026-11-23T10:30:00Z",
 			"duration_seconds": 600.0, "distance_meters": nil, "elevation_gain_meters": nil,
 			"source": "manual", "created_at": "2026-11-23T15:30:00Z", "locked": false, "contributions": []any{},
+			"speed_mps": nil, "pace_seconds_per_km": nil,
 			"admin_change": map[string]any{"action": "updated", "at": "2026-11-23T15:30:00Z", "admin_id": bobID},
 		}},
 		"next_cursor": encoded(t, ActivityPosition{StartedAt: started.Add(-2 * time.Hour), ID: challengeID}),

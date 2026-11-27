@@ -3824,7 +3824,7 @@ components:
           description: Pass it as `cursor` for the next page; null on the last page.
     AdminActivity:
       type: object
-      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, created_at, contributions, locked, admin_change]
+      required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, speed_mps, pace_seconds_per_km, created_at, contributions, locked, admin_change]
       additionalProperties: false
       description: An activity as stored, with where it counts now.
       properties:
@@ -3852,6 +3852,16 @@ components:
         source:
           type: string
           enum: [manual]
+        speed_mps:
+          type: number
+          format: double
+          nullable: true
+          description: Speed in meters per second, computed as `Activity.speed_mps`; null without distance.
+        pace_seconds_per_km:
+          type: number
+          format: double
+          nullable: true
+          description: Pace in seconds per kilometer, computed as `Activity.pace_seconds_per_km`; null without distance.
         created_at:
           type: string
           format: date-time
