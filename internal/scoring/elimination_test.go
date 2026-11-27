@@ -711,14 +711,80 @@ func TestEliminationByRepetitions(t *testing.T) {
 // repetitions, the meters left empty.
 func TestEliminationByRepetitionsProgress(t *testing.T) {
 	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 4)
-	start, end := w.WeekBounds(2)
-	w.Now = start.Add(2 * time.Hour)
-	reps := func(at time.Time, n int) Activity {
-		return Activity{UserID: "a", SportCode: "crossfit", StartedAt: at, Repetitions: map[string]int{"wall_ball": n}}
+	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
+	weekEnd := func(n int) time.Time { _, e := w.WeekBounds(n); return e }
+	reps := func(week, n int) Activity {
+		return Activity{UserID: "a", SportCode: "crossfit", StartedAt: weekStart(week).Add(time.Hour), Repetitions: map[string]int{"wall_ball": n}}
 	}
 	e := Elimination{Sport: "crossfit", Exercise: "wall_ball", StepRepetitions: 10, AtRisk: 24 * time.Hour}
-	got := e.Score(w, users("a"), []Activity{reps(start.Add(-48*time.Hour), 100), reps(start.Add(time.Hour), 40)})[0].Progress
-	if want := (&Progress{InRepetitions: true, Status: StatusInProgress, MinimumRepetitions: points(110), Repetitions: 40, WeekEndsAt: end}); !reflect.DeepEqual(got, want) {
-		t.Fatalf("Progress = %+v, want %+v", got, want)
+	tests := []struct {
+		name       string
+		now        time.Time
+		activities []Activity
+		want       *Progress
+	}{
+		{
+			name: "week 1: no minimum, no status", now: weekEnd(1).Add(-time.Hour), activities: []Activity{reps(1, 100)},
+			want: &Progress{InRepetitions: true, Repetitions: 100, WeekEndsAt: weekEnd(1)},
+		},
+		{
+			name: "exactly the minimum: reached", now: weekEnd(2).Add(-time.Hour), activities: []Activity{reps(1, 100), reps(2, 110)},
+			want: &Progress{InRepetitions: true, Status: StatusReached, MinimumRepetitions: points(110), Repetitions: 110, WeekEndsAt: weekEnd(2)},
+		},
+		{
+			name: "24 hours left under the minimum: at risk", now: weekEnd(2).Add(-24 * time.Hour), activities: []Activity{reps(1, 100), reps(2, 40)},
+			want: &Progress{InRepetitions: true, Status: StatusAtRisk, MinimumRepetitions: points(110), Repetitions: 40, WeekEndsAt: weekEnd(2)},
+		},
+		{
+			name: "a second before: in progress", now: weekEnd(2).Add(-24*time.Hour - time.Second), activities: []Activity{reps(1, 100), reps(2, 40)},
+			want: &Progress{InRepetitions: true, Status: StatusInProgress, MinimumRepetitions: points(110), Repetitions: 40, WeekEndsAt: weekEnd(2)},
+		},
+		{
+			name: "eliminated once the week locks", now: w.WeekLocksAt(2), activities: []Activity{reps(1, 100), reps(2, 109)},
+			want: &Progress{InRepetitions: true, Status: StatusEliminated, EliminatedWeek: 2},
+		},
+		{
+			name: "before the challenge: no live status", now: w.Start.Add(-time.Hour),
+			want: &Progress{InRepetitions: true},
+		},
+		{
+			name: "the challenge is over: no live status", now: w.End, activities: []Activity{reps(1, 100), reps(2, 110), reps(3, 120), reps(4, 130)},
+			want: &Progress{InRepetitions: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := w
+			w.Now = tt.now
+			if got := e.Score(w, users("a"), tt.activities)[0].Progress; !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Progress = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEliminationInMetersIgnoresRepetitions: without an exercise, the
+// repetitions of an activity count for nothing, and nothing is in
+// repetitions.
+func TestEliminationInMetersIgnoresRepetitions(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 4)
+	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
+	_, end3 := w.WeekBounds(3)
+	run := func(week, distance int) Activity {
+		return Activity{
+			UserID: "a", SportCode: "run", StartedAt: weekStart(week).Add(time.Hour), DurationSeconds: 1800,
+			DistanceMeters: meters(distance), Repetitions: map[string]int{"": 99999, "wall_ball": 99999},
+		}
+	}
+	w.Now = w.WeekLocksAt(2)
+	e := Elimination{Sport: "run", StepMeters: 2000, AtRisk: 24 * time.Hour}
+	activities := []Activity{run(1, 5000), run(2, 6000)}
+	if got, want := e.Eliminations(w, users("a"), activities), []Eliminated{{UserID: "a", Week: 2, DistanceMeters: 6000, MinimumMeters: 7000}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Eliminations() = %+v, want %+v", got, want)
+	}
+	w.Now = w.WeekLocksAt(2).Add(-time.Second)
+	got := e.Score(w, users("a"), activities)
+	if want := []Entry{{UserID: "a", Rank: 1, Value: 11000, Progress: &Progress{Status: StatusInProgress, MinimumMeters: meters(8000), WeekEndsAt: end3}}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Score() = %+v, want %+v", got, want)
 	}
 }
