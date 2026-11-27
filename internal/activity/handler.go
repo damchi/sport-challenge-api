@@ -392,6 +392,7 @@ func toChallengeActivity(it Authored) (api.ChallengeActivity, error) {
 		PaceSecondsPerKm:    a.PaceSecondsPerKm,
 		Contributions:       a.Contributions,
 		Locked:              a.Locked,
+		Repetitions:         a.Repetitions,
 		User:                api.LeaderboardUser{Id: userID, Pseudo: it.Author.Pseudo, FirstName: it.Author.FirstName, LastName: it.Author.LastName},
 	}, nil
 }
