@@ -91,6 +91,14 @@ func TestConstraints(t *testing.T) {
 		{name: "elevation gain for a sport without distance", sql: `INSERT INTO sports (code, distance_mode, suggested_factor, elevation_allowed) VALUES ('dance', 'none', NULL, true)`, constraint: "sports_elevation_allowed_by_mode"},
 		{name: "factor bounds included", sql: `INSERT INTO sports VALUES ('canoe', 'required', 0.1), ('kayak', 'optional', 2)`},
 
+		// exercises (000024)
+		{name: "exercise of a sport", sql: `INSERT INTO exercises VALUES ('rope_climb', 'crossfit', 11)`},
+		{name: "uppercase exercise code", sql: `INSERT INTO exercises VALUES ('Rope_climb', 'crossfit', 11)`, constraint: "exercises_code_check"},
+		{name: "exercise of an unknown sport", sql: `INSERT INTO exercises VALUES ('rope_climb', 'curling', 1)`, constraint: "exercises_sport_code_fkey"},
+		{name: "exercise position 0", sql: `INSERT INTO exercises VALUES ('rope_climb', 'crossfit', 0)`, constraint: "exercises_position_check"},
+		{name: "same exercise position twice", sql: `INSERT INTO exercises VALUES ('rope_climb', 'crossfit', 1)`, constraint: "exercises_sport_position_key"},
+		{name: "same exercise code twice", sql: `INSERT INTO exercises VALUES ('burpee', 'yoga', 1)`, constraint: "exercises_pkey"},
+
 		// challenges (000004)
 		{name: "valid challenge", sql: `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by) VALUES ('T', 'private', 'UTC', '2026-12-01Z', '2026-12-15Z', '` + userID + `')`},
 		{name: "other visibility", sql: `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by) VALUES ('T', 'friends', 'UTC', '2026-12-01Z', '2026-12-15Z', '` + userID + `')`, constraint: "challenges_visibility_check"},
