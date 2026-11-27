@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -385,10 +386,12 @@ func byKey(tx *gorm.DB, userID, key string) (Activity, bool, error) {
 	}
 	out := rows[0].Activity
 	err = tx.Raw(`SELECT exercise_code AS exercise, repetitions AS count FROM activity_repetitions
-		WHERE activity_id = ? ORDER BY exercise_code`, out.ID).Scan(&out.Repetitions).Error
+		WHERE activity_id = ?`, out.ID).Scan(&out.Repetitions).Error
 	if err != nil {
 		return Activity{}, false, fmt.Errorf("read repetitions by key: %w", err)
 	}
+	// Sorted as at the creation (Service.Record), whatever the collation.
+	slices.SortFunc(out.Repetitions, func(a, b Repetitions) int { return strings.Compare(a.Exercise, b.Exercise) })
 	return out, true, nil
 }
 
