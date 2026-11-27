@@ -136,13 +136,17 @@ func pointsDiffer(before, after leaderboard.Weeks, users []string, n int) bool {
 }
 
 // eliminationsDiffer tells whether the eliminations judged in week n differ
-// between before and after: another participant, distance or minimum.
+// between before and after: another participant, distance, minimum, unit.
 func eliminationsDiffer(before, after []EliminationRow, n int) bool {
-	of := func(rows []EliminationRow) map[string][2]int {
-		out := map[string][2]int{}
+	type judged struct {
+		distance, required int
+		repetitions        bool
+	}
+	of := func(rows []EliminationRow) map[string]judged {
+		out := map[string]judged{}
 		for _, e := range rows {
 			if e.WeekNumber == n {
-				out[e.User.ID] = [2]int{e.DistanceMeters, e.RequiredMeters}
+				out[e.User.ID] = judged{e.DistanceMeters, e.RequiredMeters, e.InRepetitions}
 			}
 		}
 		return out
