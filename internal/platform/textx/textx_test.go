@@ -32,6 +32,7 @@ func TestHasHidden(t *testing.T) {
 		{name: "line separator", s: text('a', 0x2028, 'b'), want: true},
 		{name: "paragraph separator", s: text('a', 0x2029, 'b'), want: true},
 		{name: "separators allowed", s: text('a', 0x2028, 'b', 0x2029, 'c'), allowed: text(0x2028, 0x2029)},
+		{name: "format character allowed", s: text('a', 0x200b, 'b'), allowed: text(0x200b)},
 		{name: "zero width space", s: text('a', 0x200b, 'b'), want: true},
 		{name: "right-to-left override", s: text('a', 0x202e, 'b'), want: true},
 		{name: "right-to-left isolate", s: text('a', 0x2067, 'b'), want: true},

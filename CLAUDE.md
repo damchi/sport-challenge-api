@@ -43,7 +43,7 @@ Structure **cible** : chaque dossier est créé par le premier ticket qui y met 
 ```
 cmd/api, cmd/worker, cmd/migrate
 internal/
-  platform/   config, db, httpx, auth, storage, clock, apperr
+  platform/   config, db, httpx, auth, storage, clock, apperr, textx
   api         code generated from api/openapi.yaml (make generate)
   health      GET /health, GET /ready
   user, challenge, invitation, sport, activity, scoring,
