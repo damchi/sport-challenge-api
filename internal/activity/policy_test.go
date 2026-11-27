@@ -1,6 +1,7 @@
 package activity
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"testing"
@@ -324,4 +325,52 @@ func TestAdminRefusal(t *testing.T) {
 		t.Fatalf("admin: %v", err)
 	}
 	checkError(t, AdminRefusal(false), apperr.CodeNotFound, nil)
+}
+
+func TestUnknownExerciseRefusal(t *testing.T) {
+	// Two CrossFit challenges on burpees and one on wall balls, from Monday
+	// 2026-06-01 for 3 weeks.
+	crossfit := func(exercise string) Participation {
+		p := participation(t, [3]int{2026, 6, 1}, 3)
+		p.Reference, p.Exercise = "crossfit", exercise
+		return p
+	}
+	burpees, wallBalls := crossfit("burpee"), crossfit("wall_ball")
+	strength := burpees
+	strength.Reference = "strength"
+	later := participation(t, [3]int{2026, 7, 6}, 3)
+	later.Reference, later.Exercise = "crossfit", "air_squat"
+	abandoned := crossfit("push_up")
+	abandoned.Active, abandoned.AbandonedAt = false, ptr(toronto(t, 2026, 6, 2, 10))
+	all := []Participation{burpees, burpees, wallBalls, strength, later, abandoned}
+	friday := toronto(t, 2026, 6, 5, 10)
+	reps := func(exercises ...string) []Repetitions {
+		out := make([]Repetitions, len(exercises))
+		for i, e := range exercises {
+			out[i] = Repetitions{Exercise: e, Count: 10}
+		}
+		return out
+	}
+	tests := []struct {
+		name  string
+		sport string
+		reps  []Repetitions
+		want  bool // refused
+	}{
+		{name: "burpees and wall balls of the challenges", sport: "crossfit", reps: reps("burpee", "wall_ball")},
+		{name: "no repetitions", sport: "crossfit"},
+		{name: "unknown exercise", sport: "crossfit", reps: reps("burpee", "thruster"), want: true},
+		{name: "challenge whose window does not hold the activity", sport: "crossfit", reps: reps("air_squat"), want: true},
+		{name: "exercise of a challenge of another reference sport", sport: "run", reps: reps("burpee"), want: true},
+		{name: "exercise of a challenge abandoned", sport: "crossfit", reps: reps("push_up"), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := UnknownExerciseRefusal(tt.sport, friday, tt.reps, all)
+			var appErr *apperr.Error
+			if refused := errors.As(err, &appErr) && appErr.Code == apperr.CodeUnknownExercise; refused != tt.want || (!tt.want && err != nil) {
+				t.Fatalf("UnknownExerciseRefusal() = %v, want refused %v", err, tt.want)
+			}
+		})
+	}
 }

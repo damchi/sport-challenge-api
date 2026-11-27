@@ -1335,11 +1335,12 @@ paths:
             The profile is incomplete (`profile_incomplete`), the sport needs
             a distance (`distance_required`) or takes none
             (`distance_not_allowed`), an elevation gain is sent for a sport
-            or an activity that takes none (`elevation_not_allowed`), the
-            activity overlaps another of the
-            user (`activity_overlap`), or the week of `started_at` is locked
-            in a challenge where the activity counts, or was already locked
-            when the user left a challenge (`week_locked`).
+            or an activity that takes none (`elevation_not_allowed`), an
+            exercise of `repetitions` is offered by none of the user's
+            challenges (`unknown_exercise`), the activity overlaps another of
+            the user (`activity_overlap`), or the week of `started_at` is
+            locked in a challenge where the activity counts, or was already
+            locked when the user left a challenge (`week_locked`).
           content:
             application/json:
               schema:
@@ -2895,6 +2896,7 @@ components:
         - distance_required
         - distance_not_allowed
         - elevation_not_allowed
+        - unknown_exercise
         - week_locked
         - activity_overlap
         - cursor_invalid
@@ -5163,6 +5165,34 @@ components:
             badge). Refused (`elevation_not_allowed`)
             when the sport's `elevation_allowed` is false or the activity has
             no distance. On a change, leaving it out removes it.
+        repetitions:
+          type: array
+          maxItems: 50
+          description: |
+            Repetitions by exercise, optional; they count for the elimination
+            by repetitions only. Each exercise once, and one of a challenge of
+            the user with an elimination by repetitions, whose reference
+            sport is `sport_code`, where they are an active participant and
+            whose window holds `started_at` (`unknown_exercise` otherwise).
+            Creation only for now: a change refuses them (400
+            `validation_failed` on `repetitions`).
+          items:
+            $ref: "#/components/schemas/ActivityRepetitions"
+    ActivityRepetitions:
+      type: object
+      required: [exercise, repetitions]
+      additionalProperties: false
+      properties:
+        exercise:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,31}$"
+          description: Code of an exercise of the catalogue (`Sport.exercises`).
+          example: burpee
+        repetitions:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: Repetitions of the exercise in the activity, 0 to 10,000.
     Activity:
       type: object
       required: [id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, speed_mps, pace_seconds_per_km, contributions, locked]
@@ -5209,6 +5239,11 @@ components:
             possibly empty. A deleted challenge never appears.
           items:
             $ref: "#/components/schemas/ActivityContribution"
+        repetitions:
+          type: array
+          description: The repetitions by exercise; returned by the creation only for now.
+          items:
+            $ref: "#/components/schemas/ActivityRepetitions"
         locked:
           type: boolean
           description: |

@@ -19,7 +19,9 @@ type Activity struct {
 	// elevation category and the weekly elevation criterion of the Points
 	// category count it.
 	ElevationGainMeters *int
-	Source              string
+	// Repetitions are by exercise, each exercise once.
+	Repetitions []Repetitions `gorm:"-"`
+	Source      string
 	// IdempotencyKey is the key the client sent with the creation, if any.
 	IdempotencyKey *string
 }

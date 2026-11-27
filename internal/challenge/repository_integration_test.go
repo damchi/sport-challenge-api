@@ -536,3 +536,34 @@ func TestCreateStoresAnEliminationByRepetitions(t *testing.T) {
 		t.Fatalf("AdminUpdate(run) = %v, want 400 on the three elimination fields", err)
 	}
 }
+
+// TestMembershipsGiveTheExercise: the reference sport and the exercise of an
+// elimination by repetitions, none for one in meters or without elimination;
+// one row per challenge.
+func TestMembershipsGiveTheExercise(t *testing.T) {
+	pseudo := "marie_92"
+	svc, _, userID := setup(t, &pseudo)
+	want := map[string][2]string{}
+	for _, d := range []Draft{noDistance("crossfit", repetitions("wall_ball", 10)), valid(), noDistance("crossfit", nil)} {
+		c, err := svc.Create(t.Context(), userID, d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[c.ID] = [2]string{d.reference(), ""}
+		if d.Elimination != nil {
+			want[c.ID] = [2]string{d.reference(), d.Elimination.Exercise}
+		}
+	}
+	got, err := svc.Memberships(t.Context(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range got {
+		if w, ok := want[m.ID]; !ok || [2]string{m.Reference, m.Exercise} != w {
+			t.Fatalf("membership %s: %q %q, want %v", m.ID, m.Reference, m.Exercise, w)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d memberships, want %d", len(got), len(want))
+	}
+}

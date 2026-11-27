@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -98,6 +99,9 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 				err = errors.New("insert activity: key conflict without an activity")
 			}
 			out = found
+			return err
+		}
+		if err := insertRepetitions(tx, ids[0], a.Repetitions); err != nil {
 			return err
 		}
 		out, created = a, true
@@ -380,7 +384,31 @@ func byKey(tx *gorm.DB, userID, key string) (Activity, bool, error) {
 	if rows[0].Deleted {
 		return Activity{}, false, errActivityNotFound
 	}
-	return rows[0].Activity, true, nil
+	out := rows[0].Activity
+	err = tx.Raw(`SELECT exercise_code AS exercise, repetitions AS count FROM activity_repetitions
+		WHERE activity_id = ?`, out.ID).Scan(&out.Repetitions).Error
+	if err != nil {
+		return Activity{}, false, fmt.Errorf("read repetitions by key: %w", err)
+	}
+	// Sorted as at the creation (Service.Record), whatever the collation.
+	slices.SortFunc(out.Repetitions, func(a, b Repetitions) int { return strings.Compare(a.Exercise, b.Exercise) })
+	return out, true, nil
+}
+
+// insertRepetitions writes the repetitions of activity id on tx, in one
+// statement.
+func insertRepetitions(tx *gorm.DB, id string, reps []Repetitions) error {
+	if len(reps) == 0 {
+		return nil
+	}
+	rows := make([]map[string]any, len(reps))
+	for i, r := range reps {
+		rows[i] = map[string]any{"activity_id": id, "exercise_code": r.Exercise, "repetitions": r.Count}
+	}
+	if err := tx.Table("activity_repetitions").Create(rows).Error; err != nil {
+		return fmt.Errorf("insert repetitions: %w", err)
+	}
+	return nil
 }
 
 // lockUser takes the row of user id FOR SHARE, as every write that

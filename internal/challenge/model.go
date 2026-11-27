@@ -274,6 +274,10 @@ type UserChallenge struct {
 	// Factors are those of the cumulative distance category: what an
 	// activity brings to it.
 	Factors map[string]float64
+	// Reference is the reference sport, and Exercise the exercise of the
+	// elimination by repetitions, empty without one.
+	Reference string
+	Exercise  string
 	Membership
 }
 

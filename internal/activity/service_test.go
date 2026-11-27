@@ -182,11 +182,12 @@ func (f fakeCatalogue) SportRules(_ context.Context, code string) (SportRules, b
 }
 
 var catalogue = fakeCatalogue{rules: map[string]SportRules{
-	"run":   {DistanceMode: distanceRequired, ElevationAllowed: true},
-	"swim":  {DistanceMode: distanceRequired},
-	"yoga":  {DistanceMode: distanceNone},
-	"other": {DistanceMode: distanceOptional, ElevationAllowed: true},
-	"ski_2": {DistanceMode: distanceOptional},
+	"run":      {DistanceMode: distanceRequired, ElevationAllowed: true},
+	"swim":     {DistanceMode: distanceRequired},
+	"yoga":     {DistanceMode: distanceNone},
+	"crossfit": {DistanceMode: distanceNone},
+	"other":    {DistanceMode: distanceOptional, ElevationAllowed: true},
+	"ski_2":    {DistanceMode: distanceOptional},
 }}
 
 // fakeParticipations gives challenges for user, the actor when empty, only;
@@ -495,6 +496,7 @@ func TestServiceUpdateRefusals(t *testing.T) {
 		{name: "in the future", draft: run(recordNow.Add(time.Hour)), code: apperr.CodeValidationFailed, noDecision: true},
 		{name: "distance not allowed", draft: yogaWithDistance, code: apperr.CodeDistanceNotAllowed, noDecision: true},
 		{name: "distance required", draft: Draft{SportCode: "run", StartedAt: inWeek2, DurationSeconds: 60}, code: apperr.CodeDistanceRequired, noDecision: true},
+		{name: "repetitions, not changed yet (SC-API-221)", draft: Draft{SportCode: "run", StartedAt: inWeek2, DurationSeconds: 60, Repetitions: []Repetitions{}}, code: apperr.CodeValidationFailed, noDecision: true},
 		{name: "account deleted meanwhile", repoErr: errAccountDeleted, draft: run(inWeek2), code: apperr.CodeAccountDeleted, noDecision: true},
 		{name: "participations read fails", ps: fakeParticipations{err: storage}, draft: run(inWeek2), wantErr: storage},
 		{name: "storage fails", repoErr: storage, draft: run(inWeek2), wantErr: storage, noDecision: true},

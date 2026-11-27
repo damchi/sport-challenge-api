@@ -37,6 +37,10 @@ type Participation struct {
 	// Factors are those of the cumulative distance category of the
 	// challenge, frozen at its creation.
 	Factors map[string]float64
+	// Reference is the reference sport of the challenge, and Exercise the
+	// exercise of its elimination by repetitions, empty without one.
+	Reference string
+	Exercise  string
 	// Active is true when the author is an active participant: read from the
 	// participation status, never the role (a creator who abandoned no
 	// longer competes).
@@ -77,6 +81,25 @@ func Contributions(a Activity, challenges []Participation) []Contribution {
 		})
 	}
 	return out
+}
+
+// UnknownExerciseRefusal refuses repetitions of an exercise that none of
+// challenges offers an activity of sport started at startedAt: challenges
+// with an elimination by repetitions of that exercise, sport as their
+// reference, where it counts (README §2.5); 422 unknown_exercise.
+func UnknownExerciseRefusal(sport string, startedAt time.Time, reps []Repetitions, challenges []Participation) error {
+	offered := map[string]bool{}
+	for _, c := range challenges {
+		if c.Exercise != "" && c.Reference == sport && counts(c, startedAt) {
+			offered[c.Exercise] = true
+		}
+	}
+	for _, r := range reps {
+		if !offered[r.Exercise] {
+			return apperr.New(apperr.CodeUnknownExercise, nil)
+		}
+	}
+	return nil
 }
 
 // IsLocked reports whether an activity started at startedAt is locked at now

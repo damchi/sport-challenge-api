@@ -58,6 +58,9 @@ const (
 	// CodeElevationNotAllowed refuses an elevation gain for a sport that
 	// takes none, or for an activity without distance.
 	CodeElevationNotAllowed Code = "elevation_not_allowed"
+	// CodeUnknownExercise refuses repetitions of an exercise that no
+	// challenge of the author where the activity counts eliminates on.
+	CodeUnknownExercise Code = "unknown_exercise"
 	// CodeWeekLocked refuses writing an activity whose week is locked (7 am
 	// on the first day of the next week) in a challenge where it counts, or
 	// was when its author left one (ADR 0001).
@@ -136,6 +139,8 @@ func definitionOf(code Code) (definition, bool) {
 		return definition{http.StatusUnprocessableEntity, "Distance not allowed"}, true
 	case CodeElevationNotAllowed:
 		return definition{http.StatusUnprocessableEntity, "Elevation gain not allowed"}, true
+	case CodeUnknownExercise:
+		return definition{http.StatusUnprocessableEntity, "Unknown exercise"}, true
 	case CodeWeekLocked:
 		return definition{http.StatusUnprocessableEntity, "Week locked"}, true
 	case CodeActivityOverlap:

@@ -135,6 +135,26 @@ func TestCreateActivityRecords(t *testing.T) {
 	}
 }
 
+// The repetitions are shown as entered, sorted by exercise; an exercise no
+// challenge offers answers 422 unknown_exercise (SC-API-216).
+func TestCreateActivityRepetitions(t *testing.T) {
+	c1 := challengeOf(t, "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b")
+	c1.Reference, c1.Exercise = "crossfit", "wall_ball"
+	c2 := c1
+	c2.Exercise = "burpee"
+	svc := newService(t, &fakeRepository{}, fakeParticipations{challenges: []Participation{c1, c2}})
+	body := `{"sport_code":"crossfit","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"repetitions":[{"exercise":"wall_ball","repetitions":40},{"exercise":"burpee","repetitions":0}]}`
+	rec, out := postActivity(t, svc, body, nil)
+	want := []any{map[string]any{"exercise": "burpee", "repetitions": 0.0}, map[string]any{"exercise": "wall_ball", "repetitions": 40.0}}
+	if rec.Code != http.StatusCreated || !reflect.DeepEqual(out["repetitions"], want) {
+		t.Fatalf("got %d %v, want 201 with %v", rec.Code, out["repetitions"], want)
+	}
+	rec, out = postActivity(t, svc, strings.Replace(body, `"burpee"`, `"thruster"`, 1), nil)
+	if e, _ := out["error"].(map[string]any); rec.Code != http.StatusUnprocessableEntity || e["code"] != "unknown_exercise" {
+		t.Fatalf("got %d %v, want 422 unknown_exercise", rec.Code, out)
+	}
+}
+
 // The elevation gain is shown as entered; null when not entered
 // (SC-API-149).
 func TestCreateActivityElevationGain(t *testing.T) {

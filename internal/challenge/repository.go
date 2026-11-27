@@ -278,14 +278,17 @@ func (r *Repository) Memberships(ctx context.Context, userID string) ([]UserChal
 		Participant    string
 		AbandonedAt    *time.Time
 		DistanceParams Params
+		ReferenceSport string
+		Exercise       string
 	}
 	err := db.Conn(ctx, r.db).Raw(`SELECT c.id, c.title, c.timezone, c.starts_at, c.ends_at, p.status AS participant, p.abandoned_at,
 		EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = p.user_id) AS creator,
-		COALESCE(cat.params, '{}') AS distance_params
+		COALESCE(cat.params, '{}') AS distance_params, c.reference_sport, COALESCE(el.params->>'exercise', '') AS exercise
 		FROM participants p JOIN challenges c ON c.id = p.challenge_id
 		LEFT JOIN categories cat ON cat.challenge_id = c.id AND cat.type = ?
+		LEFT JOIN categories el ON el.challenge_id = c.id AND el.type = ?
 		WHERE p.user_id = ? AND c.deleted_at IS NULL
-		ORDER BY c.starts_at, c.id`, CategoryCumulativeDistance, userID).Scan(&rows).Error
+		ORDER BY c.starts_at, c.id`, CategoryCumulativeDistance, CategoryElimination, userID).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list memberships: %w", err)
 	}
@@ -298,6 +301,8 @@ func (r *Repository) Memberships(ctx context.Context, userID string) ([]UserChal
 			StartsAt:   row.StartsAt,
 			EndsAt:     row.EndsAt,
 			Factors:    row.DistanceParams.Factors,
+			Reference:  row.ReferenceSport,
+			Exercise:   row.Exercise,
 			Membership: Membership{Creator: row.Creator, Participant: ParticipantStatus(row.Participant), AbandonedAt: row.AbandonedAt},
 		})
 	}

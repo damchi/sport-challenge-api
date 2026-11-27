@@ -62,6 +62,12 @@ func TestValidate(t *testing.T) {
 		{name: "negative distance", draft: with(func(d *Draft) { d.DistanceMeters = ptr(-1) }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "distance_meters"},
 		{name: "distance of 1000 km and 1 meter", draft: with(func(d *Draft) { d.DistanceMeters = ptr(1_000_001) }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "distance_meters"},
 
+		// Repetitions: 0 to 10,000 by exercise, each exercise once (README §2.5).
+		{name: "repetitions 0 and 10000", draft: with(func(d *Draft) { d.Repetitions = []Repetitions{{"burpee", 0}, {"wall_ball", 10_000}} }), mode: "required"},
+		{name: "repetitions over 10000", draft: with(func(d *Draft) { d.Repetitions = []Repetitions{{"burpee", 10_001}} }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "repetitions"},
+		{name: "negative repetitions", draft: with(func(d *Draft) { d.Repetitions = []Repetitions{{"burpee", -1}} }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "repetitions"},
+		{name: "an exercise twice", draft: with(func(d *Draft) { d.Repetitions = []Repetitions{{"burpee", 10}, {"burpee", 20}} }), mode: "required", wantCode: apperr.CodeValidationFailed, wantFields: "repetitions"},
+
 		// Distance by sport: required, not allowed, optional for "other" (D9).
 		{name: "distance missing for a distance sport", draft: with(func(d *Draft) { d.DistanceMeters = nil }), mode: "required", wantCode: apperr.CodeDistanceRequired},
 		{name: "sport without distance", draft: with(func(d *Draft) { d.SportCode = "yoga"; d.DistanceMeters = nil }), mode: "none"},
