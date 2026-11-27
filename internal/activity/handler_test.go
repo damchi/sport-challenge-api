@@ -447,6 +447,51 @@ func TestListMyActivities(t *testing.T) {
 	}
 }
 
+// A change replaces the repetitions, shown sorted by exercise; an exercise
+// neither on the activity nor offered answers 422 unknown_exercise
+// (SC-API-221).
+func TestUpdateActivityRepetitions(t *testing.T) {
+	c1 := challengeOf(t, "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b")
+	c1.Reference, c1.Exercise = "crossfit", "wall_ball"
+	c2 := c1
+	c2.Exercise = "burpee"
+	repo := &fakeRepository{stored: map[string]Activity{activityID: storedRun(t)}}
+	svc := newService(t, repo, fakeParticipations{challenges: []Participation{c1, c2}})
+	body := `{"sport_code":"crossfit","started_at":"2026-06-10T11:00:00Z","duration_seconds":1500,"repetitions":[{"exercise":"wall_ball","repetitions":40},{"exercise":"burpee","repetitions":0}]}`
+	rec, out := serve(t, svc, http.MethodPatch, activityTarget, body, nil)
+	want := []any{map[string]any{"exercise": "burpee", "repetitions": 0.0}, map[string]any{"exercise": "wall_ball", "repetitions": 40.0}}
+	if rec.Code != http.StatusOK || !reflect.DeepEqual(out["repetitions"], want) {
+		t.Fatalf("got %d %v, want 200 with %v", rec.Code, out["repetitions"], want)
+	}
+	rec, out = serve(t, svc, http.MethodPatch, activityTarget, strings.Replace(body, `"burpee"`, `"thruster"`, 1), nil)
+	if rec.Code != http.StatusUnprocessableEntity || errorCode(out) != "unknown_exercise" {
+		t.Fatalf("got %d %v, want 422 unknown_exercise", rec.Code, out)
+	}
+}
+
+// The list shows the repetitions of an activity; one without has no field.
+func TestListMyActivitiesRepetitions(t *testing.T) {
+	session := storedRun(t)
+	session.SportCode, session.DistanceMeters = "crossfit", nil
+	session.Repetitions = []Repetitions{{Exercise: "air_squat", Count: 20}, {Exercise: "burpee", Count: 30}}
+	plain := storedRun(t)
+	plain.ID = "5f1e7c1a-0000-4000-8000-000000000003"
+	svc := newService(t, &fakeRepository{listing: []Activity{session, plain}}, fakeParticipations{})
+	rec, body := serve(t, svc, http.MethodGet, "/api/v1/me/activities", "", nil)
+	items, _ := body["items"].([]any)
+	if rec.Code != http.StatusOK || len(items) != 2 {
+		t.Fatalf("got %d %v, want 200 with two items", rec.Code, body)
+	}
+	first, _ := items[0].(map[string]any)
+	want := []any{map[string]any{"exercise": "air_squat", "repetitions": 20.0}, map[string]any{"exercise": "burpee", "repetitions": 30.0}}
+	if !reflect.DeepEqual(first["repetitions"], want) {
+		t.Fatalf("repetitions %v, want %v", first["repetitions"], want)
+	}
+	if second, _ := items[1].(map[string]any); second["repetitions"] != nil {
+		t.Fatalf("item %v, want no repetitions field", second)
+	}
+}
+
 func TestListMyActivitiesRefusals(t *testing.T) {
 	noDate, err := httpx.EncodeCursor(Position{ID: activityID})
 	if err != nil {
