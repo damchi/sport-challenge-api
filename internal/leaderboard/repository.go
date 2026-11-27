@@ -97,12 +97,13 @@ type PointsRead struct {
 }
 
 // Activities is ActivitiesOf for challenge challengeID alone, in window w
-// with weeklySport summed per week, the groups of a points category whose
+// with weeklySport summed per week (with the repetitions of exercise when it
+// is not empty), the groups of a points category whose
 // minimum session is minSessionSeconds (0 without such a category), and the
 // elevation gains summed when elevation (the cumulative elevation category,
 // or the weekly elevation criterion of the points category).
-func (r *Repository) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
-	sc := Scope{ChallengeID: challengeID, Window: w, WeeklySport: weeklySport, Elevation: elevation}
+func (r *Repository) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport, exercise string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
+	sc := Scope{ChallengeID: challengeID, Window: w, WeeklySport: weeklySport, Exercise: exercise, Elevation: elevation}
 	if minSessionSeconds > 0 {
 		sc.Points = &PointsRead{MinSessionSeconds: minSessionSeconds}
 	}

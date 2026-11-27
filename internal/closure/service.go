@@ -75,7 +75,8 @@ const (
 
 // Activities gives the participants of a challenge and, in one query, the
 // totals of the activities of its active participants started in the window,
-// per participant and week for weeklySport (abandoned participants included,
+// per participant and week for weeklySport, with the repetitions of
+// exercise when it is not empty (abandoned participants included,
 // judged in the weeks locked before they left), per participant and sport for the
 // others; with minSessionSeconds > 0, the groups of a points category whose
 // minimum session it is: every sport per participant, week and sport,
@@ -83,7 +84,7 @@ const (
 // gains of each total (module leaderboard, which ranks from the same data).
 type Activities interface {
 	Participants(ctx context.Context, challengeID string) ([]scoring.Participant, error)
-	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error)
+	Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport, exercise string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error)
 }
 
 // Service holds the use cases of the closure.
@@ -205,11 +206,11 @@ func (s *Service) closeChallenge(ctx context.Context, c Challenge, now time.Time
 	if err != nil {
 		return 0, 0, err
 	}
-	activities, err := s.data.Activities(ctx, c.ID, w, c.Sport, 0, false)
+	activities, err := s.data.Activities(ctx, c.ID, w, c.Sport, c.Exercise, 0, false)
 	if err != nil {
 		return 0, 0, err
 	}
-	scorer := scoring.Elimination{Sport: c.Sport, StepMeters: c.StepMeters}
+	scorer := scoring.Elimination{Sport: c.Sport, StepMeters: c.StepMeters, Exercise: c.Exercise, StepRepetitions: c.StepRepetitions}
 	eliminated := scorer.Eliminations(w, participants, activities)
 
 	for _, week := range todo {
@@ -250,6 +251,7 @@ func closableOf(c EndedChallenge) (Challenge, bool) {
 			return Challenge{
 				ID: c.ID, Timezone: c.Timezone, StartsAt: c.StartsAt, EndsAt: c.EndsAt,
 				CategoryID: cat.ID, Sport: cat.Sport, StepMeters: cat.StepMeters,
+				Exercise: cat.Exercise, StepRepetitions: cat.StepRepetitions,
 			}, true
 		}
 	}
@@ -397,7 +399,8 @@ func (s *Service) freeze(ctx context.Context, c EndedChallenge, w scoring.Window
 	if err != nil {
 		return false, err
 	}
-	activities, err := s.data.Activities(ctx, c.ID, w, eliminationSport(c.Categories), minSessionSeconds(c.Categories), hasElevation(c.Categories))
+	sport, exercise := eliminationSettings(c.Categories)
+	activities, err := s.data.Activities(ctx, c.ID, w, sport, exercise, minSessionSeconds(c.Categories), hasElevation(c.Categories))
 	if err != nil {
 		return false, err
 	}
@@ -407,16 +410,18 @@ func (s *Service) freeze(ctx context.Context, c EndedChallenge, w scoring.Window
 		if err != nil {
 			return false, err
 		}
-		if cat.Type == categoryElimination {
+		frozen := newPayload(scorer.Score(w, participants, activities))
+		if e, ok := scorer.(scoring.Elimination); ok {
 			last.CategoryID = cat.ID
-			e := scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters}
 			for _, out := range e.Eliminations(w, participants, activities) {
 				if out.Week == last.Number {
 					last.Eliminated = append(last.Eliminated, out)
 				}
 			}
+			if e.Exercise != "" {
+				frozen.Exercise, frozen.Unit = e.Exercise, "repetitions"
+			}
 		}
-		frozen := newPayload(scorer.Score(w, participants, activities))
 		if points, ok := scorer.(scoring.Points); ok {
 			frozen.addBreakdown(points.Breakdown(w, participants, activities))
 		}
@@ -433,15 +438,16 @@ func (s *Service) freeze(ctx context.Context, c EndedChallenge, w scoring.Window
 	return done, nil
 }
 
-// eliminationSport is the sport of the elimination category, the only one
-// counted week by week; empty without such a category.
-func eliminationSport(categories []Category) string {
+// eliminationSettings is the sport of the elimination category, the only one
+// counted week by week, and its exercise for an elimination by repetitions;
+// empty without such a category.
+func eliminationSettings(categories []Category) (sport, exercise string) {
 	for _, cat := range categories {
 		if cat.Type == categoryElimination {
-			return cat.Sport
+			return cat.Sport, cat.Exercise
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // minSessionSeconds is the minimum session of the points category, whose
@@ -476,7 +482,7 @@ func scorerOf(cat Category) (scoring.Scorer, error) {
 	case categoryCumulativeDistance:
 		return scoring.Distance{Factors: cat.Factors}, nil
 	case categoryElimination:
-		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters}, nil
+		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters, Exercise: cat.Exercise, StepRepetitions: cat.StepRepetitions}, nil
 	case categoryPoints:
 		return scoring.Points{Criteria: cat.Criteria, Podium: cat.Podium, Factors: cat.Factors}, nil
 	case categoryElevation:
@@ -488,8 +494,12 @@ func scorerOf(cat Category) (scoring.Scorer, error) {
 
 // payload is the stored ranking of a category. It names participants by id,
 // never by pseudo; an account deleted since is left out when it is served.
+// Exercise and Unit are those of an elimination by repetitions, whose values
+// are repetitions; absent otherwise (values in meters or seconds).
 type payload struct {
-	Entries []payloadEntry `json:"entries"`
+	Exercise string         `json:"exercise,omitempty"`
+	Unit     string         `json:"unit,omitempty"`
+	Entries  []payloadEntry `json:"entries"`
 }
 
 type payloadEntry struct {

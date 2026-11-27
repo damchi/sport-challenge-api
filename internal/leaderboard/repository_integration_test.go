@@ -720,7 +720,7 @@ func TestActivitiesOfReadsTheFastestRun(t *testing.T) {
 	s.activity(steady, "run", at, 3000, km(10000), false)
 	s.activity(rider, "ride", at, 600, km(10000), false) // 60 s/km, not a run
 	w := scoring.Window{Start: start.UTC(), End: start.AddDate(0, 0, 7).UTC(), Location: loc, Now: start.AddDate(0, 0, 7).UTC()}
-	got, err := NewRepository(gdb).Activities(t.Context(), id, w, "", 1200, false)
+	got, err := NewRepository(gdb).Activities(t.Context(), id, w, "", "", 1200, false)
 	if err != nil {
 		t.Fatal(err)
 	}

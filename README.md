@@ -654,7 +654,7 @@ flowchart TD
 | `elimination` | participant, catégorie, semaine d'élimination, distance courue (ou répétitions) et minimum exigé cette semaine-là (trace du jugement, jamais lue pour classer) |
 | `badge_definition` | challenge, nom, description, règle (JSON structuré), créateur, date de création |
 | `badge_award` | badge, utilisateur, date d'obtention, activité déclencheuse (si applicable) ; unique (badge, utilisateur) |
-| `result_snapshot` | challenge, catégorie, classement figé au verrouillage de la dernière semaine (effacé puis refigé par un recalcul admin, §2.12) |
+| `result_snapshot` | challenge, catégorie, classement figé au verrouillage de la dernière semaine (effacé puis refigé par un recalcul admin, §2.12) ; celui d'une élimination aux répétitions porte aussi son exercice (`exercise`) et son unité (`unit` : `repetitions`), ses valeurs étant des répétitions (SC-API-218) |
 | `admin_actions` | admin, instant, action, type et identifiant de la cible (défi, participant, activité, compte), défis touchés, ancienne et nouvelle valeur (`jsonb`), motif (3 à 500 caractères) ; lisible des seuls admins (§2.12) |
 | `worker_runs` | tâche du worker, début, fin, issue, code d'erreur (sans donnée personnelle) ; alimente le tableau de bord admin |
 | `pending_auth0_deletions` | identifiant chez Auth0 (en clair, Auth0 en a besoin) et compte supprimé (`user_id`) d'une suppression à rejouer par `retry-auth0-deletions`, avec ses essais échoués (`attempts`), le code du dernier échec (`last_error_code`, ex. `auth0_status_400`, `auth0_status_503`, `auth0_request_failed`) et `blocked` si Auth0 l'a refusée pour de bon (§2.12) ; la ligne est retirée dès que l'identité est supprimée chez Auth0, le lien avec le compte avec elle |
