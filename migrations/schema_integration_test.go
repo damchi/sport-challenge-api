@@ -28,6 +28,8 @@ const (
 	// Two invitations of the fixture challenge.
 	invitationID      = "00000000-0000-0000-0000-0000000000a1"
 	otherInvitationID = "00000000-0000-0000-0000-0000000000a2"
+	// An activity of the fixture user.
+	activityID = "00000000-0000-0000-0000-0000000000ac"
 )
 
 // fixture is a user and a two-week challenge the cases build on.
@@ -42,6 +44,16 @@ VALUES ('` + challengeID + `', 'Spring', 'public', 'America/Montreal',
 const eliminationFixture = `
 INSERT INTO categories (id, challenge_id, type, position) VALUES ('` + categoryID + `', '` + challengeID + `', 'elimination', 3);
 INSERT INTO participants VALUES ('` + challengeID + `', '` + userID + `', 'active', '2026-12-02Z', NULL);`
+
+// activityFixture is a crossfit session of the fixture user.
+const activityFixture = `
+INSERT INTO activities (id, user_id, sport_code, started_at, duration_seconds) VALUES ('` + activityID + `', '` + userID + `', 'crossfit', '2026-12-02Z', 3600);`
+
+// repetitionsRow is the insertion of the repetitions of exercise in the
+// fixture activity, with an SQL expression for their number.
+func repetitionsRow(exercise, repetitions string) string {
+	return activityFixture + `INSERT INTO activity_repetitions VALUES ('` + activityID + `', '` + exercise + `', ` + repetitions + `);`
+}
 
 // otherChallengeFixture is a second challenge of the same creator.
 const otherChallengeFixture = `
@@ -154,6 +166,16 @@ func TestConstraints(t *testing.T) {
 		{name: "pending deletion blocked by Auth0", sql: `INSERT INTO pending_auth0_deletions (auth_subject, attempts, last_error_code, blocked) VALUES ('email|1', 3, 'auth0_status_400', true)`},
 		{name: "pending deletion blocked without an error", sql: `INSERT INTO pending_auth0_deletions (auth_subject, attempts, blocked) VALUES ('email|1', 1, true)`, constraint: "pending_auth0_deletions_blocked_check"},
 		{name: "negative attempts", sql: `INSERT INTO pending_auth0_deletions (auth_subject, attempts) VALUES ('email|1', -1)`, constraint: "pending_auth0_deletions_attempts_check"},
+
+		// activity_repetitions (000025)
+		{name: "repetitions bounds included", sql: repetitionsRow("burpee", "0") + `INSERT INTO activity_repetitions VALUES ('` + activityID + `', 'wall_ball', 10000)`},
+		{name: "negative repetitions", sql: repetitionsRow("burpee", "-1"), constraint: "activity_repetitions_repetitions_check"},
+		{name: "repetitions over 10000", sql: repetitionsRow("burpee", "10001"), constraint: "activity_repetitions_repetitions_check"},
+		{name: "repetitions of an unknown exercise", sql: repetitionsRow("deadlift", "10"), constraint: "activity_repetitions_exercise_code_fkey"},
+		{name: "repetitions of an unknown activity", sql: `INSERT INTO activity_repetitions VALUES ('` + deadID + `', 'burpee', 10)`, constraint: "activity_repetitions_activity_id_fkey"},
+		{name: "same exercise twice in an activity", sql: repetitionsRow("burpee", "10") + `INSERT INTO activity_repetitions VALUES ('` + activityID + `', 'burpee', 20)`, constraint: "activity_repetitions_pkey"},
+		// Without the cascade, this DELETE fails on activity_repetitions_activity_id_fkey.
+		{name: "erased activity takes its repetitions", sql: repetitionsRow("burpee", "10") + `DELETE FROM activities WHERE id = '` + activityID + `'`},
 
 		// activities (000006)
 		{name: "valid run", sql: `INSERT INTO activities (user_id, sport_code, started_at, duration_seconds, distance_meters) VALUES ('` + userID + `', 'run', '2026-12-02Z', 1800, 5000)`},
@@ -301,6 +323,9 @@ func TestQueryIndexes(t *testing.T) {
 		{name: "eliminations of a challenge (ClearResults)", query: "DELETE FROM elimination WHERE challenge_id = '" + challengeID + "'", index: "elimination_challenge_id_idx"},
 		{name: "invitations of a challenge (Reschedule)", query: "UPDATE invitations SET expires_at = now() WHERE challenge_id = '" + challengeID + "' AND revoked_at IS NULL", index: "invitations_challenge_id_idx"},
 		{name: "admin list of challenges", query: "SELECT id FROM challenges ORDER BY created_at DESC, id DESC LIMIT 51", index: "challenges_created_at_id_idx"},
+		// The repetitions of an exercise in an activity (weekly totals,
+		// SC-API-217), and the cascade from activities.
+		{name: "repetitions of an activity", query: "SELECT repetitions FROM activity_repetitions WHERE activity_id = '" + activityID + "' AND exercise_code = 'burpee'", index: "activity_repetitions_pkey"},
 		{name: "admin list of accounts", query: "SELECT id FROM users ORDER BY created_at DESC, id DESC LIMIT 51", index: "users_created_at_id_idx"},
 	}
 	for _, tt := range tests {
@@ -459,10 +484,10 @@ func TestAddSportsDownKeepsTheSportsInUse(t *testing.T) {
 	}
 	seeded := []string{"crossfit none - false", "hyrox required 1.00 false", "paragliding required 0.30 false"}
 
-	// The rollback goes through the exercises first (000024), which name
-	// crossfit, as golang-migrate would.
-	down := []string{"000024_create_exercises.down.sql", "000020_add_crossfit_hyrox_paragliding.down.sql"}
-	up := []string{"000020_add_crossfit_hyrox_paragliding.up.sql", "000024_create_exercises.up.sql"}
+	// The rollback goes through the repetitions (000025) and the exercises
+	// (000024), which name crossfit, first, as golang-migrate would.
+	down := []string{"000025_create_activity_repetitions.down.sql", "000024_create_exercises.down.sql", "000020_add_crossfit_hyrox_paragliding.down.sql"}
+	up := []string{"000020_add_crossfit_hyrox_paragliding.up.sql", "000024_create_exercises.up.sql", "000025_create_activity_repetitions.up.sql"}
 	run(t, pool, down, false)
 	if got := rows(); !slices.Equal(got, seeded) {
 		t.Fatalf("sports after down = %v, want every one in use kept: %v", got, seeded)
