@@ -177,6 +177,7 @@ func activityDraft(b *api.AdminActivityWrite) activity.Draft {
 		DurationSeconds:     b.DurationSeconds,
 		DistanceMeters:      b.DistanceMeters,
 		ElevationGainMeters: b.ElevationGainMeters,
+		Repetitions:         activity.RepetitionsOf(b.Repetitions),
 	}
 }
 

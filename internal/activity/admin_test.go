@@ -119,16 +119,18 @@ func TestAdminRecordIdempotencyKey(t *testing.T) {
 		name     string
 		repo     *fakeRepository
 		recorded bool
+		reps     []Repetitions
 		code     apperr.Code
 		wantErr  error
 	}{
 		{name: "new key: recorded with it", repo: &fakeRepository{}, recorded: true},
 		{name: "same key, another body: recorded before", repo: &fakeRepository{existing: &before}, wantErr: ErrRecordedBefore},
+		{name: "same key, an exercise offered no more: recorded before", repo: &fakeRepository{existing: &before}, reps: []Repetitions{{"wall_ball", 5}}, wantErr: ErrRecordedBefore},
 		{name: "same key, activity deleted since", repo: &fakeRepository{err: errActivityNotFound}, code: apperr.CodeActivityNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w, err := adminService(t, tt.repo, true, challengeOf(t, "c1")).AdminRecord(t.Context(), admin, author, &key, run(toronto(t, 2026, 6, 10, 7)))
+			w, err := adminService(t, tt.repo, true, challengeOf(t, "c1")).AdminRecord(t.Context(), admin, author, &key, withReps(run(toronto(t, 2026, 6, 10, 7)), tt.reps...))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -313,5 +315,81 @@ func TestAdminPlacesRefused(t *testing.T) {
 	s = NewService(&fakeRepository{}, fakeProfiles{}, catalogue, ps, nil, clock.NewFake(recordNow))
 	if _, err := s.AdminPlaces(t.Context(), admin, author, []Activity{{ID: "a1"}}); !errors.Is(err, storage) {
 		t.Fatalf("read fails: error = %v, want the cause kept", err)
+	}
+}
+
+func TestAdminRepetitions(t *testing.T) {
+	// c1 offers burpee, week 1 locked; air_squat, on the activity, no more.
+	c1 := challengeOf(t, "c1")
+	c1.Reference, c1.Exercise = "run", "burpee"
+	locked := toronto(t, 2026, 6, 3, 7)
+	burpees, squats := Repetitions{Exercise: "burpee", Count: 40}, Repetitions{Exercise: "air_squat", Count: 20}
+	current := Activity{ID: "a1", UserID: author, SportCode: "run", StartedAt: locked, DurationSeconds: 1500, DistanceMeters: ptr(5000), Repetitions: []Repetitions{squats}}
+
+	t.Run("record", func(t *testing.T) {
+		repo := &fakeRepository{}
+		w, err := adminService(t, repo, true, c1).AdminRecord(t.Context(), admin, author, nil, withReps(run(locked), burpees))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := w.Write(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(repo.recorded.Repetitions, []Repetitions{burpees}) || !reflect.DeepEqual(got.New["repetitions"], map[string]int{"burpee": 40}) {
+			t.Fatalf("recorded %v, journal %v; want the burpees", repo.recorded.Repetitions, got.New["repetitions"])
+		}
+	})
+
+	tests := []struct {
+		name    string
+		reps    []Repetitions
+		old     any
+		changed any
+	}{
+		{name: "replaced, the kept exercise left out", reps: []Repetitions{burpees}, old: map[string]int{"air_squat": 20}, changed: map[string]int{"burpee": 40}},
+		{name: "an exercise already on the activity kept", reps: []Repetitions{{Exercise: "air_squat", Count: 25}, burpees}, old: map[string]int{"air_squat": 20}, changed: map[string]int{"air_squat": 25, "burpee": 40}},
+		{name: "left out: removed", old: map[string]int{"air_squat": 20}, changed: nil},
+	}
+	for _, tt := range tests {
+		t.Run("update, "+tt.name, func(t *testing.T) {
+			repo := &fakeRepository{stored: map[string]Activity{"a1": current}}
+			w, err := adminService(t, repo, false, c1).AdminUpdate(t.Context(), admin, "a1", withReps(run(locked), tt.reps...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := w.Write(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.Old, map[string]any{"repetitions": tt.old}) || !reflect.DeepEqual(got.New, map[string]any{"repetitions": tt.changed}) {
+				t.Fatalf("change = %+v, want repetitions %v → %v", got, tt.old, tt.changed)
+			}
+		})
+	}
+
+	refused := []struct {
+		name  string
+		draft Draft
+		code  apperr.Code
+	}{
+		{name: "an exercise no challenge of the author offers", draft: withReps(run(locked), Repetitions{Exercise: "wall_ball", Count: 10}), code: apperr.CodeUnknownExercise},
+		{name: "out of bounds: validation unchanged", draft: withReps(run(locked), Repetitions{Exercise: "burpee", Count: 10_001}), code: apperr.CodeValidationFailed},
+	}
+	for _, tt := range refused {
+		t.Run("refused, "+tt.name, func(t *testing.T) {
+			repo := &fakeRepository{stored: map[string]Activity{"a1": current}}
+			svc := adminService(t, repo, true, c1)
+			w, err := svc.AdminRecord(t.Context(), admin, author, nil, tt.draft)
+			if err == nil {
+				_, err = w.Write(t.Context())
+			}
+			checkError(t, err, tt.code, nil)
+			_, err = svc.AdminUpdate(t.Context(), admin, "a1", tt.draft)
+			checkError(t, err, tt.code, nil)
+			if repo.recorded != nil || repo.updated != nil {
+				t.Fatal("written")
+			}
+		})
 	}
 }
