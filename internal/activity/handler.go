@@ -303,7 +303,20 @@ func toDraft(b api.ActivityCreate) Draft {
 		DurationSeconds:     b.DurationSeconds,
 		DistanceMeters:      b.DistanceMeters,
 		ElevationGainMeters: b.ElevationGainMeters,
+		Repetitions:         repetitionsOf(b.Repetitions),
 	}
+}
+
+// repetitionsOf reads the repetitions of the contract, nil when left out.
+func repetitionsOf(in *[]api.ActivityRepetitions) []Repetitions {
+	if in == nil {
+		return nil
+	}
+	out := make([]Repetitions, len(*in))
+	for i, r := range *in {
+		out[i] = Repetitions{Exercise: r.Exercise, Count: r.Repetitions}
+	}
+	return out
 }
 
 func toAPI(rec Recorded) (api.Activity, error) {
@@ -326,6 +339,13 @@ func toAPI(rec Recorded) (api.Activity, error) {
 	if rec.DistanceMeters != nil {
 		v := Speed(*rec.DistanceMeters, rec.DurationSeconds)
 		out.SpeedMps, out.PaceSecondsPerKm = &v.MetersPerSecond, &v.SecondsPerKilometer
+	}
+	if len(rec.Repetitions) > 0 {
+		reps := make([]api.ActivityRepetitions, len(rec.Repetitions))
+		for i, r := range rec.Repetitions {
+			reps[i] = api.ActivityRepetitions{Exercise: r.Exercise, Repetitions: r.Count}
+		}
+		out.Repetitions = &reps
 	}
 	for _, c := range rec.Contributions {
 		cid, err := uuid.Parse(c.ChallengeID)

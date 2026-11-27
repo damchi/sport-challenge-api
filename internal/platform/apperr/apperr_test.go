@@ -35,6 +35,7 @@ func TestNew(t *testing.T) {
 		{CodeDistanceRequired, http.StatusUnprocessableEntity},
 		{CodeDistanceNotAllowed, http.StatusUnprocessableEntity},
 		{CodeElevationNotAllowed, http.StatusUnprocessableEntity},
+		{CodeUnknownExercise, http.StatusUnprocessableEntity},
 		{CodeWeekLocked, http.StatusUnprocessableEntity},
 		{CodeAlreadyParticipant, http.StatusConflict},
 		{CodeParticipationAbandoned, http.StatusUnprocessableEntity},

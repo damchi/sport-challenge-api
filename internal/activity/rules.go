@@ -21,8 +21,10 @@ const (
 	maxDistanceMeters  = 1_000_000
 	// maxElevationGainMeters bounds the elevation gain (SC-API-149).
 	maxElevationGainMeters = 20_000
-	minSportLabel          = 2
-	maxSportLabel          = 40
+	// maxRepetitions bounds the repetitions of an exercise (README §2.5).
+	maxRepetitions = 10_000
+	minSportLabel  = 2
+	maxSportLabel  = 40
 	// futureTolerance absorbs the clock drift of the client's device, for
 	// the start and the end of an activity.
 	futureTolerance = 5 * time.Minute
@@ -55,6 +57,15 @@ type Draft struct {
 	// cumulative elevation category and the weekly elevation criterion of the
 	// Points category count it, no badge (README §2.5).
 	ElevationGainMeters *int
+	// Repetitions are by exercise, optional (README §2.5).
+	Repetitions []Repetitions
+}
+
+// Repetitions are the repetitions of an exercise of the catalogue in an
+// activity.
+type Repetitions struct {
+	Exercise string
+	Count    int
 }
 
 // SportRules is what the catalogue says of a sport for its activities: its
@@ -103,6 +114,9 @@ func Validate(draft Draft, sport SportRules, now time.Time) (Draft, error) {
 		fields = append(fields, "duration_seconds", "started_at")
 		fields = slices.Compact(slices.Sorted(slices.Values(fields)))
 	}
+	if !validRepetitions(draft.Repetitions) {
+		fields = append(fields, "repetitions")
+	}
 	label, ok := sportLabel(draft.SportCode, draft.SportLabel)
 	if !ok {
 		fields = append(fields, "sport_label")
@@ -123,6 +137,19 @@ func Validate(draft Draft, sport SportRules, now time.Time) (Draft, error) {
 
 	draft.SportLabel = label
 	return draft, nil
+}
+
+// validRepetitions checks the repetitions of an activity: 0 to 10,000 for
+// each exercise, each exercise once.
+func validRepetitions(reps []Repetitions) bool {
+	seen := make(map[string]bool, len(reps))
+	for _, r := range reps {
+		if seen[r.Exercise] || r.Count < 0 || r.Count > maxRepetitions {
+			return false
+		}
+		seen[r.Exercise] = true
+	}
+	return true
 }
 
 // sportLabel checks the label of a sport: required for "other", refused

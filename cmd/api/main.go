@@ -313,6 +313,8 @@ func toParticipation(m challenge.UserChallenge) (activity.Participation, error) 
 		EndsAt:      m.EndsAt,
 		Location:    loc,
 		Factors:     m.Factors,
+		Reference:   m.Reference,
+		Exercise:    m.Exercise,
 		Active:      m.Participant == challenge.ParticipantActive,
 		AbandonedAt: m.AbandonedAt,
 	}, nil

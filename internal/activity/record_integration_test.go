@@ -234,3 +234,49 @@ func TestRecordKeyOfAnotherUser(t *testing.T) {
 		t.Fatalf("first activity %s %s, %v, want it unchanged", owner, startedAt, err)
 	}
 }
+
+// TestRecordStoresTheRepetitions: burpees and wall balls of two CrossFit
+// challenges, stored with the activity and answered again with its key; an
+// exercise none offers, or a locked week, writes nothing.
+func TestRecordStoresTheRepetitions(t *testing.T) {
+	f := setupRecord(t)
+	crossfit := func(id, exercise string) Participation {
+		p := challengeOf(t, id)
+		p.Reference, p.Exercise = "crossfit", exercise
+		return p
+	}
+	svc := f.service(crossfit("c1", "burpee"), crossfit("c2", "wall_ball"))
+	draft := func(at time.Time, reps ...Repetitions) Draft {
+		return Draft{SportCode: "crossfit", StartedAt: at, DurationSeconds: 1800, Repetitions: reps}
+	}
+	key := "wod"
+	reps := []Repetitions{{"burpee", 30}, {"wall_ball", 40}}
+	got, err := svc.Record(t.Context(), f.user, &key, draft(toronto(t, 2026, 6, 10, 7), reps...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := func() []Repetitions {
+		t.Helper()
+		var out []Repetitions
+		if err := f.gdb.Raw(`SELECT r.exercise_code AS exercise, r.repetitions AS count FROM activity_repetitions r
+			JOIN activities a ON a.id = r.activity_id WHERE a.user_id = ? ORDER BY 1`, f.user).Scan(&out).Error; err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if !slices.Equal(got.Repetitions, reps) || !slices.Equal(stored(), reps) {
+		t.Fatalf("recorded %+v, stored %+v, want %+v", got.Repetitions, stored(), reps)
+	}
+	again, err := svc.Record(t.Context(), f.user, &key, draft(toronto(t, 2026, 6, 10, 7)))
+	if err != nil || again.Created || !slices.Equal(again.Repetitions, reps) {
+		t.Fatalf("again %+v, %v, want the activity recorded first with its repetitions", again, err)
+	}
+
+	_, err = svc.Record(t.Context(), f.user, nil, draft(toronto(t, 2026, 6, 10, 9), Repetitions{"thruster", 10}))
+	wantCode(t, err, apperr.CodeUnknownExercise)
+	_, err = svc.Record(t.Context(), f.user, nil, draft(toronto(t, 2026, 6, 3, 7), Repetitions{"burpee", 10}))
+	wantCode(t, err, apperr.CodeWeekLocked)
+	if f.count() != 1 || len(stored()) != 2 {
+		t.Fatalf("%d activities, %d repetitions, want nothing more written", f.count(), len(stored()))
+	}
+}

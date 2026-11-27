@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
@@ -85,8 +86,10 @@ func NewService(repo repository, profiles Profiles, catalogue Catalogue, partici
 // (Validate), an unknown sport giving 400 validation_failed on sport_code.
 // The activity is refused with 422 week_locked when its week is locked in a
 // challenge where it counts, or was when the actor left one (IsLocked),
-// checked in the transaction of the write; it is
-// recorded even if it counts nowhere (ADR 0001). With idempotencyKey, an
+// checked in the transaction of the write, and its repetitions with 422
+// unknown_exercise for an exercise none of those challenges offers
+// (UnknownExerciseRefusal); it is recorded even if it counts nowhere (ADR
+// 0001). With idempotencyKey, an
 // activity of the actor recorded before with the same key is returned
 // instead, nothing being written, or 404 activity_not_found once deleted.
 func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *string, draft Draft) (Recorded, error) {
@@ -111,8 +114,12 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 		DurationSeconds:     draft.DurationSeconds,
 		DistanceMeters:      draft.DistanceMeters,
 		ElevationGainMeters: draft.ElevationGainMeters,
-		Source:              SourceManual,
-		IdempotencyKey:      idempotencyKey,
+		// Sorted by exercise, as they are read back.
+		Repetitions: slices.SortedFunc(slices.Values(draft.Repetitions), func(a, b Repetitions) int {
+			return strings.Compare(a.Exercise, b.Exercise)
+		}),
+		Source:         SourceManual,
+		IdempotencyKey: idempotencyKey,
 	}
 	var challenges []Participation
 	stored, created, err := s.repo.Record(ctx, a, func(ctx context.Context) error {
@@ -122,6 +129,9 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 		}
 		if IsLocked(s.clock.Now(), a.StartedAt, ps) {
 			return apperr.New(apperr.CodeWeekLocked, nil)
+		}
+		if err := UnknownExerciseRefusal(a.SportCode, a.StartedAt, a.Repetitions, ps); err != nil {
+			return err
 		}
 		challenges = ps
 		return nil
@@ -153,6 +163,10 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 // was recorded with a complete one. A badge won stays won (README §2.7,
 // V1.1).
 func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (Recorded, error) {
+	// The change of the repetitions comes with SC-API-221.
+	if draft.Repetitions != nil {
+		return Recorded{}, apperr.InvalidFields(nil, "repetitions")
+	}
 	draft, err := s.validate(ctx, draft)
 	if err != nil {
 		return Recorded{}, err
