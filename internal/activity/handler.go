@@ -303,12 +303,12 @@ func toDraft(b api.ActivityCreate) Draft {
 		DurationSeconds:     b.DurationSeconds,
 		DistanceMeters:      b.DistanceMeters,
 		ElevationGainMeters: b.ElevationGainMeters,
-		Repetitions:         repetitionsOf(b.Repetitions),
+		Repetitions:         RepetitionsOf(b.Repetitions),
 	}
 }
 
-// repetitionsOf reads the repetitions of the contract, nil when left out.
-func repetitionsOf(in *[]api.ActivityRepetitions) []Repetitions {
+// RepetitionsOf reads the repetitions of the contract, nil when left out.
+func RepetitionsOf(in *[]api.ActivityRepetitions) []Repetitions {
 	if in == nil {
 		return nil
 	}

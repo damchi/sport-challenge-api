@@ -146,3 +146,59 @@ func TestCorrectionsRunFromTheDatabase(t *testing.T) {
 		}
 	})
 }
+
+// TestCorrectionsRunRepetitions: repetitions of a judged week corrected under
+// its minimum eliminate, in repetitions, in the preview as once committed.
+func TestCorrectionsRunRepetitions(t *testing.T) {
+	r, pool := newRepository(t)
+	start := time.Date(2026, 3, 2, 5, 0, 0, 0, time.UTC)
+	ann, bob := insertUser(t, pool, "email|ann", start.AddDate(0, -1, 0), false), insertUser(t, pool, "email|bob", start.AddDate(0, -1, 0), false)
+	challenge := insertChallengeRow(t, pool, ann, challengeRow{title: "Pompes", visibility: "public", startsAt: start, weeks: 4, createdAt: start})
+	exec(t, pool, `UPDATE challenges SET reference_sport = 'crossfit', timezone = 'America/Toronto' WHERE id = $1`, challenge)
+	exec(t, pool, `INSERT INTO categories (challenge_id, type, position, params) VALUES ($1, 'cumulative_time', 1, '{}'),
+		($1, 'elimination', 3, '{"sport": "crossfit", "exercise": "push_up", "step_repetitions": 20}')`, challenge)
+	exec(t, pool, `INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)`, challenge, bob, start)
+	push := func(user string, week, reps int) (id string) {
+		if err := pool.QueryRow(t.Context(), `WITH a AS (INSERT INTO activities (user_id, sport_code, started_at, duration_seconds)
+			VALUES ($1, 'crossfit', $2, 1800) RETURNING id)
+			INSERT INTO activity_repetitions (activity_id, exercise_code, repetitions) SELECT id, 'push_up', $3 FROM a RETURNING activity_id`,
+			user, start.AddDate(0, 0, 7*(week-1)).Add(10*time.Hour), reps).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	push(ann, 1, 50)
+	push(bob, 1, 50)
+	push(ann, 2, 70)
+	bobWeek2 := push(bob, 2, 70)
+	locked := start.AddDate(0, 0, 14).Add(7 * time.Hour)
+	worker := closure.NewService(closure.NewRepository(r.db), leaderboard.NewRepository(r.db), clock.NewFake(locked), slog.New(slog.DiscardHandler))
+	if _, err := worker.CloseWeeks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	corrections := NewCorrections(r, NewJournal(r, clock.NewFake(locked)), worker, noBoards{})
+	fewer := func(dryRun bool) Correction {
+		return Correction{
+			Touched: func(context.Context) ([]string, error) { return []string{challenge}, nil },
+			Apply: func(ctx context.Context) (Entry, error) {
+				err := db.Conn(ctx, r.db).Exec(`UPDATE activity_repetitions SET repetitions = 69 WHERE activity_id = ?`, bobWeek2).Error
+				return Entry{
+					Action: "activity.update", TargetType: TargetActivity, TargetID: bobWeek2,
+					OldValue: map[string]any{"repetitions": 70}, NewValue: map[string]any{"repetitions": 69},
+				}, err
+			},
+			Reason: "Répétitions mal saisies", DryRun: dryRun,
+		}
+	}
+	bobOut := EliminationRow{User: UserRef{ID: bob}, WeekNumber: 2, DistanceMeters: 69, RequiredMeters: 70, InRepetitions: true}
+	for _, dryRun := range []bool{true, false} {
+		previews, err := corrections.Run(t.Context(), auth.Actor{ID: ann, Admin: true}, fewer(dryRun))
+		if err != nil || len(previews) != 1 || len(previews[0].Eliminations) != 1 || !reflect.DeepEqual(*previews[0].Eliminations[0].After, bobOut) {
+			t.Fatalf("dry run %v: previews %+v, %v; want bob eliminated in week 2, in repetitions", dryRun, previews, err)
+		}
+	}
+	state, err := r.State(t.Context(), challenge)
+	if err != nil || !reflect.DeepEqual(state.Eliminations, []EliminationRow{bobOut}) || countActions(t, pool) != 1 {
+		t.Fatalf("committed: %+v, %v, %d journal lines; want bob eliminated, one line", state.Eliminations, err, countActions(t, pool))
+	}
+}

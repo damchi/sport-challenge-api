@@ -53,7 +53,7 @@ var ErrRecordedBefore = errors.New("activity recorded before with this idempoten
 // account: the journal tells them apart. idempotencyKey, if any, is that of
 // the account, as for Record: an activity of userID recorded before with it
 // makes Write give ErrRecordedBefore, or 404 activity_not_found once
-// deleted, whatever draft is.
+// deleted, whatever draft is; its repetitions are checked as for Record.
 func (s *Service) AdminRecord(ctx context.Context, actor auth.Actor, userID string, idempotencyKey *string, draft Draft) (AdminWrite, error) {
 	draft, err := s.adminDraft(ctx, actor, draft)
 	if err != nil {
@@ -78,7 +78,10 @@ func (s *Service) AdminRecord(ctx context.Context, actor auth.Actor, userID stri
 	return AdminWrite{
 		Touched: Touched(ps, a.StartedAt),
 		Write: func(ctx context.Context) (AdminChange, error) {
-			stored, created, err := s.repo.Record(ctx, a, anyTime)
+			// Checked on a creation only, as for Record: no week lock.
+			stored, created, err := s.repo.Record(ctx, a, func(context.Context) error {
+				return UnknownExerciseRefusal(a.SportCode, a.StartedAt, a.Repetitions, nil, ps)
+			})
 			if err != nil {
 				return AdminChange{}, storageError(err)
 			}
@@ -91,9 +94,9 @@ func (s *Service) AdminRecord(ctx context.Context, actor auth.Actor, userID stri
 }
 
 // AdminUpdate prepares the replacement of activity id with draft, as Update
-// replaces it: a missing or deleted activity, or that of a deleted account,
-// answers 404 activity_not_found. The challenges touched are those of its
-// current start and of the new one.
+// replaces it, repetitions included: a missing or deleted activity, or that
+// of a deleted account, answers 404 activity_not_found. The challenges
+// touched are those of its current start and of the new one.
 func (s *Service) AdminUpdate(ctx context.Context, actor auth.Actor, id string, draft Draft) (AdminWrite, error) {
 	draft, err := s.adminDraft(ctx, actor, draft)
 	if err != nil {
@@ -104,9 +107,9 @@ func (s *Service) AdminUpdate(ctx context.Context, actor auth.Actor, id string, 
 		return AdminWrite{}, err
 	}
 	a := draftActivity(draft)
-	// The admin corrections of the repetitions come with SC-API-219: until
-	// then, they stay.
-	a.Repetitions = current.Repetitions
+	if err := UnknownExerciseRefusal(a.SportCode, a.StartedAt, a.Repetitions, current.Repetitions, ps); err != nil {
+		return AdminWrite{}, err
+	}
 	return AdminWrite{
 		Touched: Touched(ps, current.StartedAt, a.StartedAt),
 		Write: func(ctx context.Context) (AdminChange, error) {
@@ -210,8 +213,7 @@ func (s *Service) lockAccount(ctx context.Context, userID string, missing apperr
 	return nil
 }
 
-// anyTime and anyActivity decide an admin write: no week lock applies.
-func anyTime(context.Context) error               { return nil }
+// anyActivity decides an admin change: no week lock applies.
 func anyActivity(context.Context, Activity) error { return nil }
 
 // draftActivity is the activity of draft, its fields entered only.
@@ -223,6 +225,7 @@ func draftActivity(d Draft) Activity {
 		DurationSeconds:     d.DurationSeconds,
 		DistanceMeters:      d.DistanceMeters,
 		ElevationGainMeters: d.ElevationGainMeters,
+		Repetitions:         sortedRepetitions(d.Repetitions),
 	}
 }
 
@@ -236,7 +239,21 @@ func journalFields(a Activity) map[string]any {
 		"duration_seconds":      a.DurationSeconds,
 		"distance_meters":       deref(a.DistanceMeters),
 		"elevation_gain_meters": deref(a.ElevationGainMeters),
+		"repetitions":           repetitionCounts(a.Repetitions),
 	}
+}
+
+// repetitionCounts are the repetitions of reps by exercise, as the journal
+// keeps them; nil for none.
+func repetitionCounts(reps []Repetitions) any {
+	if len(reps) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(reps))
+	for _, r := range reps {
+		out[r.Exercise] = r.Count
+	}
+	return out
 }
 
 // changedFields keeps the fields of before and after whose values differ.

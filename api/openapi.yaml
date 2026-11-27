@@ -2487,9 +2487,9 @@ paths:
             The profile of the account is incomplete (`profile_incomplete`),
             the sport needs a distance (`distance_required`) or takes none
             (`distance_not_allowed`), an elevation gain is sent for a sport
-            or an activity that takes none (`elevation_not_allowed`), or the
-            activity would overlap another of the account
-            (`activity_overlap`).
+            or an activity that takes none (`elevation_not_allowed`), an exercise
+            no challenge of the account offers (`unknown_exercise`), or the
+            activity would overlap another of the account (`activity_overlap`).
           content:
             application/json:
               schema:
@@ -2545,9 +2545,9 @@ paths:
           description: |
             The sport needs a distance (`distance_required`) or takes none
             (`distance_not_allowed`), an elevation gain is sent for a sport
-            or an activity that takes none (`elevation_not_allowed`), or the
-            activity would overlap another of the account
-            (`activity_overlap`).
+            or an activity that takes none (`elevation_not_allowed`), an exercise
+            no challenge of the account offers (`unknown_exercise`), or the
+            activity would overlap another of the account (`activity_overlap`).
           content:
             application/json:
               schema:
@@ -3459,6 +3459,12 @@ components:
           minimum: 0
           maximum: 20000
           description: As in `ActivityCreate`.
+        repetitions:
+          type: array
+          maxItems: 50
+          description: As in `ActivityCreate`, from the challenges of the account of the activity.
+          items:
+            $ref: "#/components/schemas/ActivityRepetitions"
     AdminReason:
       type: string
       minLength: 1

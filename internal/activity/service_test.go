@@ -109,6 +109,7 @@ func (f *fakeRepository) Update(ctx context.Context, _, id string, a Activity, d
 	out := current
 	out.SportCode, out.SportLabel, out.StartedAt = a.SportCode, a.SportLabel, a.StartedAt
 	out.DurationSeconds, out.DistanceMeters, out.ElevationGainMeters = a.DurationSeconds, a.DistanceMeters, a.ElevationGainMeters
+	out.Repetitions = a.Repetitions
 	f.updated = &out
 	return out, nil
 }
