@@ -108,10 +108,9 @@ func (e Elimination) Eliminations(w Window, participants []Participant, activiti
 		}
 		distances := weekly[p.UserID]
 		if n := firstEliminatedWeek(distances, upTo, e.step()); n > 0 {
-			el := Eliminated{UserID: p.UserID, Week: n, DistanceMeters: distances[n], MinimumMeters: minimumMeters(distances[n-1], e.step())}
-			if e.Exercise != "" {
-				el.Repetitions, el.MinimumRepetitions, el.DistanceMeters, el.MinimumMeters = el.DistanceMeters, el.MinimumMeters, 0, 0
-			}
+			el := Eliminated{UserID: p.UserID, Week: n}
+			*inUnit(e, &el.DistanceMeters, &el.Repetitions) = distances[n]
+			*inUnit(e, &el.MinimumMeters, &el.MinimumRepetitions) = minimumMeters(distances[n-1], e.step())
 			out = append(out, el)
 		}
 	}
@@ -177,28 +176,23 @@ func firstEliminatedWeek(distances []int, judged, step int) int {
 // eliminatedWeek (0 if not) while week, ending at weekEnd, is running (0 if
 // none), in repetitions with an exercise.
 func (e Elimination) progress(distances []int, eliminatedWeek, week int, weekEnd, now time.Time) *Progress {
-	p := e.progressRaw(distances, eliminatedWeek, week, weekEnd, now)
-	if e.Exercise != "" {
-		p.MinimumRepetitions, p.Repetitions = p.MinimumMeters, p.DistanceMeters
-		p.MinimumMeters, p.DistanceMeters, p.InRepetitions = nil, 0, true
-	}
-	return p
-}
-
-// progressRaw is progress, its numbers in the meters fields whatever the unit.
-func (e Elimination) progressRaw(distances []int, eliminatedWeek, week int, weekEnd, now time.Time) *Progress {
+	p := &Progress{InRepetitions: e.Exercise != ""}
 	switch {
 	case eliminatedWeek > 0:
-		return &Progress{Status: StatusEliminated, EliminatedWeek: eliminatedWeek}
+		p.Status, p.EliminatedWeek = StatusEliminated, eliminatedWeek
+		return p
 	case week == 0:
-		return &Progress{}
-	case week == 1:
-		return &Progress{DistanceMeters: distances[1], WeekEndsAt: weekEnd}
+		return p
+	}
+	p.WeekEndsAt = weekEnd
+	*inUnit(e, &p.DistanceMeters, &p.Repetitions) = distances[week]
+	if week == 1 {
+		return p
 	}
 	minimum := minimumMeters(distances[week-1], e.step())
-	p := &Progress{MinimumMeters: &minimum, DistanceMeters: distances[week], WeekEndsAt: weekEnd}
+	*inUnit(e, &p.MinimumMeters, &p.MinimumRepetitions) = &minimum
 	switch {
-	case p.DistanceMeters >= minimum:
+	case distances[week] >= minimum:
 		p.Status = StatusReached
 	case weekEnd.Sub(now) <= e.AtRisk:
 		p.Status = StatusAtRisk
@@ -206,6 +200,16 @@ func (e Elimination) progressRaw(distances []int, eliminatedWeek, week int, week
 		p.Status = StatusInProgress
 	}
 	return p
+}
+
+// inUnit returns, out of a pair, the field of the category's unit: meters,
+// or repetitions with an exercise. It is the only place an elimination
+// picks its field.
+func inUnit[T any](e Elimination, meters, repetitions *T) *T {
+	if e.Exercise != "" {
+		return repetitions
+	}
+	return meters
 }
 
 // minimumMeters is the rule of the minimum, the only place it lives: the
