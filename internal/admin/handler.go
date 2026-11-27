@@ -888,6 +888,10 @@ func (h *Handler) ListAdminUserActivities(ctx context.Context, req api.ListAdmin
 			Contributions:       make([]api.ActivityContribution, len(a.Contributions)),
 			Locked:              a.Locked,
 		}
+		if a.DistanceMeters != nil {
+			v := activity.Speed(*a.DistanceMeters, a.DurationSeconds)
+			out.Items[i].SpeedMps, out.Items[i].PaceSecondsPerKm = &v.MetersPerSecond, &v.SecondsPerKilometer
+		}
 		if c := a.AdminChange; c != nil {
 			adminID, err := uuid.Parse(c.AdminID)
 			if err != nil {
