@@ -66,9 +66,12 @@ const participantCountColumn = `(SELECT count(*) FROM participants p JOIN users 
 
 // listColumns are the columns of a Summary. The membership of @actor is read
 // as in membershipQuery, so a summary gives the same role as the challenge
-// itself.
+// itself. The exercise is that of the elimination category (@elimination),
+// one per challenge at most (categories_challenge_type_key), null without
+// one or in meters.
 const listColumns = `
 SELECT c.id, c.title, c.visibility, c.timezone, c.reference_sport, c.starts_at, c.ends_at,
+       (SELECT params->>'exercise' FROM categories WHERE challenge_id = c.id AND type = @elimination) AS exercise,
        ` + participantCountColumn + ` AS participant_count,
        me.status AS my_status,
        EXISTS (SELECT 1 FROM challenge_creators WHERE challenge_id = c.id AND user_id = @actor) AS creator,
@@ -84,7 +87,7 @@ WHERE c.deleted_at IS NULL`
 func (r *Repository) List(ctx context.Context, q ListQuery) ([]Summary, error) {
 	var sql strings.Builder
 	sql.WriteString(listColumns)
-	args := map[string]any{"actor": q.ActorID, "now": q.Now, "limit": q.Limit}
+	args := map[string]any{"actor": q.ActorID, "now": q.Now, "limit": q.Limit, "elimination": CategoryElimination}
 
 	sql.WriteString(scopeFilter(q.Scope))
 	switch q.Status {

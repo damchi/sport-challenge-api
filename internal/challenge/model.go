@@ -161,11 +161,13 @@ type Position struct {
 
 // Summary is a challenge in a listing.
 type Summary struct {
-	ID               string
-	Title            string
-	Visibility       string
-	Timezone         string
-	ReferenceSport   string
+	ID             string
+	Title          string
+	Visibility     string
+	Timezone       string
+	ReferenceSport string
+	// Exercise is that of an elimination by repetitions, nil otherwise.
+	Exercise         *string
 	StartsAt         time.Time
 	EndsAt           time.Time
 	ParticipantCount int
