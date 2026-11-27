@@ -1365,7 +1365,7 @@ paths:
         one answers 404 `activity_not_found`, the same answer in every case.
         The body replaces every field the author entered, with the
         validations of the creation: a field left out is cleared
-        (`sport_label`, `distance_meters`). The source and the
+        (`sport_label`, `distance_meters`, `repetitions`). The source and the
         `Idempotency-Key` of the creation stay. It is refused
         (`week_locked`) when the week of the current `started_at`, or of the
         new one, is locked in a challenge where the activity counts, or was
@@ -1397,9 +1397,10 @@ paths:
           description: |
             The sport needs a distance (`distance_required`) or takes none
             (`distance_not_allowed`), an elevation gain is sent for a sport
-            or an activity that takes none (`elevation_not_allowed`), it
-            would overlap another activity of
-            the user (`activity_overlap`), or the week of the current or the
+            or an activity that takes none (`elevation_not_allowed`), an
+            exercise of `repetitions` is neither on the activity nor offered
+            by the user's challenges (`unknown_exercise`), it would overlap
+            another activity of the user (`activity_overlap`), or the week of the current or the
             new `started_at` is locked in a challenge where the activity
             counts, or was already locked when the user left a challenge
             (`week_locked`).
@@ -5192,8 +5193,9 @@ components:
             the user with an elimination by repetitions, whose reference
             sport is `sport_code`, where they are an active participant and
             whose window holds `started_at` (`unknown_exercise` otherwise).
-            Creation only for now: a change refuses them (400
-            `validation_failed` on `repetitions`).
+            A change replaces them all, as the other fields: left out, they
+            are removed; those of an exercise already on the activity are
+            kept even when no challenge offers it any more.
           items:
             $ref: "#/components/schemas/ActivityRepetitions"
     ActivityRepetitions:
@@ -5259,7 +5261,10 @@ components:
             $ref: "#/components/schemas/ActivityContribution"
         repetitions:
           type: array
-          description: The repetitions by exercise; returned by the creation only for now.
+          description: |
+            Every repetitions of the activity by exercise, sorted by
+            exercise, those of an exercise no challenge offers any more
+            included; absent when none.
           items:
             $ref: "#/components/schemas/ActivityRepetitions"
         locked:

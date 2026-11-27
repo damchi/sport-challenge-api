@@ -114,12 +114,9 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 		DurationSeconds:     draft.DurationSeconds,
 		DistanceMeters:      draft.DistanceMeters,
 		ElevationGainMeters: draft.ElevationGainMeters,
-		// Sorted by exercise, as they are read back.
-		Repetitions: slices.SortedFunc(slices.Values(draft.Repetitions), func(a, b Repetitions) int {
-			return strings.Compare(a.Exercise, b.Exercise)
-		}),
-		Source:         SourceManual,
-		IdempotencyKey: idempotencyKey,
+		Repetitions:         sortedRepetitions(draft.Repetitions),
+		Source:              SourceManual,
+		IdempotencyKey:      idempotencyKey,
 	}
 	var challenges []Participation
 	stored, created, err := s.repo.Record(ctx, a, func(ctx context.Context) error {
@@ -130,7 +127,7 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 		if IsLocked(s.clock.Now(), a.StartedAt, ps) {
 			return apperr.New(apperr.CodeWeekLocked, nil)
 		}
-		if err := UnknownExerciseRefusal(a.SportCode, a.StartedAt, a.Repetitions, ps); err != nil {
+		if err := UnknownExerciseRefusal(a.SportCode, a.StartedAt, a.Repetitions, nil, ps); err != nil {
 			return err
 		}
 		challenges = ps
@@ -155,7 +152,9 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 }
 
 // Update replaces activity id of actorID with draft, validated as at the
-// creation (Record): the body replaces every field entered. The activity of
+// creation (Record): the body replaces every field entered, repetitions
+// included, those of an exercise already on the activity being kept (no
+// challenge offering it any more: UnknownExerciseRefusal). The activity of
 // someone else, a deleted or a missing one gives 404 activity_not_found. It
 // is refused with 422 week_locked when the week of its current start, or of
 // the new one, is locked (IsLocked), checked in the
@@ -163,10 +162,6 @@ func (s *Service) Record(ctx context.Context, actorID string, idempotencyKey *st
 // was recorded with a complete one. A badge won stays won (README §2.7,
 // V1.1).
 func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (Recorded, error) {
-	// The change of the repetitions comes with SC-API-221.
-	if draft.Repetitions != nil {
-		return Recorded{}, apperr.InvalidFields(nil, "repetitions")
-	}
 	draft, err := s.validate(ctx, draft)
 	if err != nil {
 		return Recorded{}, err
@@ -177,9 +172,10 @@ func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (
 		StartedAt:       draft.StartedAt.UTC(),
 		DurationSeconds: draft.DurationSeconds,
 		DistanceMeters:  draft.DistanceMeters,
-		// Left out of the body, the elevation gain is removed: the body
-		// replaces every field entered.
+		// Left out of the body, the elevation gain and the repetitions are
+		// removed: the body replaces every field entered.
 		ElevationGainMeters: draft.ElevationGainMeters,
+		Repetitions:         sortedRepetitions(draft.Repetitions),
 	}
 	var challenges []Participation
 	stored, err := s.repo.Update(ctx, actorID, id, a, func(ctx context.Context, current Activity) error {
@@ -192,6 +188,9 @@ func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (
 		if IsLocked(s.clock.Now(), a.StartedAt, ps) {
 			return apperr.New(apperr.CodeWeekLocked, nil)
 		}
+		if err := UnknownExerciseRefusal(a.SportCode, a.StartedAt, a.Repetitions, current.Repetitions, ps); err != nil {
+			return err
+		}
 		challenges = ps
 		return nil
 	})
@@ -203,6 +202,11 @@ func (s *Service) Update(ctx context.Context, actorID, id string, draft Draft) (
 		Contributions: Contributions(stored, challenges),
 		Locked:        IsLocked(s.clock.Now(), stored.StartedAt, challenges),
 	}, nil
+}
+
+// sortedRepetitions is reps sorted by exercise, as they are read back.
+func sortedRepetitions(reps []Repetitions) []Repetitions {
+	return slices.SortedFunc(slices.Values(reps), func(a, b Repetitions) int { return strings.Compare(a.Exercise, b.Exercise) })
 }
 
 // EraseUser deletes every activity of userID, for the deletion of their

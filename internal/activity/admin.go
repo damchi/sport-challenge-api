@@ -104,6 +104,9 @@ func (s *Service) AdminUpdate(ctx context.Context, actor auth.Actor, id string, 
 		return AdminWrite{}, err
 	}
 	a := draftActivity(draft)
+	// The admin corrections of the repetitions come with SC-API-219: until
+	// then, they stay.
+	a.Repetitions = current.Repetitions
 	return AdminWrite{
 		Touched: Touched(ps, current.StartedAt, a.StartedAt),
 		Write: func(ctx context.Context) (AdminChange, error) {
