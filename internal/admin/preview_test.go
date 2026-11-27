@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"maps"
 	"reflect"
 	"testing"
 	"time"
@@ -240,5 +241,31 @@ func TestPreviewOfAFinishedChallenge(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("preview() =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestMinimums(t *testing.T) {
+	progress := func(meters, repetitions *int) leaderboard.Leaderboard {
+		e := leaderboard.Ranked{Entry: scoring.Entry{UserID: "a", Progress: &scoring.Progress{MinimumMeters: meters, MinimumRepetitions: repetitions}}}
+		return leaderboard.Leaderboard{Categories: []leaderboard.CategoryRanking{{Type: leaderboard.CategoryElimination, Entries: []leaderboard.Ranked{e}}}}
+	}
+	tests := []struct {
+		name          string
+		before, after leaderboard.Leaderboard
+		differ        bool
+	}{
+		{"same meters", progress(new(5000), nil), progress(new(5000), nil), false},
+		{"other meters", progress(new(5000), nil), progress(new(6000), nil), true},
+		{"same repetitions", progress(nil, new(50)), progress(nil, new(50)), false},
+		{"other repetitions", progress(nil, new(50)), progress(nil, new(60)), true},
+		{"repetitions appear", progress(nil, nil), progress(nil, new(50)), true},
+		{"unit changes", progress(new(50), nil), progress(nil, new(50)), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := !maps.Equal(minimums(tt.before), minimums(tt.after)); got != tt.differ {
+				t.Errorf("minimums differ = %v, want %v", got, tt.differ)
+			}
+		})
 	}
 }

@@ -330,6 +330,28 @@ func TestReadChallengeWithNothingYet(t *testing.T) {
 	}
 }
 
+// The eliminations of a challenge by repetitions are read in repetitions.
+func TestReadChallengeEliminationsInRepetitions(t *testing.T) {
+	r, pool := newRepository(t)
+	start := time.Date(2026, 11, 9, 5, 0, 0, 0, time.UTC)
+	ann := insertUser(t, pool, "email|ann", start, false)
+	id := insertChallengeRow(t, pool, ann, challengeRow{title: "Défi", visibility: "public", startsAt: start, weeks: 2, createdAt: start})
+	exec(t, pool, `UPDATE challenges SET reference_sport = 'crossfit' WHERE id = $1`, id)
+	exec(t, pool, `INSERT INTO categories (challenge_id, type, position, params) VALUES
+		($1, 'elimination', 1, '{"exercise": "push_up", "step_repetitions": 10}')`, id)
+	exec(t, pool, `INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters)
+		SELECT $1, id, $2, 2, 40, 50 FROM categories WHERE challenge_id = $1`, id, ann)
+
+	got, err := r.Challenge(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []EliminationRow{{User: UserRef{ID: ann}, WeekNumber: 2, DistanceMeters: 40, RequiredMeters: 50, InRepetitions: true}}
+	if !reflect.DeepEqual(got.Eliminations, want) {
+		t.Errorf("Eliminations = %+v, want %+v", got.Eliminations, want)
+	}
+}
+
 func TestReadChallengeNotFound(t *testing.T) {
 	r, _ := newRepository(t)
 	_, err := r.Challenge(t.Context(), "5b1c3c2e-2d0f-4f8e-9a51-6f1f0c7a3d11")

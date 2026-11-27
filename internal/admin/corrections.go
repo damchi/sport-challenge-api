@@ -286,7 +286,7 @@ func (s *Corrections) read(ctx context.Context, actor auth.Actor, id string, ran
 
 // eliminationChanges lists, in the order of after then of before, the
 // participants whose elimination differs between before and after: given,
-// removed, or of another week or distance.
+// removed, or of another week, distance or unit.
 func eliminationChanges(before, after []EliminationRow) []EliminationChange {
 	was := make(map[string]EliminationRow, len(before))
 	for _, e := range before {
@@ -301,7 +301,8 @@ func eliminationChanges(before, after []EliminationRow) []EliminationChange {
 		switch {
 		case !ok:
 			out = append(out, EliminationChange{User: e.User, After: &now})
-		case old.WeekNumber != e.WeekNumber || old.DistanceMeters != e.DistanceMeters || old.RequiredMeters != e.RequiredMeters:
+		case old.WeekNumber != e.WeekNumber || old.DistanceMeters != e.DistanceMeters || old.RequiredMeters != e.RequiredMeters ||
+			old.InRepetitions != e.InRepetitions:
 			out = append(out, EliminationChange{User: e.User, Before: &old, After: &now})
 		}
 	}

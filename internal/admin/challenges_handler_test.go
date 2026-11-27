@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/damchi/sport-challenge-api/internal/api"
 	"github.com/damchi/sport-challenge-api/internal/platform/buildinfo"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/httpx"
@@ -199,6 +201,54 @@ func TestGetAdminChallenge(t *testing.T) {
 			map[string]any{"closed_at": nil, "ends_at": "2026-11-23T05:00:00Z", "locked": true, "locks_at": "2026-11-23T12:00:00Z", "number": 2, "starts_at": "2026-11-16T05:00:00Z"},
 		},
 	})
+}
+
+// The eliminations of a challenge by repetitions are in repetitions, its
+// meters at 0.
+func TestGetAdminChallengeEliminationsInRepetitions(t *testing.T) {
+	repo := &fakeRepo{data: ChallengeData{
+		Challenge: ChallengeRecord{
+			ID: challengeID, Title: "Défi", Visibility: "private", Timezone: "America/Toronto",
+			ReferenceSport: "crossfit", StartsAt: detailStart, EndsAt: detailEnd, CreatedAt: detailStart,
+		},
+		Categories:   []CategoryRow{{Type: "elimination", Position: 1, Params: []byte(`{"exercise": "push_up", "step_repetitions": 10}`)}},
+		Eliminations: []EliminationRow{{User: UserRef{ID: bobID, Pseudo: ptr("Bob")}, WeekNumber: 2, DistanceMeters: 40, RequiredMeters: 50, InRepetitions: true}},
+	}}
+	svc := NewService(repo, nil, clock.NewFake(statsAt), buildinfo.Info{})
+
+	rec, got := serve(t, svc, adminToken, "/api/v1/admin/challenges/"+challengeID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	sameJSON(t, got["eliminations"], []any{map[string]any{
+		"distance_meters": 0, "required_meters": 0, "repetitions": 40, "required_repetitions": 50,
+		"user": map[string]any{"first_name": nil, "id": bobID, "last_name": nil, "pseudo": "Bob"}, "week_number": 2,
+	}})
+}
+
+func TestToJudgement(t *testing.T) {
+	tests := []struct {
+		name string
+		in   *EliminationRow
+		want *api.AdminEliminationJudgement
+	}{
+		{"none", nil, nil},
+		{
+			"meters", &EliminationRow{WeekNumber: 2, DistanceMeters: 4000, RequiredMeters: 5000},
+			&api.AdminEliminationJudgement{WeekNumber: 2, DistanceMeters: 4000, RequiredMeters: 5000},
+		},
+		{
+			"repetitions", &EliminationRow{WeekNumber: 3, DistanceMeters: 40, RequiredMeters: 50, InRepetitions: true},
+			&api.AdminEliminationJudgement{WeekNumber: 3, Repetitions: new(40), RequiredRepetitions: new(50)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := toJudgement(tt.in); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("toJudgement(%+v) = %+v, want %+v", tt.in, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestGetAdminChallengeNotFound(t *testing.T) {

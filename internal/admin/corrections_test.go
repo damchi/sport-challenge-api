@@ -313,4 +313,9 @@ func TestEliminationChanges(t *testing.T) {
 	if got := eliminationChanges(before, before); len(got) != 0 {
 		t.Fatalf("changes = %+v, want none", got)
 	}
+	// The same figures in another unit are another elimination.
+	reps := EliminationRow{User: a, WeekNumber: 2, DistanceMeters: 6000, RequiredMeters: 7000, InRepetitions: true}
+	if got := eliminationChanges(before[:1], []EliminationRow{reps}); len(got) != 1 || !eliminationsDiffer(before[:1], []EliminationRow{reps}, 2) {
+		t.Fatalf("changes = %+v, want a's elimination, now in repetitions", got)
+	}
 }
