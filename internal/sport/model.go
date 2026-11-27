@@ -12,6 +12,9 @@ type Sport struct {
 	// ElevationAllowed tells whether an activity of the sport may have an
 	// elevation gain; never for a sport without distance.
 	ElevationAllowed bool
+	// Exercises holds the codes of the exercises of the sport in display
+	// order; only Catalogue fills it.
+	Exercises []string `gorm:"-"`
 }
 
 // Exercise is a row of the exercises table (reference data from the

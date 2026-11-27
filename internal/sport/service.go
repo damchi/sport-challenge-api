@@ -10,6 +10,7 @@ import (
 type repository interface {
 	List(ctx context.Context) ([]Sport, error)
 	ListExercises(ctx context.Context, sportCode string) ([]Exercise, error)
+	ListAllExercises(ctx context.Context) ([]Exercise, error)
 }
 
 // Service holds the use cases of the catalogue of sports and exercises.
@@ -28,6 +29,30 @@ func (s *Service) List(ctx context.Context) ([]Sport, error) {
 	sports, err := s.repo.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list catalogue: %w", err)
+	}
+	return sports, nil
+}
+
+// Catalogue returns the catalogue like List, each sport with its exercises
+// in display order (never nil), in two reads whatever the number of sports.
+func (s *Service) Catalogue(ctx context.Context) ([]Sport, error) {
+	sports, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	exercises, err := s.repo.ListAllExercises(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list catalogue exercises: %w", err)
+	}
+	bySport := make(map[string][]string)
+	for _, e := range exercises {
+		bySport[e.SportCode] = append(bySport[e.SportCode], e.Code)
+	}
+	for i := range sports {
+		sports[i].Exercises = bySport[sports[i].Code]
+		if sports[i].Exercises == nil {
+			sports[i].Exercises = []string{}
+		}
 	}
 	return sports, nil
 }

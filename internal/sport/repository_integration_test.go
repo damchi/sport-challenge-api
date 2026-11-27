@@ -101,6 +101,18 @@ func TestGetSportsServesTheCatalogue(t *testing.T) {
 	if len(want) > 0 {
 		t.Fatalf("sports %v missing from %v", want, body.Sports)
 	}
+
+	// SC-API-211: the CrossFit exercises in display order, none elsewhere.
+	crossfit := []any{"burpee", "wall_ball", "air_squat", "push_up", "pull_up", "box_jump", "double_under", "kettlebell_swing", "thruster", "sit_up"}
+	for _, s := range body.Sports {
+		wantExercises := []any{}
+		if s["code"] == "crossfit" {
+			wantExercises = crossfit
+		}
+		if got, ok := s["exercises"].([]any); !ok || !slices.Equal(got, wantExercises) {
+			t.Errorf("%v exercises = %#v, want %v", s["code"], s["exercises"], wantExercises)
+		}
+	}
 }
 
 // TestExercisesOfTheCatalogue reads the exercises seeded by the migrations

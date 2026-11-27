@@ -20,9 +20,9 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// GetSports answers the catalogue.
+// GetSports answers the catalogue with the exercises of each sport.
 func (h *Handler) GetSports(ctx context.Context, _ api.GetSportsRequestObject) (api.GetSportsResponseObject, error) {
-	sports, err := h.service.List(ctx)
+	sports, err := h.service.Catalogue(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -33,6 +33,7 @@ func (h *Handler) GetSports(ctx context.Context, _ api.GetSportsRequestObject) (
 			DistanceMode:     api.SportDistanceMode(s.DistanceMode),
 			SuggestedFactor:  s.SuggestedFactor,
 			ElevationAllowed: s.ElevationAllowed,
+			Exercises:        s.Exercises,
 		})
 	}
 	return api.GetSports200JSONResponse{

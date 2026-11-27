@@ -81,3 +81,13 @@ func TestServiceFind(t *testing.T) {
 		t.Fatalf("error = %v, want it to wrap %v", err, storage)
 	}
 }
+
+// TestServiceCatalogueExercisesFailure: a failed read of the exercises fails
+// the catalogue, even when the sports were read.
+func TestServiceCatalogueExercisesFailure(t *testing.T) {
+	storage := errors.New("connection refused")
+	repo := fakeRepository{sports: []Sport{{Code: "crossfit", DistanceMode: "none"}}, exercisesErr: storage}
+	if _, err := NewService(repo).Catalogue(t.Context()); !errors.Is(err, storage) {
+		t.Fatalf("error = %v, want it to wrap %v", err, storage)
+	}
+}
