@@ -4808,7 +4808,7 @@ components:
           description: The end of the current week; null when eliminated or outside the weeks.
     ChallengeSummary:
       type: object
-      required: [id, title, visibility, timezone, reference_sport, starts_at, ends_at, participant_count, my_role, my_status, status, current_week, week_ends_at, week_count, my_week, best_result]
+      required: [id, title, visibility, timezone, reference_sport, exercise, starts_at, ends_at, participant_count, my_role, my_status, status, current_week, week_ends_at, week_count, my_week, best_result]
       additionalProperties: false
       properties:
         id:
@@ -4825,6 +4825,14 @@ components:
           type: string
           description: Code of the sport the distances are brought back to and the elimination is run in.
           example: ride
+        exercise:
+          type: string
+          nullable: true
+          description: |
+            Code of the exercise of the elimination when it is by repetitions
+            (`Sport.exercises`), as `CategoryRanking.exercise`; null otherwise
+            (elimination in meters, or none). Whatever the scope and status.
+          example: burpee
         starts_at:
           type: string
           format: date-time

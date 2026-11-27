@@ -200,6 +200,7 @@ func (h *Handler) ListChallenges(ctx context.Context, req api.ListChallengesRequ
 			Visibility:       api.ChallengeSummaryVisibility(c.Visibility),
 			Timezone:         c.Timezone,
 			ReferenceSport:   c.ReferenceSport,
+			Exercise:         c.Exercise,
 			StartsAt:         c.StartsAt.UTC(),
 			EndsAt:           c.EndsAt.UTC(),
 			ParticipantCount: c.ParticipantCount,

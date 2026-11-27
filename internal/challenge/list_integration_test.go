@@ -5,6 +5,7 @@ package challenge
 import (
 	"io"
 	"log/slog"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -257,6 +258,40 @@ func TestListGivesTheReferenceSport(t *testing.T) {
 				t.Fatalf("found %d of %d challenges in %q", found, len(tt.want), titles(page.Items))
 			}
 		})
+	}
+}
+
+// The exercise of an elimination by repetitions is read with the page,
+// whatever the scope; null for one in meters or none (SC-API-224).
+func TestListGivesTheExercise(t *testing.T) {
+	f := newListFixture(t)
+	if _, err := f.pool.Exec(t.Context(), `UPDATE challenges SET reference_sport = 'crossfit' WHERE id = '00000000-0000-0000-0000-0000000000b0';
+		INSERT INTO categories (challenge_id, type, position, params) VALUES
+		('00000000-0000-0000-0000-0000000000b0', 'elimination', 2, '{"sport": "crossfit", "exercise": "burpee", "step_repetitions": 10}'),
+		('00000000-0000-0000-0000-0000000000a1', 'elimination', 2, '{"sport": "run", "step_meters": 1000}'),
+		('00000000-0000-0000-0000-0000000000e1', 'elimination', 2, '{"sport": "crossfit", "exercise": "push_up", "step_repetitions": 10}')`); err != nil {
+		t.Fatal(err)
+	}
+	for scope, want := range map[string]map[string]string{
+		ScopePublic: {"B ongoing, mine": "burpee", "A upcoming": "", "H upcoming, same start as A": "", "E finished": "push_up"},
+		ScopeMine:   {"B ongoing, mine": "burpee", "D private, I abandoned": ""},
+	} {
+		page, err := f.svc.List(t.Context(), f.me, scope, "", 20, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, s := range page.Items {
+			if _, ok := want[s.Title]; ok {
+				got[s.Title] = ""
+				if s.Exercise != nil {
+					got[s.Title] = *s.Exercise
+				}
+			}
+		}
+		if !maps.Equal(got, want) {
+			t.Errorf("%s: exercises %v, want %v", scope, got, want)
+		}
 	}
 }
 

@@ -384,6 +384,27 @@ func TestListChallenges(t *testing.T) {
 	}
 }
 
+// The exercise of an elimination by repetitions; null otherwise
+// (SC-API-224).
+func TestListChallengesExercise(t *testing.T) {
+	burpee := "burpee"
+	repo := &fakeRepository{summaries: []Summary{
+		{ID: "11111111-1111-1111-1111-111111111111", Title: "Burpees", Visibility: "public", Timezone: "UTC", ReferenceSport: "crossfit", Exercise: &burpee, StartsAt: now, EndsAt: now.AddDate(0, 0, 14)},
+		{ID: "22222222-2222-2222-2222-222222222222", Title: "Run", Visibility: "public", Timezone: "UTC", ReferenceSport: "run", StartsAt: now, EndsAt: now.AddDate(0, 0, 14)},
+	}}
+	svc := NewService(repo, fakeProfiles{}, fakeCatalogue{}, fakeStandings{}, clock.NewFake(now))
+	rec, out := serve(t, svc, http.MethodGet, "/api/v1/challenges?scope=public", "")
+	items, _ := out["items"].([]any)
+	if rec.Code != http.StatusOK || len(items) != 2 {
+		t.Fatalf("status %d, items %v, want 200 and two items", rec.Code, out["items"])
+	}
+	first, _ := items[0].(map[string]any)
+	second, _ := items[1].(map[string]any)
+	if v, ok := second["exercise"]; first["exercise"] != "burpee" || !ok || v != nil {
+		t.Fatalf("exercises %v and %v, want burpee then null", first["exercise"], second["exercise"])
+	}
+}
+
 func TestListChallengesMyWeek(t *testing.T) {
 	active := string(ParticipantActive)
 	weekEnd := now.Add(48 * time.Hour)
