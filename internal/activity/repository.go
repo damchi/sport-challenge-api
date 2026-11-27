@@ -119,7 +119,7 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 // locked first (lockUser), then the activity FOR UPDATE, so that a change
 // or a deletion of the same activity committed meanwhile is seen. decide
 // gets the activity as stored and refuses with an error, nothing being
-// written then; the activity it gets has its repetitions, which a replaces.
+// written then; its activity has the repetitions, replaced by those of a.
 // The source, the external id and the idempotency key stay.
 // A missing or deleted activity, or one of someone else, gives
 // errActivityNotFound; an anonymized actor errAccountDeleted.
