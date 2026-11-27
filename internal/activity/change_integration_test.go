@@ -3,13 +3,16 @@
 package activity
 
 import (
+	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
+	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
 
 // stored is a row of activities as Update and Delete leave it.
@@ -217,5 +220,63 @@ func TestUpdateReplacesTheRepetitions(t *testing.T) {
 	}
 	if got, err := f.service().Update(t.Context(), f.user, id, session(11)); err != nil || got.Repetitions != nil || reps() != nil {
 		t.Fatalf("left out: %+v, %v, listed %+v, want none", got.Repetitions, err, reps())
+	}
+}
+
+// TestAdminUpdateReplacesTheRepetitions: an admin correction replaces the
+// repetitions in the database, in a locked week too, an exercise already on
+// the activity kept once offered no more; left out, they are removed. The
+// change gives their values before and after (SC-API-219).
+func TestAdminUpdateReplacesTheRepetitions(t *testing.T) {
+	f := setupRecord(t)
+	burpees := challengeOf(t, "c1")
+	burpees.Reference, burpees.Exercise = "crossfit", "burpee"
+	session := func(day int, reps ...Repetitions) Draft {
+		return Draft{SportCode: "crossfit", StartedAt: toronto(t, 2026, 6, day, 7), DurationSeconds: 1800, Repetitions: reps}
+	}
+	rec, err := f.service(burpees).Record(t.Context(), f.user, nil, session(10, Repetitions{"burpee", 30}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// As admin.Corrections, in one transaction.
+	change := func(svc *Service, d Draft) (c AdminChange, err error) {
+		err = db.InTx(t.Context(), f.gdb, func(ctx context.Context) error {
+			w, err := svc.AdminUpdate(ctx, admin, rec.ID, d)
+			if err == nil {
+				c, err = w.Write(ctx)
+			}
+			return err
+		})
+		return c, err
+	}
+	correct := func(svc *Service, d Draft) (AdminChange, []Repetitions) {
+		t.Helper()
+		c, err := change(svc, d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, err := NewRepository(f.gdb).Get(t.Context(), rec.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c, stored.Repetitions
+	}
+	repsOf := func(c AdminChange) []any { return []any{c.Old["repetitions"], c.New["repetitions"]} }
+
+	// Week 1 of c1, locked at recordNow.
+	c, stored := correct(f.service(burpees), session(3, Repetitions{"burpee", 45}))
+	if !slices.Equal(stored, []Repetitions{{"burpee", 45}}) || !reflect.DeepEqual(repsOf(c), []any{map[string]int{"burpee": 30}, map[string]int{"burpee": 45}}) {
+		t.Fatalf("locked week: stored %+v, change %+v; want 30 → 45", stored, c)
+	}
+	c, stored = correct(f.service(), session(3, Repetitions{"burpee", 50}))
+	if !slices.Equal(stored, []Repetitions{{"burpee", 50}}) || !reflect.DeepEqual(repsOf(c), []any{map[string]int{"burpee": 45}, map[string]int{"burpee": 50}}) {
+		t.Fatalf("offered no more: stored %+v, change %+v; want 45 → 50, kept", stored, c)
+	}
+	_, err = change(f.service(), session(3, Repetitions{"burpee", 50}, Repetitions{"wall_ball", 5}))
+	wantCode(t, err, apperr.CodeUnknownExercise)
+	// Refused, nothing written: the change below starts from 50 burpees.
+	c, stored = correct(f.service(), session(3))
+	if stored != nil || !reflect.DeepEqual(repsOf(c), []any{map[string]int{"burpee": 50}, nil}) {
+		t.Fatalf("left out: stored %+v, change %+v; want them removed", stored, c)
 	}
 }
