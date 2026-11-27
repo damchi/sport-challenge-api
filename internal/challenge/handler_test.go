@@ -250,6 +250,21 @@ func TestCreateChallengeWithAReferenceSport(t *testing.T) {
 	}
 }
 
+func TestCreateChallengeEliminationByRepetitions(t *testing.T) {
+	svc, repo := newTestService(true)
+	rec, out := post(t, svc, `{"title":"CrossFit spring","visibility":"public","timezone":"America/Toronto","start_date":"2026-03-04","weeks":6,`+
+		`"reference_sport":"crossfit","categories":{"elimination":{"exercise":"wall_ball","step_repetitions":10}}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d, want 201: %s", rec.Code, rec.Body)
+	}
+	cats, _ := out["categories"].([]any)
+	params, _ := cats[1].(map[string]any)["params"].(map[string]any)
+	want := map[string]any{"sport": "crossfit", "exercise": "wall_ball", "step_repetitions": 10.0}
+	if !reflect.DeepEqual(params, want) || repo.created.Categories[1].Params.Exercise != "wall_ball" {
+		t.Fatalf("elimination params %v, want %v", params, want)
+	}
+}
+
 func TestCreateChallengeRefusals(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -274,6 +289,10 @@ func TestCreateChallengeRefusals(t *testing.T) {
 		{name: "settings of the cumulative distance", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{}`, `"cumulative_distance":{"factors":{}}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.cumulative_distance"},
 		{name: "elimination step of 0", complete: true, body: strings.Replace(validBody, `"step_meters":2000`, `"step_meters":0`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.step_meters"},
 		{name: "elimination step over 100 km", complete: true, body: strings.Replace(validBody, `"step_meters":2000`, `"step_meters":100001`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.step_meters"},
+		{
+			name: "elimination in meters without distance", complete: true, body: `{"title":"CrossFit spring","visibility":"public","timezone":"America/Toronto","start_date":"2026-03-04","weeks":6,"reference_sport":"crossfit","categories":{"elimination":{"step_meters":2000}}}`,
+			wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.exercise,categories.elimination.step_meters,categories.elimination.step_repetitions",
+		},
 		{name: "elimination without step", complete: true, body: strings.Replace(validBody, `{"step_meters":2000}`, `{}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.elimination.step_meters"},
 		{name: "null categories", complete: true, body: strings.Replace(validBody, `"categories":{"cumulative_distance":{},"elimination":{"step_meters":2000}}`, `"categories":null`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories"},
 		{name: "settings of the cumulative elevation", complete: true, body: strings.Replace(validBody, `"cumulative_distance":{}`, `"cumulative_distance":{},"cumulative_elevation":{"factors":{}}`, 1), wantStatus: 400, wantCode: "validation_failed", wantFields: "categories.cumulative_elevation"},

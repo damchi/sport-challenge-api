@@ -44,6 +44,10 @@ const (
 	maxSessionMinutes        = 180
 )
 
+// maxRepetitionsStep is the technical bound of the repetitions increment
+// of the elimination (README §2.3).
+const maxRepetitionsStep = 1000
+
 // pointsPodiums are the sizes of the top that scores in the points
 // category, those scoring.Points has a scale for.
 var pointsPodiums = []int{5, 10}
@@ -95,10 +99,17 @@ type Draft struct {
 	DistanceFactors map[string]float64
 }
 
-// EliminationDraft is the setting of the elimination category.
+// EliminationDraft is the setting of the elimination category: StepMeters
+// under a reference sport with a distance, Exercise and StepRepetitions
+// under one without (README §2.3); zero when not given.
 type EliminationDraft struct {
 	// StepMeters is the increment X, in meters.
 	StepMeters int
+	// Exercise is the code of the exercise of the reference sport whose
+	// repetitions are summed.
+	Exercise string
+	// StepRepetitions is the increment X, in repetitions.
+	StepRepetitions int
 }
 
 // PointsDraft is the setting of the points category.
@@ -149,30 +160,32 @@ type Window struct {
 // Validate checks draft against the challenge rules, at the instant now
 // (from platform/clock), with distanceSports the sports of the catalogue that
 // have a distance and referenceMode the distance mode of the reference sport
-// (empty when the catalogue has no such sport): required or none. Without
-// distance, the categories and criteria that need one are refused, and so
-// are the distance factors (README §2.1 and §2.4); with one, the factors are
-// refused without a category that uses them (usesFactors).
+// (empty when the catalogue has no such sport): required or none, and
+// exerciseKnown whether the exercise of the elimination is one of the
+// reference sport. Without distance, the categories and criteria that need
+// one are refused, and so are the distance factors (README §2.1 and §2.4),
+// the elimination being by repetitions (invalidElimination); with one, the
+// factors are refused without a category that uses them (usesFactors).
 // It returns the window of the challenge: from the first instant of the
 // first local day (midnight, or the end of the skipped hour where a time
 // change skips midnight: scoring.StartOfDay), for a whole number of weeks
 // counted in local days (a week across a time change lasts 167 or 169
 // hours). A broken rule gives 400 validation_failed listing the fields,
 // sorted.
-func Validate(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string) (Window, error) {
-	return validate(draft, now, distanceSports, referenceMode, false)
+func Validate(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string, exerciseKnown bool) (Window, error) {
+	return validate(draft, now, distanceSports, referenceMode, exerciseKnown, false)
 }
 
 // ValidateSettings checks the settings an admin gives a challenge (README
 // §2.12) with the rules of the creation (Validate), but the first day, which
 // may be in the past: the admin moves a challenge in progress or finished.
 // It is still at most a year ahead.
-func ValidateSettings(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string) (Window, error) {
-	return validate(draft, now, distanceSports, referenceMode, true)
+func ValidateSettings(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string, exerciseKnown bool) (Window, error) {
+	return validate(draft, now, distanceSports, referenceMode, exerciseKnown, true)
 }
 
 // validate is Validate, the first day allowed in the past with pastAllowed.
-func validate(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string, pastAllowed bool) (Window, error) {
+func validate(draft Draft, now time.Time, distanceSports map[string]bool, referenceMode string, exerciseKnown, pastAllowed bool) (Window, error) {
 	var fields []string
 
 	if !validTitle(draft.Title) {
@@ -187,9 +200,6 @@ func validate(draft Draft, now time.Time, distanceSports map[string]bool, refere
 	if draft.Weeks < minWeeks || draft.Weeks > maxWeeks {
 		fields = append(fields, "weeks")
 	}
-	if e := draft.Elimination; e != nil && (e.StepMeters <= 0 || e.StepMeters > maxEliminationStep) {
-		fields = append(fields, "categories.elimination.step_meters")
-	}
 	if p := draft.Points; p != nil {
 		fields = append(fields, invalidPoints(*p)...)
 	}
@@ -197,6 +207,9 @@ func validate(draft Draft, now time.Time, distanceSports map[string]bool, refere
 		fields = append(fields, "reference_sport")
 	}
 	noDistance := referenceMode == distanceNone
+	if e := draft.Elimination; e != nil {
+		fields = append(fields, invalidElimination(*e, noDistance, exerciseKnown)...)
+	}
 	if noDistance {
 		fields = append(fields, withoutDistance(draft)...)
 	}
@@ -308,14 +321,40 @@ func withoutDistance(draft Draft) []string {
 	if draft.Elevation {
 		fields = append(fields, "categories.cumulative_elevation")
 	}
-	// The elimination by repetitions comes with SC-API-214.
-	if draft.Elimination != nil {
-		fields = append(fields, "categories.elimination")
-	}
 	if p := draft.Points; p != nil && slices.ContainsFunc(p.Criteria, func(c string) bool {
 		return slices.Contains(distanceCriteria, c)
 	}) {
 		fields = append(fields, "categories.points.criteria")
+	}
+	return fields
+}
+
+// invalidElimination returns the fields of the elimination settings e that
+// break the rules (README §2.3): in meters with a distance, in repetitions
+// of an exercise of the reference sport (exerciseKnown) without; the other
+// form is refused.
+func invalidElimination(e EliminationDraft, noDistance, exerciseKnown bool) []string {
+	var fields []string
+	if noDistance {
+		if e.StepMeters != 0 {
+			fields = append(fields, "categories.elimination.step_meters")
+		}
+		if !exerciseKnown {
+			fields = append(fields, "categories.elimination.exercise")
+		}
+		if e.StepRepetitions <= 0 || e.StepRepetitions > maxRepetitionsStep {
+			fields = append(fields, "categories.elimination.step_repetitions")
+		}
+		return fields
+	}
+	if e.StepMeters <= 0 || e.StepMeters > maxEliminationStep {
+		fields = append(fields, "categories.elimination.step_meters")
+	}
+	if e.Exercise != "" {
+		fields = append(fields, "categories.elimination.exercise")
+	}
+	if e.StepRepetitions != 0 {
+		fields = append(fields, "categories.elimination.step_repetitions")
 	}
 	return fields
 }

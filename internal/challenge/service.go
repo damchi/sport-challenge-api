@@ -56,12 +56,13 @@ type Profiles interface {
 	Names(ctx context.Context, userIDs []string) (map[string]Name, error)
 }
 
-// Catalogue gives the suggested factor of every sport with a distance, and
-// the distance mode of a sport, false when there is no such sport (module
-// sport).
+// Catalogue gives the suggested factor of every sport with a distance, the
+// distance mode of a sport, false when there is no such sport, and whether
+// an exercise belongs to a sport (module sport).
 type Catalogue interface {
 	SuggestedFactors(ctx context.Context) (map[string]float64, error)
 	DistanceMode(ctx context.Context, code string) (string, bool, error)
+	HasExercise(ctx context.Context, sportCode, code string) (bool, error)
 }
 
 // Standings gives where actorID stands in each of challenges that is in its
@@ -122,8 +123,13 @@ func (s *Service) Create(ctx context.Context, actorID string, draft Draft) (Chal
 		return Challenge{}, fmt.Errorf("read catalogue: %w", err)
 	}
 
+	exerciseKnown, err := s.exerciseKnown(ctx, draft)
+	if err != nil {
+		return Challenge{}, err
+	}
+
 	now := s.clock.Now()
-	window, err := Validate(draft, now, distanceSports, referenceMode)
+	window, err := Validate(draft, now, distanceSports, referenceMode, exerciseKnown)
 	if err != nil {
 		return Challenge{}, err
 	}
@@ -166,7 +172,9 @@ func categoriesOf(draft Draft, factors map[string]float64) []Category {
 		categories = append(categories, Category{Type: CategoryCumulativeDistance, Position: positionDistance, Params: Params{Factors: factors}})
 	}
 	if e := draft.Elimination; e != nil {
-		categories = append(categories, Category{Type: CategoryElimination, Position: positionElimination, Params: Params{Sport: draft.reference(), StepMeters: e.StepMeters}})
+		categories = append(categories, Category{Type: CategoryElimination, Position: positionElimination, Params: Params{
+			Sport: draft.reference(), StepMeters: e.StepMeters, Exercise: e.Exercise, StepRepetitions: e.StepRepetitions,
+		}})
 	}
 	if p := draft.Points; p != nil {
 		params := Params{Criteria: p.Criteria, Podium: p.Podium, MinSessionSeconds: p.minSessionMinutes() * 60}
@@ -179,6 +187,20 @@ func categoriesOf(draft Draft, factors map[string]float64) []Category {
 		categories = append(categories, Category{Type: CategoryElevation, Position: positionElevation, Params: Params{}})
 	}
 	return categories
+}
+
+// exerciseKnown tells whether the elimination of draft names an exercise of
+// its reference sport; false without one.
+func (s *Service) exerciseKnown(ctx context.Context, draft Draft) (bool, error) {
+	e := draft.Elimination
+	if e == nil || e.Exercise == "" {
+		return false, nil
+	}
+	known, err := s.catalogue.HasExercise(ctx, draft.reference(), e.Exercise)
+	if err != nil {
+		return false, fmt.Errorf("read catalogue: %w", err)
+	}
+	return known, nil
 }
 
 // noEmpty is description, none when empty: an empty description is no

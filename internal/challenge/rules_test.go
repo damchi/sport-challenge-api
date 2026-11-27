@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,17 @@ func minutes(n int) *int { return &n }
 // minimum session.
 func points(criteria ...string) *PointsDraft {
 	return &PointsDraft{Criteria: criteria, Podium: 5}
+}
+
+// repetitions sets an elimination by repetitions of exercise, increment x.
+func repetitions(exercise string, x int) func(*Draft) {
+	return func(d *Draft) { d.Elimination = &EliminationDraft{Exercise: exercise, StepRepetitions: x} }
+}
+
+// knownExercise tells whether the elimination of d names an exercise of its
+// reference sport in the fake catalogue, as the service asks it.
+func knownExercise(d Draft) bool {
+	return d.Elimination != nil && slices.Contains(catalogueExercises[d.reference()], d.Elimination.Exercise)
 }
 
 func with(change func(*Draft)) Draft {
@@ -268,7 +280,27 @@ func TestValidate(t *testing.T) {
 		// one (README §2.1), and so are the factors (§2.4).
 		{name: "no distance: cumulative distance", draft: noDistance("crossfit", func(d *Draft) { d.Distance = true }), referenceMode: "none", wantFields: "categories.cumulative_distance"},
 		{name: "no distance: cumulative elevation", draft: noDistance("crossfit", func(d *Draft) { d.Elevation = true }), referenceMode: "none", wantFields: "categories.cumulative_elevation"},
-		{name: "no distance: elimination", draft: noDistance("crossfit", func(d *Draft) { d.Elimination = &EliminationDraft{StepMeters: 2000} }), referenceMode: "none", wantFields: "categories.elimination"},
+		// Without distance, the elimination is by repetitions of an
+		// exercise of the reference sport (README §2.3, SC-API-214).
+		{name: "no distance: wall ball, X = 10", draft: noDistance("crossfit", repetitions("wall_ball", 10)), referenceMode: "none"},
+		{name: "no distance: X = 1", draft: noDistance("crossfit", repetitions("burpee", 1)), referenceMode: "none"},
+		{name: "no distance: X = 1000", draft: noDistance("crossfit", repetitions("wall_ball", 1000)), referenceMode: "none"},
+		{name: "no distance: X = 0", draft: noDistance("crossfit", repetitions("wall_ball", 0)), referenceMode: "none", wantFields: "categories.elimination.step_repetitions"},
+		{name: "no distance: X = 1001", draft: noDistance("crossfit", repetitions("wall_ball", 1001)), referenceMode: "none", wantFields: "categories.elimination.step_repetitions"},
+		{name: "no distance: X negative", draft: noDistance("crossfit", repetitions("wall_ball", -1)), referenceMode: "none", wantFields: "categories.elimination.step_repetitions"},
+		{name: "no distance: exercise of another sport", draft: noDistance("crossfit", repetitions("squat", 10)), referenceMode: "none", wantFields: "categories.elimination.exercise"},
+		{name: "no distance: unknown exercise", draft: noDistance("crossfit", repetitions("quidditch", 10)), referenceMode: "none", wantFields: "categories.elimination.exercise"},
+		{name: "no distance: no exercise", draft: noDistance("crossfit", repetitions("", 10)), referenceMode: "none", wantFields: "categories.elimination.exercise"},
+		{name: "no distance: no settings", draft: noDistance("crossfit", func(d *Draft) { d.Elimination = &EliminationDraft{} }), referenceMode: "none", wantFields: "categories.elimination.exercise,categories.elimination.step_repetitions"},
+		{name: "no distance: meters", draft: noDistance("crossfit", func(d *Draft) { d.Elimination = &EliminationDraft{StepMeters: 2000} }), referenceMode: "none", wantFields: "categories.elimination.exercise,categories.elimination.step_meters,categories.elimination.step_repetitions"},
+		{name: "no distance: meters and repetitions", draft: noDistance("crossfit", func(d *Draft) {
+			d.Elimination = &EliminationDraft{StepMeters: 2000, Exercise: "wall_ball", StepRepetitions: 10}
+		}), referenceMode: "none", wantFields: "categories.elimination.step_meters"},
+		{name: "no distance, no exercise in the catalogue: yoga", draft: noDistance("yoga", repetitions("wall_ball", 10)), referenceMode: "none", wantFields: "categories.elimination.exercise"},
+		{name: "distance: repetitions", draft: with(repetitions("wall_ball", 10)), wantFields: "categories.elimination.exercise,categories.elimination.step_meters,categories.elimination.step_repetitions"},
+		{name: "distance: meters and repetitions", draft: with(func(d *Draft) {
+			d.Elimination = &EliminationDraft{StepMeters: 2000, Exercise: "wall_ball", StepRepetitions: 10}
+		}), wantFields: "categories.elimination.exercise,categories.elimination.step_repetitions"},
 		{name: "no distance: longest distance", draft: noDistance("crossfit", func(d *Draft) {
 			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDistance)
 		}), referenceMode: "none", wantFields: "categories.points.criteria"},
@@ -284,10 +316,9 @@ func TestValidate(t *testing.T) {
 		{name: "no distance: empty factors", draft: noDistance("crossfit", func(d *Draft) { d.DistanceFactors = map[string]float64{} }), referenceMode: "none", wantFields: "distance_factors"},
 		{name: "no distance: every refused choice, sorted", draft: noDistance("crossfit", func(d *Draft) {
 			d.Distance, d.Elevation = true, true
-			d.Elimination = &EliminationDraft{StepMeters: 2000}
 			d.Points = points(scoring.CriterionLongestDistance)
 			d.DistanceFactors = map[string]float64{"ride": 0.25}
-		}), referenceMode: "none", wantFields: "categories.cumulative_distance,categories.cumulative_elevation,categories.elimination,categories.points.criteria,distance_factors"},
+		}), referenceMode: "none", wantFields: "categories.cumulative_distance,categories.cumulative_elevation,categories.points.criteria,distance_factors"},
 		{name: "no distance: two refused criteria and a duplicate, the field once", draft: noDistance("crossfit", func(d *Draft) {
 			d.Points = points(scoring.CriterionLongestDistance, scoring.CriterionFastestRun, scoring.CriterionFastestRun)
 		}), referenceMode: "none", wantFields: "categories.points.criteria"},
@@ -324,13 +355,13 @@ func TestValidate(t *testing.T) {
 			}
 			for _, v := range []struct {
 				name     string
-				validate func(Draft, time.Time, map[string]bool, string) (Window, error)
+				validate func(Draft, time.Time, map[string]bool, string, bool) (Window, error)
 				want     string
 			}{
 				{"Validate", Validate, tt.wantFields},
 				{"ValidateSettings", ValidateSettings, adminFields},
 			} {
-				_, err := v.validate(tt.draft, now, distanceSports, mode)
+				_, err := v.validate(tt.draft, now, distanceSports, mode, knownExercise(tt.draft))
 				if v.want == "" {
 					if err != nil {
 						t.Fatalf("%s() error = %v, want nil", v.name, err)
@@ -415,7 +446,7 @@ func TestValidateWindow(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w, err := Validate(tt.draft, tt.now, distanceSports, distanceRequired)
+			w, err := Validate(tt.draft, tt.now, distanceSports, distanceRequired, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -442,7 +473,7 @@ func TestValidateWindowIsNeverFixedDurations(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w, err := Validate(with(func(d *Draft) { d.StartDate = tt.start; d.Weeks = 2 }), tt.now, distanceSports, distanceRequired)
+			w, err := Validate(with(func(d *Draft) { d.StartDate = tt.start; d.Weeks = 2 }), tt.now, distanceSports, distanceRequired, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -466,7 +497,7 @@ func TestValidateStartsOnTheChosenLocalDay(t *testing.T) {
 		t.Skip("this zone database does not skip midnight on 2027-09-05 in Santiago")
 	}
 	draft := with(func(d *Draft) { d.Timezone = "America/Santiago"; d.StartDate = "2027-09-05"; d.Weeks = 2 })
-	w, err := Validate(draft, time.Date(2027, 9, 1, 12, 0, 0, 0, time.UTC), distanceSports, distanceRequired)
+	w, err := Validate(draft, time.Date(2027, 9, 1, 12, 0, 0, 0, time.UTC), distanceSports, distanceRequired, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,12 +508,12 @@ func TestValidateStartsOnTheChosenLocalDay(t *testing.T) {
 		t.Fatalf("ends at %s local, want 2027-09-19 00:00", got)
 	}
 	// On that day, starting the same day is still allowed at its first instant.
-	if _, err := Validate(draft, w.StartsAt, distanceSports, distanceRequired); err != nil {
+	if _, err := Validate(draft, w.StartsAt, distanceSports, distanceRequired, false); err != nil {
 		t.Fatalf("start today refused at the first instant of the day: %v", err)
 	}
 	// And the day before is yesterday from that first instant.
 	yesterday := with(func(d *Draft) { d.Timezone = "America/Santiago"; d.StartDate = "2027-09-04"; d.Weeks = 2 })
-	if _, err := Validate(yesterday, w.StartsAt, distanceSports, distanceRequired); err == nil {
+	if _, err := Validate(yesterday, w.StartsAt, distanceSports, distanceRequired, false); err == nil {
 		t.Fatal("start yesterday accepted at the first instant of the day")
 	}
 }
@@ -491,10 +522,10 @@ func TestValidateAYearAheadIsACalendarYear(t *testing.T) {
 	// From 2027-03-01, a year ahead is 2028-03-01: 366 days later, since
 	// 2028-02-29 exists. 365 days would stop at 2028-02-29.
 	from := time.Date(2027, 3, 1, 17, 0, 0, 0, time.UTC)
-	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-01" }), from, distanceSports, distanceRequired); err != nil {
+	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-01" }), from, distanceSports, distanceRequired, false); err != nil {
 		t.Fatalf("start the same day next year refused: %v", err)
 	}
-	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-02" }), from, distanceSports, distanceRequired); err == nil {
+	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2028-03-02" }), from, distanceSports, distanceRequired, false); err == nil {
 		t.Fatal("start after the same day next year accepted")
 	}
 }
@@ -506,11 +537,11 @@ func TestValidateStartAtTheEdgesOfToday(t *testing.T) {
 	}
 	draft := with(func(d *Draft) { d.StartDate = "2026-03-04" })
 	// Last second of the local 2026-03-04: starting that day is allowed.
-	if _, err := Validate(draft, time.Date(2026, 3, 4, 23, 59, 59, 0, toronto), distanceSports, distanceRequired); err != nil {
+	if _, err := Validate(draft, time.Date(2026, 3, 4, 23, 59, 59, 0, toronto), distanceSports, distanceRequired, false); err != nil {
 		t.Fatalf("start today at 23:59:59 refused: %v", err)
 	}
 	// Local midnight of 2026-03-05: 2026-03-04 is now yesterday.
-	if _, err := Validate(draft, time.Date(2026, 3, 5, 0, 0, 0, 0, toronto), distanceSports, distanceRequired); err == nil {
+	if _, err := Validate(draft, time.Date(2026, 3, 5, 0, 0, 0, 0, toronto), distanceSports, distanceRequired, false); err == nil {
 		t.Fatal("start yesterday accepted at local midnight")
 	}
 }
@@ -518,12 +549,12 @@ func TestValidateStartAtTheEdgesOfToday(t *testing.T) {
 func TestValidateTodayIsInTheChallengeTimeZone(t *testing.T) {
 	// 02:00 UTC on 2026-03-05 is still 2026-03-04 in Toronto (21:00).
 	late := time.Date(2026, 3, 5, 2, 0, 0, 0, time.UTC)
-	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2026-03-04" }), late, distanceSports, distanceRequired); err != nil {
+	if _, err := Validate(with(func(d *Draft) { d.StartDate = "2026-03-04" }), late, distanceSports, distanceRequired, false); err != nil {
 		t.Fatalf("start on the local today refused: %v", err)
 	}
 	// In Paris it is already 2026-03-05 (03:00): 2026-03-04 is in the past.
 	paris := with(func(d *Draft) { d.Timezone = "Europe/Paris"; d.StartDate = "2026-03-04" })
-	if _, err := Validate(paris, late, distanceSports, distanceRequired); err == nil {
+	if _, err := Validate(paris, late, distanceSports, distanceRequired, false); err == nil {
 		t.Fatal("start on the local yesterday accepted")
 	}
 }

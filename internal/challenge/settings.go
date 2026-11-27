@@ -117,9 +117,15 @@ func (s *Service) AdminUpdate(ctx context.Context, actor auth.Actor, id string, 
 		if draft.reference() != reference {
 			return Challenge{}, errReferenceChanged
 		}
+		// The exercise is known once the categories are read: a plain read
+		// of the catalogue, in the transaction ctx carries.
+		exerciseKnown, err := s.exerciseKnown(ctx, draft)
+		if err != nil {
+			return Challenge{}, err
+		}
 		// One instant for the rules and the status the change gives.
 		at := s.clock.Now()
-		window, err := ValidateSettings(draft, at, distanceSports, referenceMode)
+		window, err := ValidateSettings(draft, at, distanceSports, referenceMode, exerciseKnown)
 		if err != nil {
 			return Challenge{}, err
 		}
@@ -225,7 +231,9 @@ func draftOf(c Challenge, cats []Category) (Draft, error) {
 		case CategoryCumulativeDistance:
 			d.Distance = true
 		case CategoryElimination:
-			d.Elimination = &EliminationDraft{StepMeters: cat.Params.StepMeters}
+			d.Elimination = &EliminationDraft{
+				StepMeters: cat.Params.StepMeters, Exercise: cat.Params.Exercise, StepRepetitions: cat.Params.StepRepetitions,
+			}
 		case CategoryPoints:
 			minimum := cat.Params.MinSessionSeconds / 60
 			d.Points = &PointsDraft{Criteria: cat.Params.Criteria, Podium: cat.Params.Podium, MinSessionMinutes: &minimum}

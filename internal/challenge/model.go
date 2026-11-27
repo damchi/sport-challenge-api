@@ -70,9 +70,12 @@ type Params struct {
 	// Factors is the distance factor by sport code (cumulative_distance,
 	// and points with the longest distance criterion).
 	Factors map[string]float64 `json:"factors,omitempty"`
-	// Sport and StepMeters are the elimination settings.
-	Sport      string `json:"sport,omitempty"`
-	StepMeters int    `json:"step_meters,omitempty"`
+	// Sport and StepMeters, or Exercise and StepRepetitions under a
+	// reference sport without distance, are the elimination settings.
+	Sport           string `json:"sport,omitempty"`
+	StepMeters      int    `json:"step_meters,omitempty"`
+	Exercise        string `json:"exercise,omitempty"`
+	StepRepetitions int    `json:"step_repetitions,omitempty"`
 	// Criteria, Podium and MinSessionSeconds are the points settings.
 	Criteria          []string `json:"criteria,omitempty"`
 	Podium            int      `json:"podium,omitempty"`
