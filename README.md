@@ -187,7 +187,7 @@ Un challenge a **de 1 à 5 catégories** : le temps cumulé, toujours, et celles
 - ✅ Seul un participant actif peut devenir créateur (tout créateur est donc participant) ; ajouter quelqu'un qui est déjà créateur ne change rien (même après la fin) ; nommer un nouveau créateur n'est plus possible une fois le challenge terminé (sauf pour un admin, §2.12).
 - ✅ Un créateur ne peut pas être exclu par un autre créateur (les créateurs sont à égalité ; un créateur peut toujours abandonner lui-même) ; seul un admin le peut (§2.12). Une exclusion n'est plus possible une fois le challenge terminé, et exclure quelqu'un qui a déjà abandonné ne change rien.
 - ✅ Pas de système de contestation en V1 : les participants se font confiance. Les corrections qu'aucun utilisateur ne peut faire (semaine verrouillée, réglage figé, inscription close, résultats figés) passent par un admin (§2.12).
-- ✅ **Pas de plafond de volume par utilisateur** (SC-API-083) : ni sur le nombre de challenges créés, ni sur les invitations, ni sur les activités par jour. La seule protection contre les abus est la **limite de débit** (par adresse IP, et par utilisateur sur les écritures, §5.7), tenue en mémoire par instance. À revoir si des abus apparaissent, notamment des challenges publics en masse sur la page d'accueil.
+- ✅ **Pas de plafond de volume par utilisateur** (SC-API-083) : ni sur le nombre de challenges créés, ni sur les invitations, ni sur les activités par jour. La seule protection contre les abus est la **limite de débit** (par adresse IP, et par utilisateur sur les écritures, §5.7), tenue en mémoire par instance. À revoir si des abus apparaissent, notamment des challenges publics en masse sur l'accueil de l'app (`/challenges`).
 
 ### 2.10 Modèle économique
 
@@ -195,9 +195,9 @@ Un challenge a **de 1 à 5 catégories** : le temps cumulé, toujours, et celles
 
 ### 2.11 Page de présentation (landing page)
 
-Décisions du propriétaire du produit du 2026-11-23 (SC-API-151) :
+Décisions du propriétaire du produit du 2026-11-23 (SC-API-151) et du 2026-11-26 (SC-API-206) :
 
-- ✅ Une **page de présentation publique** s'affiche à `/` pour un visiteur **non connecté** ; une personne connectée voit à la place la page d'accueil de l'app, avec ses défis (côté frontend). Elle est servie par le frontend, avec un **contenu statique** : elle n'appelle pas l'API, qui exige une connexion pour toutes ses routes (§5.7). Elle ne liste donc pas les challenges publics, lisibles seulement par un utilisateur connecté (§2.1, §5.7).
+- ✅ Une **page de présentation publique** s'affiche à `/` pour **tout le monde, connecté ou non** (décision du 2026-11-26) ; l'accueil de l'app, avec ses défis, est à `/challenges` (côté frontend). La page de présentation est servie par le frontend, avec un **contenu statique** : elle n'appelle pas l'API, qui exige une connexion pour toutes ses routes (§5.7). Elle ne liste donc pas les challenges publics, lisibles seulement par un utilisateur connecté (§2.1, §5.7).
 - ✅ Elle ne présente que des règles ✅ de ce README, sans en inventer ni en promettre d'autres, et suit leur évolution. Elle explique, dans cet ordre :
   1. **Le principe** (§1, §2.1) : créer un défi entre amis, en choisir la durée (de 2 à 52 semaines), la date de début, la visibilité (privé ou public) et si les participants peuvent inviter ; saisir chaque activité **une seule fois** : elle compte dans tous les défis où l'on participe et dont la période contient sa date (§2.5). Gratuit (§2.10).
   2. **Les semaines** (§2.1, §2.3, §2.5) : découpées dans le fuseau du défi ; une activité compte pour la semaine de son début et se saisit, se modifie ou se supprime jusqu'au **verrouillage**, à 7 h, heure locale du défi, le premier jour de la semaine suivante.
