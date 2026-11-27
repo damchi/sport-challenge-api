@@ -3294,7 +3294,11 @@ components:
             - $ref: "#/components/schemas/CategoriesCreate"
         reference_sport:
           type: string
-          description: As at creation; a new one starts again from the suggested factors.
+          description: |
+            As at creation; a new one starts again from the suggested factors.
+            Moving to a sport without distance is refused while the challenge
+            keeps a category or a criterion that needs one (send `categories`
+            without them).
           pattern: "^[a-z][a-z0-9_]{0,31}$"
           example: run
         distance_factors:
@@ -4192,9 +4196,14 @@ components:
           description: |
             Code of the sport the distances are brought back to and the
             elimination is run in: a sport of the catalogue whose distance is
-            required (`distance_mode` `required`), otherwise 400
-            `validation_failed` on `reference_sport`. `run` when absent; `null`
-            is refused (no default in the schema, which would replace it).
+            required or none (`distance_mode` `required` or `none`), otherwise
+            400 `validation_failed` on `reference_sport`. Without distance, 400
+            `validation_failed` names each choice that needs one:
+            `categories.cumulative_distance`, `categories.cumulative_elevation`,
+            `categories.elimination`, `categories.points.criteria` (with
+            `longest_distance`, `weekly_elevation` or `fastest_run`) and
+            `distance_factors`. `run` when absent; `null` is refused (no
+            default in the schema, which would replace it).
           pattern: "^[a-z][a-z0-9_]{0,31}$"
           example: run
         distance_factors:
@@ -4203,9 +4212,9 @@ components:
             Factors chosen by the creator, by sport code (distance sports only,
             0.1 to 2, two decimals at most), for the cumulative distance and
             the `longest_distance` criterion of the points category: without
-            either, sending them answers 400 `validation_failed` on
-            `distance_factors`. Send only the factors the creator
-            changed: sports not given keep their suggested factor brought back
+            either, or with a reference sport without distance, sending them
+            answers 400 `validation_failed` on `distance_factors`. Send only
+            the factors the creator changed: sports not given keep their suggested factor brought back
             to the reference sport, min(1, factor / factor of the reference),
             rounded to two decimals and never under 0.1. The reference sport is
             refused, even at 1: it always counts x1.
