@@ -273,6 +273,10 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	s.activity(users[1], "run", end, 3600, km(99000), false)                     // at the end, outside
 	// Elevation gains on some runs and rides, none elsewhere.
 	s.exec(`UPDATE activities SET elevation_gain_meters = distance_meters / 40 WHERE sport_code IN ('run', 'ride') AND duration_seconds <> 1200`)
+	// Burpees growing with the distance, and wall balls the elimination by
+	// repetitions of burpees never counts (SC-API-217).
+	s.exec(`INSERT INTO activity_repetitions (activity_id, exercise_code, repetitions) SELECT id, 'burpee', distance_meters / 100 FROM activities WHERE distance_meters IS NOT NULL`)
+	s.exec(`INSERT INTO activity_repetitions (activity_id, exercise_code, repetitions) SELECT id, 'wall_ball', 7 FROM activities`)
 
 	repo := NewRepository(gdb)
 	participantsOf, err := repo.ParticipantsOf(t.Context(), []string{challengeID})
@@ -285,7 +289,8 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	// in the weeks the points category keeps); each is its own group of
 	// sessions.
 	const minSession = 1200
-	rows, err := pool.Query(t.Context(), `SELECT a.user_id, a.sport_code, a.started_at, a.duration_seconds, a.distance_meters, a.elevation_gain_meters
+	rows, err := pool.Query(t.Context(), `SELECT a.user_id, a.sport_code, a.started_at, a.duration_seconds, a.distance_meters, a.elevation_gain_meters,
+			(SELECT jsonb_object_agg(exercise_code, repetitions) FROM activity_repetitions WHERE activity_id = a.id)
 		FROM participants p JOIN activities a ON a.user_id = p.user_id
 		WHERE p.challenge_id = $1 AND a.deleted_at IS NULL AND a.started_at >= $2 AND a.started_at < $3`,
 		challengeID, start, end)
@@ -295,7 +300,7 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	var raw []scoring.Activity
 	for rows.Next() {
 		var a scoring.Activity
-		if err := rows.Scan(&a.UserID, &a.SportCode, &a.StartedAt, &a.DurationSeconds, &a.DistanceMeters, &a.ElevationMeters); err != nil {
+		if err := rows.Scan(&a.UserID, &a.SportCode, &a.StartedAt, &a.DurationSeconds, &a.DistanceMeters, &a.ElevationMeters, &a.Repetitions); err != nil {
 			t.Fatal(err)
 		}
 		a.StartedAt = a.StartedAt.UTC()
@@ -329,6 +334,17 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		t.Fatal(err)
 	}
 	groups := groupsOf[challengeID]
+	// With an elimination by repetitions of burpees, with and without a
+	// points category.
+	repsOf, err := repo.ActivitiesOf(t.Context(), []Scope{{ChallengeID: challengeID, Window: w, WeeklySport: "run", Exercise: "burpee"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repsGroupsOf, err := repo.ActivitiesOf(t.Context(), []Scope{{ChallengeID: challengeID, Window: w, WeeklySport: "run", Exercise: "burpee", Points: &PointsRead{MinSessionSeconds: minSession}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repetitions := scoring.Elimination{Sport: "run", Exercise: "burpee", StepRepetitions: 15}
 	if len(groups) >= len(raw) || len(groups) <= len(totals) {
 		t.Fatalf("%d groups for %d raw activities and %d totals, want between", len(groups), len(raw), len(totals))
 	}
@@ -353,6 +369,8 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 		{"time, points category", scoring.Duration{}, groups},
 		{"distance, points category", scoring.Distance{Factors: factors}, groups},
 		{"elimination, points category", elimination, groups},
+		{"elimination by repetitions", repetitions, repsOf[challengeID]},
+		{"elimination by repetitions, points category", repetitions, repsGroupsOf[challengeID]},
 		{"points", points, groups},
 		{"points, weekly elevation", weeklyElevation, groups},
 		{"points, fastest run", fastestRun, groups},
@@ -378,16 +396,18 @@ func TestActivitiesGiveTheRankingsOfTheRawActivities(t *testing.T) {
 	// The data set must judge something: at the end, someone is eliminated
 	// and someone is not.
 	w.Now = end
-	var eliminated, survivors int
-	for _, e := range elimination.Score(w, participants, raw) {
-		if e.Progress != nil && e.Progress.Status == scoring.StatusEliminated {
-			eliminated++
-		} else {
-			survivors++
+	for _, e := range []scoring.Elimination{elimination, repetitions} {
+		var eliminated, survivors int
+		for _, entry := range e.Score(w, participants, raw) {
+			if entry.Progress != nil && entry.Progress.Status == scoring.StatusEliminated {
+				eliminated++
+			} else {
+				survivors++
+			}
 		}
-	}
-	if eliminated == 0 || survivors == 0 {
-		t.Fatalf("%d eliminated, %d survivors: want both, or the comparison proves little", eliminated, survivors)
+		if eliminated == 0 || survivors == 0 {
+			t.Fatalf("%+v: %d eliminated, %d survivors: want both, or the comparison proves little", e, eliminated, survivors)
+		}
 	}
 	// The elevation gains must rank someone.
 	if e := (scoring.Elevation{}).Score(w, participants, raw); e[0].Value == 0 {
@@ -1104,5 +1124,63 @@ func TestATransactionNeverReadsTheCache(t *testing.T) {
 	// Rolled back: the kept ranking is served, not the preview.
 	if got := seconds(t.Context()); got != 3600 {
 		t.Fatalf("after the rollback: %d s, want 3600", got)
+	}
+}
+
+// TestActivitiesOfReadsTheExerciseOfEachChallenge: two challenges on burpees
+// and one on wall balls for the same participant, each reading its exercise
+// only, on the CrossFit activities not deleted; the locked week is judged.
+func TestActivitiesOfReadsTheExerciseOfEachChallenge(t *testing.T) {
+	pool := testdb.New(t)
+	gdb, err := db.NewGorm(pool, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := seed{t: t, pool: pool}
+	loc := toronto(t)
+	start, end := scoring.StartOfDay(2026, 3, 2, loc), scoring.StartOfDay(2026, 3, 16, loc)
+	w := scoring.Window{Start: start, End: end, Location: loc, Now: end.Add(24 * time.Hour)}
+	u := s.user("u1")
+	exercises := []string{"burpee", "burpee", "wall_ball"}
+	scopes := make([]Scope, len(exercises))
+	for i, e := range exercises {
+		var id string
+		if err := pool.QueryRow(t.Context(), `INSERT INTO challenges (title, visibility, timezone, starts_at, ends_at, created_by, reference_sport)
+			VALUES ('WOD', 'public', 'America/Toronto', $1, $2, $3, 'crossfit') RETURNING id`, start, end, u).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		s.exec("INSERT INTO participants (challenge_id, user_id, joined_at) VALUES ($1, $2, $3)", id, u, start)
+		scopes[i] = Scope{ChallengeID: id, Window: w, WeeklySport: "crossfit", Exercise: e}
+	}
+	reps := func(sport string, at time.Time, deleted bool, burpees, wallBalls int) {
+		s.activity(u, sport, at, 1800, nil, deleted)
+		s.exec(`INSERT INTO activity_repetitions SELECT id, 'burpee', $2::int FROM activities WHERE started_at = $1
+			UNION ALL SELECT id, 'wall_ball', $3::int FROM activities WHERE started_at = $1`, at, burpees, wallBalls)
+	}
+	reps("crossfit", start.Add(time.Hour), false, 100, 50)
+	reps("crossfit", start.Add(30*time.Hour), false, 20, 10)
+	reps("strength", start.Add(60*time.Hour), false, 500, 500) // another sport
+	reps("crossfit", start.Add(90*time.Hour), true, 900, 900)  // deleted
+	reps("crossfit", start.AddDate(0, 0, 7).Add(time.Hour), false, 125, 70)
+	byChallenge, err := NewRepository(gdb).ActivitiesOf(t.Context(), scopes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := []scoring.Participant{{UserID: u}}
+	for i, sc := range scopes {
+		e := scoring.Elimination{Sport: "crossfit", Exercise: sc.Exercise, StepRepetitions: 10}
+		got := e.Eliminations(w, participants, byChallenge[sc.ChallengeID])
+		// Burpees 120 then 125, under 130: eliminated in week 2; wall balls
+		// 60 then 70, the minimum.
+		want := []scoring.Eliminated{{UserID: u, Week: 2, Repetitions: 125, MinimumRepetitions: 130}}
+		if sc.Exercise == "wall_ball" {
+			want = nil
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("challenge %d (%s): eliminations %+v, want %+v", i, sc.Exercise, got, want)
+		}
+		if v := e.Score(w, participants, byChallenge[sc.ChallengeID])[0].Value; v != map[string]int{"burpee": 245, "wall_ball": 130}[sc.Exercise] {
+			t.Fatalf("challenge %d (%s): value %d", i, sc.Exercise, v)
+		}
 	}
 }

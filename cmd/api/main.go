@@ -420,6 +420,7 @@ func toLeaderboardChallenge(c challenge.Challenge) leaderboard.Challenge {
 	for i, cat := range c.Categories {
 		categories[i] = leaderboard.Category{
 			Type: cat.Type, Factors: cat.Params.Factors, Sport: cat.Params.Sport, StepMeters: cat.Params.StepMeters,
+			Exercise: cat.Params.Exercise, StepRepetitions: cat.Params.StepRepetitions,
 			Criteria: cat.Params.Criteria, Podium: cat.Params.Podium, MinSessionSeconds: cat.Params.MinSessionSeconds,
 		}
 	}

@@ -59,7 +59,7 @@ func (s *Service) Page(ctx context.Context, actor auth.Actor, id string, req Pag
 // when lines are left. The ranking orders the ranked lines first, the
 // abandoned ones last, so the lines after the podium keep that order.
 func paginate(cat CategoryRanking, userID string, limit int, after *Position) (CategoryPage, error) {
-	out := CategoryPage{Type: cat.Type, RankedCount: cat.RankedCount}
+	out := CategoryPage{Type: cat.Type, Exercise: cat.Exercise, RankedCount: cat.RankedCount}
 	for i := range cat.Entries {
 		if cat.Entries[i].UserID == userID {
 			me := cat.Entries[i]

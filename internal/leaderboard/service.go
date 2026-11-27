@@ -161,7 +161,7 @@ func (s *Service) compute(ctx context.Context, c Challenge, w scoring.Window, sc
 			ranked[j] = Ranked{Entry: e}
 			ranked[j].Name = names[e.UserID]
 		}
-		board.Categories[i] = CategoryRanking{Type: cat.Type, RankedCount: rankedCount(entries), Entries: ranked}
+		board.Categories[i] = CategoryRanking{Type: cat.Type, Exercise: cat.Exercise, RankedCount: rankedCount(entries), Entries: ranked}
 	}
 	return computed{window: w, participants: participants, activities: activities, board: board}, nil
 }
@@ -288,7 +288,9 @@ func (s *Service) scorerOf(cat Category) (scoring.Scorer, error) {
 	case CategoryCumulativeDistance:
 		return scoring.Distance{Factors: cat.Factors}, nil
 	case CategoryElimination:
-		return scoring.Elimination{Sport: cat.Sport, StepMeters: cat.StepMeters, AtRisk: s.atRisk}, nil
+		return scoring.Elimination{
+			Sport: cat.Sport, StepMeters: cat.StepMeters, Exercise: cat.Exercise, StepRepetitions: cat.StepRepetitions, AtRisk: s.atRisk,
+		}, nil
 	case CategoryPoints:
 		return scoring.Points{Criteria: cat.Criteria, Podium: cat.Podium, Factors: cat.Factors}, nil
 	case CategoryElevation:
@@ -356,12 +358,12 @@ func (s *Service) frozen(ctx context.Context, c Challenge) (Leaderboard, bool, e
 
 	board := Leaderboard{ComputedAt: createdAt, Categories: make([]CategoryRanking, len(c.Categories))}
 	for i, cat := range c.Categories {
-		entries := thaw(cat.Type, rankings[i], deleted)
+		entries := thaw(cat, rankings[i], deleted)
 		ranked := make([]Ranked, len(entries))
 		for j, e := range entries {
 			ranked[j] = Ranked{Entry: e, Name: names[e.UserID]}
 		}
-		board.Categories[i] = CategoryRanking{Type: cat.Type, RankedCount: rankedCount(entries), Entries: ranked}
+		board.Categories[i] = CategoryRanking{Type: cat.Type, Exercise: cat.Exercise, RankedCount: rankedCount(entries), Entries: ranked}
 	}
 	return board, true, nil
 }
@@ -411,7 +413,7 @@ func (s *Service) Results(ctx context.Context, actorID string, challenges []Chal
 		}
 		places := make([]Place, len(c.Categories))
 		for i, cat := range c.Categories {
-			places[i] = placeOf(cat.Type, thaw(cat.Type, rankings[i], deleted), actorID)
+			places[i] = placeOf(cat.Type, thaw(cat, rankings[i], deleted), actorID)
 		}
 		out[c.ID] = places
 	}
@@ -456,10 +458,10 @@ func frozenUsers(ids []string, rankings []frozenRanking) []string {
 	return ids
 }
 
-// thaw returns the entries of the frozen ranking r of a category of type
-// categoryType without the deleted accounts: the ranks are given again, in
+// thaw returns the entries of the frozen ranking r of category cat
+// without the deleted accounts: the ranks are given again, in
 // the frozen order, and equal ones still share a rank (1, 1, 3).
-func thaw(categoryType string, r frozenRanking, deleted map[string]bool) []scoring.Entry {
+func thaw(cat Category, r frozenRanking, deleted map[string]bool) []scoring.Entry {
 	entries := make([]scoring.Entry, 0, len(r.Entries))
 	var frozenRank, rank int
 	for _, e := range r.Entries {
@@ -475,10 +477,10 @@ func thaw(categoryType string, r frozenRanking, deleted map[string]bool) []scori
 		}
 		// As computed: a survivor of the elimination category has an empty
 		// progress once the challenge is over, an abandoned one has none.
-		if categoryType == CategoryElimination && !e.Abandoned {
-			entry.Progress = &scoring.Progress{}
+		if cat.Type == CategoryElimination && !e.Abandoned {
+			entry.Progress = &scoring.Progress{InRepetitions: cat.Exercise != ""}
 			if e.EliminatedWeek > 0 {
-				entry.Progress = &scoring.Progress{Status: scoring.StatusEliminated, EliminatedWeek: e.EliminatedWeek}
+				entry.Progress.Status, entry.Progress.EliminatedWeek = scoring.StatusEliminated, e.EliminatedWeek
 			}
 		}
 		entries = append(entries, entry)
@@ -496,7 +498,7 @@ func scopeOf(id string, categories []Category, w scoring.Window) Scope {
 	for _, cat := range categories {
 		switch cat.Type {
 		case CategoryElimination:
-			sc.WeeklySport = cat.Sport
+			sc.WeeklySport, sc.Exercise = cat.Sport, cat.Exercise
 		case CategoryPoints:
 			sc.Points = &PointsRead{MinSessionSeconds: cat.MinSessionSeconds}
 			if slices.Contains(cat.Criteria, scoring.CriterionWeeklyElevation) {

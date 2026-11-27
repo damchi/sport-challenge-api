@@ -4525,6 +4525,14 @@ components:
         type:
           type: string
           enum: [cumulative_time, cumulative_distance, elimination, points, cumulative_elevation]
+        exercise:
+          type: string
+          nullable: true
+          description: |
+            Elimination by repetitions only, the exercise whose repetitions
+            count: the values, the minimum and the live status are then in
+            repetitions (`EliminationProgress.repetitions`); absent or null
+            for an elimination in meters and the other categories.
         ranked_count:
           type: integer
           minimum: 0
@@ -4548,7 +4556,8 @@ components:
             `limit`, a page of the lines after the podium. Ranked ones first,
             best first; abandoned ones last. `value` is in seconds for
             `cumulative_time`, in meters for `cumulative_distance`,
-            `elimination` and `cumulative_elevation`, in points acquired for
+            `elimination` (in repetitions for an elimination by repetitions,
+            `exercise`) and `cumulative_elevation`, in points acquired for
             `points`.
           items:
             $ref: "#/components/schemas/LeaderboardEntry"
@@ -4755,7 +4764,16 @@ components:
         distance_meters:
           type: integer
           minimum: 0
-          description: The distance already covered in the reference sport in the current week; 0 when eliminated or outside the weeks.
+          description: The distance already covered in the reference sport in the current week; 0 when eliminated or outside the weeks, and in an elimination by repetitions.
+        minimum_repetitions:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Elimination by repetitions only (absent otherwise), the repetitions the current week needs, as `minimum_meters` (then null).
+        repetitions:
+          type: integer
+          minimum: 0
+          description: Elimination by repetitions only (absent otherwise), the repetitions of the exercise already done in the current week, as `distance_meters` (then 0).
         week_ends_at:
           type: string
           format: date-time

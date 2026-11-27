@@ -1130,3 +1130,19 @@ func TestResultsFailures(t *testing.T) {
 		})
 	}
 }
+
+// TestThawAnEliminationByRepetitions: frozen, an elimination by repetitions
+// keeps its unit, and the week of an elimination.
+func TestThawAnEliminationByRepetitions(t *testing.T) {
+	var r frozenRanking
+	if err := json.Unmarshal([]byte(`{"entries":[{"user_id":"a","rank":1,"value":330},{"user_id":"b","rank":2,"value":209,"eliminated_week":2}]}`), &r); err != nil {
+		t.Fatal(err)
+	}
+	got := thaw(Category{Type: CategoryElimination, Exercise: "burpee"}, r, nil)
+	want := []*scoring.Progress{{InRepetitions: true}, {InRepetitions: true, Status: scoring.StatusEliminated, EliminatedWeek: 2}}
+	for i, e := range got {
+		if !reflect.DeepEqual(e.Progress, want[i]) {
+			t.Fatalf("entry %d progress %+v, want %+v", i, e.Progress, want[i])
+		}
+	}
+}

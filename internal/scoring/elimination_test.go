@@ -718,7 +718,7 @@ func TestEliminationByRepetitionsProgress(t *testing.T) {
 	}
 	e := Elimination{Sport: "crossfit", Exercise: "wall_ball", StepRepetitions: 10, AtRisk: 24 * time.Hour}
 	got := e.Score(w, users("a"), []Activity{reps(start.Add(-48*time.Hour), 100), reps(start.Add(time.Hour), 40)})[0].Progress
-	if want := (&Progress{Status: StatusInProgress, MinimumRepetitions: points(110), Repetitions: 40, WeekEndsAt: end}); !reflect.DeepEqual(got, want) {
+	if want := (&Progress{InRepetitions: true, Status: StatusInProgress, MinimumRepetitions: points(110), Repetitions: 40, WeekEndsAt: end}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Progress = %+v, want %+v", got, want)
 	}
 }

@@ -252,6 +252,9 @@ func toMyWeek(st Standing) *api.MyWeek {
 // being null, as the leaderboard does (leaderboard.toProgress).
 func toProgress(p scoring.Progress) *api.EliminationProgress {
 	out := &api.EliminationProgress{MinimumMeters: p.MinimumMeters, DistanceMeters: p.DistanceMeters}
+	if p.InRepetitions {
+		out.MinimumRepetitions, out.Repetitions = p.MinimumRepetitions, &p.Repetitions
+	}
 	if p.Status != "" {
 		status := api.EliminationProgressStatus(p.Status)
 		out.Status = &status

@@ -81,8 +81,10 @@ const (
 // the numbers of the current week: the distance already covered and the
 // instant it ends; the minimum and a status only from week 2, which has a
 // reference. Outside the weeks of the challenge there is nothing but the elimination.
-// With an exercise, MinimumRepetitions and Repetitions replace the meters.
+// With an exercise, MinimumRepetitions and Repetitions replace the meters,
+// and InRepetitions is true.
 type Progress struct {
+	InRepetitions      bool
 	Status             string
 	EliminatedWeek     int
 	MinimumMeters      *int
