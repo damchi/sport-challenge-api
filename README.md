@@ -482,10 +482,10 @@ sport-challenge-api/
 │   │   └── model.go · service.go · repository.go · handler.go
 │   │                                liens d'invitation, règle « les participants peuvent inviter »
 │   │
-│   ├── sport/                       le catalogue lui-même est dans les migrations 000003 et 000020 (données de référence)
-│   │   ├── model.go                 Sport : code, mode de distance, coefficient suggéré
-│   │   ├── repository.go            lecture de la table sports
-│   │   ├── service.go               lecture du catalogue, coefficients suggérés, mode de distance d'un sport
+│   ├── sport/                       le catalogue lui-même est dans les migrations 000003 et 000020, celui des exercices dans 000024 (données de référence)
+│   │   ├── model.go                 Sport : code, mode de distance, coefficient suggéré ; Exercise : code, sport, ordre
+│   │   ├── repository.go            lecture des tables sports et exercises
+│   │   ├── service.go               lecture du catalogue, coefficients suggérés, mode de distance d'un sport, exercices d'un sport
 │   │   └── handler.go               GET /sports
 │   │
 │   ├── activity/

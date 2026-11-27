@@ -25,6 +25,10 @@ type fakeRepository struct {
 
 func (f fakeRepository) List(context.Context) ([]Sport, error) { return f.sports, f.err }
 
+func (f fakeRepository) ListExercises(context.Context, string) ([]Exercise, error) {
+	return nil, f.err
+}
+
 type acceptingVerifier struct{}
 
 func (acceptingVerifier) Verify(context.Context, string) (auth.Claims, error) {
