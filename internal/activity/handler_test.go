@@ -611,8 +611,11 @@ const challengeActivities = "/api/v1/challenges/8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f
 func TestListChallengeActivities(t *testing.T) {
 	c1 := challengeOf(t, "8a0c2f4e-1b3d-4e5f-9a7b-6c8d0e2f4a6b")
 	run := storedRun(t)
-	run.UserID = participant
-	repo := &fakeRepository{listing: []Activity{run, run}}
+	// Repetitions of an exercise c1 does not offer: shown all the same.
+	run.UserID, run.Repetitions = participant, []Repetitions{{Exercise: "wall_ball", Count: 12}}
+	plain := run
+	plain.Repetitions = nil
+	repo := &fakeRepository{listing: []Activity{run, plain}}
 	pseudo := "lea"
 	profiles := fakeProfiles{names: map[string]Name{participant: {Pseudo: &pseudo}}}
 	var asked scopeCall
@@ -633,6 +636,14 @@ func TestListChallengeActivities(t *testing.T) {
 	want := map[string]any{"id": participant, "pseudo": pseudo, "first_name": nil, "last_name": nil, "avatar": nil}
 	if !reflect.DeepEqual(first["user"], want) {
 		t.Fatalf("user %v, want %v", first["user"], want)
+	}
+	if reps := []any{map[string]any{"exercise": "wall_ball", "repetitions": 12.0}}; !reflect.DeepEqual(first["repetitions"], reps) {
+		t.Fatalf("repetitions %v, want %v", first["repetitions"], reps)
+	}
+	// Without repetitions, no field.
+	_, body = serve(t, svc, http.MethodGet, challengeActivities, "", nil)
+	if items, _ := body["items"].([]any); len(items) != 2 || items[1].(map[string]any)["repetitions"] != nil {
+		t.Fatalf("items %v, want the second without repetitions", body["items"])
 	}
 }
 

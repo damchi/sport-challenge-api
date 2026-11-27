@@ -5536,6 +5536,13 @@ components:
             where it counts, at 7 am, local time of the challenge, on the
             first day of the next week; for an author who abandoned, only
             when the week was already locked when they left.
+        repetitions:
+          type: array
+          description: |
+            As `Activity.repetitions`: every one, sorted by exercise, those of
+            an exercise this challenge does not offer included; absent when none.
+          items:
+            $ref: "#/components/schemas/ActivityRepetitions"
         user:
           $ref: "#/components/schemas/LeaderboardUser"
     ChallengeActivityPage:
