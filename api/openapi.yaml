@@ -326,9 +326,10 @@ paths:
       operationId: getSports
       summary: List the sports
       description: |
-        Catalogue of sports, sorted by code. The apps translate the codes and
-        prefill the distance factors of the challenge creation form with the
-        suggested ones; the creator may change them.
+        Catalogue of sports, sorted by code, with the exercises of each. The
+        apps translate the codes and prefill the distance factors of the
+        challenge creation form with the suggested ones; the creator may
+        change them.
       tags: [sports]
       responses:
         "200":
@@ -4100,7 +4101,7 @@ components:
             $ref: "#/components/schemas/Sport"
     Sport:
       type: object
-      required: [code, distance_mode, suggested_factor, elevation_allowed]
+      required: [code, distance_mode, suggested_factor, elevation_allowed, exercises]
       additionalProperties: false
       properties:
         code:
@@ -4125,6 +4126,15 @@ components:
             Whether an activity of this sport may have an elevation gain
             (`elevation_gain_meters`), with a distance; always false for a
             sport without distance.
+        exercises:
+          type: array
+          description: |
+            Codes of the exercises of the sport (elimination by repetitions,
+            README §2.3 and §2.5), in display order, translated by the apps;
+            empty for a sport without exercises.
+          items:
+            type: string
+            example: wall_ball
     ChallengeCreate:
       type: object
       required: [title, visibility, timezone, start_date, weeks]

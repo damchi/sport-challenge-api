@@ -31,6 +31,16 @@ func (r *Repository) List(ctx context.Context) ([]Sport, error) {
 	return sports, nil
 }
 
+// ListAllExercises returns every exercise, sorted by sport then display
+// order, in the transaction ctx carries (db.Conn), like List.
+func (r *Repository) ListAllExercises(ctx context.Context) ([]Exercise, error) {
+	var exercises []Exercise
+	if err := db.Conn(ctx, r.db).Order("sport_code, position").Find(&exercises).Error; err != nil {
+		return nil, fmt.Errorf("list all exercises: %w", err)
+	}
+	return exercises, nil
+}
+
 // ListExercises returns the exercises of sport sportCode, in display order,
 // in the transaction ctx carries (db.Conn), like List.
 func (r *Repository) ListExercises(ctx context.Context, sportCode string) ([]Exercise, error) {

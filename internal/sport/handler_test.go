@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -19,14 +20,19 @@ import (
 )
 
 type fakeRepository struct {
-	sports []Sport
-	err    error
+	sports    []Sport
+	exercises []Exercise
+	err       error
 }
 
 func (f fakeRepository) List(context.Context) ([]Sport, error) { return f.sports, f.err }
 
 func (f fakeRepository) ListExercises(context.Context, string) ([]Exercise, error) {
 	return nil, f.err
+}
+
+func (f fakeRepository) ListAllExercises(context.Context) ([]Exercise, error) {
+	return f.exercises, f.err
 }
 
 type acceptingVerifier struct{}
@@ -73,9 +79,13 @@ func factor(v float64) *float64 { return &v }
 
 func TestGetSports(t *testing.T) {
 	rec := getSports(t, fakeRepository{sports: []Sport{
+		{Code: "crossfit", DistanceMode: "none"},
 		{Code: "other", DistanceMode: "optional", SuggestedFactor: factor(1), ElevationAllowed: true},
 		{Code: "ride", DistanceMode: "required", SuggestedFactor: factor(0.3), ElevationAllowed: true},
+		{Code: "run", DistanceMode: "required", SuggestedFactor: factor(1), ElevationAllowed: true},
 		{Code: "yoga", DistanceMode: "none"},
+	}, exercises: []Exercise{
+		{Code: "burpee", SportCode: "crossfit", Position: 1}, {Code: "wall_ball", SportCode: "crossfit", Position: 2},
 	}})
 
 	if rec.Code != http.StatusOK {
@@ -90,9 +100,20 @@ func TestGetSports(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
+	// The exercises of a sport keep the display order; a sport without any
+	// has an empty list, never null.
+	wantExercises := map[string][]any{"crossfit": {"burpee", "wall_ball"}, "other": {}, "ride": {}, "run": {}, "yoga": {}}
+	for _, s := range body.Sports {
+		code, _ := s["code"].(string)
+		if got, ok := s["exercises"].([]any); !ok || !slices.Equal(got, wantExercises[code]) {
+			t.Fatalf("%s exercises = %#v, want %v", code, s["exercises"], wantExercises[code])
+		}
+	}
 	want := []map[string]any{
+		{"code": "crossfit", "distance_mode": "none", "suggested_factor": nil, "elevation_allowed": false},
 		{"code": "other", "distance_mode": "optional", "suggested_factor": 1.0, "elevation_allowed": true},
 		{"code": "ride", "distance_mode": "required", "suggested_factor": 0.3, "elevation_allowed": true},
+		{"code": "run", "distance_mode": "required", "suggested_factor": 1.0, "elevation_allowed": true},
 		{"code": "yoga", "distance_mode": "none", "suggested_factor": nil, "elevation_allowed": false},
 	}
 	if len(body.Sports) != len(want) {
