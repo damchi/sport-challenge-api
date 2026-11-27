@@ -409,7 +409,7 @@ func (f fakeCatalogue) SuggestedFactors(context.Context) (map[string]float64, er
 }
 
 // catalogueModes are the distance modes of the fake catalogue.
-var catalogueModes = map[string]string{"run": "required", "walk": "required", "ride": "required", "rowing": "required", "yoga": "none", "other": "optional"}
+var catalogueModes = map[string]string{"run": "required", "walk": "required", "ride": "required", "rowing": "required", "yoga": "none", "crossfit": "none", "other": "optional"}
 
 func (f fakeCatalogue) DistanceMode(_ context.Context, code string) (string, bool, error) {
 	mode, ok := catalogueModes[code]
@@ -629,10 +629,11 @@ func TestServiceCreateWithAReferenceSport(t *testing.T) {
 	}
 }
 
-// TestServiceCreateRefusesTheReference: a reference without a required
-// distance is refused before anything is written.
+// TestServiceCreateRefusesTheReference: a reference with an optional
+// distance or unknown to the catalogue is refused before anything is
+// written (one without distance is allowed, SC-API-212).
 func TestServiceCreateRefusesTheReference(t *testing.T) {
-	for _, reference := range []string{"yoga", "other", "quidditch", ""} {
+	for _, reference := range []string{"other", "quidditch", ""} {
 		t.Run(reference, func(t *testing.T) {
 			repo := &fakeRepository{}
 			svc := NewService(repo, fakeProfiles{complete: true}, fakeCatalogue{factors: suggested()}, fakeStandings{}, clock.NewFake(now))

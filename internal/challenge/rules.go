@@ -31,8 +31,10 @@ const (
 	// defaultReferenceSport is the reference sport of a challenge whose
 	// creator chose none.
 	defaultReferenceSport = "run"
-	// distanceRequired is the distance mode a reference sport needs.
+	// distanceRequired and distanceNone are the distance modes a reference
+	// sport may have (README §2.1).
 	distanceRequired     = "required"
+	distanceNone         = "none"
 	factorFieldPrefix    = "distance_factors."
 	distanceFactorsField = "distance_factors"
 	// defaultMinSessionMinutes is the minimum session of the points
@@ -45,6 +47,12 @@ const (
 // pointsPodiums are the sizes of the top that scores in the points
 // category, those scoring.Points has a scale for.
 var pointsPodiums = []int{5, 10}
+
+// distanceCriteria are the criteria of the points category that need a
+// reference sport with a distance (README §2.1).
+var distanceCriteria = []string{
+	scoring.CriterionLongestDistance, scoring.CriterionWeeklyElevation, scoring.CriterionFastestRun,
+}
 
 // pointsCriteria are the criteria of the points category.
 var pointsCriteria = []string{
@@ -141,7 +149,9 @@ type Window struct {
 // Validate checks draft against the challenge rules, at the instant now
 // (from platform/clock), with distanceSports the sports of the catalogue that
 // have a distance and referenceMode the distance mode of the reference sport
-// (empty when the catalogue has no such sport). The distance factors are
+// (empty when the catalogue has no such sport): required or none. Without
+// distance, the categories and criteria that need one are refused, and so
+// are the distance factors (README §2.1 and §2.4); with one, the factors are
 // refused without a category that uses them (usesFactors).
 // It returns the window of the challenge: from the first instant of the
 // first local day (midnight, or the end of the skipped hour where a time
@@ -183,11 +193,16 @@ func validate(draft Draft, now time.Time, distanceSports map[string]bool, refere
 	if p := draft.Points; p != nil {
 		fields = append(fields, invalidPoints(*p)...)
 	}
-	if referenceMode != distanceRequired {
+	if referenceMode != distanceRequired && referenceMode != distanceNone {
 		fields = append(fields, "reference_sport")
 	}
-	if !draft.usesFactors() && draft.DistanceFactors != nil {
-		// No category uses them: the field alone, its keys never echoed.
+	noDistance := referenceMode == distanceNone
+	if noDistance {
+		fields = append(fields, withoutDistance(draft)...)
+	}
+	if (noDistance || !draft.usesFactors()) && draft.DistanceFactors != nil {
+		// No category uses them, or no distance at all: the field alone,
+		// its keys never echoed.
 		fields = append(fields, distanceFactorsField)
 	} else {
 		fields = append(fields, invalidFactors(draft.DistanceFactors, distanceSports, draft.reference())...)
@@ -220,7 +235,8 @@ func validate(draft Draft, now time.Time, distanceSports map[string]bool, refere
 
 	if len(fields) > 0 {
 		slices.Sort(fields)
-		return Window{}, apperr.InvalidFields(nil, fields...)
+		// A field two rules refuse (the points criteria) is named once.
+		return Window{}, apperr.InvalidFields(nil, slices.Compact(fields)...)
 	}
 	return window, nil
 }
@@ -280,6 +296,28 @@ func location(name string) (*time.Location, error) {
 		return nil, errInvalidTimezone
 	}
 	return loc, nil
+}
+
+// withoutDistance returns the fields of the choices of draft a reference
+// sport without distance does not allow (README §2.1).
+func withoutDistance(draft Draft) []string {
+	var fields []string
+	if draft.Distance {
+		fields = append(fields, "categories.cumulative_distance")
+	}
+	if draft.Elevation {
+		fields = append(fields, "categories.cumulative_elevation")
+	}
+	// The elimination by repetitions comes with SC-API-214.
+	if draft.Elimination != nil {
+		fields = append(fields, "categories.elimination")
+	}
+	if p := draft.Points; p != nil && slices.ContainsFunc(p.Criteria, func(c string) bool {
+		return slices.Contains(distanceCriteria, c)
+	}) {
+		fields = append(fields, "categories.points.criteria")
+	}
+	return fields
 }
 
 // invalidPoints returns the fields of the points settings that break the

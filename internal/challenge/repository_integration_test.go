@@ -21,6 +21,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/clock"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 	"github.com/damchi/sport-challenge-api/internal/platform/db/testdb"
+	"github.com/damchi/sport-challenge-api/internal/scoring"
 )
 
 // The modules user and sport are read through SQL here: a module never
@@ -212,13 +213,39 @@ func TestCreateStoresTheReferenceSport(t *testing.T) {
 	}
 }
 
+// TestCreateStoresAReferenceWithoutDistance: with the catalogue of the
+// migrations, a crossfit challenge (no distance, SC-API-212) is created and
+// read back with points but no factor frozen anywhere.
+func TestCreateStoresAReferenceWithoutDistance(t *testing.T) {
+	pseudo := "marie_92"
+	svc, pool, userID := setup(t, &pseudo)
+	c, err := svc.Create(t.Context(), userID, noDistance("crossfit", func(d *Draft) {
+		d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionSessionCount)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := svc.Get(t.Context(), auth.Actor{ID: userID}, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ReferenceSport != "crossfit" {
+		t.Fatalf("reference read back %q, want crossfit", d.ReferenceSport)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM categories WHERE challenge_id = $1", c.ID); n != 2 {
+		t.Fatalf("%d categories, want the cumulative time and the points", n)
+	}
+	if n := count(t, pool, "SELECT count(*) FROM categories WHERE challenge_id = $1 AND params ? 'factors'", c.ID); n != 0 {
+		t.Fatalf("%d categories with factors, want none", n)
+	}
+}
+
 // TestCreateRefusesAReferenceWithoutRequiredDistance: with the catalogue of
-// the migrations, yoga and crossfit (no distance), other (optional) and an
-// unknown code.
+// the migrations, other (optional) and an unknown code.
 func TestCreateRefusesAReferenceWithoutRequiredDistance(t *testing.T) {
 	pseudo := "marie_92"
 	svc, pool, userID := setup(t, &pseudo)
-	for _, reference := range []string{"yoga", "crossfit", "other", "quidditch"} {
+	for _, reference := range []string{"other", "quidditch"} {
 		t.Run(reference, func(t *testing.T) {
 			_, err := svc.Create(t.Context(), userID, with(func(d *Draft) { d.ReferenceSport = sportCode(reference) }))
 			var appErr *apperr.Error

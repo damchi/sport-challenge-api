@@ -121,6 +121,15 @@ func TestServiceAdminUpdate(t *testing.T) {
 			},
 		},
 		{
+			name:    "run to crossfit without the categories that need a distance",
+			changes: SettingsChanges{ReferenceSport: text("crossfit"), Categories: &CategoryChoice{}},
+			check: func(t *testing.T, written Challenge, _ SettingsChange) {
+				if written.ReferenceSport != "crossfit" || len(written.Categories) != 1 || written.Categories[0].Params.Factors != nil {
+					t.Fatalf("reference %q, categories %+v, want crossfit with the cumulative time only, no factor", written.ReferenceSport, written.Categories)
+				}
+			},
+		},
+		{
 			name:    "factors sent replace those they name, the others kept",
 			changes: SettingsChanges{DistanceFactors: map[string]float64{"walk": 0.8}},
 			check: func(t *testing.T, written Challenge, change SettingsChange) {
@@ -250,7 +259,18 @@ func TestServiceAdminUpdateRefusals(t *testing.T) {
 		{name: "53 weeks", actor: adminActor(), changes: SettingsChanges{Weeks: weeks(53)}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "weeks"},
 		{name: "more than a year ahead", actor: adminActor(), changes: SettingsChanges{StartDate: text("2027-03-05")}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "start_date"},
 		{name: "unknown time zone", actor: adminActor(), changes: SettingsChanges{Timezone: text("Mars/Olympus")}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "timezone"},
-		{name: "reference without distance", actor: adminActor(), changes: SettingsChanges{ReferenceSport: text("yoga")}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "reference_sport"},
+		{name: "reference with an optional distance", actor: adminActor(), changes: SettingsChanges{ReferenceSport: text("other")}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "reference_sport"},
+		// SC-API-212: the categories kept must still be allowed without distance.
+		{
+			name: "run to crossfit with the cumulative distance", actor: adminActor(),
+			changes:  SettingsChanges{ReferenceSport: text("crossfit"), Categories: &CategoryChoice{Distance: true}},
+			wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "categories.cumulative_distance",
+		},
+		{
+			name: "run to crossfit keeping the categories", actor: adminActor(),
+			changes:  SettingsChanges{ReferenceSport: text("crossfit")},
+			wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "categories.cumulative_distance,categories.elimination",
+		},
 		{name: "factor of the reference", actor: adminActor(), changes: SettingsChanges{DistanceFactors: map[string]float64{"run": 1}}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "distance_factors.run"},
 		{name: "factor of the new reference", actor: adminActor(), changes: SettingsChanges{ReferenceSport: text("ride"), DistanceFactors: map[string]float64{"ride": 0.5}}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "distance_factors.ride"},
 		{name: "factor over 2", actor: adminActor(), changes: SettingsChanges{DistanceFactors: map[string]float64{"ride": 2.5}}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "distance_factors.ride"},

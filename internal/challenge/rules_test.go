@@ -57,6 +57,19 @@ func with(change func(*Draft)) Draft {
 	return d
 }
 
+// noDistance is a draft with the cumulative time only, under reference, a
+// sport without distance, then change if given.
+func noDistance(reference string, change func(*Draft)) Draft {
+	return with(func(d *Draft) {
+		d.ReferenceSport = sportCode(reference)
+		d.Distance = false
+		d.Elimination = nil
+		if change != nil {
+			change(d)
+		}
+	})
+}
+
 func TestValidate(t *testing.T) {
 	desc := func(n int) *string { s := strings.Repeat("é", n); return &s }
 	tests := []struct {
@@ -245,9 +258,39 @@ func TestValidate(t *testing.T) {
 		})},
 
 		// Reference sport: a sport of the catalogue whose distance is
-		// required, run when none is given.
+		// required or none (SC-API-212), run when none is given.
 		{name: "ride as the reference", draft: with(func(d *Draft) { d.ReferenceSport = sportCode("ride") })},
-		{name: "reference without distance", draft: with(func(d *Draft) { d.ReferenceSport = sportCode("yoga") }), referenceMode: "none", wantFields: "reference_sport"},
+		{name: "crossfit as the reference", draft: noDistance("crossfit", nil), referenceMode: "none"},
+		{name: "yoga as the reference, with points", draft: noDistance("yoga", func(d *Draft) {
+			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionSessionCount)
+		}), referenceMode: "none"},
+		// Without distance, the choices that need one are refused, one by
+		// one (README §2.1), and so are the factors (§2.4).
+		{name: "no distance: cumulative distance", draft: noDistance("crossfit", func(d *Draft) { d.Distance = true }), referenceMode: "none", wantFields: "categories.cumulative_distance"},
+		{name: "no distance: cumulative elevation", draft: noDistance("crossfit", func(d *Draft) { d.Elevation = true }), referenceMode: "none", wantFields: "categories.cumulative_elevation"},
+		{name: "no distance: elimination", draft: noDistance("crossfit", func(d *Draft) { d.Elimination = &EliminationDraft{StepMeters: 2000} }), referenceMode: "none", wantFields: "categories.elimination"},
+		{name: "no distance: longest distance", draft: noDistance("crossfit", func(d *Draft) {
+			d.Points = points(scoring.CriterionLongestDuration, scoring.CriterionLongestDistance)
+		}), referenceMode: "none", wantFields: "categories.points.criteria"},
+		{name: "no distance: weekly elevation", draft: noDistance("crossfit", func(d *Draft) {
+			d.Points = points(scoring.CriterionSessionCount, scoring.CriterionWeeklyElevation)
+		}), referenceMode: "none", wantFields: "categories.points.criteria"},
+		{name: "no distance: fastest run", draft: noDistance("crossfit", func(d *Draft) { d.Points = points(scoring.CriterionFastestRun) }), referenceMode: "none", wantFields: "categories.points.criteria"},
+		{name: "no distance: factors", draft: noDistance("crossfit", func(d *Draft) { d.DistanceFactors = map[string]float64{"ride": 0.25} }), referenceMode: "none", wantFields: "distance_factors"},
+		{name: "no distance: factors with the cumulative distance", draft: noDistance("crossfit", func(d *Draft) {
+			d.Distance = true
+			d.DistanceFactors = map[string]float64{"ride": 0.25}
+		}), referenceMode: "none", wantFields: "categories.cumulative_distance,distance_factors"},
+		{name: "no distance: empty factors", draft: noDistance("crossfit", func(d *Draft) { d.DistanceFactors = map[string]float64{} }), referenceMode: "none", wantFields: "distance_factors"},
+		{name: "no distance: every refused choice, sorted", draft: noDistance("crossfit", func(d *Draft) {
+			d.Distance, d.Elevation = true, true
+			d.Elimination = &EliminationDraft{StepMeters: 2000}
+			d.Points = points(scoring.CriterionLongestDistance)
+			d.DistanceFactors = map[string]float64{"ride": 0.25}
+		}), referenceMode: "none", wantFields: "categories.cumulative_distance,categories.cumulative_elevation,categories.elimination,categories.points.criteria,distance_factors"},
+		{name: "no distance: two refused criteria and a duplicate, the field once", draft: noDistance("crossfit", func(d *Draft) {
+			d.Points = points(scoring.CriterionLongestDistance, scoring.CriterionFastestRun, scoring.CriterionFastestRun)
+		}), referenceMode: "none", wantFields: "categories.points.criteria"},
 		{name: "reference with an optional distance", draft: with(func(d *Draft) { d.ReferenceSport = sportCode("other") }), referenceMode: "optional", wantFields: "reference_sport"},
 		{name: "unknown reference", draft: with(func(d *Draft) { d.ReferenceSport = sportCode("quidditch") }), referenceMode: unknownSport, wantFields: "reference_sport"},
 		{name: "factor under 0.1", draft: with(func(d *Draft) { d.DistanceFactors = map[string]float64{"ride": 0.09} }), wantFields: "distance_factors.ride"},
