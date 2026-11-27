@@ -23,6 +23,8 @@ type fakeRepository struct {
 	sports    []Sport
 	exercises []Exercise
 	err       error
+	// exercisesErr fails the read of the exercises alone.
+	exercisesErr error
 }
 
 func (f fakeRepository) List(context.Context) ([]Sport, error) { return f.sports, f.err }
@@ -32,6 +34,9 @@ func (f fakeRepository) ListExercises(context.Context, string) ([]Exercise, erro
 }
 
 func (f fakeRepository) ListAllExercises(context.Context) ([]Exercise, error) {
+	if f.exercisesErr != nil {
+		return nil, f.exercisesErr
+	}
 	return f.exercises, f.err
 }
 
