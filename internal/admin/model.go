@@ -369,6 +369,8 @@ type ActivityRow struct {
 	// AdminChange is the last time an admin added or changed the activity;
 	// nil if none did.
 	AdminChange *ActivityChange `gorm:"-"`
+	// Repetitions are every repetitions of the activity, sorted by exercise.
+	Repetitions []activity.Repetitions `gorm:"-"`
 }
 
 // What an admin did to an activity (ActivityChange.Action).

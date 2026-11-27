@@ -307,6 +307,18 @@ func toDraft(b api.ActivityCreate) Draft {
 	}
 }
 
+// APIRepetitions are reps in their contract form, nil (left out) for none.
+func APIRepetitions(reps []Repetitions) *[]api.ActivityRepetitions {
+	if len(reps) == 0 {
+		return nil
+	}
+	out := make([]api.ActivityRepetitions, len(reps))
+	for i, r := range reps {
+		out[i] = api.ActivityRepetitions{Exercise: r.Exercise, Repetitions: r.Count}
+	}
+	return &out
+}
+
 // RepetitionsOf reads the repetitions of the contract, nil when left out.
 func RepetitionsOf(in *[]api.ActivityRepetitions) []Repetitions {
 	if in == nil {
@@ -340,13 +352,7 @@ func toAPI(rec Recorded) (api.Activity, error) {
 		v := Speed(*rec.DistanceMeters, rec.DurationSeconds)
 		out.SpeedMps, out.PaceSecondsPerKm = &v.MetersPerSecond, &v.SecondsPerKilometer
 	}
-	if len(rec.Repetitions) > 0 {
-		reps := make([]api.ActivityRepetitions, len(rec.Repetitions))
-		for i, r := range rec.Repetitions {
-			reps[i] = api.ActivityRepetitions{Exercise: r.Exercise, Repetitions: r.Count}
-		}
-		out.Repetitions = &reps
-	}
+	out.Repetitions = APIRepetitions(rec.Repetitions)
 	for _, c := range rec.Contributions {
 		cid, err := uuid.Parse(c.ChallengeID)
 		if err != nil {

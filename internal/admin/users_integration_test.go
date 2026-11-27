@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/damchi/sport-challenge-api/internal/activity"
 )
 
 // setProfile gives account id its pseudo, names and e-mail.
@@ -268,6 +270,20 @@ func TestRepositoryListUserActivities(t *testing.T) {
 	if !reflect.DeepEqual(first, want) {
 		t.Fatalf("first = %+v, want %+v", first, want)
 	}
+
+	t.Run("the repetitions of each, by exercise", func(t *testing.T) {
+		// On session(2) of ann and session(5) of bob, never in her page.
+		exec(t, pool, `INSERT INTO activity_repetitions (activity_id, exercise_code, repetitions)
+			SELECT id, e, n FROM activities, (VALUES ('push_up', 12), ('burpee', 30)) AS r (e, n) WHERE started_at IN ($1, $2)`, session(2), session(5))
+		got, err := r.ListUserActivities(t.Context(), ann, ActivityQuery{Limit: 10})
+		if err != nil || len(got) != 3 {
+			t.Fatalf("ListUserActivities() = %+v, %v; want 3 sessions", got, err)
+		}
+		want := []activity.Repetitions{{Exercise: "burpee", Count: 30}, {Exercise: "push_up", Count: 12}}
+		if got[0].Repetitions != nil || !slices.Equal(got[1].Repetitions, want) || got[2].Repetitions != nil {
+			t.Fatalf("repetitions %v, %v, %v; want none, %v, none", got[0].Repetitions, got[1].Repetitions, got[2].Repetitions, want)
+		}
+	})
 
 	t.Run("the last change of an admin", func(t *testing.T) {
 		dan := insertUser(t, pool, "email|dan", recorded, false)

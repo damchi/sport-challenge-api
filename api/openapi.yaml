@@ -3908,6 +3908,11 @@ components:
             never appears.
           items:
             $ref: "#/components/schemas/ActivityContribution"
+        repetitions:
+          type: array
+          description: As `Activity.repetitions`, every one, sorted by exercise; absent when none.
+          items:
+            $ref: "#/components/schemas/ActivityRepetitions"
         locked:
           type: boolean
           description: |

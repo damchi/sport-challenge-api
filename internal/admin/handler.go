@@ -901,6 +901,7 @@ func (h *Handler) ListAdminUserActivities(ctx context.Context, req api.ListAdmin
 			CreatedAt:           a.CreatedAt.UTC(),
 			Contributions:       make([]api.ActivityContribution, len(a.Contributions)),
 			Locked:              a.Locked,
+			Repetitions:         activity.APIRepetitions(a.Repetitions),
 		}
 		if a.DistanceMeters != nil {
 			v := activity.Speed(*a.DistanceMeters, a.DurationSeconds)
