@@ -13,6 +13,8 @@ type Activity struct {
 	// ElevationMeters is the elevation gain, nil without one (summed by
 	// the repository, nil when none of the sum has one).
 	ElevationMeters *int
+	// Repetitions are by exercise code (summed for a group); nil without.
+	Repetitions map[string]int
 	// For the points category, an Activity is a group of sessions of a
 	// participant, week and sport, as the repository sums them (a single
 	// session in tests), StartedAt an instant of its week (its first
@@ -79,10 +81,13 @@ const (
 // the numbers of the current week: the distance already covered and the
 // instant it ends; the minimum and a status only from week 2, which has a
 // reference. Outside the weeks of the challenge there is nothing but the elimination.
+// With an exercise, MinimumRepetitions and Repetitions replace the meters.
 type Progress struct {
-	Status         string
-	EliminatedWeek int
-	MinimumMeters  *int
-	DistanceMeters int
-	WeekEndsAt     time.Time
+	Status             string
+	EliminatedWeek     int
+	MinimumMeters      *int
+	DistanceMeters     int
+	MinimumRepetitions *int
+	Repetitions        int
+	WeekEndsAt         time.Time
 }
