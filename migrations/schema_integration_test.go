@@ -451,8 +451,10 @@ func TestAddSportsDownKeepsTheSportsInUse(t *testing.T) {
 	}
 	seeded := []string{"crossfit none - false", "hyrox required 1.00 false", "paragliding required 0.30 false"}
 
-	down := []string{"000020_add_crossfit_hyrox_paragliding.down.sql"}
-	up := []string{"000020_add_crossfit_hyrox_paragliding.up.sql"}
+	// The rollback goes through the exercises first (000024), which name
+	// crossfit, as golang-migrate would.
+	down := []string{"000024_create_exercises.down.sql", "000020_add_crossfit_hyrox_paragliding.down.sql"}
+	up := []string{"000020_add_crossfit_hyrox_paragliding.up.sql", "000024_create_exercises.up.sql"}
 	run(t, pool, down, false)
 	if got := rows(); !slices.Equal(got, seeded) {
 		t.Fatalf("sports after down = %v, want every one in use kept: %v", got, seeded)

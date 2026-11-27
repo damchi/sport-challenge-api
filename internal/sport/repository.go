@@ -9,7 +9,7 @@ import (
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
 
-// Repository is the only access to the sports table.
+// Repository is the only access to the sports and exercises tables.
 type Repository struct {
 	db *gorm.DB
 }
@@ -29,4 +29,14 @@ func (r *Repository) List(ctx context.Context) ([]Sport, error) {
 		return nil, fmt.Errorf("list sports: %w", err)
 	}
 	return sports, nil
+}
+
+// ListExercises returns the exercises of sport sportCode, in display order,
+// in the transaction ctx carries (db.Conn), like List.
+func (r *Repository) ListExercises(ctx context.Context, sportCode string) ([]Exercise, error) {
+	var exercises []Exercise
+	if err := db.Conn(ctx, r.db).Where("sport_code = ?", sportCode).Order("position").Find(&exercises).Error; err != nil {
+		return nil, fmt.Errorf("list exercises: %w", err)
+	}
+	return exercises, nil
 }

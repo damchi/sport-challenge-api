@@ -3,14 +3,16 @@ package sport
 import (
 	"context"
 	"fmt"
+	"slices"
 )
 
 // repository is what the service needs from the storage.
 type repository interface {
 	List(ctx context.Context) ([]Sport, error)
+	ListExercises(ctx context.Context, sportCode string) ([]Exercise, error)
 }
 
-// Service holds the use cases of the sports catalogue.
+// Service holds the use cases of the catalogue of sports and exercises.
 type Service struct {
 	repo repository
 }
@@ -66,4 +68,23 @@ func (s *Service) Find(ctx context.Context, code string) (Sport, bool, error) {
 		}
 	}
 	return Sport{}, false, nil
+}
+
+// Exercises returns the exercises of sport sportCode in display order, empty
+// for a sport without exercises or unknown to the catalogue.
+func (s *Service) Exercises(ctx context.Context, sportCode string) ([]Exercise, error) {
+	exercises, err := s.repo.ListExercises(ctx, sportCode)
+	if err != nil {
+		return nil, fmt.Errorf("list exercises of %s: %w", sportCode, err)
+	}
+	return exercises, nil
+}
+
+// HasExercise tells whether exercise code belongs to sport sportCode.
+func (s *Service) HasExercise(ctx context.Context, sportCode, code string) (bool, error) {
+	exercises, err := s.Exercises(ctx, sportCode)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(exercises, func(e Exercise) bool { return e.Code == code }), nil
 }

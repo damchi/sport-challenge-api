@@ -102,3 +102,57 @@ func TestGetSportsServesTheCatalogue(t *testing.T) {
 		t.Fatalf("sports %v missing from %v", want, body.Sports)
 	}
 }
+
+// TestExercisesOfTheCatalogue reads the exercises seeded by the migrations
+// (SC-API-210, README §2.5): the ten CrossFit ones in display order, none
+// for a sport without exercises, and membership limited to their sport.
+func TestExercisesOfTheCatalogue(t *testing.T) {
+	gdb, err := db.NewGorm(testdb.New(t), slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(NewRepository(gdb))
+
+	exercises, err := svc.Exercises(t.Context(), "crossfit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := make([]string, 0, len(exercises))
+	for _, e := range exercises {
+		if e.SportCode != "crossfit" {
+			t.Errorf("%s belongs to %s, want crossfit", e.Code, e.SportCode)
+		}
+		codes = append(codes, e.Code)
+	}
+	want := []string{"burpee", "wall_ball", "air_squat", "push_up", "pull_up", "box_jump", "double_under", "kettlebell_swing", "thruster", "sit_up"}
+	if !slices.Equal(codes, want) {
+		t.Fatalf("crossfit exercises = %v, want %v", codes, want)
+	}
+
+	yoga, err := svc.Exercises(t.Context(), "yoga")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(yoga) != 0 {
+		t.Fatalf("yoga exercises = %v, want none", yoga)
+	}
+
+	tests := []struct {
+		sport, exercise string
+		want            bool
+	}{
+		{"crossfit", "wall_ball", true},
+		{"crossfit", "deadlift", false},
+		{"yoga", "burpee", false},
+		{"unknown", "burpee", false},
+	}
+	for _, tt := range tests {
+		got, err := svc.HasExercise(t.Context(), tt.sport, tt.exercise)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != tt.want {
+			t.Errorf("HasExercise(%s, %s) = %v, want %v", tt.sport, tt.exercise, got, tt.want)
+		}
+	}
+}

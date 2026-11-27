@@ -340,6 +340,10 @@ type sportCatalogue []sport.Sport
 
 func (s sportCatalogue) List(context.Context) ([]sport.Sport, error) { return s, nil }
 
+func (s sportCatalogue) ListExercises(context.Context, string) ([]sport.Exercise, error) {
+	return nil, nil
+}
+
 func TestSecurityHeaders(t *testing.T) {
 	handlers := testHandlers()
 	handlers.sportHandler = sport.NewHandler(sport.NewService(sportCatalogue{{Code: "run", DistanceMode: "required"}}))
