@@ -623,3 +623,102 @@ func TestEliminationScoreOfAParticipantEliminatedThenAbandoned(t *testing.T) {
 		t.Fatalf("Score() a = %+v, want abandoned, unranked, without progress", a)
 	}
 }
+
+// TestEliminationByRepetitions: with an exercise, a week is measured by the
+// repetitions of that exercise in the activities of the reference sport,
+// under the rules of the elimination in meters (README §2.3).
+func TestEliminationByRepetitions(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 4)
+	weekStart := func(n int) time.Time { s, _ := w.WeekBounds(n); return s }
+	locked := w.WeekLocksAt
+	act := func(user, sport string, week int, repetitions map[string]int) Activity {
+		return Activity{UserID: user, SportCode: sport, StartedAt: weekStart(week).Add(time.Hour), DurationSeconds: 1800, Repetitions: repetitions}
+	}
+	// wallBalls is one CrossFit session per week (and burpees), none for 0.
+	wallBalls := func(user string, counts ...int) []Activity {
+		var as []Activity
+		for i, n := range counts {
+			if n > 0 {
+				as = append(as, act(user, "crossfit", i+1, map[string]int{"wall_ball": n, "burpee": 1000}))
+			}
+		}
+		return as
+	}
+	e := Elimination{Sport: "crossfit", Exercise: "wall_ball", StepRepetitions: 10}
+	tests := []struct {
+		name         string
+		now          time.Time
+		participants []Participant
+		activities   []Activity
+		want         []Entry
+		wantOut      []Eliminated
+	}{
+		{name: "100, 110, 120 with X = 10 survives", now: locked(3), participants: users("a"), activities: wallBalls("a", 100, 110, 120), want: []Entry{{UserID: "a", Rank: 1, Value: 330}}},
+		{
+			name: "100 then 109 is eliminated in week 2", now: locked(2), participants: users("a", "b"), activities: slices.Concat(wallBalls("a", 100, 109), wallBalls("b", 10, 20)),
+			want: []Entry{{UserID: "b", Rank: 1, Value: 30}, {UserID: "a", Rank: 2, Value: 209}}, wantOut: []Eliminated{{UserID: "a", Week: 2, Repetitions: 109, MinimumRepetitions: 110}},
+		},
+		{
+			name: "a week without repetitions is 0, eliminated", now: locked(2),
+			participants: users("a"),
+			activities:   append(wallBalls("a", 50), act("a", "crossfit", 2, nil), act("a", "crossfit", 2, map[string]int{"burpee": 80})),
+			want:         []Entry{{UserID: "a", Rank: 1, Value: 50}},
+			wantOut:      []Eliminated{{UserID: "a", Week: 2, Repetitions: 0, MinimumRepetitions: 60}},
+		},
+		{
+			name: "the repetitions of another sport are ignored", now: locked(2),
+			participants: users("a"),
+			activities:   append(wallBalls("a", 100), act("a", "strength", 2, map[string]int{"wall_ball": 500})),
+			want:         []Entry{{UserID: "a", Rank: 1, Value: 100}},
+			wantOut:      []Eliminated{{UserID: "a", Week: 2, Repetitions: 0, MinimumRepetitions: 110}},
+		},
+		{name: "a week not locked is not judged yet", now: locked(2).Add(-time.Second), participants: users("a"), activities: wallBalls("a", 100, 109), want: []Entry{{UserID: "a", Rank: 1, Value: 209}}},
+		{
+			name: "an abandon after a locked week keeps its elimination", now: locked(3),
+			participants: []Participant{{UserID: "a", Abandoned: true, AbandonedAt: at(locked(2))}},
+			activities:   wallBalls("a", 100, 109),
+			want:         []Entry{{UserID: "a", Abandoned: true}},
+			wantOut:      []Eliminated{{UserID: "a", Week: 2, Repetitions: 109, MinimumRepetitions: 110}},
+		},
+		{
+			name: "the last eliminated first, then repetitions up to the elimination", now: locked(3), participants: users("a", "b", "c"), activities: slices.Concat(wallBalls("a", 100, 50, 900), wallBalls("b", 80, 10), wallBalls("c", 10, 20, 5)),
+			want:    []Entry{{UserID: "c", Rank: 1, Value: 35}, {UserID: "a", Rank: 2, Value: 150}, {UserID: "b", Rank: 3, Value: 90}},
+			wantOut: []Eliminated{{UserID: "a", Week: 2, Repetitions: 50, MinimumRepetitions: 110}, {UserID: "b", Week: 2, Repetitions: 10, MinimumRepetitions: 90}, {UserID: "c", Week: 3, Repetitions: 5, MinimumRepetitions: 30}},
+		},
+		{
+			name: "survivors tied share the rank", now: locked(2), participants: users("a", "b", "c"), activities: slices.Concat(wallBalls("a", 100, 110), wallBalls("b", 50, 160), wallBalls("c", 10, 20)),
+			want: []Entry{{UserID: "a", Rank: 1, Value: 210}, {UserID: "b", Rank: 1, Value: 210}, {UserID: "c", Rank: 3, Value: 30}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := Window{Start: w.Start, End: w.End, Location: w.Location, Now: tt.now}
+			got := e.Score(w, tt.participants, tt.activities)
+			for i := range got {
+				got[i].Progress = nil
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Score() = %+v, want %+v", got, tt.want)
+			}
+			if out := e.Eliminations(w, tt.participants, tt.activities); !reflect.DeepEqual(out, tt.wantOut) {
+				t.Fatalf("Eliminations() = %+v, want %+v", out, tt.wantOut)
+			}
+		})
+	}
+}
+
+// TestEliminationByRepetitionsProgress: the live situation is in
+// repetitions, the meters left empty.
+func TestEliminationByRepetitionsProgress(t *testing.T) {
+	w := window(t, "America/Toronto", [3]int{2026, 3, 2}, 4)
+	start, end := w.WeekBounds(2)
+	w.Now = start.Add(2 * time.Hour)
+	reps := func(at time.Time, n int) Activity {
+		return Activity{UserID: "a", SportCode: "crossfit", StartedAt: at, Repetitions: map[string]int{"wall_ball": n}}
+	}
+	e := Elimination{Sport: "crossfit", Exercise: "wall_ball", StepRepetitions: 10, AtRisk: 24 * time.Hour}
+	got := e.Score(w, users("a"), []Activity{reps(start.Add(-48*time.Hour), 100), reps(start.Add(time.Hour), 40)})[0].Progress
+	if want := (&Progress{Status: StatusInProgress, MinimumRepetitions: points(110), Repetitions: 40, WeekEndsAt: end}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Progress = %+v, want %+v", got, want)
+	}
+}
