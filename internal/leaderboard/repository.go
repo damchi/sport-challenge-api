@@ -82,8 +82,11 @@ type Scope struct {
 	ChallengeID string
 	Window      scoring.Window
 	WeeklySport string
-	Points      *PointsRead
-	Elevation   bool
+	// Exercise is that of an elimination by repetitions, whose repetitions
+	// are summed per week on the totals of WeeklySport; empty otherwise.
+	Exercise  string
+	Points    *PointsRead
+	Elevation bool
 }
 
 // PointsRead is what the points category needs read: every activity grouped
@@ -117,6 +120,7 @@ type scopeRow struct {
 	To          time.Time   `json:"to_at"`
 	Starts      []time.Time `json:"starts"`
 	Weekly      string      `json:"weekly"`
+	Exercise    string      `json:"exercise"`
 	Points      bool        `json:"points"`
 	MinSeconds  int         `json:"min_seconds"`
 	// Elevation is not sent to the database: it only says, once read,
@@ -194,12 +198,14 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 	// when one of the challenges has it: without, the read is the one of the
 	// totals alone.
 	groupColumns, elevationColumns := "", ""
+	repetitions := false
 	for i, sc := range scopes {
 		starts := make([]time.Time, sc.Window.Weeks())
 		for n := range starts {
 			starts[n], _ = sc.Window.WeekBounds(n + 1)
 		}
-		rowsIn[i] = scopeRow{ChallengeID: sc.ChallengeID, From: sc.Window.Start, To: sc.Window.End, Starts: starts, Weekly: sc.WeeklySport}
+		rowsIn[i] = scopeRow{ChallengeID: sc.ChallengeID, From: sc.Window.Start, To: sc.Window.End, Starts: starts, Weekly: sc.WeeklySport, Exercise: sc.Exercise}
+		repetitions = repetitions || sc.Exercise != ""
 		if sc.Points != nil {
 			rowsIn[i].Points, rowsIn[i].MinSeconds = true, sc.Points.MinSessionSeconds
 			groupColumns = pointsColumns
@@ -251,8 +257,17 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 	if err != nil {
 		return nil, fmt.Errorf("read activities: %w", err)
 	}
+	// weekly finds the total of the weekly sport of a participant and week.
+	type weekKey struct {
+		challenge, user string
+		week            int
+	}
+	weekly := map[weekKey]int{}
 	for _, row := range rows {
 		sc := byID[row.ChallengeID]
+		if row.Week > 0 && row.SportCode == sc.Weekly {
+			weekly[weekKey{row.ChallengeID, row.UserID, row.Week}] = len(out[row.ChallengeID])
+		}
 		startedAt := sc.From
 		if row.Week > 0 {
 			// The WHERE keeps the activities in the window, so in its weeks:
@@ -276,6 +291,41 @@ func (r *Repository) ActivitiesOf(ctx context.Context, scopes []Scope) (map[stri
 			a.ElevationMeters = row.ElevationMeters
 		}
 		out[row.ChallengeID] = append(out[row.ChallengeID], a)
+	}
+	if !repetitions {
+		return out, nil
+	}
+	// The repetitions of the exercise, per participant and week, on the
+	// same activities as their total of the weekly sport, which carries
+	// them: one more query, for the eliminations by repetitions alone.
+	var reps []struct {
+		ChallengeID string
+		UserID      string
+		Week        int
+		Repetitions int
+	}
+	err = db.Conn(ctx, r.db).Raw(
+		`SELECT w.challenge_id, a.user_id, width_bucket(a.started_at, w.starts) AS week, SUM(r.repetitions) AS repetitions
+		FROM jsonb_to_recordset(CAST(@windows AS jsonb))
+			AS w(challenge_id uuid, from_at timestamptz, to_at timestamptz, starts timestamptz[], weekly text, exercise text)
+		JOIN participants p ON p.challenge_id = w.challenge_id
+		JOIN users u ON u.id = p.user_id AND u.anonymized_at IS NULL
+		JOIN activities a ON a.user_id = p.user_id
+		JOIN activity_repetitions r ON r.activity_id = a.id AND r.exercise_code = w.exercise
+		WHERE w.exercise <> '' AND a.deleted_at IS NULL AND a.started_at >= w.from_at AND a.started_at < w.to_at
+			AND a.sport_code = w.weekly
+		GROUP BY 1, 2, 3`,
+		map[string]any{"windows": string(windows)},
+	).Scan(&reps).Error
+	if err != nil {
+		return nil, fmt.Errorf("read repetitions: %w", err)
+	}
+	for _, row := range reps {
+		i, ok := weekly[weekKey{row.ChallengeID, row.UserID, row.Week}]
+		if !ok {
+			return nil, fmt.Errorf("read repetitions: week %d of %s without its total", row.Week, row.UserID)
+		}
+		out[row.ChallengeID][i].Repetitions = map[string]int{byID[row.ChallengeID].Exercise: row.Repetitions}
 	}
 	return out, nil
 }

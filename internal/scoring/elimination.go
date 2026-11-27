@@ -180,7 +180,7 @@ func (e Elimination) progress(distances []int, eliminatedWeek, week int, weekEnd
 	p := e.progressRaw(distances, eliminatedWeek, week, weekEnd, now)
 	if e.Exercise != "" {
 		p.MinimumRepetitions, p.Repetitions = p.MinimumMeters, p.DistanceMeters
-		p.MinimumMeters, p.DistanceMeters = nil, 0
+		p.MinimumMeters, p.DistanceMeters, p.InRepetitions = nil, 0, true
 	}
 	return p
 }

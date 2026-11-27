@@ -170,7 +170,7 @@ func TestGetLeaderboardAnswersEveryCategory(t *testing.T) {
 
 	elimination := categories[2].(map[string]any)["entries"].([]any)
 	annLine := elimination[0].(map[string]any)["elimination"].(map[string]any)
-	if annLine["status"] != "in_progress" || annLine["minimum_meters"] != 7000.0 || annLine["distance_meters"] != 4000.0 || annLine["eliminated_week"] != nil || annLine["week_ends_at"] == nil {
+	if annLine["status"] != "in_progress" || annLine["minimum_meters"] != 7000.0 || annLine["distance_meters"] != 4000.0 || annLine["eliminated_week"] != nil || annLine["week_ends_at"] == nil || annLine["repetitions"] != nil {
 		t.Fatalf("ann's progress %v, want in progress, 4000 of 7000 m, no elimination", annLine)
 	}
 }
@@ -212,6 +212,20 @@ func TestGetLeaderboardAnswersTheCategoriesOfTheChallenge(t *testing.T) {
 				t.Fatalf("categories %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestGetLeaderboardAnswersAnEliminationByRepetitions: the category names
+// its exercise, the live status is in repetitions (none entered here).
+func TestGetLeaderboardAnswersAnEliminationByRepetitions(t *testing.T) {
+	c := twoWeeks(t)
+	c.Categories = []Category{{Type: CategoryCumulativeTime}, {Type: CategoryElimination, Sport: "run", Exercise: "burpee", StepRepetitions: 10}}
+	rec, body := get(t, handlerService(t, &fakeChallenges{c: c}), "/api/v1/challenges/"+challengeID+"/leaderboard", true)
+	cat, _ := body["categories"].([]any)[1].(map[string]any)
+	line, _ := cat["entries"].([]any)[0].(map[string]any)["elimination"].(map[string]any)
+	if rec.Code != http.StatusOK || cat["exercise"] != "burpee" || line["repetitions"] != 0.0 || line["minimum_repetitions"] != 10.0 ||
+		line["distance_meters"] != 0.0 || line["minimum_meters"] != nil {
+		t.Fatalf("got %d %v, want the exercise and the live status in repetitions", rec.Code, cat)
 	}
 }
 

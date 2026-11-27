@@ -35,9 +35,12 @@ type Category struct {
 	// Factors is the distance factor by sport code (cumulative_distance,
 	// and points with the longest distance criterion).
 	Factors map[string]float64
-	// Sport and StepMeters are the elimination settings.
-	Sport      string
-	StepMeters int
+	// Sport and StepMeters, or Exercise and StepRepetitions for an
+	// elimination by repetitions, are the elimination settings.
+	Sport           string
+	StepMeters      int
+	Exercise        string
+	StepRepetitions int
 	// Criteria, Podium and MinSessionSeconds are the points settings.
 	Criteria          []string
 	Podium            int
@@ -64,7 +67,9 @@ type Name struct {
 // participants are ranked in it (abandoned ones are not, deleted accounts
 // are not listed).
 type CategoryRanking struct {
-	Type        string
+	Type string
+	// Exercise is that of an elimination by repetitions, empty otherwise.
+	Exercise    string
 	RankedCount int
 	Entries     []Ranked
 }
@@ -123,6 +128,7 @@ type Page struct {
 // (nil at the end and without a limit).
 type CategoryPage struct {
 	Type        string
+	Exercise    string
 	RankedCount int
 	Podium      []Ranked
 	Entries     []Ranked

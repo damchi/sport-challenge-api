@@ -103,7 +103,7 @@ func Contract(b Leaderboard) (api.Leaderboard, error) {
 			return api.Leaderboard{}, err
 		}
 		out.Categories = append(out.Categories, api.CategoryRanking{
-			Type: api.CategoryRankingType(c.Type), RankedCount: c.RankedCount, Entries: entries,
+			Type: api.CategoryRankingType(c.Type), Exercise: noEmpty(c.Exercise), RankedCount: c.RankedCount, Entries: entries,
 		})
 	}
 	return out, nil
@@ -147,7 +147,7 @@ func pageRequest(p api.GetLeaderboardParams) (PageRequest, error) {
 // toRanking turns a category of a page into its contract form, the
 // position of its next page as an opaque cursor.
 func toRanking(c CategoryPage) (api.CategoryRanking, error) {
-	out := api.CategoryRanking{Type: api.CategoryRankingType(c.Type), RankedCount: c.RankedCount}
+	out := api.CategoryRanking{Type: api.CategoryRankingType(c.Type), Exercise: noEmpty(c.Exercise), RankedCount: c.RankedCount}
 	var err error
 	if out.Entries, err = toEntries(c.Entries); err != nil {
 		return api.CategoryRanking{}, err
@@ -211,10 +211,21 @@ func toEntry(r Ranked) (api.LeaderboardEntry, error) {
 	return entry, nil
 }
 
+// noEmpty is s, nil when empty.
+func noEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // toProgress turns the live situation into its contract form, zero values
 // being null: no status, no eliminated week, no minimum, no week end.
 func toProgress(p scoring.Progress) *api.EliminationProgress {
 	out := &api.EliminationProgress{MinimumMeters: p.MinimumMeters, DistanceMeters: p.DistanceMeters}
+	if p.InRepetitions {
+		out.MinimumRepetitions, out.Repetitions = p.MinimumRepetitions, &p.Repetitions
+	}
 	if p.Status != "" {
 		status := api.EliminationProgressStatus(p.Status)
 		out.Status = &status
