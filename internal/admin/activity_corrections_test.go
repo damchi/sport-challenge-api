@@ -220,8 +220,9 @@ func (f activityUpdaterFunc) Delete(_ context.Context, actor auth.Actor, id, rea
 }
 
 // TestAdminActivityRoutes: each route passes the target, the activity, the
-// reason and dry_run to its change and answers its preview; without the
-// permission, 404 not_found; a refusal keeps its code; a body without its
+// reason and dry_run to its change (the repetitions in the draft) and answers
+// its preview; without the permission, 404 not_found; a refusal keeps its
+// code (422 unknown_exercise of a record or an update); a body without its
 // reason is refused.
 func TestAdminActivityRoutes(t *testing.T) {
 	type call struct {
@@ -238,6 +239,9 @@ func TestAdminActivityRoutes(t *testing.T) {
 		if reason == "refused" {
 			return nil, apperr.New(apperr.CodeActivityNotFound, nil)
 		}
+		if reason == "unknown exercise" {
+			return nil, apperr.New(apperr.CodeUnknownExercise, nil)
+		}
 		if reason == "" {
 			return nil, apperr.InvalidFields(nil, "reason")
 		}
@@ -246,8 +250,8 @@ func TestAdminActivityRoutes(t *testing.T) {
 	h := NewHandler(NewService(&fakeRepo{}, nil, clock.NewFake(statsAt), buildinfo.Info{}), nil, nil, activities, nil)
 	started := time.Date(2026, 6, 3, 11, 0, 0, 0, time.UTC)
 	distance := 5000
-	run := activity.Draft{SportCode: "run", StartedAt: started, DurationSeconds: 1500, DistanceMeters: &distance}
-	fields := `"sport_code": "run", "started_at": "2026-06-03T11:00:00Z", "duration_seconds": 1500, "distance_meters": 5000, `
+	run := activity.Draft{SportCode: "run", StartedAt: started, DurationSeconds: 1500, DistanceMeters: &distance, Repetitions: []activity.Repetitions{{Exercise: "burpee", Count: 30}}}
+	fields := `"sport_code": "run", "started_at": "2026-06-03T11:00:00Z", "duration_seconds": 1500, "distance_meters": 5000, "repetitions": [{"exercise": "burpee", "repetitions": 30}], `
 	routes := []struct {
 		name, method, target, body string
 		want                       call
@@ -280,6 +284,13 @@ func TestAdminActivityRoutes(t *testing.T) {
 			rec, body = serveWith(t, h, adminToken, r.method, r.target, r.body+`"reason": "refused"}`, io.Discard)
 			if e, _ := body["error"].(map[string]any); rec.Code != http.StatusNotFound || e["code"] != "activity_not_found" {
 				t.Fatalf("refused: got %d %v, want 404 activity_not_found", rec.Code, body)
+			}
+
+			if r.method != http.MethodDelete {
+				rec, body = serveWith(t, h, adminToken, r.method, r.target, r.body+`"reason": "unknown exercise"}`, io.Discard)
+				if e, _ := body["error"].(map[string]any); rec.Code != http.StatusUnprocessableEntity || e["code"] != "unknown_exercise" {
+					t.Fatalf("unknown exercise: got %d %v, want 422 unknown_exercise", rec.Code, body)
+				}
 			}
 
 			rec, body = serveWith(t, h, adminToken, r.method, r.target, r.body+`"reason": "", "dry_run": true}`, io.Discard)

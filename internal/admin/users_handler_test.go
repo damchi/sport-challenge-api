@@ -191,7 +191,10 @@ func TestListAdminUserActivities(t *testing.T) {
 			ID: inviteID, SportCode: "run", StartedAt: started, DurationSeconds: 1800, DistanceMeters: ptr(5000), ElevationGainMeters: ptr(40), Source: "manual", CreatedAt: listAt.Add(-time.Hour),
 			AdminChange: &ActivityChange{Action: ActivityCreated, At: listAt.Add(-time.Hour), AdminID: bobID},
 		},
-		{ID: bobID, SportCode: "other", SportLabel: ptr("Escalade"), StartedAt: started.Add(-time.Hour), DurationSeconds: 600, Source: "manual", CreatedAt: listAt},
+		{
+			ID: bobID, SportCode: "other", SportLabel: ptr("Escalade"), StartedAt: started.Add(-time.Hour), DurationSeconds: 600, Source: "manual", CreatedAt: listAt,
+			Repetitions: []activity.Repetitions{{Exercise: "air_squat", Count: 0}, {Exercise: "burpee", Count: 30}},
+		},
 		{
 			ID: challengeID, SportCode: "run", StartedAt: started.Add(-2 * time.Hour), DurationSeconds: 600, Source: "manual", CreatedAt: listAt,
 			AdminChange: &ActivityChange{Action: ActivityUpdated, At: listAt, AdminID: bobID},
@@ -224,6 +227,8 @@ func TestListAdminUserActivities(t *testing.T) {
 			"id": bobID, "sport_code": "other", "sport_label": "Escalade", "started_at": "2026-11-23T11:30:00Z",
 			"duration_seconds": 600.0, "distance_meters": nil, "elevation_gain_meters": nil,
 			"source": "manual", "created_at": "2026-11-23T15:30:00Z", "locked": false, "contributions": []any{},
+			// As read, sorted by exercise; absent from the others.
+			"repetitions": []any{map[string]any{"exercise": "air_squat", "repetitions": 0.0}, map[string]any{"exercise": "burpee", "repetitions": 30.0}},
 			// No distance, no speed nor pace.
 			"speed_mps": nil, "pace_seconds_per_km": nil,
 			"admin_change": nil,

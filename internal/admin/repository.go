@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
+	"github.com/damchi/sport-challenge-api/internal/activity"
 	"github.com/damchi/sport-challenge-api/internal/platform/apperr"
 	"github.com/damchi/sport-challenge-api/internal/platform/db"
 )
@@ -380,8 +381,9 @@ func (r *Repository) ListUserChallenges(ctx context.Context, id string, q PageQu
 // (started_at, id) makes the order total, on the index
 // activities_user_started_at_idx. Each one carries the last journal line
 // of an admin that added or changed it (activity.create, activity.update),
-// read in the same query on admin_actions_target_idx. errUserNotFound when
-// there is no such account.
+// read in the same query on admin_actions_target_idx, and its repetitions,
+// read for the whole page in a second one, sorted by exercise.
+// errUserNotFound when there is no such account.
 func (r *Repository) ListUserActivities(ctx context.Context, id string, q ActivityQuery) ([]ActivityRow, error) {
 	var query strings.Builder
 	query.WriteString(`SELECT a.id, a.sport_code, a.sport_label, a.started_at, a.duration_seconds, a.distance_meters,
@@ -412,18 +414,40 @@ func (r *Repository) ListUserActivities(ctx context.Context, id string, q Activi
 		ChangedAt    *time.Time
 		ChangedBy    *string
 	}
+	var reps []struct {
+		ActivityID string
+		activity.Repetitions
+	}
 	err := r.ofUser(ctx, id, func(tx *gorm.DB) error {
 		if err := tx.Raw(query.String(), args).Scan(&rows).Error; err != nil {
 			return fmt.Errorf("list user activities: %w", err)
+		}
+		ids := make([]string, len(rows))
+		for i, row := range rows {
+			ids[i] = row.ID
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		// The primary key (activity_id, exercise_code) serves it; sorted by
+		// bytes, as module activity sorts them, whatever the collation.
+		if err := tx.Raw(`SELECT activity_id, exercise_code AS exercise, repetitions AS count FROM activity_repetitions
+			WHERE activity_id = ANY(CAST(? AS uuid[])) ORDER BY exercise_code COLLATE "C"`, db.UUIDs(ids)).Scan(&reps).Error; err != nil {
+			return fmt.Errorf("list repetitions: %w", err)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	of := make(map[string][]activity.Repetitions, len(reps))
+	for _, rep := range reps {
+		of[rep.ActivityID] = append(of[rep.ActivityID], rep.Repetitions)
+	}
 	out := make([]ActivityRow, len(rows))
 	for i, row := range rows {
 		out[i] = row.ActivityRow
+		out[i].Repetitions = of[row.ID]
 		if row.ChangeAction == nil || row.ChangedAt == nil || row.ChangedBy == nil {
 			continue
 		}
