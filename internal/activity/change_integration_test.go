@@ -4,6 +4,7 @@ package activity
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -165,4 +166,56 @@ func TestChangeActivityAccountDeleted(t *testing.T) {
 	_, err := svc.Update(t.Context(), f.user, rec.ID, run(toronto(t, 2026, 6, 10, 9)))
 	wantCode(t, err, apperr.CodeAccountDeleted)
 	wantCode(t, svc.Delete(t.Context(), f.user, rec.ID), apperr.CodeAccountDeleted)
+}
+
+// TestUpdateReplacesTheRepetitions: a CrossFit session entered before the
+// user joins a burpees challenge gets its burpees by a change; once no
+// challenge offers them any more (left, changed by an admin), a change that
+// sends them back keeps them, one that adds wall balls is refused, one that
+// leaves them out removes them. A locked week, or the activity of someone
+// else, changes nothing.
+func TestUpdateReplacesTheRepetitions(t *testing.T) {
+	f := setupRecord(t)
+	burpees := challengeOf(t, "c1")
+	burpees.Reference, burpees.Exercise = "crossfit", "burpee"
+	session := func(day int, reps ...Repetitions) Draft {
+		return Draft{SportCode: "crossfit", StartedAt: toronto(t, 2026, 6, day, 7), DurationSeconds: 1800, Repetitions: reps}
+	}
+	rec, err := f.service().Record(t.Context(), f.user, nil, session(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, thirty := rec.ID, []Repetitions{{"burpee", 30}}
+	reps := func() []Repetitions {
+		t.Helper()
+		page, err := f.service().Mine(t.Context(), f.user, Filter{}, 10, nil)
+		if err != nil || len(page.Items) != 1 {
+			t.Fatalf("list %+v, %v, want the session", page, err)
+		}
+		return page.Items[0].Repetitions
+	}
+	if got, err := f.service(burpees).Update(t.Context(), f.user, id, session(10, thirty...)); err != nil || !slices.Equal(got.Repetitions, thirty) || !slices.Equal(reps(), thirty) {
+		t.Fatalf("joined: %+v, %v, listed %+v, want %+v", got.Repetitions, err, reps(), thirty)
+	}
+
+	_, err = f.service(burpees).Update(t.Context(), f.user, id, session(3, thirty...))
+	wantCode(t, err, apperr.CodeWeekLocked)
+	var other string
+	if err := f.pool.QueryRow(t.Context(), "INSERT INTO users (auth_subject, pseudo) VALUES ('email|other', 'other') RETURNING id").Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.service(burpees).Update(t.Context(), other, id, session(10))
+	wantCode(t, err, apperr.CodeActivityNotFound)
+
+	if got, err := f.service().Update(t.Context(), f.user, id, session(11, thirty...)); err != nil || !slices.Equal(got.Repetitions, thirty) {
+		t.Fatalf("offered no more, sent back: %+v, %v, want them kept", got.Repetitions, err)
+	}
+	_, err = f.service().Update(t.Context(), f.user, id, session(11, Repetitions{"burpee", 30}, Repetitions{"wall_ball", 5}))
+	wantCode(t, err, apperr.CodeUnknownExercise)
+	if !slices.Equal(reps(), thirty) {
+		t.Fatalf("after the refusals: %+v, want %+v", reps(), thirty)
+	}
+	if got, err := f.service().Update(t.Context(), f.user, id, session(11)); err != nil || got.Repetitions != nil || reps() != nil {
+		t.Fatalf("left out: %+v, %v, listed %+v, want none", got.Repetitions, err, reps())
+	}
 }

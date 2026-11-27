@@ -86,9 +86,14 @@ func Contributions(a Activity, challenges []Participation) []Contribution {
 // UnknownExerciseRefusal refuses repetitions of an exercise that none of
 // challenges offers an activity of sport started at startedAt: challenges
 // with an elimination by repetitions of that exercise, sport as their
-// reference, where it counts (README §2.5); 422 unknown_exercise.
-func UnknownExerciseRefusal(sport string, startedAt time.Time, reps []Repetitions, challenges []Participation) error {
+// reference, where it counts (README §2.5); 422 unknown_exercise. An exercise
+// of kept, the repetitions already on the activity a change replaces, is
+// kept even when none offers it any more.
+func UnknownExerciseRefusal(sport string, startedAt time.Time, reps, kept []Repetitions, challenges []Participation) error {
 	offered := map[string]bool{}
+	for _, r := range kept {
+		offered[r.Exercise] = true
+	}
 	for _, c := range challenges {
 		if c.Exercise != "" && c.Reference == sport && counts(c, startedAt) {
 			offered[c.Exercise] = true

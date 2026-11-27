@@ -355,7 +355,9 @@ func TestUnknownExerciseRefusal(t *testing.T) {
 		name  string
 		sport string
 		reps  []Repetitions
-		want  bool // refused
+		// kept are the repetitions already on the activity (a change).
+		kept []Repetitions
+		want bool // refused
 	}{
 		{name: "burpees and wall balls of the challenges", sport: "crossfit", reps: reps("burpee", "wall_ball")},
 		{name: "no repetitions", sport: "crossfit"},
@@ -363,10 +365,12 @@ func TestUnknownExerciseRefusal(t *testing.T) {
 		{name: "challenge whose window does not hold the activity", sport: "crossfit", reps: reps("air_squat"), want: true},
 		{name: "exercise of a challenge of another reference sport", sport: "run", reps: reps("burpee"), want: true},
 		{name: "exercise of a challenge abandoned", sport: "crossfit", reps: reps("push_up"), want: true},
+		{name: "change keeping an exercise offered no more", sport: "crossfit", reps: reps("push_up", "burpee"), kept: reps("push_up")},
+		{name: "change adding an exercise not offered", sport: "crossfit", reps: reps("push_up", "thruster"), kept: reps("push_up"), want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := UnknownExerciseRefusal(tt.sport, friday, tt.reps, all)
+			err := UnknownExerciseRefusal(tt.sport, friday, tt.reps, tt.kept, all)
 			var appErr *apperr.Error
 			if refused := errors.As(err, &appErr) && appErr.Code == apperr.CodeUnknownExercise; refused != tt.want || (!tt.want && err != nil) {
 				t.Fatalf("UnknownExerciseRefusal() = %v, want refused %v", err, tt.want)

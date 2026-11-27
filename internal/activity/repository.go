@@ -119,7 +119,8 @@ func (r *Repository) Record(ctx context.Context, a Activity, decide func(ctx con
 // locked first (lockUser), then the activity FOR UPDATE, so that a change
 // or a deletion of the same activity committed meanwhile is seen. decide
 // gets the activity as stored and refuses with an error, nothing being
-// written then. The source, the external id and the idempotency key stay.
+// written then; the activity it gets has its repetitions, which a replaces.
+// The source, the external id and the idempotency key stay.
 // A missing or deleted activity, or one of someone else, gives
 // errActivityNotFound; an anonymized actor errAccountDeleted.
 func (r *Repository) Update(ctx context.Context, actorID, id string, a Activity, decide func(ctx context.Context, current Activity) error) (Activity, error) {
@@ -143,9 +144,17 @@ func (r *Repository) Update(ctx context.Context, actorID, id string, a Activity,
 		if err != nil {
 			return fmt.Errorf("update activity: %w", err)
 		}
+		// The repetitions are replaced as the other fields.
+		if err := tx.Exec("DELETE FROM activity_repetitions WHERE activity_id = ?", id).Error; err != nil {
+			return fmt.Errorf("remove repetitions: %w", err)
+		}
+		if err := insertRepetitions(tx, id, a.Repetitions); err != nil {
+			return err
+		}
 		out = current
 		out.SportCode, out.SportLabel, out.StartedAt = a.SportCode, a.SportLabel, a.StartedAt
 		out.DurationSeconds, out.DistanceMeters, out.ElevationGainMeters = a.DurationSeconds, a.DistanceMeters, a.ElevationGainMeters
+		out.Repetitions = a.Repetitions
 		return nil
 	})
 	if err != nil {
@@ -179,7 +188,7 @@ func (r *Repository) EraseUser(ctx context.Context, userID string) error {
 }
 
 // Get returns activity id, deleted ones left out (errActivityNotFound), in
-// the transaction of ctx, of any author (an admin change).
+// the transaction of ctx, of any author (admin), with its repetitions.
 func (r *Repository) Get(ctx context.Context, id string) (Activity, error) {
 	var rows []Activity
 	err := db.Conn(ctx, r.db).Raw(`SELECT id, user_id, sport_code, sport_label, started_at, duration_seconds, distance_meters, elevation_gain_meters, source, idempotency_key
@@ -189,6 +198,9 @@ func (r *Repository) Get(ctx context.Context, id string) (Activity, error) {
 	}
 	if len(rows) == 0 {
 		return Activity{}, errActivityNotFound
+	}
+	if err := withRepetitions(db.Conn(ctx, r.db), rows); err != nil {
+		return Activity{}, err
 	}
 	return rows[0], nil
 }
@@ -237,6 +249,9 @@ func (r *Repository) change(ctx context.Context, actorID, id string, decide func
 		if len(rows) == 0 {
 			return errActivityNotFound
 		}
+		if err := withRepetitions(tx, rows); err != nil {
+			return err
+		}
 		if err := decide(ctx, rows[0]); err != nil {
 			return err
 		}
@@ -246,7 +261,8 @@ func (r *Repository) change(ctx context.Context, actorID, id string, decide func
 
 // List returns up to q.Limit activities of the users of q.UserIDs, deleted
 // ones left out, started in [q.From, q.To), of sport q.SportCode when set,
-// most recent first (started_at, id), after the position q.After when set.
+// most recent first (started_at, id), after the position q.After when set,
+// each with its repetitions (one more query for the page).
 func (r *Repository) List(ctx context.Context, q ListQuery) ([]Activity, error) {
 	if len(q.UserIDs) == 0 {
 		return nil, errors.New("list activities: no user")
@@ -270,6 +286,9 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Activity, error) 
 	var rows []Activity
 	if err := tx.Order("started_at DESC, id DESC").Limit(q.Limit).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list activities: %w", err)
+	}
+	if err := withRepetitions(r.db.WithContext(ctx), rows); err != nil {
+		return nil, err
 	}
 	return rows, nil
 }
@@ -384,15 +403,42 @@ func byKey(tx *gorm.DB, userID, key string) (Activity, bool, error) {
 	if rows[0].Deleted {
 		return Activity{}, false, errActivityNotFound
 	}
-	out := rows[0].Activity
-	err = tx.Raw(`SELECT exercise_code AS exercise, repetitions AS count FROM activity_repetitions
-		WHERE activity_id = ?`, out.ID).Scan(&out.Repetitions).Error
-	if err != nil {
-		return Activity{}, false, fmt.Errorf("read repetitions by key: %w", err)
+	out := []Activity{rows[0].Activity}
+	if err := withRepetitions(tx, out); err != nil {
+		return Activity{}, false, err
 	}
-	// Sorted as at the creation (Service.Record), whatever the collation.
-	slices.SortFunc(out.Repetitions, func(a, b Repetitions) int { return strings.Compare(a.Exercise, b.Exercise) })
-	return out, true, nil
+	return out[0], true, nil
+}
+
+// withRepetitions sets the repetitions of each of as, read on tx in one
+// query, sorted by exercise as at the creation (Service.Record), whatever
+// the collation.
+func withRepetitions(tx *gorm.DB, as []Activity) error {
+	if len(as) == 0 {
+		return nil
+	}
+	ids := make([]string, len(as))
+	for i, a := range as {
+		ids[i] = a.ID
+	}
+	var rows []struct {
+		ActivityID string
+		Repetitions
+	}
+	err := tx.Raw(`SELECT activity_id, exercise_code AS exercise, repetitions AS count FROM activity_repetitions
+		WHERE activity_id = ANY(CAST(? AS uuid[]))`, db.UUIDs(ids)).Scan(&rows).Error
+	if err != nil {
+		return fmt.Errorf("read repetitions: %w", err)
+	}
+	of := make(map[string][]Repetitions, len(as))
+	for _, r := range rows {
+		of[r.ActivityID] = append(of[r.ActivityID], r.Repetitions)
+	}
+	for i := range as {
+		as[i].Repetitions = of[as[i].ID]
+		slices.SortFunc(as[i].Repetitions, func(a, b Repetitions) int { return strings.Compare(a.Exercise, b.Exercise) })
+	}
+	return nil
 }
 
 // insertRepetitions writes the repetitions of activity id on tx, in one
