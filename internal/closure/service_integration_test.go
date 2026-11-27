@@ -732,8 +732,8 @@ type deletedAfterReading struct {
 	done bool
 }
 
-func (d *deletedAfterReading) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
-	out, err := d.Repository.Activities(ctx, challengeID, w, weeklySport, minSessionSeconds, elevation)
+func (d *deletedAfterReading) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport, exercise string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
+	out, err := d.Repository.Activities(ctx, challengeID, w, weeklySport, exercise, minSessionSeconds, elevation)
 	if !d.done {
 		d.done = true
 		d.s.exec(`DELETE FROM activities WHERE user_id = $1`, d.user)

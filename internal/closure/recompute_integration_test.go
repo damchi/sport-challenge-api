@@ -287,13 +287,13 @@ type pausedData struct {
 	first   bool
 }
 
-func (p *pausedData) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
+func (p *pausedData) Activities(ctx context.Context, challengeID string, w scoring.Window, weeklySport, exercise string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
 	if !p.first {
 		p.first = true
 		close(p.paused)
 		<-p.release
 	}
-	return p.data.Activities(ctx, challengeID, w, weeklySport, minSessionSeconds, elevation)
+	return p.data.Activities(ctx, challengeID, w, weeklySport, exercise, minSessionSeconds, elevation)
 }
 
 func (p *pausedData) Participants(ctx context.Context, challengeID string) ([]scoring.Participant, error) {

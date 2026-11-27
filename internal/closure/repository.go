@@ -115,9 +115,14 @@ func (r *Repository) CloseWeek(ctx context.Context, c Challenge, week int, close
 // insertEliminations records the eliminations of a week in category
 // categoryID. A participant is eliminated once: an existing row is the
 // earlier judgement. A participation erased since the judgement (account
-// deleted) gets none.
+// deleted) gets none. Of an elimination by repetitions, the columns of the
+// distance and the minimum hold the repetitions and their minimum.
 func insertEliminations(tx *gorm.DB, challengeID, categoryID string, eliminated []scoring.Eliminated) error {
 	for _, e := range eliminated {
+		measure, minimum := e.DistanceMeters, e.MinimumMeters
+		if e.MinimumRepetitions > 0 {
+			measure, minimum = e.Repetitions, e.MinimumRepetitions
+		}
 		if err := tx.Exec(
 			`INSERT INTO elimination (challenge_id, category_id, user_id, week_number, distance_meters, required_meters)
 			SELECT @challenge, @category, @user, @week, @distance, @minimum
@@ -125,7 +130,7 @@ func insertEliminations(tx *gorm.DB, challengeID, categoryID string, eliminated 
 			ON CONFLICT (category_id, user_id) DO NOTHING`,
 			map[string]any{
 				"challenge": challengeID, "category": categoryID, "user": e.UserID,
-				"week": e.Week, "distance": e.DistanceMeters, "minimum": e.MinimumMeters,
+				"week": e.Week, "distance": measure, "minimum": minimum,
 			},
 		).Error; err != nil {
 			return fmt.Errorf("insert elimination: %w", err)
@@ -174,6 +179,8 @@ func (r *Repository) readChallenges(ctx context.Context, where string, args map[
 		Factors           string
 		Sport             string
 		StepMeters        int
+		Exercise          string
+		StepRepetitions   int
 		Criteria          string
 		Podium            int
 		MinSessionSeconds int
@@ -183,6 +190,8 @@ func (r *Repository) readChallenges(ctx context.Context, where string, args map[
 			COALESCE(cat.params->>'factors', '{}') AS factors,
 			COALESCE(cat.params->>'sport', '') AS sport,
 			COALESCE((cat.params->>'step_meters')::int, 0) AS step_meters,
+			COALESCE(cat.params->>'exercise', '') AS exercise,
+			COALESCE((cat.params->>'step_repetitions')::int, 0) AS step_repetitions,
 			COALESCE(cat.params->>'criteria', '[]') AS criteria,
 			COALESCE((cat.params->>'podium')::int, 0) AS podium,
 			COALESCE((cat.params->>'min_session_seconds')::int, 0) AS min_session_seconds
@@ -202,6 +211,7 @@ func (r *Repository) readChallenges(ctx context.Context, where string, args map[
 		}
 		cat := Category{
 			ID: row.CategoryID, Type: row.Type, Sport: row.Sport, StepMeters: row.StepMeters,
+			Exercise: row.Exercise, StepRepetitions: row.StepRepetitions,
 			Podium: row.Podium, MinSessionSeconds: row.MinSessionSeconds,
 		}
 		if err := json.Unmarshal([]byte(row.Factors), &cat.Factors); err != nil {

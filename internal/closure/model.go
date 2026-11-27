@@ -19,6 +19,9 @@ type Challenge struct {
 	CategoryID string
 	Sport      string
 	StepMeters int
+	// Exercise and StepRepetitions: of an elimination by repetitions only.
+	Exercise        string
+	StepRepetitions int
 }
 
 // Result counts what a run of the task did, for the log.
@@ -48,9 +51,11 @@ type Category struct {
 	// Factors is the distance factor by sport code (cumulative_distance,
 	// and points with the longest distance criterion).
 	Factors map[string]float64
-	// Sport and StepMeters are the elimination settings.
-	Sport      string
-	StepMeters int
+	// Sport and StepMeters (or Exercise and StepRepetitions): the elimination.
+	Sport           string
+	StepMeters      int
+	Exercise        string
+	StepRepetitions int
 	// Criteria, Podium and MinSessionSeconds are the points settings.
 	Criteria          []string
 	Podium            int

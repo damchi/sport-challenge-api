@@ -160,7 +160,7 @@ func (f *fakeData) Participants(context.Context, string) ([]scoring.Participant,
 	return f.participants, nil
 }
 
-func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
+func (f *fakeData) Activities(_ context.Context, _ string, _ scoring.Window, weeklySport, _ string, minSessionSeconds int, elevation bool) ([]scoring.Activity, error) {
 	f.loads++
 	f.weekly, f.minSession, f.elevation = weeklySport, minSessionSeconds, elevation
 	return f.activities, nil
@@ -750,13 +750,17 @@ func (s staleRepo) EndedChallenges(context.Context, time.Time) ([]EndedChallenge
 	return s.ended, nil
 }
 
-func TestEliminationSport(t *testing.T) {
+func TestEliminationSettings(t *testing.T) {
 	with := []Category{{Type: categoryCumulativeTime}, {Type: categoryElimination, Sport: "run"}}
-	if got := eliminationSport(with); got != "run" {
-		t.Fatalf("with an elimination category: %q, want run", got)
+	if sport, exercise := eliminationSettings(with); sport != "run" || exercise != "" {
+		t.Fatalf("with an elimination in meters: %q %q, want run and no exercise", sport, exercise)
 	}
-	if got := eliminationSport(with[:1]); got != "" {
-		t.Fatalf("without an elimination category: %q, want empty", got)
+	reps := []Category{{Type: categoryCumulativeTime}, {Type: categoryElimination, Sport: "crossfit", Exercise: "burpee", StepRepetitions: 10}}
+	if sport, exercise := eliminationSettings(reps); sport != "crossfit" || exercise != "burpee" {
+		t.Fatalf("with an elimination by repetitions: %q %q, want crossfit and burpee", sport, exercise)
+	}
+	if sport, exercise := eliminationSettings(with[:1]); sport != "" || exercise != "" {
+		t.Fatalf("without an elimination category: %q %q, want empty", sport, exercise)
 	}
 }
 
