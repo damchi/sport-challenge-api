@@ -1108,3 +1108,16 @@ func TestDeleteChallenge(t *testing.T) {
 		})
 	}
 }
+
+// TestToProgressInRepetitions: "Mes défis" gives the repetitions of an
+// elimination by repetitions only, as the leaderboard does.
+func TestToProgressInRepetitions(t *testing.T) {
+	minimum := 110
+	out := toProgress(scoring.Progress{InRepetitions: true, MinimumRepetitions: &minimum, Repetitions: 40})
+	if out.Repetitions == nil || *out.Repetitions != 40 || out.MinimumRepetitions == nil || *out.MinimumRepetitions != 110 || out.DistanceMeters != 0 || out.MinimumMeters != nil {
+		t.Fatalf("toProgress() = %+v, want 40 of 110 repetitions", out)
+	}
+	if out := toProgress(scoring.Progress{DistanceMeters: 4000}); out.Repetitions != nil || out.MinimumRepetitions != nil {
+		t.Fatalf("toProgress(meters) = %+v, want no repetitions", out)
+	}
+}
