@@ -366,6 +366,7 @@ func TestUnknownExerciseRefusal(t *testing.T) {
 		{name: "exercise of a challenge of another reference sport", sport: "run", reps: reps("burpee"), want: true},
 		{name: "exercise of a challenge abandoned", sport: "crossfit", reps: reps("push_up"), want: true},
 		{name: "change keeping an exercise offered no more", sport: "crossfit", reps: reps("push_up", "burpee"), kept: reps("push_up")},
+		{name: "change of sport keeping an exercise (decision 2026-11-27)", sport: "run", reps: reps("burpee"), kept: reps("burpee")},
 		{name: "change adding an exercise not offered", sport: "crossfit", reps: reps("push_up", "thruster"), kept: reps("push_up"), want: true},
 	}
 	for _, tt := range tests {
