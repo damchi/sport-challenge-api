@@ -4254,15 +4254,32 @@ components:
         activity without is 0 m); no settings.
     EliminationCreate:
       type: object
-      required: [step_meters]
       additionalProperties: false
-      description: Elimination, run in the reference sport.
+      description: |
+        Elimination, run in the reference sport: `step_meters` with a
+        reference sport that has a distance; `exercise` and
+        `step_repetitions` with a reference sport without distance (the
+        weekly sum of the repetitions of that exercise). The other form is
+        refused (400 `validation_failed` on its field), and so is the
+        elimination under a reference sport without exercises.
       properties:
         step_meters:
           type: integer
           minimum: 1
           maximum: 100000
-          description: Increment X, in meters.
+          description: Increment X, in meters; reference sport with a distance only.
+        exercise:
+          type: string
+          minLength: 1
+          description: |
+            Code of an exercise of the reference sport (`Sport.exercises`);
+            reference sport without distance only.
+          example: wall_ball
+        step_repetitions:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: Increment X, in repetitions; reference sport without distance only.
     PointsCreate:
       type: object
       required: [criteria, podium]
@@ -4369,6 +4386,12 @@ components:
         step_meters:
           type: integer
           description: Elimination category only, increment X in meters.
+        exercise:
+          type: string
+          description: Elimination category under a reference sport without distance only, the exercise whose repetitions count.
+        step_repetitions:
+          type: integer
+          description: Elimination category under a reference sport without distance only, increment X in repetitions.
         criteria:
           type: array
           description: Points category only, its criteria in the order chosen.

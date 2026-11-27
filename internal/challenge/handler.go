@@ -69,7 +69,9 @@ func (h *Handler) CreateChallenge(ctx context.Context, req api.CreateChallengeRe
 func CategoryChoiceOf(cats api.CategoriesCreate) CategoryChoice {
 	choice := CategoryChoice{Distance: cats.CumulativeDistance != nil, Elevation: cats.CumulativeElevation != nil}
 	if e := cats.Elimination; e != nil {
-		choice.Elimination = &EliminationDraft{StepMeters: e.StepMeters}
+		choice.Elimination = &EliminationDraft{
+			StepMeters: deref(e.StepMeters), Exercise: deref(e.Exercise), StepRepetitions: deref(e.StepRepetitions),
+		}
 	}
 	if p := cats.Points; p != nil {
 		choice.Points = &PointsDraft{Podium: int(p.Podium), MinSessionMinutes: p.MinSessionMinutes}
@@ -110,6 +112,10 @@ func toAPI(c Challenge) (api.Challenge, error) {
 		if cat.Params.StepMeters != 0 {
 			step := cat.Params.StepMeters
 			params.StepMeters = &step
+		}
+		if cat.Params.Exercise != "" {
+			exercise, step := cat.Params.Exercise, cat.Params.StepRepetitions
+			params.Exercise, params.StepRepetitions = &exercise, &step
 		}
 		if cat.Params.Criteria != nil {
 			criteria := make([]api.CategoryParamsCriteria, len(cat.Params.Criteria))
@@ -511,4 +517,14 @@ func (h *Handler) DeleteChallenge(ctx context.Context, req api.DeleteChallengeRe
 		return nil, err
 	}
 	return api.DeleteChallenge204Response{}, nil
+}
+
+// deref is the value p points to, the zero value for nil: a setting left
+// out of the contract.
+func deref[T any](p *T) T {
+	var zero T
+	if p == nil {
+		return zero
+	}
+	return *p
 }

@@ -80,6 +80,18 @@ func TestServiceAdminUpdate(t *testing.T) {
 			},
 		},
 		{
+			name: "crossfit with an elimination by repetitions of wall balls",
+			changes: SettingsChanges{ReferenceSport: text("crossfit"), Categories: &CategoryChoice{
+				Elimination: &EliminationDraft{Exercise: "wall_ball", StepRepetitions: 10},
+			}},
+			check: func(t *testing.T, written Challenge, _ SettingsChange) {
+				want := Params{Sport: "crossfit", Exercise: "wall_ball", StepRepetitions: 10}
+				if len(written.Categories) != 2 || !reflect.DeepEqual(written.Categories[1].Params, want) {
+					t.Fatalf("categories %+v, want the time and the elimination %+v", written.Categories, want)
+				}
+			},
+		},
+		{
 			name:    "the first day moved into the past moves the end of week 1",
 			changes: SettingsChanges{StartDate: text("2026-01-26")},
 			check: func(t *testing.T, written Challenge, change SettingsChange) {
@@ -269,7 +281,14 @@ func TestServiceAdminUpdateRefusals(t *testing.T) {
 		{
 			name: "run to crossfit keeping the categories", actor: adminActor(),
 			changes:  SettingsChanges{ReferenceSport: text("crossfit")},
-			wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "categories.cumulative_distance,categories.elimination",
+			wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "categories.cumulative_distance,categories.elimination.exercise,categories.elimination.step_meters,categories.elimination.step_repetitions",
+		},
+		{
+			name: "crossfit with an exercise of another sport", actor: adminActor(),
+			changes: SettingsChanges{ReferenceSport: text("crossfit"), Categories: &CategoryChoice{
+				Elimination: &EliminationDraft{Exercise: "squat", StepRepetitions: 10},
+			}},
+			wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "categories.elimination.exercise",
 		},
 		{name: "factor of the reference", actor: adminActor(), changes: SettingsChanges{DistanceFactors: map[string]float64{"run": 1}}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "distance_factors.run"},
 		{name: "factor of the new reference", actor: adminActor(), changes: SettingsChanges{ReferenceSport: text("ride"), DistanceFactors: map[string]float64{"ride": 0.5}}, wantCode: apperr.CodeValidationFailed, wantStatus: http.StatusBadRequest, wantFields: "distance_factors.ride"},

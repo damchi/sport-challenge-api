@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -78,6 +79,12 @@ func (c sqlCatalogue) SuggestedFactors(ctx context.Context) (map[string]float64,
 		factors[code] = f
 	}
 	return factors, rows.Err()
+}
+
+func (c sqlCatalogue) HasExercise(ctx context.Context, sportCode, code string) (bool, error) {
+	var found bool
+	err := c.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM exercises WHERE sport_code = $1 AND code = $2)", sportCode, code).Scan(&found)
+	return found, err
 }
 
 func (c sqlCatalogue) DistanceMode(ctx context.Context, code string) (string, bool, error) {
@@ -481,4 +488,51 @@ func sameInstant(a, b *time.Time) bool {
 		return a == b
 	}
 	return a.Equal(*b)
+}
+
+// TestCreateStoresAnEliminationByRepetitions: CrossFit with wall balls, X =
+// 10, read back with its exercise; an admin then changes the exercise,
+// checked against the catalogue of the migrations.
+func TestCreateStoresAnEliminationByRepetitions(t *testing.T) {
+	pseudo := "marie_92"
+	svc, _, userID := setup(t, &pseudo)
+	c, err := svc.Create(t.Context(), userID, noDistance("crossfit", repetitions("wall_ball", 10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eliminationOf := func() Params {
+		t.Helper()
+		d, err := svc.Get(t.Context(), auth.Actor{ID: userID}, c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.Categories) != 2 || d.Categories[1].Type != CategoryElimination {
+			t.Fatalf("categories %+v, want the cumulative time and the elimination", d.Categories)
+		}
+		return d.Categories[1].Params
+	}
+	if got, want := eliminationOf(), (Params{Sport: "crossfit", Exercise: "wall_ball", StepRepetitions: 10}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("elimination read back %+v, want %+v", got, want)
+	}
+
+	admin := auth.Actor{ID: userID, Admin: true}
+	choice := func(exercise string) SettingsChanges {
+		return SettingsChanges{Categories: &CategoryChoice{Elimination: &EliminationDraft{Exercise: exercise, StepRepetitions: 20}}}
+	}
+	_, err = svc.AdminUpdate(t.Context(), admin, c.ID, choice("squat"))
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Params[apperr.FieldsParam] != "categories.elimination.exercise" {
+		t.Fatalf("AdminUpdate(squat, no exercise of the catalogue) = %v, want 400 on categories.elimination.exercise", err)
+	}
+	if _, err := svc.AdminUpdate(t.Context(), admin, c.ID, choice("burpee")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := eliminationOf(), (Params{Sport: "crossfit", Exercise: "burpee", StepRepetitions: 20}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("elimination after the admin change %+v, want %+v", got, want)
+	}
+	// Back to run, the categories kept: repetitions are refused with a distance.
+	_, err = svc.AdminUpdate(t.Context(), admin, c.ID, SettingsChanges{ReferenceSport: sportCode("run")})
+	if !errors.As(err, &appErr) || appErr.Params[apperr.FieldsParam] != "categories.elimination.exercise,categories.elimination.step_meters,categories.elimination.step_repetitions" {
+		t.Fatalf("AdminUpdate(run) = %v, want 400 on the three elimination fields", err)
+	}
 }
