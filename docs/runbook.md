@@ -131,7 +131,7 @@ Ne jamais coller un secret dans un ticket, un message ou un journal. Un secret e
 ### Confidentialité et conformité
 
 - [ ] **Politique de confidentialité** publiée en **français et en anglais**, qui mentionne :
-  - que les activités détaillées d'un participant sont **visibles par les autres participants** du challenge (l'application le dit aussi avant de rejoindre), **y compris après avoir quitté le challenge ou en avoir été exclu**, pour toutes les activités datées de sa fenêtre (README §5.7) ;
+  - que les activités détaillées d'un participant sont **visibles par les autres participants** du challenge (l'application le dit aussi avant de rejoindre un challenge depuis sa page, mais pas quand un lien d'invitation inscrit directement : la politique est alors la seule à le dire, README §6), **y compris après avoir quitté le challenge ou en avoir été exclu**, pour toutes les activités datées de sa fenêtre (README §5.7) ;
   - que le **prénom et le nom** d'un participant sont visibles par les autres utilisateurs (participants, classements ; pour un challenge public, par tout utilisateur connecté), et que son **adresse e-mail**, reçue d'Auth0, n'est visible que de lui (README §2.8) ;
   - les données conservées (profil : pseudo, prénom, nom, e-mail ; résumés d'activité), leur lieu (Canada, Montréal) et leur durée de conservation (à décider : la purge des challenges supprimés est une question ouverte, README §8) ;
   - l'effet d'une suppression de compte (anonymisation : pseudo, prénom, nom et e-mail effacés ; effacement des données du compte dans tous ses challenges, terminés compris : activités, participations, résultats figés, liens d'invitation ; les challenges qu'il a créés restent) ;
