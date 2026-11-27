@@ -584,12 +584,15 @@ func readActions(tx *gorm.DB, q ActionQuery) ([]Action, error) {
 }
 
 // readEliminations reads the eliminations of challenge id on tx, earliest
-// week first.
+// week first, in repetitions when their category counts the
+// repetitions of an exercise.
 func readEliminations(tx *gorm.DB, id string) ([]EliminationRow, error) {
 	var out []EliminationRow
 	if err := tx.Raw(`SELECT u.id AS user_id, u.pseudo AS user_pseudo, u.first_name AS user_first_name,
-		u.last_name AS user_last_name, e.week_number, e.distance_meters, e.required_meters
+		u.last_name AS user_last_name, e.week_number, e.distance_meters, e.required_meters,
+		COALESCE(cat.params->>'exercise', '') <> '' AS in_repetitions
 		FROM elimination e JOIN users u ON u.id = e.user_id
+		JOIN categories cat ON cat.id = e.category_id
 		WHERE e.challenge_id = @id ORDER BY e.week_number, u.id`, map[string]any{"id": id}).Scan(&out).Error; err != nil {
 		return nil, fmt.Errorf("read eliminations: %w", err)
 	}

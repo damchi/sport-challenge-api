@@ -3240,11 +3240,21 @@ components:
         distance_meters:
           type: integer
           minimum: 0
-          description: The distance of the reference sport they did that week.
+          description: The distance of the reference sport they did that week; 0 in an elimination by repetitions.
         required_meters:
           type: integer
           minimum: 0
-          description: The minimum they had to reach.
+          description: The minimum they had to reach; 0 in an elimination by repetitions.
+        repetitions:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Elimination by repetitions only (absent otherwise), the repetitions of the exercise they did that week, as `distance_meters` (then 0).
+        required_repetitions:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Elimination by repetitions only (absent otherwise), the minimum they had to reach, as `required_meters` (then 0).
     AdminChallengeUpdate:
       type: object
       additionalProperties: false
@@ -3625,11 +3635,21 @@ components:
         distance_meters:
           type: integer
           minimum: 0
-          description: The distance of the reference sport they did that week.
+          description: The distance of the reference sport they did that week; 0 in an elimination by repetitions.
         required_meters:
           type: integer
           minimum: 0
-          description: The minimum they had to reach.
+          description: The minimum they had to reach; 0 in an elimination by repetitions.
+        repetitions:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Elimination by repetitions only (absent otherwise), the repetitions of the exercise they did that week, as `distance_meters` (then 0).
+        required_repetitions:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Elimination by repetitions only (absent otherwise), the minimum they had to reach, as `required_meters` (then 0).
     AdminInvitation:
       type: object
       required: [id, invited_by, created_at, expires_at, revoked_at, status]

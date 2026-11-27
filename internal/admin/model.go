@@ -170,12 +170,15 @@ type CategoryRow struct {
 	Params   []byte
 }
 
-// EliminationRow is a participant eliminated at WeekNumber.
+// EliminationRow is a participant eliminated at WeekNumber. In an
+// elimination by repetitions (InRepetitions), DistanceMeters and
+// RequiredMeters hold repetitions, as the elimination table keeps them.
 type EliminationRow struct {
 	User           UserRef `gorm:"embedded;embeddedPrefix:user_"`
 	WeekNumber     int
 	DistanceMeters int
 	RequiredMeters int
+	InRepetitions  bool
 }
 
 // InvitationRow is an invitation link, its token never kept.

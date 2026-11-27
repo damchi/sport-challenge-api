@@ -423,7 +423,18 @@ func toJudgement(e *EliminationRow) *api.AdminEliminationJudgement {
 	if e == nil {
 		return nil
 	}
-	return &api.AdminEliminationJudgement{WeekNumber: e.WeekNumber, DistanceMeters: e.DistanceMeters, RequiredMeters: e.RequiredMeters}
+	out := &api.AdminEliminationJudgement{WeekNumber: e.WeekNumber}
+	out.DistanceMeters, out.RequiredMeters, out.Repetitions, out.RequiredRepetitions = eliminationMeasures(*e)
+	return out
+}
+
+// eliminationMeasures gives the distance and minimum of e in meters, or,
+// in an elimination by repetitions, 0 and both in repetitions.
+func eliminationMeasures(e EliminationRow) (meters, requiredMeters int, repetitions, requiredRepetitions *int) {
+	if e.InRepetitions {
+		return 0, 0, &e.DistanceMeters, &e.RequiredMeters
+	}
+	return e.DistanceMeters, e.RequiredMeters, nil, nil
 }
 
 // GetAdminStats answers the figures of the dashboard.
@@ -601,7 +612,9 @@ func (h *Handler) GetAdminChallenge(ctx context.Context, req api.GetAdminChallen
 		if err != nil {
 			return nil, err
 		}
-		out.Eliminations[i] = api.AdminElimination{User: user, WeekNumber: e.WeekNumber, DistanceMeters: e.DistanceMeters, RequiredMeters: e.RequiredMeters}
+		el := api.AdminElimination{User: user, WeekNumber: e.WeekNumber}
+		el.DistanceMeters, el.RequiredMeters, el.Repetitions, el.RequiredRepetitions = eliminationMeasures(e)
+		out.Eliminations[i] = el
 	}
 	for i, inv := range d.Invitations {
 		invID, err := uuid.Parse(inv.ID)

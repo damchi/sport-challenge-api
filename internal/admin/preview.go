@@ -150,17 +150,29 @@ func eliminationsDiffer(before, after []EliminationRow, n int) bool {
 	return !maps.Equal(of(before), of(after))
 }
 
+// minimum is an elimination minimum, in meters or in repetitions.
+type minimum struct {
+	value       int
+	repetitions bool
+}
+
 // minimums gives, by participant, the elimination minimum of the week in
-// progress in board (nil without one: week 1, or eliminated).
-func minimums(board leaderboard.Leaderboard) map[string]int {
-	out := map[string]int{}
+// progress in board (absent without one: week 1, or eliminated).
+func minimums(board leaderboard.Leaderboard) map[string]minimum {
+	out := map[string]minimum{}
 	for _, cat := range board.Categories {
 		if cat.Type != leaderboard.CategoryElimination {
 			continue
 		}
 		for _, e := range cat.Entries {
-			if e.Progress != nil && e.Progress.MinimumMeters != nil {
-				out[e.UserID] = *e.Progress.MinimumMeters
+			if e.Progress == nil {
+				continue
+			}
+			if m := e.Progress.MinimumMeters; m != nil {
+				out[e.UserID] = minimum{value: *m}
+			}
+			if r := e.Progress.MinimumRepetitions; r != nil {
+				out[e.UserID] = minimum{value: *r, repetitions: true}
 			}
 		}
 	}
