@@ -530,4 +530,9 @@ func TestCreateStoresAnEliminationByRepetitions(t *testing.T) {
 	if got, want := eliminationOf(), (Params{Sport: "crossfit", Exercise: "burpee", StepRepetitions: 20}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("elimination after the admin change %+v, want %+v", got, want)
 	}
+	// Back to run, the categories kept: repetitions are refused with a distance.
+	_, err = svc.AdminUpdate(t.Context(), admin, c.ID, SettingsChanges{ReferenceSport: sportCode("run")})
+	if !errors.As(err, &appErr) || appErr.Params[apperr.FieldsParam] != "categories.elimination.exercise,categories.elimination.step_meters,categories.elimination.step_repetitions" {
+		t.Fatalf("AdminUpdate(run) = %v, want 400 on the three elimination fields", err)
+	}
 }

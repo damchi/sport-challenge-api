@@ -416,7 +416,9 @@ func (f fakeCatalogue) DistanceMode(_ context.Context, code string) (string, boo
 	return mode, ok, f.err
 }
 
-// catalogueExercises are the exercises of the fake catalogue, by sport.
+// catalogueExercises are the exercises of the fake catalogue, by sport;
+// strength has one here, unlike the real catalogue, to test an exercise of
+// another sport.
 var catalogueExercises = map[string][]string{"crossfit": {"burpee", "wall_ball"}, "strength": {"squat"}}
 
 func (f fakeCatalogue) HasExercise(_ context.Context, sportCode, code string) (bool, error) {
