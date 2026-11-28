@@ -67,3 +67,6 @@ docs/superpowers/
 
 # Python caches of the Claude scripts
 __pycache__/
+
+# Postman environments filled with tokens (docs/postman.md)
+postman/*.local.postman_environment.json
