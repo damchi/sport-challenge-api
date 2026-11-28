@@ -16,7 +16,7 @@ L'API n'accepte que l'access token d'un utilisateur Auth0 : aucune application m
 |---|---|
 | `token` | l'utilisateur A, celui qui crée les défis |
 | `otherToken` | l'utilisateur B, pour les invitations et l'exclusion |
-| `adminToken` | un compte qui a le rôle Auth0 « admin » (double authentification) |
+| `adminToken` | un troisième compte, distinct de A et B, qui a le rôle Auth0 « admin » (double authentification) : le jeton de A doit être sans la permission `admin`, pour les refus des routes `/admin/*` |
 
 Pour obtenir un jeton : se connecter au frontend local avec le compte, ouvrir les outils de développement (onglet Réseau), choisir un appel à l'API, puis copier la valeur de l'en-tête `Authorization` sans le mot `Bearer`.
 
@@ -51,6 +51,7 @@ Les requêtes destructives (suppression de compte) seront dans un dossier à par
 | Invitations | une invitation au défi principal, ouverte puis acceptée par B (B y devient participant actif, pour les dossiers suivants), le 409 d'une seconde acceptation, le 404 d'un jeton inconnu et le 403 d'une invitation par B (le défi principal ne laisse pas inviter les participants) |
 | Activités | une séance CrossFit avec burpees, saisie avec une clé d'idempotence, rejouée (200), remplacée, gardée pour les dossiers suivants (`activityId`) ; une course saisie puis supprimée ; les refus 400 (sport inconnu), 404 (modification et suppression de l'activité d'un autre) et 422 (`unknown_exercise`) ; les lectures de l'utilisateur. Deux exécutions de la collection doivent être espacées de 5 minutes : la séance va de 6 à 2 minutes avant l'exécution et la course de 7 à 6 minutes avant, et deux activités ne se chevauchent jamais (`activity_overlap`). Éviter aussi de la lancer entre 00 h 00 et 00 h 10 UTC : la séance est alors ramenée au début du jour, dans la fenêtre du défi (la course, elle, tombe la veille et ne compte dans aucun défi, sans effet sur les tests) |
 | Lectures d'un défi | le classement du défi principal (temps cumulé, élimination aux burpees, A et B classés), son fil d'activités et les activités de A vus par B ; le 404 des points sans catégorie Points ; un défi public que B voit sans l'avoir rejoint, où A participe (404 `not_found` pour B sur son fil et sur les activités de A), supprimé en fin de dossier |
+| Admin : défis | avec `adminToken` (compte qui a le rôle « admin », double authentification) sur un défi privé de A créé pour l'occasion : tableau de bord, recherche, détail ; modification (refusée sans `reason`, puis `dry_run`, puis pour de bon) ; B ajouté (409 la seconde fois), exclu, réintégré, nommé créateur puis retiré ; le refus `last_creator` sur A ; suppression (le défi supprimé trouvé dans la liste) puis restauration, chacune précédée de son `dry_run`, visibles dans les actions récentes ; chaque route du dossier avec `token`, sans la permission, en `dry_run` : 404 `not_found` ; enfin le défi supprimé par A |
 
 Avant de committer un changement de la collection, vérifier que ses scripts sont du JavaScript valide (les tests sont des chaînes entre apostrophes : jamais d'apostrophe dans un nom de test) :
 
