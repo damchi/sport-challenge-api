@@ -17,6 +17,7 @@ L'API n'accepte que l'access token d'un utilisateur Auth0 : aucune application m
 | `token` | l'utilisateur A, celui qui crée les défis |
 | `otherToken` | l'utilisateur B, pour les invitations et l'exclusion |
 | `adminToken` | un troisième compte, distinct de A et B, qui a le rôle Auth0 « admin » (double authentification) : le jeton de A doit être sans la permission `admin`, pour les refus des routes `/admin/*` |
+| `disposableToken`, `otherDisposableToken` | deux comptes jetables C et D, pour le seul dossier « Destructif » : sans eux, ce dossier échoue sans rien supprimer |
 
 Pour obtenir un jeton : se connecter au frontend local avec le compte, ouvrir les outils de développement (onglet Réseau), choisir un appel à l'API, puis copier la valeur de l'en-tête `Authorization` sans le mot `Bearer`.
 
@@ -38,7 +39,18 @@ Pour obtenir un jeton : se connecter au frontend local avec le compte, ouvrir le
 
   Pour noter le résultat dans une pull request, n'en coller que le résumé (le tableau final). `--verbose`, `--export-environment`, `--export-collection` et les rapports HTML ou JSON écrivent l'en-tête `Authorization`, les jetons ou le corps des requêtes (dont le jeton d'invitation).
 
-Les requêtes destructives (suppression de compte) seront dans un dossier à part, à lancer en dernier, avec des comptes jetables.
+### Le dossier « Destructif »
+
+Il supprime deux comptes, **irréversiblement** : C se supprime lui-même (`DELETE /me`), l'admin supprime D. À lancer seul, en dernier, après les autres dossiers (il lui faut `adminToken` et `token`), jamais avec le compte d'une vraie personne.
+
+- Créer deux comptes Auth0 jetables (une adresse de test chacun), s'y connecter une fois au frontend local pour créer leur compte local, puis coller leurs jetons dans `disposableToken` et `otherDisposableToken`. Le tenant Auth0 est celui de la production (`docs/auth0-setup.md`) : ces comptes y existent comme les autres.
+- Une identité supprimée ne recrée jamais de compte local : chaque exécution du dossier demande deux nouveaux comptes.
+- En local, la suppression chez Auth0 échoue (l'application machine à machine locale n'a aucun droit) et reste en attente de reprise : c'est attendu. Supprimer ensuite les deux comptes à la main dans la console Auth0.
+- Sans ces deux jetons, le dossier échoue sans rien supprimer : lancer toute la collection sans eux est sans danger. Chaque suppression est de plus sautée si son compte n'est pas un compte jetable (ni A, ni B, ni l'admin).
+- Récupérer les jetons de C, D, A et de l'admin juste avant de lancer le dossier : ils durent 15 minutes.
+- Pour C et D, utiliser des adresses qui reçoivent le code de connexion (boîte de test, ou alias `+…`) ; l'envoi passe par le fournisseur d'e-mail de la production. Ne jamais s'y connecter sur l'app de production.
+- Dans la console Auth0 (celle de la production), chercher chaque compte par son adresse de test exacte et vérifier son identifiant (`sub`) avant de le supprimer.
+- Les deux demandes de suppression restent en attente dans la base locale : en local, `make worker TASK=retry-auth0-deletions` les rejoue sans pouvoir aboutir.
 
 ## Dossiers
 
@@ -53,6 +65,7 @@ Les requêtes destructives (suppression de compte) seront dans un dossier à par
 | Lectures d'un défi | le classement du défi principal (temps cumulé, élimination aux burpees, A et B classés), son fil d'activités et les activités de A vus par B ; le 404 des points sans catégorie Points ; un défi public que B voit sans l'avoir rejoint, où A participe (404 `not_found` pour B sur son fil et sur les activités de A), supprimé en fin de dossier |
 | Admin : défis | avec `adminToken` (compte qui a le rôle « admin », double authentification) sur un défi privé de A créé pour l'occasion : tableau de bord, recherche, détail ; modification (refusée sans `reason`, puis `dry_run`, puis pour de bon) ; B ajouté (409 la seconde fois), exclu, réintégré, nommé créateur puis retiré ; le refus `last_creator` sur A ; suppression (le défi supprimé trouvé dans la liste) puis restauration, chacune précédée de son `dry_run`, visibles dans les actions récentes ; chaque route du dossier avec `token`, sans la permission, en `dry_run` : 404 `not_found` ; enfin le défi supprimé par A |
 | Admin : comptes | avec `adminToken` : la liste et la recherche des comptes (dans le corps, jamais dans l'URL), B lu, renommé, bloqué puis débloqué (puis il relit son profil, et retrouve son nom en fin de dossier), le 403 d'un admin qui se bloque ; les défis de A ; une course ajoutée à A juste après sa séance, dans la même fenêtre et sans chevauchement (aperçu puis pour de bon, avec une clé d'idempotence), puis supprimée ; le 422 `unknown_exercise` (en aperçu) ; les répétitions de la séance de A corrigées (35 puis 40 burpees), visibles dans ses activités et dans le journal, qui donne aussi les actions sur B, sur la course et la restauration du dossier précédent ; chaque route du dossier avec `token`, sans la permission : 404 `not_found` (en aperçu, ou sur un compte inexistant) |
+| Destructif (à lancer seul) | C, seul créateur d'un défi en cours, refusé (422 `last_creator`) puis supprimé (204), son jeton refusé ensuite (401 `account_deleted`) ; D de même, supprimé par l'admin (404 sans la permission), puis anonymisé (suppression Auth0 en attente), trouvé par la recherche avant et plus après, et 404 `user_not_found` une seconde fois |
 
 Avant de committer un changement de la collection, vérifier que ses scripts sont du JavaScript valide (les tests sont des chaînes entre apostrophes : jamais d'apostrophe dans un nom de test) :
 
