@@ -26,13 +26,14 @@ Pour obtenir un jeton : se connecter au frontend local avec le compte, ouvrir le
 
 ## Lancer
 
+- L'API limite chaque utilisateur à 2 requêtes par seconde (rafale de 10) : sans délai, une exécution d'affilée reçoit des 429 `rate_limited`. Mettre un délai de 600 ms entre les requêtes : **Delay** dans le Runner, `--delay-request 600` avec newman.
 - Dans Postman : **Run collection** (Runner), dossiers dans l'ordre. Les requêtes s'enchaînent : une création range l'identifiant renvoyé dans une variable de collection, réutilisée ensuite.
 - Ou en ligne de commande avec newman, sans rien installer dans le dépôt. Les jetons vont dans une copie de l'environnement ignorée par git (`postman/*.local.postman_environment.json`), jamais sur la ligne de commande (historique du shell, `ps`) :
 
   ```sh
   cp postman/local.postman_environment.json postman/mine.local.postman_environment.json
   # y coller les jetons, puis :
-  npx newman run postman/sport-challenge.postman_collection.json -e postman/mine.local.postman_environment.json
+  npx newman run postman/sport-challenge.postman_collection.json -e postman/mine.local.postman_environment.json --delay-request 600
   ```
 
   Pour noter le résultat dans une pull request, n'en coller que le résumé (le tableau final). `--verbose`, `--export-environment` et les rapports HTML ou JSON écrivent l'en-tête `Authorization` ou les jetons.
@@ -46,3 +47,10 @@ Les requêtes destructives (suppression de compte) seront dans un dossier à par
 | Santé | `GET /health`, `GET /ready` (sans jeton) |
 | Compte | `PATCH /api/v1/me` (complète le profil, exigé pour créer un défi ou saisir une activité ; le prénom et le nom du compte A deviennent « Test Postman »), `GET /api/v1/me`, et le refus sans jeton |
 | Sports | `GET /api/v1/sports` |
+| Défis | le profil de B complété (exigé pour rejoindre) ; un défi principal public, CrossFit avec élimination aux burpees, gardé pour les dossiers suivants (`challengeId`) ; un défi privé (404 pour B, modifié, supprimé) ; un défi où B rejoint, est nommé créateur puis abandonne ; un défi où B est exclu, puis ne peut plus rejoindre ; les refus 400, 403, 404, 409 et 422 |
+
+Avant de committer un changement de la collection, vérifier que ses scripts sont du JavaScript valide (les tests sont des chaînes entre apostrophes : jamais d'apostrophe dans un nom de test) :
+
+```sh
+f=$(mktemp).js && jq -r '.. | objects | select(has("exec")) | .exec[]' postman/sport-challenge.postman_collection.json > "$f" && node --check "$f"; rm -f "$f"
+```
