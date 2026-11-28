@@ -187,10 +187,14 @@
           "event": [{"listen": "test", "script": {"exec": ["pm.test('201', () => pm.response.to.have.status(201));", "pm.collectionVariables.set('outsiderChallengeId', pm.response.json().id);"]}}]},
         {"name": "GET /challenges/{outsider} (B): visible", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{outsiderChallengeId}}", "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{otherToken}}", "type": "string"}]}},
           "event": [{"listen": "test", "script": {"exec": ["pm.test('200, public and visible to B, an outsider', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().my_role).to.eql('outsider'); });"]}}]},
+        {"name": "GET /participants/{A}/activities by A (participant): 200", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{outsiderChallengeId}}/participants/{{userId}}/activities"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('200, A takes part in it', () => pm.response.to.have.status(200));"]}}]},
         {"name": "GET /activities of a challenge B never joined: 404", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{outsiderChallengeId}}/activities", "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{otherToken}}", "type": "string"}]}},
           "event": [{"listen": "test", "script": {"exec": ["pm.test('404 not_found', () => { pm.response.to.have.status(404); const e = pm.response.json().error; pm.expect(e.code).to.eql('not_found'); pm.expect(e.message).to.be.a('string'); });"]}}]},
         {"name": "GET /participants/{A}/activities by a non-participant: 404", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{outsiderChallengeId}}/participants/{{userId}}/activities", "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{otherToken}}", "type": "string"}]}},
-          "event": [{"listen": "test", "script": {"exec": ["pm.test('404 not_found', () => { pm.response.to.have.status(404); const e = pm.response.json().error; pm.expect(e.code).to.eql('not_found'); pm.expect(e.message).to.be.a('string'); });"]}}]}
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('404 not_found', () => { pm.response.to.have.status(404); const e = pm.response.json().error; pm.expect(e.code).to.eql('not_found'); pm.expect(e.message).to.be.a('string'); });"]}}]},
+        {"name": "DELETE /challenges/{outsider}", "request": {"method": "DELETE", "url": "{{baseUrl}}/api/v1/challenges/{{outsiderChallengeId}}"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('204, cleaned up', () => pm.response.to.have.status(204));", "pm.collectionVariables.unset('outsiderChallengeId');"]}}]}
       ]
     }
   ]
