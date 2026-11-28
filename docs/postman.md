@@ -22,7 +22,7 @@ Pour obtenir un jeton : se connecter au frontend local avec le compte, ouvrir le
 
 - Coller le jeton dans la colonne **Current value** de l'environnement, jamais dans **Initial value** : seule la valeur initiale est exportée et synchronisée. **Persist** (ou **Persist all**) recopie les valeurs courantes dans les valeurs initiales : ne jamais l'utiliser sur cet environnement. Le type `secret` masque la valeur à l'écran, sans l'empêcher d'être exportée.
 - Un jeton dure 15 minutes ; au-delà, l'API répond 401 `token_expired` et il faut le recopier. Un jeton du frontend local porte l'audience locale : l'API de production le refuse. Effacer les jetons (et le presse-papiers) après usage, surtout celui de l'admin.
-- **Ne jamais committer un jeton** : `postman/local.postman_environment.json` garde ses jetons vides (seul `baseUrl` a une valeur), et la collection ne se remplace jamais par un export de Postman (ses variables de collection contiendraient des identifiants locaux et un jeton d'invitation, valable jusqu'à la fin de la semaine 1 : ne jamais utiliser **Persist** sur elles, et les vider après une exécution) : la modifier à la main et relire `git diff` avant de committer.
+- **Ne jamais committer un jeton** : `postman/local.postman_environment.json` garde ses jetons vides (seul `baseUrl` a une valeur), et la collection ne se remplace jamais par un export de Postman (ses variables de collection contiendraient des identifiants locaux et un jeton d'invitation, valable jusqu'à la fin de la semaine 1, effacé par la collection dès qu'il ne sert plus : ne jamais utiliser **Persist** sur elles, et les vider après une exécution) : la modifier à la main et relire `git diff` avant de committer.
 
 ## Lancer
 
