@@ -566,7 +566,8 @@ sport-challenge-api/
 │   └── oapi-codegen.yaml            configuration de la génération du code serveur (internal/api)
 ├── deploy/
 │   ├── Dockerfile                   build multi-stage, image minimale (api, worker, migrate)
-│   └── docker-compose.yml           local : PostgreSQL (émulateur de stockage en V1.1)
+│   ├── docker-compose.yml           local : PostgreSQL (émulateur de stockage en V1.1)
+│   └── initdb/                      local : heures de la base sport_challenge affichées en heure de Montréal (stockage en UTC)
 ├── docs/                            déploiement, exploitation, migrations, publication, Auth0, ADR
 ├── .github/workflows/               ci.yml, release.yml, deploy.yml, claude-review.yml
 ├── Makefile                         raccourcis : run, worker, test, lint, fmt, migrate, generate, docker (make help)

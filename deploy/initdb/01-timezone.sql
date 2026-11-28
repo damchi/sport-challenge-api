@@ -1,0 +1,11 @@
+-- Local development only: show sport_challenge timestamps in Montreal time.
+-- Display only: timestamptz values are still stored in UTC, and the API never
+-- relies on the session time zone. The postgres database, used by
+-- make test-integration, stays in UTC.
+--
+-- PostgreSQL runs this script only when the volume is created. On an existing
+-- volume, run once:
+--   docker compose -f deploy/docker-compose.yml exec postgres \
+--     psql -U sport -d sport_challenge \
+--     -c "ALTER DATABASE sport_challenge SET timezone = 'America/Montreal'"
+ALTER DATABASE sport_challenge SET timezone = 'America/Montreal';

@@ -9,6 +9,10 @@
 
 Le workflow `.github/workflows/ci.yml` s'exécute sur chaque pull request et sur chaque push vers `main`. Un premier job (`what changed`, script `.github/scripts/code-changed.sh`) regarde les fichiers modifiés : si seule la documentation change (`docs/`, fichiers `*.md`, `.claude/`), les quatre jobs ci-dessous sont **sautés**, ce qui compte comme réussi pour les vérifications obligatoires et économise les minutes d'Actions du dépôt privé ; dans le doute, ou si ce premier job échoue, tout tourne. Sinon : `make fmt` (aucune différence attendue), `make openapi-lint`, `make generate` (le code généré doit être identique à celui du dépôt), `make lint`, `make vuln` (`govulncheck` : échoue sur une vulnérabilité connue que le code atteint), `make test`. D'autres tâches tournent en parallèle : migrations appliquées, annulées puis réappliquées sur une base PostgreSQL vide (`migrations up, down, up`), tests d'intégration contre PostgreSQL (`integration tests`) et build de l'image (`docker image`).
 
+## Base locale et fuseau horaire
+
+La base locale `sport_challenge` affiche les heures en heure de Montréal (`deploy/initdb/01-timezone.sql`, exécuté à la création du volume ; pour un volume existant, lancer une fois la commande donnée dans ce fichier). La CI, la production et la base `postgres` des tests d'intégration restent en UTC. C'est un réglage d'affichage seulement : **aucune requête SQL ne doit dépendre du fuseau de session**. Un découpage par jour ou par semaine passe toujours le fuseau du challenge (`AT TIME ZONE ?`), jamais un `::date`, `date_trunc` ou `now()::date` nu sur un `timestamptz`.
+
 ## Ajouter ou modifier une route
 
 L'API est **spec-first** : le contrat `api/openapi.yaml` est la source, le code de routage est généré à partir de lui. Il n'y a donc aucun `router.GET(...)` écrit à la main.
