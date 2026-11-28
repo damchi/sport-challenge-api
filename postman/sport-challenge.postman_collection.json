@@ -170,6 +170,28 @@
         {"name": "GET /me/activities/weeks", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/me/activities/weeks?tz=UTC&limit=1"},
           "event": [{"listen": "test", "script": {"exec": ["pm.test('200, the current week first', () => { pm.response.to.have.status(200); const b = pm.response.json(); pm.expect(b.items.length).to.eql(1); pm.expect(b.items[0].sessions).to.be.at.least(1); pm.expect(b).to.have.property('next_cursor'); });"]}}]}
       ]
+    },
+    {
+      "name": "Lectures d'un défi",
+      "event": [{"listen": "prerequest", "script": {"exec": ["pm.collectionVariables.set('today', new Date().toISOString().slice(0, 10));"]}}],
+      "item": [
+        {"name": "GET /leaderboard", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{challengeId}}/leaderboard"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('200, the categories of the main challenge', () => { pm.response.to.have.status(200); const types = pm.response.json().categories.map(c => c.type); pm.expect(types).to.include.members(['cumulative_time', 'elimination']); });", "pm.test('the elimination in burpees, A and B ranked', () => { const el = pm.response.json().categories.find(c => c.type === 'elimination'); pm.expect(el.exercise).to.eql('burpee'); const ids = el.entries.map(e => e.user.id); pm.expect(ids).to.include.members([pm.collectionVariables.get('userId'), pm.collectionVariables.get('otherUserId')]); pm.expect(el.me.elimination.repetitions).to.be.at.least(35); });", "pm.test('the time of the session counted', () => { const t = pm.response.json().categories.find(c => c.type === 'cumulative_time'); pm.expect(t.me.value).to.be.at.least(240); });"]}}]},
+        {"name": "GET /activities (feed, B)", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{challengeId}}/activities?limit=100", "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{otherToken}}", "type": "string"}]}},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('200, the session of A with its author and burpees', () => { pm.response.to.have.status(200); const a = pm.response.json().items.find(x => x.id === pm.collectionVariables.get('activityId')); pm.expect(a.user.id).to.eql(pm.collectionVariables.get('userId')); pm.expect(a.repetitions).to.eql([{exercise: 'burpee', repetitions: 35}]); });"]}}]},
+        {"name": "GET /participants/{A}/activities (B)", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{challengeId}}/participants/{{userId}}/activities?limit=100", "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{otherToken}}", "type": "string"}]}},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('200, the session of A, counting here', () => { pm.response.to.have.status(200); const a = pm.response.json().items.find(x => x.id === pm.collectionVariables.get('activityId')); pm.expect(a.contributions.map(c => c.challenge_id)).to.eql([pm.collectionVariables.get('challengeId')]); });"]}}]},
+        {"name": "GET /participants/{B}/points without points category: 404", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{challengeId}}/participants/{{otherUserId}}/points"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('404 not_found', () => { pm.response.to.have.status(404); const e = pm.response.json().error; pm.expect(e.code).to.eql('not_found'); pm.expect(e.message).to.be.a('string'); });"]}}]},
+        {"name": "POST /challenges (outsider)", "request": {"method": "POST", "url": "{{baseUrl}}/api/v1/challenges", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"title\": \"Postman outsider\", \"visibility\": \"public\", \"timezone\": \"UTC\", \"start_date\": \"{{today}}\", \"weeks\": 2}"}},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('201', () => pm.response.to.have.status(201));", "pm.collectionVariables.set('outsiderChallengeId', pm.response.json().id);"]}}]},
+        {"name": "GET /challenges/{outsider} (B): visible", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{outsiderChallengeId}}", "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{otherToken}}", "type": "string"}]}},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('200, public and visible to B, an outsider', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().my_role).to.eql('outsider'); });"]}}]},
+        {"name": "GET /activities of a challenge B never joined: 404", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{outsiderChallengeId}}/activities", "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{otherToken}}", "type": "string"}]}},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('404 not_found', () => { pm.response.to.have.status(404); const e = pm.response.json().error; pm.expect(e.code).to.eql('not_found'); pm.expect(e.message).to.be.a('string'); });"]}}]},
+        {"name": "GET /participants/{A}/activities by a non-participant: 404", "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/challenges/{{outsiderChallengeId}}/participants/{{userId}}/activities", "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{otherToken}}", "type": "string"}]}},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('404 not_found', () => { pm.response.to.have.status(404); const e = pm.response.json().error; pm.expect(e.code).to.eql('not_found'); pm.expect(e.message).to.be.a('string'); });"]}}]}
+      ]
     }
   ]
 }
