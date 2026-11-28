@@ -157,10 +157,10 @@ func TestListAdminUserChallenges(t *testing.T) {
 	joined, abandoned, deleted := listAt.AddDate(0, 0, -14), listAt.AddDate(0, 0, -7), listAt.Add(-time.Hour)
 	repo := &fakeRepo{userChallenges: []UserChallengeRow{
 		{
-			ID: challengeID, Title: "Défi", Visibility: "private", Timezone: "America/Toronto", StartsAt: joined, EndsAt: listAt, CreatedAt: listAt.Add(-time.Minute),
+			ID: challengeID, Title: "Défi", Visibility: "private", Timezone: "America/Toronto", ReferenceSport: "run", Exercise: ptr("burpee"), StartsAt: joined, EndsAt: listAt, CreatedAt: listAt.Add(-time.Minute),
 			DeletedAt: &deleted, IsCreator: true, ParticipantStatus: ptr("abandoned"), JoinedAt: &joined, AbandonedAt: &abandoned,
 		},
-		{ID: bobID, Title: "Créé", Visibility: "public", Timezone: "Europe/Paris", StartsAt: listAt.Add(time.Hour), EndsAt: listAt.AddDate(0, 0, 14), CreatedAt: listAt.Add(-2 * time.Minute), IsCreator: true},
+		{ID: bobID, Title: "Créé", Visibility: "public", Timezone: "Europe/Paris", ReferenceSport: "ride", StartsAt: listAt.Add(time.Hour), EndsAt: listAt.AddDate(0, 0, 14), CreatedAt: listAt.Add(-2 * time.Minute), IsCreator: true},
 	}}
 	rec, got := serve(t, newChallengeService(repo), adminToken, userPath+"/challenges?limit=5")
 	if rec.Code != http.StatusOK || repo.id != annID || repo.pageQuery.Limit != 6 {
@@ -170,12 +170,16 @@ func TestListAdminUserChallenges(t *testing.T) {
 		"items": []any{
 			map[string]any{
 				"id": challengeID, "title": "Défi", "visibility": "private", "timezone": "America/Toronto", "status": "finished",
+				// A deleted challenge keeps its sport and exercise.
+				"reference_sport": "run", "exercise": "burpee",
 				"starts_at": "2026-11-09T15:30:00Z", "ends_at": "2026-11-23T15:30:00Z", "created_at": "2026-11-23T15:29:00Z",
 				"deleted_at": "2026-11-23T14:30:00Z", "is_creator": true, "participant_status": "abandoned",
 				"joined_at": "2026-11-09T15:30:00Z", "abandoned_at": "2026-11-16T15:30:00Z",
 			},
 			map[string]any{
 				"id": bobID, "title": "Créé", "visibility": "public", "timezone": "Europe/Paris", "status": "upcoming",
+				// In meters or without elimination: no exercise.
+				"reference_sport": "ride", "exercise": nil,
 				"starts_at": "2026-11-23T16:30:00Z", "ends_at": "2026-12-07T15:30:00Z", "created_at": "2026-11-23T15:28:00Z",
 				"deleted_at": nil, "is_creator": true, "participant_status": nil, "joined_at": nil, "abandoned_at": nil,
 			},

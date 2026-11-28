@@ -3790,7 +3790,7 @@ components:
           description: Pass it as `cursor` for the next page; null on the last page.
     AdminUserChallenge:
       type: object
-      required: [id, title, visibility, timezone, status, starts_at, ends_at, created_at, deleted_at, is_creator, participant_status, joined_at, abandoned_at]
+      required: [id, title, visibility, timezone, reference_sport, exercise, status, starts_at, ends_at, created_at, deleted_at, is_creator, participant_status, joined_at, abandoned_at]
       additionalProperties: false
       description: A challenge of an account, with its role there.
       properties:
@@ -3805,6 +3805,18 @@ components:
         timezone:
           type: string
           description: IANA time zone of the challenge, the one its days and weeks follow.
+        reference_sport:
+          type: string
+          description: Code of the sport the distances are brought back to and the elimination is run in, as `ChallengeSummary.reference_sport`.
+          example: ride
+        exercise:
+          type: string
+          nullable: true
+          description: |
+            Code of the exercise of the elimination when it is by repetitions
+            (`Sport.exercises`), as `ChallengeSummary.exercise`; null otherwise
+            (elimination in meters, or none). Whatever the status, deleted or not.
+          example: burpee
         status:
           type: string
           enum: [upcoming, ongoing, finished]

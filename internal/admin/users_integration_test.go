@@ -189,6 +189,12 @@ func TestRepositoryListUserChallenges(t *testing.T) {
 	deletedAt := at(10)
 	gone := insertChallengeRow(t, pool, ann, challengeRow{title: "Gone", visibility: "public", startsAt: starts, weeks: 2, createdAt: at(4), deletedAt: &deletedAt})
 	insertChallengeRow(t, pool, bob, challengeRow{title: "Not hers", visibility: "public", startsAt: starts, weeks: 2, createdAt: at(5)})
+	// An elimination by repetitions (deleted challenge), one in meters, and
+	// none for the others; another reference sport than the default.
+	exec(t, pool, `INSERT INTO categories (challenge_id, type, position, params) VALUES
+		($1, 'elimination', 1, '{"exercise": "burpee", "step_repetitions": 10}'),
+		($2, 'cumulative_time', 1, '{}'), ($2, 'elimination', 2, '{"sport": "run", "step_meters": 2000}')`, gone, left)
+	exec(t, pool, `UPDATE challenges SET reference_sport = 'ride' WHERE id = $1`, created)
 
 	got, err := r.ListUserChallenges(t.Context(), ann, PageQuery{Limit: 10})
 	if err != nil {
@@ -202,11 +208,12 @@ func TestRepositoryListUserChallenges(t *testing.T) {
 	ends := starts.AddDate(0, 0, 14)
 	active := "active"
 	abandoned := "abandoned"
+	burpee := "burpee"
 	want := []UserChallengeRow{
-		{ID: gone, Title: "Gone", Visibility: "public", Timezone: "America/Toronto", StartsAt: starts, EndsAt: ends, CreatedAt: at(4), DeletedAt: &deletedAt, IsCreator: true, ParticipantStatus: &active, JoinedAt: ptr(at(4))},
-		{ID: creatorOnly, Title: "Creator", Visibility: "public", Timezone: "America/Toronto", StartsAt: starts, EndsAt: ends, CreatedAt: at(3), IsCreator: true},
-		{ID: left, Title: "Left", Visibility: "public", Timezone: "America/Toronto", StartsAt: starts, EndsAt: ends, CreatedAt: at(2), ParticipantStatus: &abandoned, JoinedAt: ptr(at(2)), AbandonedAt: ptr(at(3))},
-		{ID: created, Title: "Mine", Visibility: "private", Timezone: "America/Toronto", StartsAt: starts, EndsAt: ends, CreatedAt: at(1), IsCreator: true, ParticipantStatus: &active, JoinedAt: ptr(at(1))},
+		{ID: gone, Title: "Gone", Visibility: "public", Timezone: "America/Toronto", ReferenceSport: "run", Exercise: &burpee, StartsAt: starts, EndsAt: ends, CreatedAt: at(4), DeletedAt: &deletedAt, IsCreator: true, ParticipantStatus: &active, JoinedAt: ptr(at(4))},
+		{ID: creatorOnly, Title: "Creator", Visibility: "public", Timezone: "America/Toronto", ReferenceSport: "run", StartsAt: starts, EndsAt: ends, CreatedAt: at(3), IsCreator: true},
+		{ID: left, Title: "Left", Visibility: "public", Timezone: "America/Toronto", ReferenceSport: "run", StartsAt: starts, EndsAt: ends, CreatedAt: at(2), ParticipantStatus: &abandoned, JoinedAt: ptr(at(2)), AbandonedAt: ptr(at(3))},
+		{ID: created, Title: "Mine", Visibility: "private", Timezone: "America/Toronto", ReferenceSport: "ride", StartsAt: starts, EndsAt: ends, CreatedAt: at(1), IsCreator: true, ParticipantStatus: &active, JoinedAt: ptr(at(1))},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListUserChallenges() =\n%+v\nwant\n%+v", got, want)

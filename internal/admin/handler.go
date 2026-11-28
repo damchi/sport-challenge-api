@@ -847,18 +847,20 @@ func (h *Handler) ListAdminUserChallenges(ctx context.Context, req api.ListAdmin
 			return nil, fmt.Errorf("challenge id: %w", err)
 		}
 		item := api.AdminUserChallenge{
-			Id:          id,
-			Title:       c.Title,
-			Visibility:  api.AdminUserChallengeVisibility(c.Visibility),
-			Timezone:    c.Timezone,
-			Status:      api.AdminUserChallengeStatus(c.Status),
-			StartsAt:    c.StartsAt.UTC(),
-			EndsAt:      c.EndsAt.UTC(),
-			CreatedAt:   c.CreatedAt.UTC(),
-			DeletedAt:   utc(c.DeletedAt),
-			IsCreator:   c.IsCreator,
-			JoinedAt:    utc(c.JoinedAt),
-			AbandonedAt: utc(c.AbandonedAt),
+			Id:             id,
+			Title:          c.Title,
+			Visibility:     api.AdminUserChallengeVisibility(c.Visibility),
+			Timezone:       c.Timezone,
+			ReferenceSport: c.ReferenceSport,
+			Exercise:       c.Exercise,
+			Status:         api.AdminUserChallengeStatus(c.Status),
+			StartsAt:       c.StartsAt.UTC(),
+			EndsAt:         c.EndsAt.UTC(),
+			CreatedAt:      c.CreatedAt.UTC(),
+			DeletedAt:      utc(c.DeletedAt),
+			IsCreator:      c.IsCreator,
+			JoinedAt:       utc(c.JoinedAt),
+			AbandonedAt:    utc(c.AbandonedAt),
 		}
 		if c.ParticipantStatus != nil {
 			status := api.AdminUserChallengeParticipantStatus(*c.ParticipantStatus)
