@@ -41,12 +41,12 @@ Pour obtenir un jeton : se connecter au frontend local avec le compte, ouvrir le
 
 ### Le dossier « Destructif »
 
-Il supprime deux comptes, **irréversiblement** : C se supprime lui-même (`DELETE /me`), l'admin supprime D. À lancer seul, en dernier, après les autres dossiers (il lui faut `adminToken` et `token`), jamais avec le compte d'une vraie personne.
+Il supprime deux comptes, **irréversiblement** : C se supprime lui-même (`DELETE /me`), l'admin supprime D. À lancer seul, en dernier, après les autres dossiers (il lui faut `token`, `otherToken` et `adminToken`), jamais avec le compte d'une vraie personne.
 
 - Créer deux comptes Auth0 jetables (une adresse de test chacun), s'y connecter une fois au frontend local pour créer leur compte local, puis coller leurs jetons dans `disposableToken` et `otherDisposableToken`. Le tenant Auth0 est celui de la production (`docs/auth0-setup.md`) : ces comptes y existent comme les autres.
 - Une identité supprimée ne recrée jamais de compte local : chaque exécution du dossier demande deux nouveaux comptes.
 - En local, la suppression chez Auth0 échoue (l'application machine à machine locale n'a aucun droit) et reste en attente de reprise : c'est attendu. Supprimer ensuite les deux comptes à la main dans la console Auth0.
-- Sans ces deux jetons, le dossier échoue sans rien supprimer : lancer toute la collection sans eux est sans danger. Chaque suppression est de plus sautée si son compte n'est pas un compte jetable (ni A, ni B, ni l'admin).
+- Sans ces deux jetons, le dossier échoue sans rien supprimer : lancer toute la collection sans eux est sans danger. Le dossier relit d'abord les identifiants de A, B et de l'admin (il lui faut donc aussi `otherToken`), et chaque suppression est sautée si l'un d'eux manque ou si son compte n'est pas un compte jetable (ni A, ni B, ni l'admin).
 - Récupérer les jetons de C, D, A et de l'admin juste avant de lancer le dossier : ils durent 15 minutes.
 - Pour C et D, utiliser des adresses qui reçoivent le code de connexion (boîte de test, ou alias `+…`) ; l'envoi passe par le fournisseur d'e-mail de la production. Ne jamais s'y connecter sur l'app de production.
 - Dans la console Auth0 (celle de la production), chercher chaque compte par son adresse de test exacte et vérifier son identifiant (`sub`) avant de le supprimer.
