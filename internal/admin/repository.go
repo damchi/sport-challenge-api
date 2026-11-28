@@ -343,12 +343,19 @@ func (r *Repository) ofUser(ctx context.Context, id string, read func(tx *gorm.D
 	}, opts)
 }
 
+// categoryElimination is the type of the elimination category.
+const categoryElimination = "elimination"
+
 // ListUserChallenges returns at most q.Limit challenges account id joined
 // or creates, deleted ones included, most recently created first, with its
-// role in each; errUserNotFound when there is no such account.
+// role in each; errUserNotFound when there is no such account. The exercise
+// is that of the elimination category, one per challenge at most
+// (categories_challenge_type_key), null without one or in meters.
 func (r *Repository) ListUserChallenges(ctx context.Context, id string, q PageQuery) ([]UserChallengeRow, error) {
 	var query strings.Builder
-	query.WriteString(`SELECT c.id, c.title, c.visibility, c.timezone, c.starts_at, c.ends_at, c.created_at, c.deleted_at,
+	query.WriteString(`SELECT c.id, c.title, c.visibility, c.timezone, c.reference_sport,
+		(SELECT params->>'exercise' FROM categories WHERE challenge_id = c.id AND type = @elimination) AS exercise,
+		c.starts_at, c.ends_at, c.created_at, c.deleted_at,
 		cc.user_id IS NOT NULL AS is_creator, p.status AS participant_status, p.joined_at, p.abandoned_at
 		FROM (SELECT challenge_id FROM participants WHERE user_id = @id
 			UNION SELECT challenge_id FROM challenge_creators WHERE user_id = @id) m
@@ -356,7 +363,7 @@ func (r *Repository) ListUserChallenges(ctx context.Context, id string, q PageQu
 		LEFT JOIN participants p ON p.challenge_id = c.id AND p.user_id = @id
 		LEFT JOIN challenge_creators cc ON cc.challenge_id = c.id AND cc.user_id = @id
 		WHERE true`)
-	args := map[string]any{"id": id, "limit": q.Limit}
+	args := map[string]any{"id": id, "limit": q.Limit, "elimination": categoryElimination}
 	if q.After != nil {
 		query.WriteString(" AND (c.created_at, c.id) < (@after_created, @after_id)")
 		args["after_created"], args["after_id"] = q.After.CreatedAt, q.After.ID

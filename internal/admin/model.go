@@ -315,10 +315,13 @@ type PageQuery struct {
 // ParticipantStatus, JoinedAt and AbandonedAt nil when it is a creator
 // only.
 type UserChallengeRow struct {
-	ID                string
-	Title             string
-	Visibility        string
-	Timezone          string
+	ID             string
+	Title          string
+	Visibility     string
+	Timezone       string
+	ReferenceSport string
+	// Exercise is that of an elimination by repetitions, nil otherwise.
+	Exercise          *string
 	StartsAt          time.Time
 	EndsAt            time.Time
 	CreatedAt         time.Time
